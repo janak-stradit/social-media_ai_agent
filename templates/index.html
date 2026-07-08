@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ContentAI — Enterprise Social Media Platform</title>
+    <meta name="description" content="Enterprise AI-powered social media content generation platform. Create platform-optimized captions, hashtags, and posting strategies at scale.">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body>
+
+<!-- ═══════════════════════ TOP HEADER ═══════════════════════ -->
+<header class="app-header">
+    <div class="header-brand">
+        <div class="brand-logo"><i class="fas fa-robot"></i></div>
+        <div class="brand-text">
+            <span class="brand-name">ContentAI</span>
+            <span class="brand-tagline">Enterprise Platform</span>
+        </div>
+    </div>
+    <nav class="header-nav">
+        <a href="#" class="header-nav-item active"><i class="fas fa-magic me-2"></i>Generate</a>
+        <a href="#" class="header-nav-item"><i class="fas fa-chart-bar me-2"></i>Analytics</a>
+        <a href="#" class="header-nav-item"><i class="fas fa-calendar-alt me-2"></i>Schedule</a>
+    </nav>
+    <div class="header-actions">
+        <div class="status-pill"><span class="status-dot-green"></span>All Systems Online</div>
+        <div class="header-avatar">HM</div>
+    </div>
+</header>
+
+<!-- ═══════════════════════ APP SHELL ═══════════════════════ -->
+<div class="app-shell">
+
+    <!-- ── SIDEBAR ── -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-section">
+            <div class="sidebar-section-title">Run History</div>
+            <div id="historyList" class="history-list">
+                <div class="history-empty">
+                    <i class="fas fa-clock-rotate-left fa-2x mb-3 text-slate-300"></i>
+                    <p>No runs yet</p>
+                    <small>Generate content to build history</small>
+                </div>
+            </div>
+        </div>
+        <div class="sidebar-footer">
+            <div class="sidebar-stat">
+                <span class="sidebar-stat-label">Total Runs</span>
+                <span class="sidebar-stat-value" id="historyCount">0</span>
+            </div>
+            <div class="sidebar-stat">
+                <span class="sidebar-stat-label">DB Status</span>
+                <span class="sidebar-stat-value text-success" id="dbStatus"><i class="fas fa-circle fa-xs me-1"></i>Connected</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- ── MAIN CONTENT ── -->
+    <main class="main-content">
+
+        <!-- Page Title Row -->
+        <div class="page-title-row">
+            <div>
+                <h1 class="page-title">Content Generation Studio</h1>
+                <p class="page-subtitle">Create platform-optimized social media content using multi-agent AI</p>
+            </div>
+            <div class="d-flex gap-2 align-items-center">
+                <span class="badge-enterprise"><i class="fas fa-shield-halved me-1"></i>Enterprise</span>
+                <span class="badge-version">v1.0</span>
+            </div>
+        </div>
+
+        <!-- ── INPUT ZONE ── -->
+        <div class="content-grid">
+
+            <!-- Story Input -->
+            <div class="ent-card input-story-card">
+                <div class="ent-card-header">
+                    <div class="ent-card-header-left">
+                        <div class="card-icon card-icon-blue"><i class="fas fa-pen-nib"></i></div>
+                        <div>
+                            <div class="ent-card-title">Story / Brief</div>
+                            <div class="ent-card-desc">Paste your content brief or story</div>
+                        </div>
+                    </div>
+                    <button class="btn-secondary-ent" onclick="analyzeStory()" id="analyzeBtn">
+                        <i class="fas fa-brain me-1"></i>Analyze
+                    </button>
+                </div>
+                <div class="ent-card-body">
+                    <textarea id="storyInput" class="ent-textarea" rows="7"
+                        placeholder="Describe your product launch, campaign idea, event, or story. The more detail you provide, the better the output..."></textarea>
+                    <div class="textarea-footer">
+                        <span id="charCount" class="char-count">0 characters</span>
+                        <span class="char-hint">Recommended: 100–500 chars</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Image Upload -->
+            <div class="ent-card input-image-card">
+                <div class="ent-card-header">
+                    <div class="ent-card-header-left">
+                        <div class="card-icon card-icon-teal"><i class="fas fa-image"></i></div>
+                        <div>
+                            <div class="ent-card-title">Visual Asset</div>
+                            <div class="ent-card-desc">Optional — upload an image for context</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="ent-card-body">
+                    <div id="dropZone" class="drop-zone" onclick="document.getElementById('imageInput').click()">
+                        <i class="fas fa-cloud-arrow-up fa-2x mb-2 drop-icon"></i>
+                        <p class="drop-label">Drag &amp; drop or <span class="drop-link">browse files</span></p>
+                        <p class="drop-hint">PNG, JPG, WEBP — max 16 MB</p>
+                        <input type="file" id="imageInput" accept="image/*" class="d-none">
+                    </div>
+                    <div id="imagePreview" class="mt-3 d-none">
+                        <div class="image-preview-box">
+                            <img id="previewImg" class="preview-img" alt="Preview">
+                            <span id="imageAnalysisStatus" class="analysis-badge badge-neutral">Ready</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Configuration -->
+            <div class="ent-card config-card">
+                <div class="ent-card-header">
+                    <div class="ent-card-header-left">
+                        <div class="card-icon card-icon-purple"><i class="fas fa-sliders"></i></div>
+                        <div>
+                            <div class="ent-card-title">Campaign Configuration</div>
+                            <div class="ent-card-desc">Platforms, tone, and generation settings</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="ent-card-body">
+                    <div class="config-row">
+                        <label class="config-section-label">Target Platforms</label>
+                        <div class="platform-grid">
+                            <label class="platform-chip" for="fbCheck">
+                                <input type="checkbox" value="facebook" id="fbCheck" checked>
+                                <div class="platform-chip-inner">
+                                    <i class="fab fa-facebook platform-icon-fb"></i>
+                                    <span>Facebook</span>
+                                </div>
+                            </label>
+                            <label class="platform-chip" for="igCheck">
+                                <input type="checkbox" value="instagram" id="igCheck" checked>
+                                <div class="platform-chip-inner">
+                                    <i class="fab fa-instagram platform-icon-ig"></i>
+                                    <span>Instagram</span>
+                                </div>
+                            </label>
+                            <label class="platform-chip" for="liCheck">
+                                <input type="checkbox" value="linkedin" id="liCheck" checked>
+                                <div class="platform-chip-inner">
+                                    <i class="fab fa-linkedin platform-icon-li"></i>
+                                    <span>LinkedIn</span>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="config-row mt-3">
+                        <label class="config-section-label" for="toneSelect">Content Tone</label>
+                        <select id="toneSelect" class="ent-select">
+                            <option value="">Auto-detect from content</option>
+                            <option value="professional">Professional &amp; Authoritative</option>
+                            <option value="casual">Casual &amp; Conversational</option>
+                            <option value="humorous">Humorous &amp; Engaging</option>
+                            <option value="inspirational">Inspirational &amp; Motivational</option>
+                            <option value="urgent">Urgent &amp; Action-Oriented</option>
+                        </select>
+                    </div>
+                    <div class="config-row mt-3">
+                        <label class="config-section-label">Media Output</label>
+                        <div class="platform-grid">
+                            <label class="platform-chip" for="mediaNone">
+                                <input type="radio" name="mediaType" value="none" id="mediaNone" checked>
+                                <div class="platform-chip-inner">
+                                    <i class="fas fa-font" style="color:var(--text-sub);"></i>
+                                    <span>Text Only</span>
+                                </div>
+                            </label>
+                            <label class="platform-chip" for="mediaImage">
+                                <input type="radio" name="mediaType" value="image" id="mediaImage">
+                                <div class="platform-chip-inner">
+                                    <i class="fas fa-image" style="color:var(--blue);"></i>
+                                    <span>Generate Image</span>
+                                </div>
+                            </label>
+                            <label class="platform-chip" for="mediaVideo">
+                                <input type="radio" name="mediaType" value="video" id="mediaVideo">
+                                <div class="platform-chip-inner">
+                                    <i class="fas fa-video" style="color:var(--purple);"></i>
+                                    <span>Video Script</span>
+                                </div>
+                            </label>
+                        </div>
+                        <small style="color:var(--text-muted);font-size:11px;margin-top:6px;display:block;">
+                            <strong>Image:</strong> AI-generated via DALL-E 3 &nbsp;|&nbsp;
+                            <strong>Video:</strong> Detailed storyboard &amp; script for production
+                        </small>
+                    </div>
+                    <div class="mt-4">
+                        <button id="generateBtn" class="btn-primary-ent w-100" onclick="generateContent()">
+                            <i class="fas fa-sparkles me-2"></i>Generate Content
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── LOADING STATE ── -->
+        <div id="loadingState" class="loading-panel d-none">
+            <div class="loading-inner">
+                <div class="loading-ring-wrap">
+                    <div class="loading-ring"></div>
+                    <div class="loading-ring-icon"><i class="fas fa-robot"></i></div>
+                </div>
+                <div class="loading-text-wrap">
+                    <div class="loading-title" id="loadingText">Initializing agents...</div>
+                    <div class="loading-sub">Multi-agent AI is processing your request</div>
+                    <div class="loading-progress mt-3">
+                        <div id="progressBar" class="loading-bar" style="width:0%"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ── RESULTS ── -->
+        <div id="resultsSection" class="d-none">
+            <div class="results-header">
+                <div class="results-header-left">
+                    <i class="fas fa-check-circle text-success me-2"></i>
+                    <span class="results-title">Generated Content</span>
+                </div>
+                <ul class="nav platform-tabs" id="platformTabs">
+                    <li class="nav-item">
+                        <button class="platform-tab active" data-bs-toggle="pill" data-bs-target="#facebookResult">
+                            <i class="fab fa-facebook me-1"></i>Facebook
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="platform-tab" data-bs-toggle="pill" data-bs-target="#instagramResult">
+                            <i class="fab fa-instagram me-1"></i>Instagram
+                        </button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="platform-tab" data-bs-toggle="pill" data-bs-target="#linkedinResult">
+                            <i class="fab fa-linkedin me-1"></i>LinkedIn
+                        </button>
+                    </li>
+                </ul>
+            </div>
+            <div class="tab-content" id="resultsContent"></div>
+        </div>
+
+    </main>
+</div>
+
+<!-- ═══════════════════════ HISTORY MODAL ═══════════════════════ -->
+<div class="modal fade" id="historyModal" tabindex="-1" aria-labelledby="historyModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content ent-modal">
+            <div class="modal-header ent-modal-header">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="card-icon card-icon-blue"><i class="fas fa-clock-rotate-left"></i></div>
+                    <div>
+                        <h5 class="modal-title mb-0" id="historyModalLabel">Run Details</h5>
+                        <small class="text-muted" id="modalTimestamp">—</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body ent-modal-body">
+                <div class="modal-meta-row">
+                    <div class="modal-meta-item">
+                        <div class="modal-meta-label"><i class="fas fa-sliders me-1"></i>Tone</div>
+                        <div class="modal-meta-value" id="modalTone">—</div>
+                    </div>
+                    <div class="modal-meta-item">
+                        <div class="modal-meta-label"><i class="fas fa-bullseye me-1"></i>Platforms</div>
+                        <div class="modal-meta-value" id="modalPlatforms">—</div>
+                    </div>
+                    <div class="modal-meta-item modal-meta-story">
+                        <div class="modal-meta-label"><i class="fas fa-pen me-1"></i>Story</div>
+                        <div class="modal-meta-value" id="modalStory">—</div>
+                    </div>
+                </div>
+                <hr class="ent-divider">
+                <div id="modalDetails"></div>
+            </div>
+            <div class="modal-footer ent-modal-footer">
+                <button type="button" class="btn-secondary-ent" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════ TOAST ═══════════════════════ -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="toast" class="ent-toast" role="alert">
+        <div class="ent-toast-body" id="toastBody"></div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

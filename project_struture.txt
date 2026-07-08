@@ -1,0 +1,28 @@
+social-media-ai-agent/
+├── app.py                    # Flask main app
+├── config.py                 # Configuration
+├── requirements.txt
+├── agents/
+│   ├── __init__.py
+│   ├── story_agent.py        # Story analysis & extraction
+│   ├── vision_agent.py       # Image captioning via HF
+│   ├── caption_agent.py      # Platform-specific captions
+│   ├── hashtag_agent.py      # Hashtag generation
+│   └── strategy_agent.py     # Post strategy & timing
+├── services/
+│   ├── __init__.py
+│   ├── hf_service.py         # HuggingFace API wrapper
+│   ├── llm_service.py        # OpenAI/Anthropic LLM calls
+│   └── memory_service.py     # ChromaDB vector memory
+├── api/
+│   ├── __init__.py
+│   └── routes.py             # REST API endpoints
+├── static/
+│   ├── css/
+│   │   └── style.css
+│   ├── js/
+│   │   └── app.js
+│   └── uploads/              # Image uploads
+├── templates/
+│   └── index.html            # Bootstrap 5 Dashboard
+└── docker-compose.yml
