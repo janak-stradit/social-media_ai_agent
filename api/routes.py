@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 import os
 import uuid
+from auth.utils import get_current_user_id, login_required_api
 from agents.story_agent import StoryAgent
 from agents.vision_agent import VisionAgent
 from agents.caption_agent import CaptionAgent
@@ -9,7 +10,7 @@ from agents.hashtag_agent import HashtagAgent
 from agents.strategy_agent import StrategyAgent
 
 try:
-    from db import save_run, get_history, get_run_by_id
+    from db import save_run, get_history, get_run_by_id, append_run_media
     DB_AVAILABLE = True
 except Exception as _db_err:
     DB_AVAILABLE = False
@@ -24,6 +25,32 @@ except Exception as _media_err:
     print(f"[routes] Media service not available: {_media_err}")
 
 api_bp = Blueprint('api', __name__)
+
+def _public_upload_url(filepath: str | None) -> str | None:
+    if not filepath:
+        return None
+    normalized = filepath.replace("\\", "/")
+    return normalized if normalized.startswith("/") else f"/{normalized}"
+
+
+def _persist_generated_media(run_id: int | None, platform: str, media_type: str, result: dict, user_id: int) -> None:
+    if not DB_AVAILABLE or not run_id or not result.get("success"):
+        return
+
+    media_payload = {
+        "url": result.get("url"),
+        "prompt": result.get("prompt"),
+        "type": result.get("type", media_type),
+        "duration": result.get("duration"),
+        "resolution": result.get("resolution"),
+        "size": result.get("size"),
+        "model": result.get("model"),
+        "source_image_url": result.get("source_image_url"),
+    }
+    try:
+        append_run_media(run_id, platform, media_type, media_payload, user_id=user_id)
+    except Exception as db_err:
+        current_app.logger.warning(f"[DB] Could not save generated media: {db_err}")
 
 def allowed_file(filename):
     return '.' in filename and \
@@ -46,6 +73,7 @@ def health_check():
     })
 
 @api_bp.route('/upload', methods=['POST'])
+@login_required_api
 def upload_image():
     """Upload image for analysis"""
     if 'image' not in request.files:
@@ -76,6 +104,7 @@ def upload_image():
     return jsonify({'error': 'Invalid file type'}), 400
 
 @api_bp.route('/analyze-story', methods=['POST'])
+@login_required_api
 def analyze_story():
     """Analyze story text"""
     data = request.get_json()
@@ -95,6 +124,7 @@ def analyze_story():
         return jsonify({'error': str(e)}), 500
 
 @api_bp.route('/generate', methods=['POST'])
+@login_required_api
 def generate_content():
     """
     Main endpoint to generate complete social media content
@@ -116,6 +146,7 @@ def generate_content():
     platforms = data.get('platforms', ['facebook', 'instagram', 'linkedin'])
     tone = data.get('tone')
     include_strategy = data.get('include_strategy', True)
+    user_id = get_current_user_id()
     
     try:
         # Step 1: Analyze story
@@ -159,11 +190,18 @@ def generate_content():
         # ── Persist to PostgreSQL ──────────────────────────────────────────
         if DB_AVAILABLE:
             try:
+                content_to_save = dict(response["content"])
+                if image_path and os.path.exists(image_path):
+                    content_to_save["_meta"] = {
+                        "image_path": image_path,
+                        "image_url": _public_upload_url(image_path),
+                    }
                 run_id = save_run(
                     story=story,
                     tone=tone,
                     platforms=platforms,
-                    content=response['content']
+                    content=content_to_save,
+                    user_id=user_id,
                 )
                 response['run_id'] = run_id
             except Exception as db_err:
@@ -177,25 +215,27 @@ def generate_content():
 # ── History Endpoints ──────────────────────────────────────────────────────
 
 @api_bp.route('/history', methods=['GET'])
+@login_required_api
 def list_history():
     """Return the last N generation runs from PostgreSQL"""
     if not DB_AVAILABLE:
         return jsonify({'error': 'Database not available'}), 503
     try:
         limit = min(int(request.args.get('limit', 20)), 100)
-        rows = get_history(limit=limit)
+        rows = get_history(limit=limit, user_id=get_current_user_id())
         return jsonify({'success': True, 'history': rows, 'count': len(rows)})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
 @api_bp.route('/history/<int:run_id>', methods=['GET'])
+@login_required_api
 def get_history_run(run_id):
     """Return full details for a single run"""
     if not DB_AVAILABLE:
         return jsonify({'error': 'Database not available'}), 503
     try:
-        row = get_run_by_id(run_id)
+        row = get_run_by_id(run_id, user_id=get_current_user_id())
         if not row:
             return jsonify({'error': 'Run not found'}), 404
         return jsonify({'success': True, 'run': row})
@@ -204,6 +244,7 @@ def get_history_run(run_id):
 
 
 @api_bp.route('/generate/<platform>', methods=['POST'])
+@login_required_api
 def generate_for_platform(platform):
     """Generate content for a specific platform"""
     if platform not in ['facebook', 'instagram', 'linkedin']:
@@ -239,6 +280,7 @@ def generate_for_platform(platform):
         return jsonify({'error': str(e)}), 500
 
 @api_bp.route('/schedule', methods=['POST'])
+@login_required_api
 def schedule_campaign():
     """Create a multi-platform posting schedule"""
     data = request.get_json()
@@ -263,15 +305,18 @@ def schedule_campaign():
 # ── Media Generation Endpoint ──────────────────────────────────────────────
 
 @api_bp.route('/generate-media', methods=['POST'])
+@login_required_api
 def generate_media():
     """
-    Generate image or video storyboard for a given platform and caption.
+    Generate image or video for a given platform and caption.
     Request body:
     {
         "platform": "instagram",
         "caption": "Your caption text here",
         "media_type": "image" | "video",
-        "tone": "professional"
+        "tone": "professional",
+        "run_id": 123,
+        "image_path": "static/uploads/your-image.jpg"
     }
     """
     if not MEDIA_AVAILABLE:
@@ -285,17 +330,38 @@ def generate_media():
     caption    = data.get('caption', '')
     media_type = data.get('media_type', 'image')
     tone       = data.get('tone')
+    run_id     = data.get('run_id')
+    image_path = data.get('image_path')
+    user_id    = get_current_user_id()
 
     if not caption:
         return jsonify({'error': 'caption is required'}), 400
     if platform not in ['facebook', 'instagram', 'linkedin']:
         return jsonify({'error': 'Invalid platform'}), 400
 
+    if not image_path and run_id and DB_AVAILABLE:
+        try:
+            run = get_run_by_id(run_id, user_id=user_id)
+            image_path = (run or {}).get("content", {}).get("_meta", {}).get("image_path")
+        except Exception:
+            image_path = None
+
+    if run_id and DB_AVAILABLE:
+        run = get_run_by_id(run_id, user_id=user_id)
+        if not run:
+            return jsonify({'error': 'Run not found'}), 404
+
     try:
         if media_type == 'video':
-            result = media_service.generate_video_storyboard(caption, platform, tone)
+            result = media_service.generate_video(caption, platform, tone, image_path=image_path)
         else:
-            result = media_service.generate_image(caption, platform, tone)
+            result = media_service.generate_image(caption, platform, tone, image_path=image_path)
+
+        if image_path:
+            result["source_image_url"] = _public_upload_url(image_path)
+        if run_id:
+            result["run_id"] = run_id
+            _persist_generated_media(run_id, platform, media_type, result, user_id)
 
         return jsonify(result)
 

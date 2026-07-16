@@ -1,0 +1,85 @@
+from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from auth.utils import get_current_user_id, login_required_page
+from db import create_user, get_user_by_email, get_user_by_id
+
+auth_bp = Blueprint("auth", __name__)
+
+
+def _user_payload(user) -> dict:
+    initials = "".join(part[0] for part in user.name.split()[:2]).upper() or user.email[:2].upper()
+    return {
+        "id": user.id,
+        "name": user.name,
+        "email": user.email,
+        "initials": initials,
+    }
+
+
+@auth_bp.route("/login", methods=["GET"])
+def login_page():
+    if get_current_user_id():
+        return redirect(url_for("index"))
+    return render_template("login.html")
+
+
+@auth_bp.route("/register", methods=["POST"])
+def register():
+    data = request.get_json() or {}
+    name = (data.get("name") or "").strip()
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+
+    if not name or not email or not password:
+        return jsonify({"success": False, "error": "Name, email, and password are required"}), 400
+    if len(password) < 6:
+        return jsonify({"success": False, "error": "Password must be at least 6 characters"}), 400
+    if get_user_by_email(email):
+        return jsonify({"success": False, "error": "An account with this email already exists"}), 409
+
+    user = create_user(name, email, generate_password_hash(password))
+    session.clear()
+    session["user_id"] = user["id"]
+    session.permanent = True
+    created = get_user_by_id(user["id"])
+    return jsonify({"success": True, "user": _user_payload(created)})
+
+
+@auth_bp.route("/login", methods=["POST"])
+def login():
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+
+    if not email or not password:
+        return jsonify({"success": False, "error": "Email and password are required"}), 400
+
+    user = get_user_by_email(email)
+    if not user or not check_password_hash(user.password_hash, password):
+        return jsonify({"success": False, "error": "Invalid email or password"}), 401
+
+    session.clear()
+    session["user_id"] = user.id
+    session.permanent = True
+    return jsonify({"success": True, "user": _user_payload(user)})
+
+
+@auth_bp.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return jsonify({"success": True})
+
+
+@auth_bp.route("/me", methods=["GET"])
+def me():
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"success": False, "error": "Not authenticated"}), 401
+
+    user = get_user_by_id(user_id)
+    if not user:
+        session.clear()
+        return jsonify({"success": False, "error": "Not authenticated"}), 401
+
+    return jsonify({"success": True, "user": _user_payload(user)})

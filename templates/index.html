@@ -28,7 +28,16 @@
     </nav>
     <div class="header-actions">
         <div class="status-pill"><span class="status-dot-green"></span>All Systems Online</div>
-        <div class="header-avatar">HM</div>
+        <div class="header-user">
+            <div class="header-user-meta">
+                <span class="header-user-name" id="headerUserLabel">User</span>
+                <span class="header-user-email" id="headerUserEmail"></span>
+            </div>
+            <div class="header-avatar" id="headerUserAvatar">U</div>
+            <button type="button" class="btn-secondary-ent btn-logout" id="logoutBtn">
+                <i class="fas fa-right-from-bracket me-1"></i>Logout
+            </button>
+        </div>
     </div>
 </header>
 
@@ -198,13 +207,13 @@
                                 <input type="radio" name="mediaType" value="video" id="mediaVideo">
                                 <div class="platform-chip-inner">
                                     <i class="fas fa-video" style="color:var(--purple);"></i>
-                                    <span>Video Script</span>
+                                    <span>Generate Video</span>
                                 </div>
                             </label>
                         </div>
                         <small style="color:var(--text-muted);font-size:11px;margin-top:6px;display:block;">
-                            <strong>Image:</strong> AI-generated via DALL-E 3 &nbsp;|&nbsp;
-                            <strong>Video:</strong> Detailed storyboard &amp; script for production
+                            <strong>Image:</strong> AI-generated image from your upload &nbsp;|&nbsp;
+                            <strong>Video:</strong> Animates your uploaded image into an MP4
                         </small>
                     </div>
                     <div class="mt-4">

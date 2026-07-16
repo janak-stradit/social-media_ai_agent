@@ -1,5 +1,42 @@
 $(document).ready(function () {
     let uploadedImagePath = null;
+    let lastRunId = null;
+
+    $.ajaxSetup({
+        xhrFields: { withCredentials: true }
+    });
+
+    $(document).ajaxError(function (_event, xhr) {
+        if (xhr.status === 401) {
+            window.location.href = '/api/auth/login';
+        }
+    });
+
+    function loadCurrentUser() {
+        return $.ajax({
+            url: '/api/auth/me',
+            type: 'GET',
+            success: function (r) {
+                const user = r.user || {};
+                $('#headerUserLabel').text(user.name || 'User');
+                $('#headerUserEmail').text(user.email || '');
+                $('#headerUserAvatar').text(user.initials || 'U');
+            },
+            error: function () {
+                window.location.href = '/api/auth/login';
+            }
+        });
+    }
+
+    $('#logoutBtn').on('click', function () {
+        $.post('/api/auth/logout').always(function () {
+            window.location.href = '/api/auth/login';
+        });
+    });
+
+    loadCurrentUser().always(function () {
+        renderHistory();
+    });
 
     // ── Character counter ──────────────────────────────────────────────
     $('#storyInput').on('input', function () {
@@ -93,6 +130,7 @@ $(document).ready(function () {
                     $('#resultsSection').removeClass('d-none');
                     renderResults(r.content, platforms);
                     renderHistory();
+                    lastRunId = r.run_id || null;
                     $('#generateBtn').prop('disabled', false).removeClass('generating');
                     document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
 
@@ -100,7 +138,10 @@ $(document).ready(function () {
                     if (mediaType !== 'none') {
                         platforms.forEach(p => {
                             const caption = r.content[p]?.caption?.primary_caption || story;
-                            generateMedia(p, caption, mediaType, tone);
+                            generateMedia(p, caption, mediaType, tone, {
+                                runId: lastRunId,
+                                imagePath: uploadedImagePath,
+                            });
                         });
                     }
                 }, 400);
@@ -270,6 +311,45 @@ $(document).ready(function () {
     }
 
     // ── History (PostgreSQL-backed) ────────────────────────────────────
+    let currentHistoryRun = null;
+
+    function renderSavedMediaHtml(platform, content) {
+        const media = content?.[platform]?.media || {};
+        let html = '';
+
+        if (media.image?.url) {
+            html += `
+              <div class="history-detail-block mb-2">
+                <div class="modal-meta-label"><i class="fas fa-image me-1"></i>Saved Image</div>
+                <img src="${media.image.url}" alt="Saved image for ${platform}" style="max-width:100%;border-radius:var(--radius-sm);border:1px solid var(--border);margin-top:8px;">
+              </div>`;
+        }
+
+        if (media.video?.url) {
+            html += `
+              <div class="history-detail-block mb-2">
+                <div class="modal-meta-label"><i class="fas fa-video me-1"></i>Saved Video</div>
+                <video src="${media.video.url}" controls playsinline style="max-width:100%;border-radius:var(--radius-sm);border:1px solid var(--border);margin-top:8px;background:#000;"></video>
+              </div>`;
+        }
+
+        return html;
+    }
+
+    function rememberGeneratedMedia(platform, mediaType, result) {
+        if (!currentHistoryRun?.content?.[platform]) return;
+        currentHistoryRun.content[platform].media = currentHistoryRun.content[platform].media || {};
+        currentHistoryRun.content[platform].media[mediaType] = {
+            url: result.url,
+            prompt: result.prompt,
+            type: result.type || mediaType,
+            duration: result.duration,
+            resolution: result.resolution,
+            size: result.size,
+            source_image_url: result.source_image_url,
+        };
+        $(`#modal-saved-media-${platform}`).html(renderSavedMediaHtml(platform, currentHistoryRun.content));
+    }
     function renderHistory() {
         const container = $('#historyList');
         container.html('<div class="history-empty"><i class="fas fa-spinner fa-spin fa-lg mb-2"></i><p>Loading...</p></div>');
@@ -309,6 +389,7 @@ $(document).ready(function () {
     }
 
     window.viewHistoryEntry = function (runId) {
+        currentHistoryRun = null;
         $('#modalTimestamp').text('Loading...');
         $('#modalStory, #modalTone, #modalPlatforms').text('');
         $('#modalDetails').html('<div style="text-align:center;padding:32px;"><i class="fas fa-spinner fa-spin fa-2x" style="color:var(--blue);"></i></div>');
@@ -325,6 +406,15 @@ $(document).ready(function () {
 
                 const colors = { facebook:'var(--blue)', instagram:'#e4405f', linkedin:'#0a66c2' };
                 let html = '';
+                const meta = e.content?._meta || {};
+                if (meta.image_url) {
+                    html += `
+                    <div class="history-detail-block mb-3">
+                      <div class="modal-meta-label"><i class="fas fa-upload me-1"></i>Uploaded Source Image</div>
+                      <img src="${meta.image_url}" alt="Uploaded source image" style="max-width:220px;border-radius:var(--radius-sm);border:1px solid var(--border);margin-top:8px;">
+                    </div>`;
+                }
+
                 e.platforms.forEach(platform => {
                     const data = e.content[platform]; if (!data) return;
                     const cap = data.caption?.primary_caption || '—';
@@ -332,7 +422,7 @@ $(document).ready(function () {
                     const tags = Array.isArray(data.hashtags?.hashtags) ? data.hashtags.hashtags : [];
                     const reach = safeReach(str.metrics_forecast?.reach ?? str.metrics_forecast);
                     html += `
-                    <div class="mb-4">
+                    <div class="mb-4" id="modal-platform-${platform}">
                       <h6 style="color:${colors[platform]||'var(--blue)'};font-weight:700;margin-bottom:12px;text-transform:capitalize;">
                         <i class="fab fa-${platform} me-2"></i>${platform}
                       </h6>
@@ -357,29 +447,82 @@ $(document).ready(function () {
                           </div>
                         </div>
                       </div>
-                      ${tags.length ? `<div class="hashtag-wrap">${tags.map(t=>`<span class="hashtag-pill">#${t}</span>`).join('')}</div>` : ''}
+                      ${tags.length ? `<div class="hashtag-wrap mb-2">${tags.map(t=>`<span class="hashtag-pill">#${t}</span>`).join('')}</div>` : ''}
+                      <div id="modal-saved-media-${platform}">${renderSavedMediaHtml(platform, e.content)}</div>
+                      <div class="history-media-actions">
+                        <button type="button" class="btn-secondary-ent history-media-btn" onclick="generateHistoryMedia('${platform}', 'image')" ${meta.image_path ? '' : 'disabled title="Upload an image during content generation first"'}>
+                          <i class="fas fa-image me-1"></i>Generate Image
+                        </button>
+                        <button type="button" class="btn-secondary-ent history-media-btn" onclick="generateHistoryMedia('${platform}', 'video')" ${meta.image_path ? '' : 'disabled title="Upload an image during content generation first"'}>
+                          <i class="fas fa-video me-1"></i>Generate Video
+                        </button>
+                      </div>
+                      <div id="modal-media-${platform}" class="history-media-results"></div>
                     </div>`;
                 });
+                currentHistoryRun = {
+                    runId: e.id,
+                    story: e.story,
+                    tone: e.tone,
+                    content: e.content,
+                    imagePath: meta.image_path || null,
+                    imageUrl: meta.image_url || null,
+                };
                 $('#modalDetails').html(html);
             },
             error: function () {
+                currentHistoryRun = null;
                 $('#modalDetails').html('<p style="color:var(--danger);font-size:13px;"><i class="fas fa-exclamation-circle me-2"></i>Could not load run details.</p>');
             }
         });
     };
+
+    window.generateHistoryMedia = function (platform, mediaType) {
+        if (!currentHistoryRun) {
+            showToast('Run details are not loaded yet.', 'warning');
+            return;
+        }
+
+        const caption = currentHistoryRun.content?.[platform]?.caption?.primary_caption
+            || currentHistoryRun.story
+            || '';
+        if (!caption.trim()) {
+            showToast('No caption available for media generation.', 'warning');
+            return;
+        }
+
+        generateMedia(platform, caption, mediaType, currentHistoryRun.tone, {
+            containerSelector: `#modal-media-${platform}`,
+            placeholderId: `modal-media-${platform}-${mediaType}`,
+            cardStyle: 'modal',
+            runId: currentHistoryRun.runId,
+            imagePath: currentHistoryRun.imagePath,
+            rememberInHistory: true,
+        });
+    };
+
     // ── Media Generation ───────────────────────────────────────────────
-    function generateMedia(platform, caption, mediaType, tone) {
-        // Inject placeholder into that platform's result tab
-        const container = $(`#${platform}Result .result-grid`);
+    function generateMedia(platform, caption, mediaType, tone, options = {}) {
+        const containerSelector = options.containerSelector || `#${platform}Result .result-grid`;
+        const container = $(containerSelector);
         if (!container.length) return;
 
-        const placeholderId = `media-${platform}`;
+        if (mediaType === 'video' && !options.imagePath) {
+            showToast('Upload an image first. Video generation uses your uploaded image as the source.', 'warning');
+            return;
+        }
+
+        const placeholderId = options.placeholderId || `media-${platform}`;
+        const cardStyle = options.cardStyle || 'result';
+        const gridStyle = cardStyle === 'modal' ? '' : 'grid-column:1/-1;';
+
+        $(`#${placeholderId}`).remove();
         container.append(`
-            <div id="${placeholderId}" class="result-card" style="grid-column:1/-1;">
+            <div id="${placeholderId}" class="result-card" style="${gridStyle}margin-top:12px;">
               <div class="result-card-header">
                 <div class="result-card-title">
                   <i class="fas fa-${mediaType === 'video' ? 'video' : 'image'} me-2" style="color:var(--purple);"></i>
-                  ${mediaType === 'video' ? 'Video Storyboard' : 'AI-Generated Image'}
+                  ${mediaType === 'video' ? 'AI-Generated Video' : 'AI-Generated Image'}
                 </div>
                 <span style="font-size:12px;color:var(--text-muted);"><i class="fas fa-spinner fa-spin me-1"></i>Generating...</span>
               </div>
@@ -388,7 +531,7 @@ $(document).ready(function () {
                   <div class="loading-ring" style="width:48px;height:48px;border-width:2px;"></div>
                 </div>
                 <p style="margin-top:12px;color:var(--text-muted);font-size:13px;">
-                  ${mediaType === 'video' ? 'Creating detailed video storyboard...' : 'Generating image with DALL-E 3...'}
+                  ${mediaType === 'video' ? 'Generating video... this may take 1–3 minutes.' : 'Generating image...'}
                 </p>
               </div>
             </div>`);
@@ -397,9 +540,20 @@ $(document).ready(function () {
             url: '/api/generate-media',
             type: 'POST',
             contentType: 'application/json',
-            data: JSON.stringify({ platform, caption: caption.substring(0, 500), media_type: mediaType, tone }),
+            timeout: mediaType === 'video' ? 360000 : 120000,
+            data: JSON.stringify({
+                platform,
+                caption: caption.substring(0, 500),
+                media_type: mediaType,
+                tone,
+                run_id: options.runId || null,
+                image_path: options.imagePath || null,
+            }),
             success: function (result) {
                 renderMediaResult(placeholderId, result, mediaType, platform);
+                if (options.rememberInHistory && result.success) {
+                    rememberGeneratedMedia(platform, mediaType, result);
+                }
             },
             error: function (xhr) {
                 $(`#${placeholderId} .result-card-body`).html(
@@ -432,14 +586,33 @@ $(document).ready(function () {
         if (mediaType === 'image') {
             card.find('.result-card-body').html(`
                 <div style="text-align:center;">
-                  <img src="${result.url}" alt="AI Generated for ${platform}" style="max-width:100%;border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:12px;">
-                  <p style="font-size:12px;color:var(--text-muted);margin-bottom:4px;"><strong>Size:</strong> ${result.size || 'Standard'}</p>
+                  <img src="${result.url}" alt="AI Generated for ${platform}" style="max-width:100%;max-height:400px;border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:12px;object-fit:contain;">
+                  <p style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">
+                    <strong>Size:</strong> ${result.size || 'Standard'} &nbsp;|&nbsp;
+                    <strong>Model:</strong> ${result.model || 'Unknown'} &nbsp;|&nbsp;
+                    <strong>Cost:</strong> $${result.cost !== undefined && result.cost !== null ? Number(result.cost).toFixed(4) : '0.0000'}
+                  </p>
+                  <p style="font-size:11px;color:var(--text-muted);font-style:italic;max-width:600px;margin:0 auto;">
+                    <strong>Prompt:</strong> ${escapeHtml((result.prompt || '').substring(0, 200))}...
+                  </p>
+                </div>`);
+        } else if (result.type === 'video' && result.url) {
+            card.find('.result-card-body').html(`
+                <div style="text-align:center;">
+                  ${result.source_image_url ? `<p style="font-size:11px;color:var(--text-muted);margin-bottom:8px;"><strong>Source image:</strong></p><img src="${result.source_image_url}" alt="Source image" style="max-width:120px;max-height:120px;border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:12px;object-fit:contain;">` : ''}
+                  <video src="${result.url}" controls playsinline style="max-width:100%;max-height:420px;border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:12px;background:#000;display:block;margin-left:auto;margin-right:auto;"></video>
+                  <p style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">
+                    <strong>Duration:</strong> ${result.duration || '?'}s &nbsp;|&nbsp;
+                    <strong>Resolution:</strong> ${result.resolution || 'Standard'} &nbsp;|&nbsp;
+                    <strong>Model:</strong> ${result.model || 'Unknown'} &nbsp;|&nbsp;
+                    <strong>Cost:</strong> $${result.cost !== undefined && result.cost !== null ? Number(result.cost).toFixed(4) : '0.0000'}
+                  </p>
                   <p style="font-size:11px;color:var(--text-muted);font-style:italic;max-width:600px;margin:0 auto;">
                     <strong>Prompt:</strong> ${escapeHtml((result.prompt || '').substring(0, 200))}...
                   </p>
                 </div>`);
         } else {
-            // Video storyboard
+            // Legacy storyboard fallback
             const sb = result.storyboard || {};
             const scenes = Array.isArray(sb.scenes) ? sb.scenes : [];
             let scenesHtml = scenes.map(s => `
@@ -509,5 +682,5 @@ $(document).ready(function () {
     });
 
     // ── Init ───────────────────────────────────────────────────────────
-    renderHistory();
+    // History loads after auth check above.
 });

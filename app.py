@@ -1,16 +1,17 @@
 import os
-from flask import Flask, request, jsonify
+from flask import Flask, jsonify, redirect, render_template, session, url_for
 from flask_cors import CORS
-from werkzeug.utils import secure_filename
 from config import config_map
 from api.routes import api_bp
+from auth.routes import auth_bp
+from auth.utils import get_current_user_id, login_required_page
 
 def create_app(config_name='development'):
     app = Flask(__name__, 
                 template_folder='templates',
                 static_folder='static')
     app.config.from_object(config_map[config_name])
-    CORS(app)
+    CORS(app, supports_credentials=True)
     
     # Ensure upload directory exists
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
@@ -25,11 +26,18 @@ def create_app(config_name='development'):
     
     # Register blueprints
     app.register_blueprint(api_bp, url_prefix='/api')
+    app.register_blueprint(auth_bp, url_prefix='/api/auth')
     
     @app.route('/')
+    @login_required_page
     def index():
-        from flask import render_template
         return render_template('index.html')
+
+    @app.route('/login')
+    def login_redirect():
+        if get_current_user_id():
+            return redirect(url_for('index'))
+        return redirect(url_for('auth.login_page'))
     
     @app.errorhandler(413)
     def too_large(e):

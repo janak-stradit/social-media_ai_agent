@@ -16,3 +16,4 @@ requests==2.32.0
 httpx<0.28
 sqlalchemy>=2.0
 psycopg2-binary
+boto3

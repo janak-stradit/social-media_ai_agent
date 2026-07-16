@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign In — ContentAI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body class="auth-body">
+<div class="auth-shell">
+    <div class="auth-card">
+        <div class="auth-brand">
+            <div class="brand-logo"><i class="fas fa-robot"></i></div>
+            <div>
+                <h1 class="auth-title">ContentAI</h1>
+                <p class="auth-subtitle">Sign in to access your content workspace</p>
+            </div>
+        </div>
+
+        <div class="auth-tabs">
+            <button type="button" class="auth-tab active" data-mode="login">Sign In</button>
+            <button type="button" class="auth-tab" data-mode="register">Create Account</button>
+        </div>
+
+        <form id="authForm" class="auth-form">
+            <div id="nameField" class="d-none">
+                <label class="auth-label" for="authName">Full Name</label>
+                <input id="authName" type="text" class="auth-input" placeholder="Your name">
+            </div>
+            <div>
+                <label class="auth-label" for="authEmail">Email</label>
+                <input id="authEmail" type="email" class="auth-input" placeholder="you@company.com" required>
+            </div>
+            <div>
+                <label class="auth-label" for="authPassword">Password</label>
+                <input id="authPassword" type="password" class="auth-input" placeholder="Minimum 6 characters" required>
+            </div>
+            <div id="authError" class="auth-error d-none"></div>
+            <button id="authSubmit" type="submit" class="btn-primary-ent w-100">
+                <i class="fas fa-right-to-bracket me-2"></i>Sign In
+            </button>
+        </form>
+    </div>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="{{ url_for('static', filename='js/login.js') }}"></script>
+</body>
+</html>
