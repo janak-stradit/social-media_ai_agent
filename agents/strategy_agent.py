@@ -2,7 +2,7 @@ from services.llm_service import LLMService
 from datetime import datetime, timedelta
 
 class StrategyAgent:
-    """Agent that determines optimal posting strategy"""
+    """Agent that determines optimal posting strategy with usage tracking"""
     
     PLATFORM_BEST_TIMES = {
         'facebook': {
@@ -25,7 +25,7 @@ class StrategyAgent:
     def __init__(self):
         self.llm = LLMService()
     
-    def create_strategy(self, platform, story_analysis, content_type='standard'):
+    def create_strategy(self, platform, story_analysis, content_type='standard', memory_context=None):
         """Generate comprehensive post strategy"""
         best_times = self.PLATFORM_BEST_TIMES.get(platform, {})
         
@@ -44,36 +44,28 @@ class StrategyAgent:
         Platform: {platform}
         Content Type: {content_type}
         Current Time: {datetime.now().isoformat()}
-        
-        Create the optimal posting strategy."""
-        
-        strategy = self.llm.generate_json(system_prompt, user_prompt)
+        """
+        if memory_context:
+            user_prompt += f"\n{memory_context}"
+
+        strategy, usage = self.llm.generate_json(system_prompt, user_prompt, return_usage=True)
         strategy['platform_best_practices'] = best_times
+        strategy['_usage'] = usage
         return strategy
-    
-    def schedule_posts(self, platforms, story_analysis, start_date=None):
-        """Create a multi-platform posting schedule"""
-        if start_date is None:
-            start_date = datetime.now() + timedelta(days=1)
-        
-        schedule = {}
-        for i, platform in enumerate(platforms):
-            # Stagger posts by 2-4 hours for cross-platform
-            post_time = start_date + timedelta(hours=i*3)
-            strategy = self.create_strategy(platform, story_analysis)
-            strategy['scheduled_time'] = post_time.isoformat()
-            schedule[platform] = strategy
-        
-        return {
-            'schedule': schedule,
-            'total_posts': len(platforms),
-            'campaign_duration': f"{len(platforms) * 3} hours",
-            'recommended_tools': ['Buffer', 'Hootsuite', 'Later', 'Meta Business Suite']
-        }
-    
-    def generate_all_strategies(self, story_analysis):
+
+    def generate_all_strategies(self, story_analysis, memory_context=None):
         """Generate strategies for all platforms"""
         results = {}
+        total_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cost_usd": 0.0}
+
         for platform in ['facebook', 'instagram', 'linkedin']:
-            results[platform] = self.create_strategy(platform, story_analysis)
+            res = self.create_strategy(platform, story_analysis, memory_context=memory_context)
+            u = res.pop('_usage', {})
+            total_usage["input_tokens"] += u.get("input_tokens", 0)
+            total_usage["output_tokens"] += u.get("output_tokens", 0)
+            total_usage["total_tokens"] += u.get("total_tokens", 0)
+            total_usage["cost_usd"] += u.get("cost_usd", 0.0)
+            results[platform] = res
+
+        results['_usage'] = total_usage
         return results

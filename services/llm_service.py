@@ -4,7 +4,7 @@ from config import Config
 
 
 class LLMService:
-    """LLM client for agents — Bedrock (preferred), OpenRouter, or OpenAI with automatic failover."""
+    """LLM client for agents — Bedrock (preferred), OpenRouter, or OpenAI with automatic failover and token/cost tracking."""
 
     def __init__(self):
         api_key = Config.OPENAI_API_KEY
@@ -75,8 +75,34 @@ class LLMService:
         if not self.providers:
             raise RuntimeError("No LLM providers configured. Check your API keys and AWS credentials.")
 
-    def generate(self, system_prompt, user_prompt, temperature=0.7, max_tokens=1000):
-        """Generate text using available LLM providers in sequence"""
+    def _calculate_cost(self, provider_name, model_name, in_tokens, out_tokens):
+        """Calculate estimated cost USD based on provider and model rates"""
+        in_tokens = max(0, int(in_tokens or 0))
+        out_tokens = max(0, int(out_tokens or 0))
+        
+        # Rates per 1,000 tokens
+        if "nova-lite" in model_name.lower():
+            rate_in, rate_out = 0.00006, 0.00024
+        elif "nova-pro" in model_name.lower() or "sonnet" in model_name.lower():
+            rate_in, rate_out = 0.003, 0.015
+        elif "gpt-4o-mini" in model_name.lower():
+            rate_in, rate_out = 0.00015, 0.0006
+        else:
+            # Default fallback rate
+            rate_in, rate_out = 0.0005, 0.0015
+
+        cost = ((in_tokens / 1000.0) * rate_in) + ((out_tokens / 1000.0) * rate_out)
+        return {
+            "input_tokens": in_tokens,
+            "output_tokens": out_tokens,
+            "total_tokens": in_tokens + out_tokens,
+            "cost_usd": round(cost, 6),
+            "provider": provider_name,
+            "model": model_name
+        }
+
+    def generate(self, system_prompt, user_prompt, temperature=0.7, max_tokens=2500, return_usage=False):
+        """Generate text using available LLM providers in sequence with optional token/cost metrics"""
         last_error = None
         for provider in self.providers:
             try:
@@ -100,7 +126,16 @@ class LLMService:
                         ],
                         inferenceConfig=inference_config
                     )
-                    return response['output']['message']['content'][0]['text']
+                    text_out = response['output']['message']['content'][0]['text']
+                    
+                    usage_raw = response.get('usage', {})
+                    in_t = usage_raw.get('inputTokens', len(system_prompt + user_prompt) // 4)
+                    out_t = usage_raw.get('outputTokens', len(text_out) // 4)
+                    usage_metrics = self._calculate_cost("bedrock", provider["model"], in_t, out_t)
+                    
+                    if return_usage:
+                        return text_out, usage_metrics
+                    return text_out
                 else:
                     response = provider["client"].chat.completions.create(
                         model=provider["model"],
@@ -111,19 +146,65 @@ class LLMService:
                         temperature=temperature,
                         max_tokens=max_tokens
                     )
-                    return response.choices[0].message.content
+                    text_out = response.choices[0].message.content
+                    
+                    usage_raw = getattr(response, 'usage', None)
+                    in_t = getattr(usage_raw, 'prompt_tokens', len(system_prompt + user_prompt) // 4) if usage_raw else len(system_prompt + user_prompt) // 4
+                    out_t = getattr(usage_raw, 'completion_tokens', len(text_out) // 4) if usage_raw else len(text_out) // 4
+                    usage_metrics = self._calculate_cost(provider["name"], provider["model"], in_t, out_t)
+
+                    if return_usage:
+                        return text_out, usage_metrics
+                    return text_out
             except Exception as e:
                 last_error = e
                 print(f"[LLM Service] Provider {provider['name']} failed: {e}. Trying fallback...")
         raise Exception(f"LLM Generation failed for all providers. Last error: {str(last_error)}")
 
-    def generate_json(self, system_prompt, user_prompt, temperature=0.5, max_tokens=1000):
-        """Generate structured JSON response using available LLM providers in sequence"""
+    def _robust_parse_json(self, content_str: str) -> dict:
+        """Parse JSON response resiliently using json_repair to handle invalid control characters, unescaped quotes, and formatting glitches."""
+        if not content_str:
+            return {}
+        
+        cleaned = content_str.strip()
+        if cleaned.startswith("```json"):
+            cleaned = cleaned.split("```json")[1].split("```")[0].strip()
+        elif cleaned.startswith("```"):
+            cleaned = cleaned.split("```")[1].split("```")[0].strip()
+
+        # Attempt 1: Standard json.loads with strict=False
+        try:
+            return json.loads(cleaned, strict=False)
+        except Exception:
+            pass
+
+        # Attempt 2: json_repair (fixes unescaped inner quotes, missing commas & control characters)
+        try:
+            import json_repair
+            repaired = json_repair.repair_json(cleaned, return_objects=True)
+            if isinstance(repaired, dict):
+                return repaired
+        except Exception:
+            pass
+
+        # Attempt 3: Demjson3 fallback
+        try:
+            import demjson3
+            res = demjson3.decode(cleaned)
+            if isinstance(res, dict):
+                return res
+        except Exception:
+            pass
+
+        # Attempt 4: Fallback parse
+        return json.loads(cleaned)
+
+    def generate_json(self, system_prompt, user_prompt, temperature=0.5, max_tokens=2500, return_usage=False):
+        """Generate structured JSON response with optional token/cost metrics"""
         last_error = None
         for provider in self.providers:
             try:
                 if provider["name"] == "bedrock":
-                    # Instruct Bedrock models to output JSON
                     json_system_prompt = system_prompt
                     if "json" not in system_prompt.lower():
                         json_system_prompt += "\n\nYou must return your response ONLY as a valid JSON object. Do not include any explanations or markdown formatting outside the JSON."
@@ -148,6 +229,11 @@ class LLMService:
                         inferenceConfig=inference_config
                     )
                     content = response['output']['message']['content'][0]['text']
+                    
+                    usage_raw = response.get('usage', {})
+                    in_t = usage_raw.get('inputTokens', len(json_system_prompt + user_prompt) // 4)
+                    out_t = usage_raw.get('outputTokens', len(content) // 4)
+                    usage_metrics = self._calculate_cost("bedrock", provider["model"], in_t, out_t)
                 else:
                     kwargs = {
                         "model": provider["model"],
@@ -162,14 +248,17 @@ class LLMService:
                     response = provider["client"].chat.completions.create(**kwargs)
                     content = response.choices[0].message.content
 
-                # Clean up any potential markdown formatting in case the model returns it
-                content_str = content.strip()
-                if content_str.startswith("```json"):
-                    content_str = content_str.split("```json")[1].split("```")[0].strip()
-                elif content_str.startswith("```"):
-                    content_str = content_str.split("```")[1].split("```")[0].strip()
+                    usage_raw = getattr(response, 'usage', None)
+                    in_t = getattr(usage_raw, 'prompt_tokens', len(system_prompt + user_prompt) // 4) if usage_raw else len(system_prompt + user_prompt) // 4
+                    out_t = getattr(usage_raw, 'completion_tokens', len(content) // 4) if usage_raw else len(content) // 4
+                    usage_metrics = self._calculate_cost(provider["name"], provider["model"], in_t, out_t)
 
-                return json.loads(content_str)
+                content_str = content.strip()
+                parsed_json = self._robust_parse_json(content_str)
+
+                if return_usage:
+                    return parsed_json, usage_metrics
+                return parsed_json
             except Exception as e:
                 last_error = e
                 print(f"[LLM Service] Provider {provider['name']} failed JSON generation: {e}. Trying fallback...")

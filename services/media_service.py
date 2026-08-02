@@ -175,7 +175,7 @@ class MediaGenerationService:
                 "model": model,
                 "prompt": prompt[:512],
                 "image_url": data_uri,
-                "with_audio": False,
+                "with_audio": True,
                 "movement_amplitude": "auto",
             }
             if model == "vidu2-image":
@@ -191,7 +191,7 @@ class MediaGenerationService:
             "prompt": prompt[:512],
             "image_url": [data_uri],
             "quality": Config.Z_AI_VIDEO_QUALITY,
-            "with_audio": False,
+            "with_audio": True,
             "size": self._zai_video_size(platform),
             "fps": Config.Z_AI_VIDEO_FPS,
             "duration": self._zai_video_duration(),
@@ -317,33 +317,55 @@ class MediaGenerationService:
             encoded = base64.b64encode(f.read()).decode("utf-8")
         return f"data:{mime};base64,{encoded}"
 
+    def _clean_motion_text(self, text: str) -> str:
+        """Strip non-visual meta instructions, quotes, dialogue scripts, and hashtags from video prompts."""
+        import re
+        if not text:
+            return ""
+        # Remove dialogue instruction quotes and negative directives
+        cleaned = re.sub(r'Speak\s+exactly\s+this\s+dialogue\s+only[:\s]*["“].*?["”]', '', text, flags=re.IGNORECASE | re.DOTALL)
+        cleaned = re.sub(r'Do\s+not\s+(?:say|repeat).*?["“].*?["”]', '', cleaned, flags=re.IGNORECASE | re.DOTALL)
+        cleaned = re.sub(r'["“].*?["”]', '', cleaned)  # remove quoted text
+        cleaned = re.sub(r'#\w+', '', cleaned)        # remove hashtags
+        cleaned = re.sub(r'https?://\S+', '', cleaned) # remove URLs
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        return cleaned
+
     def _build_video_prompt(self, caption: str, platform: str, tone: str = None, has_reference_image: bool = False) -> str:
         platform_style = {
-            "instagram": "vibrant portrait vertical video, cinematic lighting, modern style, highly engaging",
-            "facebook": "professional, warm corporate, polished and welcoming corporate video",
-            "linkedin": "premium executive, corporate office, clean aesthetic, highly professional style",
+            "instagram": "vibrant portrait vertical video, cinematic lighting, modern style",
+            "facebook": "professional, warm corporate, polished corporate video",
+            "linkedin": "premium executive, corporate office, clean aesthetic, professional",
         }.get(platform, "highly professional and cinematic")
-        tone_hint = f", {tone} tone" if tone else ""
 
-        # If caption is long, compress it to visual and motion descriptions
-        if len(caption) > 150:
-            motion_desc = self._compress_video_prompt(caption)
+        lower_caption = caption.lower()
+        is_character_continuation = any(k in lower_caption for k in [
+            'character', 'preserve', 'attached', 'aidan', 'continuation', 'part 1', 'part 2', 'same face'
+        ])
+
+        if has_reference_image or is_character_continuation:
+            prompt = (
+                "Animate source image character: professional executive speaking confidently to camera "
+                "with realistic speaking lip sync, subtle hand gestures, organic head nods, and direct eye contact. "
+                "Steady medium shot with slow cinematic push-in. Preserve exact face, hairstyle, skin tone, outfit, logo, lighting, "
+                "and modern office background. 4k photorealistic video, 24fps, smooth natural motion."
+            )
         else:
-            motion_desc = caption
+            cleaned_desc = self._clean_motion_text(caption)
+            if len(cleaned_desc) > 200:
+                cleaned_desc = self._compress_video_prompt(cleaned_desc)
+            if not cleaned_desc:
+                cleaned_desc = "Professional presenter speaking directly to camera in a modern corporate studio"
 
-        if has_reference_image:
-            return (
-                f"Animate the source image: {motion_desc}. "
-                f"Preserve the character's exact face, hairstyle, skin tone, clothing, and environment. "
-                f"Realistic natural motion: subtle hand gestures, organic head nods, natural blinking, realistic lip-sync. "
-                f"Cinematic lighting, high-fidelity details, steady camera close-up with slow push-in, premium photorealistic quality."
+            prompt = (
+                f"High-quality cinematic video: {cleaned_desc}. "
+                f"Style: {platform_style}. "
+                f"Realistic character motion, natural facial expressions, continuous speaking lip-sync, "
+                f"subtle gestures, professional studio lighting, 4k ultra-high-fidelity render."
             )
 
-        return (
-            f"Cinematic video showing {motion_desc}. "
-            f"Style: {platform_style}{tone_hint}. "
-            f"Realistic character motion, natural expressions, professional lighting, shallow depth of field, high-fidelity render."
-        )
+        # Ensure strict adherence to model limits (Amazon Nova Reel 512-character max)
+        return prompt[:480]
 
     def _generate_video_openrouter(self, prompt: str, platform: str, image_path: str = None) -> dict:
         """Submit an OpenRouter video job, poll until done, and save the MP4 locally."""
@@ -358,7 +380,7 @@ class MediaGenerationService:
             "aspect_ratio": aspect_ratio_map.get(platform, "16:9"),
             "duration": Config.VIDEO_DURATION,
             "resolution": Config.VIDEO_RESOLUTION,
-            "generate_audio": False,
+            "generate_audio": True,
         }
 
         resolved_image = self._resolve_image_path(image_path)
@@ -509,7 +531,14 @@ class MediaGenerationService:
     def _parse_size(self, size_str: str) -> tuple[int, int]:
         try:
             w_str, h_str = size_str.split('x')
-            return int(w_str), int(h_str)
+            w, h = int(w_str), int(h_str)
+            # Map to Amazon Nova Canvas supported dimensions (1024x1024, 1280x720, 720x1280)
+            if w > h:
+                return 1280, 720
+            elif h > w:
+                return 720, 1280
+            else:
+                return 1024, 1024
         except Exception:
             return 1024, 1024
 
@@ -539,31 +568,64 @@ class MediaGenerationService:
         model_id = getattr(Config, 'BEDROCK_IMAGE_MODEL', 'amazon.nova-canvas-v1:0')
         width, height = self._parse_size(size)
         import random
+        import json
         seed = random.randint(0, 2147483646)
         
         resolved_image = self._resolve_image_path(image_path)
         
+        # Truncate prompt to 1000 chars maximum for Nova Canvas
+        prompt_text = prompt[:1000]
+
         if resolved_image:
-            input_image_b64 = self._get_image_as_jpeg_base64(resolved_image, target_size=(width, height))
-            payload = {
-                "taskType": "IMAGE_VARIATION",
-                "imageVariationParams": {
-                    "images": [input_image_b64],
-                    "text": prompt
-                },
-                "imageGenerationConfig": {
-                    "numberOfImages": 1,
-                    "quality": "standard",
-                    "height": height,
-                    "width": width,
-                    "seed": seed
+            try:
+                input_image_b64 = self._get_image_as_jpeg_base64(resolved_image, target_size=(width, height))
+                payload = {
+                    "taskType": "IMAGE_VARIATION",
+                    "imageVariationParams": {
+                        "images": [input_image_b64],
+                        "text": prompt_text,
+                        "similarityStrength": 0.7
+                    },
+                    "imageGenerationConfig": {
+                        "numberOfImages": 1,
+                        "quality": "standard",
+                        "height": height,
+                        "width": width,
+                        "seed": seed
+                    }
                 }
-            }
+                response = self.bedrock_client.invoke_model(
+                    body=json.dumps(payload),
+                    modelId=model_id,
+                    accept="application/json",
+                    contentType="application/json"
+                )
+            except Exception as variation_err:
+                print(f"[Media Service] Bedrock IMAGE_VARIATION payload notice: {variation_err}. Falling back to TEXT_IMAGE taskType...")
+                payload = {
+                    "taskType": "TEXT_IMAGE",
+                    "textToImageParams": {
+                        "text": prompt_text
+                    },
+                    "imageGenerationConfig": {
+                        "numberOfImages": 1,
+                        "quality": "standard",
+                        "height": height,
+                        "width": width,
+                        "seed": seed
+                    }
+                }
+                response = self.bedrock_client.invoke_model(
+                    body=json.dumps(payload),
+                    modelId=model_id,
+                    accept="application/json",
+                    contentType="application/json"
+                )
         else:
             payload = {
                 "taskType": "TEXT_IMAGE",
                 "textToImageParams": {
-                    "text": prompt
+                    "text": prompt_text
                 },
                 "imageGenerationConfig": {
                     "numberOfImages": 1,
@@ -573,14 +635,12 @@ class MediaGenerationService:
                     "seed": seed
                 }
             }
-            
-        import json
-        response = self.bedrock_client.invoke_model(
-            body=json.dumps(payload),
-            modelId=model_id,
-            accept="application/json",
-            contentType="application/json"
-        )
+            response = self.bedrock_client.invoke_model(
+                body=json.dumps(payload),
+                modelId=model_id,
+                accept="application/json",
+                contentType="application/json"
+            )
         
         response_body = json.loads(response.get("body").read())
         images = response_body.get("images") or []
@@ -796,19 +856,19 @@ class MediaGenerationService:
     def generate_video(self, caption: str, platform: str, tone: str = None, image_path: str = None) -> dict:
         """Generate an actual MP4 video from caption/story text and optional reference image."""
         resolved_image = self._resolve_image_path(image_path)
+        
+        # Auto-generate a visual keyframe image if no reference image was provided
+        if not resolved_image:
+            print("[Media Service] No user image uploaded for video. Auto-generating keyframe image...")
+            keyframe_res = self.generate_image(caption, platform, tone)
+            if keyframe_res.get("success") and keyframe_res.get("url"):
+                resolved_image = self._resolve_image_path(keyframe_res["url"])
+
         prompt = self._build_video_prompt(
             caption, platform, tone, has_reference_image=bool(resolved_image)
         )
 
         try:
-            if not resolved_image:
-                return {
-                    "success": False,
-                    "type": "video",
-                    "platform": platform,
-                    "error": "Upload an image first. Video generation uses your uploaded image as the source frame.",
-                }
-
             try:
                 result = self._generate_video_bedrock(prompt, platform, image_path=resolved_image)
             except Exception as bedrock_err:
@@ -838,9 +898,21 @@ class MediaGenerationService:
                         temp_audio_path = None
                         if tts_text:
                             from gtts import gTTS
+                            tld_map = {
+                                'b2b tech leader': 'co.uk',
+                                'bold viral marketer': 'com',
+                                'friendly lifestyle coach': 'com.au',
+                                'high-growth startup': 'co.in',
+                                'standard enterprise': 'ca',
+                                'professional': 'co.uk',
+                                'casual': 'com.au',
+                                'enthusiastic': 'com',
+                                'urgent': 'com',
+                            }
+                            tld_accent = tld_map.get((tone or '').lower(), 'com')
                             temp_audio_name = f"temp_tts_{uuid.uuid4().hex[:8]}.mp3"
                             temp_audio_path = os.path.join(self.upload_folder, temp_audio_name)
-                            tts = gTTS(text=tts_text, lang='en', tld='com')
+                            tts = gTTS(text=tts_text, lang='en', tld=tld_accent)
                             tts.save(temp_audio_path)
 
                         # Output path
@@ -1093,6 +1165,14 @@ Return JSON with keys:
         Extract only the spoken dialogue or text that should be read aloud from a prompt.
         If no dialogue is specified, return the cleaned caption.
         """
+        import re
+        # Check for explicit 'Speak exactly this dialogue only: "..."' or similar pattern
+        match = re.search(r'Speak\s+exactly\s+this\s+dialogue\s+only[:\s]*["“](.*?)["”]', caption, re.IGNORECASE | re.DOTALL)
+        if match:
+            extracted = match.group(1).strip().lstrip('—').strip()
+            if extracted:
+                return extracted
+
         system_prompt = (
             "You are an AI assistant. Extract ONLY the spoken dialogue, voiceover script, or text that should be "
             "spoken aloud from the user's prompt. Do not include any instructions, scene descriptions, metadata, "
@@ -1108,7 +1188,8 @@ Return JSON with keys:
                 temperature=0.1,
                 max_tokens=300
             )
-            return dialogue.strip().replace('"', '')
+            clean_dialogue = dialogue.strip().replace('"', '').lstrip('—').strip()
+            return clean_dialogue or self._clean_text_for_tts(caption)
         except Exception as e:
             print(f"[Media Service] Dialogue extraction failed: {e}")
             return self._clean_text_for_tts(caption)

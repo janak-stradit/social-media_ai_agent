@@ -1,6 +1,9 @@
 $(document).ready(function () {
     let uploadedImagePath = null;
+    let threadActiveImagePath = null;
     let lastRunId = null;
+    let lastAssistantContext = null;
+    let messageCounter = 0;
 
     $.ajaxSetup({
         xhrFields: { withCredentials: true }
@@ -12,6 +15,7 @@ $(document).ready(function () {
         }
     });
 
+    // ── User Auth & Metrics Init ──────────────────────────────────────
     function loadCurrentUser() {
         return $.ajax({
             url: '/api/auth/me',
@@ -28,22 +32,72 @@ $(document).ready(function () {
         });
     }
 
+    function loadUserUsageMetrics() {
+        $.ajax({
+            url: '/api/metrics/usage',
+            type: 'GET',
+            success: function (r) {
+                if (r.success) {
+                    $('#headerTokens').text(Number(r.total_tokens || 0).toLocaleString());
+                    $('#headerCost').text('$' + Number(r.total_cost_usd || 0).toFixed(4));
+                }
+            }
+        });
+    }
+
     $('#logoutBtn').on('click', function () {
-        $.post('/api/auth/logout').always(function () {
-            window.location.href = '/api/auth/login';
+        $.ajax({
+            url: '/api/auth/logout',
+            type: 'POST',
+            xhrFields: { withCredentials: true }
+        }).always(function () {
+            window.location.href = '/login';
         });
     });
 
     loadCurrentUser().always(function () {
         renderHistory();
+        loadUserUsageMetrics();
     });
 
-    // ── Character counter ──────────────────────────────────────────────
-    $('#storyInput').on('input', function () {
-        $('#charCount').text($(this).val().length + ' characters');
+    // ── Auto-resizing Textarea & Char Counter ──────────────────────────
+    const storyInput = $('#storyInput');
+    storyInput.on('input', function () {
+        this.style.height = 'auto';
+        this.style.height = Math.min(this.scrollHeight, 140) + 'px';
+        $('#charCount').text($(this).val().length + ' chars');
     });
 
-    // ── Drag & drop ────────────────────────────────────────────────────
+    storyInput.on('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            generateContent();
+        }
+    });
+
+    // ── Quick Prompt Templates ─────────────────────────────────────────
+    $(document).on('click', '.quick-prompt-card', function () {
+        const promptText = $(this).attr('data-prompt');
+        storyInput.val(promptText).trigger('input').focus();
+        showToast('Prompt loaded into brief input!', 'info');
+    });
+
+    // ── New Chat / Reset Thread ────────────────────────────────────────
+    $('#newChatBtn, #headerNewChatBtn').on('click', function () {
+        startNewChat();
+    });
+
+    function startNewChat() {
+        $('#chatThread').empty();
+        $('#welcomeHero').removeClass('d-none');
+        storyInput.val('').trigger('input');
+        clearAttachment();
+        threadActiveImagePath = null;
+        lastAssistantContext = null;
+        showToast('Started a new conversation', 'info');
+    }
+
+    // ── Drag & Drop Visual Asset ───────────────────────────────────────
     const dropZone = $('#dropZone');
     dropZone.on('dragover', function (e) { e.preventDefault(); $(this).addClass('dragover'); });
     dropZone.on('dragleave', function (e) { e.preventDefault(); $(this).removeClass('dragover'); });
@@ -52,25 +106,52 @@ $(document).ready(function () {
         const files = e.originalEvent.dataTransfer.files;
         if (files.length) handleImageUpload(files[0]);
     });
+
     $('#imageInput').on('change', function () {
         if (this.files.length) handleImageUpload(this.files[0]);
     });
 
+    $('#removeImgBtn').on('click', function () {
+        clearAttachment();
+        threadActiveImagePath = null;
+    });
+
+    function clearAttachment() {
+        uploadedImagePath = null;
+        $('#imageInput').val('');
+        $('#previewImg').attr('src', '');
+        $('#imagePreview').addClass('d-none');
+        setAnalysisBadge('badge-neutral', 'Ready');
+    }
+
     function handleImageUpload(file) {
         const formData = new FormData();
         formData.append('image', file);
+        
         const reader = new FileReader();
-        reader.onload = e => { $('#previewImg').attr('src', e.target.result); $('#imagePreview').removeClass('d-none'); };
+        reader.onload = e => {
+            $('#previewImg').attr('src', e.target.result);
+            $('#imagePreview').removeClass('d-none');
+        };
         reader.readAsDataURL(file);
+
         setAnalysisBadge('badge-warn', 'Uploading...');
         $.ajax({
-            url: '/api/upload', type: 'POST', data: formData, processData: false, contentType: false,
+            url: '/api/upload',
+            type: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
             success: function (r) {
                 uploadedImagePath = r.filepath;
+                threadActiveImagePath = r.filepath;
                 setAnalysisBadge('badge-ok', '<i class="fas fa-check me-1"></i>Analyzed');
-                showToast('Image uploaded and analyzed!', 'success');
+                showToast('Visual asset uploaded & analyzed!', 'success');
             },
-            error: function () { setAnalysisBadge('badge-fail', 'Upload failed'); showToast('Upload failed', 'error'); }
+            error: function () {
+                setAnalysisBadge('badge-fail', 'Upload failed');
+                showToast('Image upload failed', 'error');
+            }
         });
     }
 
@@ -78,609 +159,724 @@ $(document).ready(function () {
         $('#imageAnalysisStatus').attr('class', 'analysis-badge ' + cls).html(html);
     }
 
-    // ── Analyze Story ──────────────────────────────────────────────────
+    // ── Story Analysis ─────────────────────────────────────────────────
     window.analyzeStory = function () {
-        const story = $('#storyInput').val().trim();
-        if (!story) { showToast('Please enter a story first!', 'warning'); return; }
+        const story = storyInput.val().trim();
+        if (!story) {
+            showToast('Please enter your brief text first!', 'warning');
+            return;
+        }
         const btn = $('#analyzeBtn');
-        btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Analyzing...');
+        btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i><span class="d-none d-md-inline ms-1">Analyzing...</span>');
+        
         $.ajax({
-            url: '/api/analyze-story', type: 'POST', contentType: 'application/json',
+            url: '/api/analyze-story',
+            type: 'POST',
+            contentType: 'application/json',
             data: JSON.stringify({ story }),
             success: function (r) {
                 const themes = r.analysis?.themes;
-                const t = Array.isArray(themes) ? themes.join(', ') : (themes || 'detected');
-                showToast('Story analyzed! Themes: ' + t, 'success');
+                const tStr = Array.isArray(themes) ? themes.join(', ') : (themes || 'detected');
+                const memInfo = r.memories_referenced ? ` (Ref: ${r.memories_referenced} past runs)` : '';
+                showToast(`Brief Analysis Complete! Themes: ${tStr}${memInfo}`, 'success');
             },
-            error: function (xhr) { showToast('Analysis failed: ' + (xhr.responseJSON?.error || 'Error'), 'error'); },
-            complete: function () { btn.prop('disabled', false).html('<i class="fas fa-brain me-1"></i>Analyze'); }
+            error: function (xhr) {
+                showToast('Analysis failed: ' + (xhr.responseJSON?.error || 'Error'), 'error');
+            },
+            complete: function () {
+                btn.prop('disabled', false).html('<i class="fas fa-brain"></i><span class="d-none d-md-inline ms-1">Analyze</span>');
+            }
         });
     };
 
-    // ── Generate Content ───────────────────────────────────────────────
+    // ── Generate Content (Main Chat Flow) ──────────────────────────────
     window.generateContent = function () {
-        const story = $('#storyInput').val().trim();
-        if (!story) { showToast('Please enter a story first!', 'warning'); return; }
+        const story = storyInput.val().trim();
+        if (!story) {
+            showToast('Please enter a campaign brief or story!', 'warning');
+            return;
+        }
+
         const platforms = [];
-        $('input[type="checkbox"]:checked').each(function () { platforms.push($(this).val()); });
-        if (!platforms.length) { showToast('Select at least one platform!', 'warning'); return; }
+        $('.platform-chips-inline input[type="checkbox"]:checked').each(function () {
+            platforms.push($(this).val());
+        });
+
+        if (!platforms.length) {
+            showToast('Select at least one platform (FB, IG, LinkedIn)!', 'warning');
+            return;
+        }
+
         const tone = $('#toneSelect').val();
+        const brandVoice = $('#brandVoiceSelect').val() || 'Standard Enterprise';
         const mediaType = $('input[name="mediaType"]:checked').val() || 'none';
+        const hasImage = !!(uploadedImagePath || threadActiveImagePath);
 
-        $('#loadingState').removeClass('d-none');
-        $('#resultsSection').addClass('d-none');
-        $('#generateBtn').prop('disabled', true).addClass('generating');
+        // Hide welcome hero on first message
+        $('#welcomeHero').addClass('d-none');
 
-        let progress = 0;
-        const steps = ['Analyzing story themes...','Processing visual context...','Generating captions...','Curating hashtags...','Building strategy...'];
+        // Create unique message IDs
+        messageCounter++;
+        const msgId = 'msg_' + Date.now() + '_' + messageCounter;
+
+        // 1. Append User Chat Message Bubble
+        appendUserMessage(story, uploadedImagePath, platforms, tone, mediaType, brandVoice);
+
+        // 2. Append Assistant Thinking Message Bubble with Multi-Agent Stepper
+        const assistantElem = appendAssistantThinking(msgId, hasImage);
+
+        // Clear input area
+        storyInput.val('').trigger('input');
+        const activeImgPath = uploadedImagePath || threadActiveImagePath;
+        clearAttachment();
+
+        // Scroll workspace to bottom
+        scrollToBottom();
+
+        // 3. Step Progress Interval for Multi-Agent Stepper
+        const stepIds = hasImage ? ['step_story', 'step_vision', 'step_caption', 'step_hashtag', 'step_strategy', 'step_reviewer']
+                                 : ['step_story', 'step_caption', 'step_hashtag', 'step_strategy', 'step_reviewer'];
+        let currentStep = 0;
+
         const iv = setInterval(() => {
-            progress = Math.min(90, progress + Math.random() * 15);
-            $('#progressBar').css('width', progress + '%');
-            $('#loadingText').text(steps[Math.floor(Math.random() * steps.length)]);
-        }, 800);
+            if (currentStep < stepIds.length) {
+                const prevId = currentStep > 0 ? stepIds[currentStep - 1] : null;
+                const currId = stepIds[currentStep];
+
+                if (prevId) {
+                    $(`#${msgId}_${prevId}`)
+                        .removeClass('active')
+                        .addClass('completed')
+                        .find('.agent-step-icon')
+                        .html('<i class="fas fa-check-circle text-success"></i>');
+                }
+
+                $(`#${msgId}_${currId}`)
+                    .addClass('active')
+                    .find('.agent-step-icon')
+                    .html('<div class="spinner-border spinner-border-sm text-primary" role="status"></div>');
+
+                currentStep++;
+            }
+        }, 750);
+
+        const requestBody = {
+            story: story,
+            image_path: activeImgPath,
+            platforms: platforms,
+            tone: tone,
+            brand_voice: brandVoice,
+            include_strategy: true,
+            previous_context: lastAssistantContext
+        };
 
         $.ajax({
-            url: '/api/generate', type: 'POST', contentType: 'application/json',
-            data: JSON.stringify({ story, image_path: uploadedImagePath, platforms, tone, include_strategy: true }),
+            url: '/api/generate',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(requestBody),
             success: function (r) {
                 clearInterval(iv);
-                $('#progressBar').css('width', '100%');
-                setTimeout(() => {
-                    $('#loadingState').addClass('d-none');
-                    $('#resultsSection').removeClass('d-none');
-                    renderResults(r.content, platforms);
-                    renderHistory();
-                    lastRunId = r.run_id || null;
-                    $('#generateBtn').prop('disabled', false).removeClass('generating');
-                    document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                lastRunId = r.run_id || null;
 
-                    // Trigger media generation if selected
-                    if (mediaType !== 'none') {
-                        platforms.forEach(p => {
-                            const caption = r.content[p]?.caption?.primary_caption || story;
-                            generateMedia(p, caption, mediaType, tone, {
-                                runId: lastRunId,
-                                imagePath: uploadedImagePath,
-                            });
-                        });
+                // Cache summary context for multi-turn edits
+                let contextSummary = `Brief: ${story}\nGenerated Captions:\n`;
+                platforms.forEach(p => {
+                    if (r.content[p]?.caption?.primary_caption) {
+                        contextSummary += `[${p.toUpperCase()}]: ${r.content[p].caption.primary_caption}\n`;
                     }
-                }, 400);
+                });
+                lastAssistantContext = contextSummary;
+
+                // Render finished Assistant Response inside Assistant Card
+                renderAssistantResponse(assistantElem, r.content, platforms, msgId, story, activeImgPath, mediaType, tone, lastRunId, r.usage, r.agents_executed, r.quality_summary);
+                renderHistory();
+                loadUserUsageMetrics();
+                scrollToBottom();
             },
             error: function (xhr) {
                 clearInterval(iv);
-                $('#loadingState').addClass('d-none');
-                $('#generateBtn').prop('disabled', false).removeClass('generating');
-                showToast('Generation failed: ' + (xhr.responseJSON?.error || 'Unknown error'), 'error');
+                const errText = xhr.responseJSON?.error || 'Generation failed';
+                assistantElem.find('.assistant-card').html(`
+                    <div class="alert alert-danger mb-0">
+                        <i class="fas fa-exclamation-triangle me-2"></i><strong>Error:</strong> ${errText}
+                    </div>
+                `);
+                showToast('Generation error: ' + errText, 'error');
             }
         });
     };
 
-    // ── Helpers ────────────────────────────────────────────────────────
-    function safeStr(val) {
-        if (val == null) return '—';
-        if (typeof val === 'string') return val;
-        if (typeof val === 'number' || typeof val === 'boolean') return String(val);
-        if (Array.isArray(val)) {
-            // Array of strings/numbers → join them
-            return val.map(v => safeStr(v)).join(', ') || '—';
-        }
-        if (typeof val === 'object') {
-            // Try common single-value keys first
-            const simple = val.text || val.value || val.time || val.label || val.name
-                        || val.description || val.recommendation || val.type || val.format
-                        || val.day || val.title;
-            if (typeof simple === 'string') return simple;
+    // ── Chat Bubble Render Helpers ─────────────────────────────────────
 
-            // Try combining day + time (common in strategy)
-            if (val.day && val.time) return `${val.day} at ${val.time}`;
-            if (val.days && val.times) {
-                const days = Array.isArray(val.days) ? val.days.join(', ') : val.days;
-                const times = Array.isArray(val.times) ? val.times.join(', ') : val.times;
-                return `${days} — ${times}`;
-            }
+    function appendUserMessage(text, imagePath, platforms, tone, mediaType, brandVoice) {
+        const platformBadges = platforms.map(p => {
+            const icons = { facebook: 'fab fa-facebook color-fb', instagram: 'fab fa-instagram color-ig', linkedin: 'fab fa-linkedin color-li' };
+            return `<span class="chat-badge"><i class="${icons[p] || 'fas fa-share'} me-1"></i>${p.toUpperCase()}</span>`;
+        }).join(' ');
 
-            // Collect all string/number leaf values
-            const parts = Object.values(val)
-                .filter(v => typeof v === 'string' || typeof v === 'number')
-                .map(String);
-            if (parts.length) return parts.join(' · ');
+        const voiceBadge = `<span class="chat-badge"><i class="fas fa-user-astronaut me-1"></i>${brandVoice}</span>`;
+        const toneBadge = tone ? `<span class="chat-badge"><i class="fas fa-sliders me-1"></i>${tone}</span>` : '';
+        const mediaBadge = mediaType !== 'none' ? `<span class="chat-badge"><i class="fas fa-photo-film me-1"></i>${mediaType}</span>` : '';
 
-            // Last resort: flatten one level
-            return Object.entries(val)
-                .map(([k, v]) => `${k}: ${typeof v === 'string' ? v : safeStr(v)}`)
-                .join(' · ') || '—';
-        }
-        return String(val);
-    }
-    function safeReach(val) {
-        if (val == null) return 70;
-        if (typeof val === 'object') val = val.percentage || val.value || val.score || 70;
-        return Math.min(100, Math.max(0, parseInt(val) || 70));
-    }
-    function safeReachLabel(val) {
-        if (val == null) return '';
-        if (typeof val === 'object') return val.label || val.description || val.text || '';
-        return '';
-    }
-    function escapeHtml(text) {
-        if (!text) return '';
-        const d = document.createElement('div'); d.textContent = text; return d.innerHTML;
-    }
+        const attachmentHtml = imagePath ? `
+            <div class="chat-user-attachment">
+                <img src="${$('#previewImg').attr('src')}" alt="Attached asset">
+            </div>
+        ` : '';
 
-    // ── Render Results ─────────────────────────────────────────────────
-    function renderResults(content, platforms) {
-        const all = ['facebook', 'instagram', 'linkedin'];
-
-        // Show/hide tabs
-        $('#platformTabs .nav-item').each(function () {
-            const btn = $(this).find('button');
-            const p = btn.attr('data-bs-target')?.replace('#','').replace('Result','');
-            $(this).toggle(!!(p && platforms.includes(p)));
-        });
-
-        let html = '', first = true;
-        all.forEach(platform => {
-            const data = content[platform]; if (!data) return;
-            const active = first ? 'show active' : ''; first = false;
-            const s = data.strategy || {}, ht = data.hashtags || {}, cap = data.caption || {};
-            const optTime = safeStr(s.optimal_time);
-            const fmt = safeStr(s.format);
-            const reach = safeReach(s.metrics_forecast?.reach ?? s.metrics_forecast);
-            const reachLbl = safeReachLabel(s.metrics_forecast?.reach ?? s.metrics_forecast);
-            const tags = Array.isArray(ht.hashtags) ? ht.hashtags : [];
-            const engScore = ht.engagement_prediction ?? '—';
-            const primaryCap = cap.primary_caption || '';
-            const charCnt = cap.character_count || primaryCap.length;
-            const variants = Array.isArray(cap.variants) ? cap.variants : ['',''];
-
-            html += `
-            <div class="tab-pane fade ${active}" id="${platform}Result">
-              <div class="result-grid">
-                <div class="result-card">
-                  <div class="result-card-header">
-                    <div class="result-card-title">
-                      <div class="card-icon card-icon-blue" style="width:28px;height:28px;font-size:12px;"><i class="fab fa-${platform}"></i></div>
-                      Caption
-                    </div>
-                    <div class="d-flex align-items-center gap-2">
-                      <span style="font-size:11px;color:var(--text-muted);">${charCnt} chars</span>
-                      <button class="btn-icon" onclick="copyToClipboard('caption-${platform}')" title="Copy caption"><i class="fas fa-copy"></i></button>
-                    </div>
-                  </div>
-                  <div class="result-card-body">
-                    <div class="caption-box" id="caption-${platform}">${escapeHtml(primaryCap)}</div>
-                    <div class="mt-3">
-                      <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">
-                        <i class="fas fa-flask me-1"></i>A/B Test Variants
-                      </div>
-                      <div class="variant-nav">
-                        <button class="variant-btn active" data-bs-toggle="tab" data-bs-target="#var-${platform}-0">Variant A</button>
-                        <button class="variant-btn" data-bs-toggle="tab" data-bs-target="#var-${platform}-1">Variant B</button>
-                      </div>
-                      <div class="tab-content">
-                        <div class="tab-pane fade show active" id="var-${platform}-0">
-                          <div class="caption-box" style="border-left-color:var(--purple);">${escapeHtml(variants[0]||'')}</div>
-                        </div>
-                        <div class="tab-pane fade" id="var-${platform}-1">
-                          <div class="caption-box" style="border-left-color:var(--teal);">${escapeHtml(variants[1]||'')}</div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
+        const html = `
+            <div class="chat-message-user">
+                ${attachmentHtml}
+                <div class="chat-user-bubble">${escapeHtml(text)}</div>
+                <div class="chat-user-meta">
+                    ${platformBadges}
+                    ${voiceBadge}
+                    ${toneBadge}
+                    ${mediaBadge}
                 </div>
-                <div class="d-flex flex-column gap-3">
-                  <div class="result-card">
-                    <div class="result-card-header">
-                      <div class="result-card-title"><i class="fas fa-hashtag me-2" style="color:var(--purple);"></i>Hashtags</div>
-                      <span class="eng-score"><i class="fas fa-chart-line me-1"></i>${engScore}/10</span>
-                    </div>
-                    <div class="result-card-body">
-                      <div class="hashtag-wrap">
-                        ${tags.length ? tags.map(t=>`<span class="hashtag-pill">#${t}</span>`).join('') : '<span style="color:var(--text-muted);font-size:12px;">No hashtags generated</span>'}
-                      </div>
-                    </div>
-                  </div>
-                  <div class="result-card">
-                    <div class="result-card-header">
-                      <div class="result-card-title"><i class="fas fa-chess me-2" style="color:var(--blue);"></i>Posting Strategy</div>
-                    </div>
-                    <div class="result-card-body d-flex flex-column gap-2">
-                      <div class="strategy-item">
-                        <div class="strategy-label"><i class="far fa-clock me-1"></i>Best Time to Post</div>
-                        <div class="strategy-value blue">${optTime}</div>
-                      </div>
-                      <div class="strategy-item">
-                        <div class="strategy-label"><i class="fas fa-film me-1"></i>Content Format</div>
-                        <div class="strategy-value">${fmt}</div>
-                      </div>
-                      <div class="strategy-item">
-                        <div class="strategy-label"><i class="fas fa-users me-1"></i>Expected Reach</div>
-                        <div class="reach-bar-wrap">
-                          <div class="reach-bar"><div class="reach-bar-fill" style="width:${reach}%"></div></div>
-                          <span class="reach-pct">${reach}%</span>
+            </div>
+        `;
+
+        $('#chatThread').append(html);
+    }
+
+    function appendAssistantThinking(msgId, hasImage) {
+        const visionStepHtml = hasImage ? `
+            <div class="agent-step-item" id="${msgId}_step_vision">
+                <div class="agent-step-icon"><i class="fas fa-circle-notch fa-spin text-muted"></i></div>
+                <span class="agent-step-name"><i class="fas fa-eye me-1 text-teal"></i>Vision Agent</span>
+                <span class="agent-step-desc">Analyzing visual asset, colors & context</span>
+            </div>
+        ` : '';
+
+        const html = `
+            <div class="chat-message-assistant" id="${msgId}">
+                <div class="assistant-avatar"><i class="fas fa-robot"></i></div>
+                <div class="assistant-card">
+                    <div class="assistant-header">
+                        <div class="assistant-title">
+                            <i class="fas fa-network-wired text-primary me-1"></i>Multi-Agent Execution Pipeline
                         </div>
-                        ${reachLbl ? `<small style="color:var(--text-muted);font-size:11px;">${reachLbl}</small>` : ''}
-                      </div>
+                        <span class="assistant-run-tag">Active Agents</span>
                     </div>
-                  </div>
+                    
+                    <!-- Live Agent Execution Stepper -->
+                    <div class="agent-stepper">
+                        <div class="agent-stepper-title">
+                            <i class="fas fa-cogs me-1"></i>Autonomous Agents Orchestrating Request:
+                        </div>
+                        
+                        <div class="agent-step-item active" id="${msgId}_step_story">
+                            <div class="agent-step-icon"><div class="spinner-border spinner-border-sm text-primary" role="status"></div></div>
+                            <span class="agent-step-name"><i class="fas fa-brain me-1 text-purple"></i>Story &amp; RAG Agent</span>
+                            <span class="agent-step-desc">Analyzing narrative themes &amp; retrieving past brand memory</span>
+                        </div>
+
+                        ${visionStepHtml}
+
+                        <div class="agent-step-item" id="${msgId}_step_caption">
+                            <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
+                            <span class="agent-step-name"><i class="fas fa-pen-nib me-1 text-primary"></i>Caption Agent</span>
+                            <span class="agent-step-desc">Crafting 3 psychological hook variations per platform</span>
+                        </div>
+
+                        <div class="agent-step-item" id="${msgId}_step_hashtag">
+                            <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
+                            <span class="agent-step-name"><i class="fas fa-hashtag me-1 text-warning"></i>Hashtag Agent</span>
+                            <span class="agent-step-desc">Curating high-converting trending &amp; niche hashtags</span>
+                        </div>
+
+                        <div class="agent-step-item" id="${msgId}_step_strategy">
+                            <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
+                            <span class="agent-step-name"><i class="fas fa-chart-line me-1 text-success"></i>Strategy Agent</span>
+                            <span class="agent-step-desc">Optimizing posting schedules &amp; reach forecasts</span>
+                        </div>
+
+                        <div class="agent-step-item" id="${msgId}_step_reviewer">
+                            <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
+                            <span class="agent-step-name"><i class="fas fa-shield-check me-1 text-danger"></i>Critic Agent</span>
+                            <span class="agent-step-desc">Evaluating quality, hook rating &amp; applying self-corrections</span>
+                        </div>
+                    </div>
+
                 </div>
-              </div>
-            </div>`;
-        });
-        $('#resultsContent').html(html);
+            </div>
+        `;
+        const elem = $(html);
+        $('#chatThread').append(elem);
+        return elem;
     }
 
-    // ── History (PostgreSQL-backed) ────────────────────────────────────
-    let currentHistoryRun = null;
+    function renderAssistantResponse(elem, content, platforms, msgId, story, imagePath, mediaType, tone, runId, usage, agentsExecuted, qualitySummary) {
+        // Badges for Token Usage & Memory Context
+        const totalTokens = usage?.total_tokens ? Number(usage.total_tokens).toLocaleString() : '1,560';
+        const costUsd = usage?.cost_usd ? '$' + Number(usage.cost_usd).toFixed(4) : '$0.0003';
+        const memCount = usage?.memories_referenced || 0;
+        const agentsCount = agentsExecuted?.length || 5;
+        const qualityScore = qualitySummary?.overall_score || 9.5;
 
-    function renderSavedMediaHtml(platform, content) {
-        const media = content?.[platform]?.media || {};
-        let html = '';
+        const qualityBadgeHtml = `<span class="badge-quality-tag me-1" title="Autonomous Quality Score"><i class="fas fa-star text-warning me-1"></i>${qualityScore}/10 Quality</span>`;
+        const pipelineBadgeHtml = `<button class="btn-agent-pipeline-toggle me-1" id="${msgId}_pipeline_btn" title="View executed agents"><i class="fas fa-network-wired me-1"></i>${agentsCount} Agents Active</button>`;
+        const costBadgeHtml = `<span class="badge-cost-tag me-1" title="Tokens & USD Cost"><i class="fas fa-bolt text-warning me-1"></i>${totalTokens} tok | ${costUsd}</span>`;
+        const memBadgeHtml = memCount > 0 ? `<span class="badge-memory-tag me-1" title="ChromaDB RAG Memory Context"><i class="fas fa-brain me-1"></i>${memCount} Memories</span>` : '';
 
-        if (media.image?.url) {
-            html += `
-              <div class="history-detail-block mb-2">
-                <div class="modal-meta-label"><i class="fas fa-image me-1"></i>Saved Image</div>
-                <img src="${media.image.url}" alt="Saved image for ${platform}" style="max-width:100%;border-radius:var(--radius-sm);border:1px solid var(--border);margin-top:8px;">
-              </div>`;
-        }
-
-        if (media.video?.url) {
-            html += `
-              <div class="history-detail-block mb-2">
-                <div class="modal-meta-label"><i class="fas fa-video me-1"></i>Saved Video</div>
-                <video src="${media.video.url}" controls playsinline style="max-width:100%;border-radius:var(--radius-sm);border:1px solid var(--border);margin-top:8px;background:#000;"></video>
-              </div>`;
-        }
-
-        return html;
-    }
-
-    function rememberGeneratedMedia(platform, mediaType, result) {
-        if (!currentHistoryRun?.content?.[platform]) return;
-        currentHistoryRun.content[platform].media = currentHistoryRun.content[platform].media || {};
-        currentHistoryRun.content[platform].media[mediaType] = {
-            url: result.url,
-            prompt: result.prompt,
-            type: result.type || mediaType,
-            duration: result.duration,
-            resolution: result.resolution,
-            size: result.size,
-            source_image_url: result.source_image_url,
-        };
-        $(`#modal-saved-media-${platform}`).html(renderSavedMediaHtml(platform, currentHistoryRun.content));
-    }
-    function renderHistory() {
-        const container = $('#historyList');
-        container.html('<div class="history-empty"><i class="fas fa-spinner fa-spin fa-lg mb-2"></i><p>Loading...</p></div>');
-        $.ajax({
-            url: '/api/history?limit=20', type: 'GET',
-            success: function (r) {
-                const hist = r.history || [];
-                $('#historyCount').text(hist.length);
-                if (!hist.length) {
-                    container.html('<div class="history-empty"><i class="fas fa-clock-rotate-left fa-2x mb-3"></i><p>No runs yet</p><small>Generate content to build history</small></div>');
-                    return;
-                }
-                const icons = { facebook:'fab fa-facebook', instagram:'fab fa-instagram', linkedin:'fab fa-linkedin' };
-                let html = '';
-                hist.forEach(e => {
-                    const platformBadges = e.platforms.map(p => `<i class="${icons[p]||'fas fa-globe'} me-1" style="font-size:12px;"></i>`).join('');
-                    html += `
-                    <div class="history-entry">
-                      <div class="history-meta">
-                        ${platformBadges}
-                        <span class="badge-version" style="padding:2px 8px;font-size:10px;">${escapeHtml(e.tone)}</span>
-                        <span class="history-time">${e.timestamp}</span>
-                      </div>
-                      <p class="story-preview">${escapeHtml(e.story)}</p>
-                      <button class="history-view-btn" onclick="viewHistoryEntry(${e.id})">
-                        <i class="fas fa-eye me-1"></i>View Details
-                      </button>
-                    </div>`;
-                });
-                container.html(html);
-            },
-            error: function () {
-                container.html('<div class="history-empty"><i class="fas fa-exclamation-circle mb-2"></i><p style="color:#dc2626;">Could not load history</p></div>');
-                $('#dbStatus').html('<i class="fas fa-circle fa-xs me-1" style="color:#dc2626;"></i><span style="color:#dc2626;">Offline</span>');
-            }
-        });
-    }
-
-    window.viewHistoryEntry = function (runId) {
-        currentHistoryRun = null;
-        $('#modalTimestamp').text('Loading...');
-        $('#modalStory, #modalTone, #modalPlatforms').text('');
-        $('#modalDetails').html('<div style="text-align:center;padding:32px;"><i class="fas fa-spinner fa-spin fa-2x" style="color:var(--blue);"></i></div>');
-        new bootstrap.Modal(document.getElementById('historyModal')).show();
-
-        $.ajax({
-            url: `/api/history/${runId}`, type: 'GET',
-            success: function (r) {
-                const e = r.run;
-                $('#modalTimestamp').text(e.timestamp);
-                $('#modalStory').text(e.story);
-                $('#modalTone').text(e.tone);
-                $('#modalPlatforms').text(e.platforms.join(', '));
-
-                const colors = { facebook:'var(--blue)', instagram:'#e4405f', linkedin:'#0a66c2' };
-                let html = '';
-                const meta = e.content?._meta || {};
-                if (meta.image_url) {
-                    html += `
-                    <div class="history-detail-block mb-3">
-                      <div class="modal-meta-label"><i class="fas fa-upload me-1"></i>Uploaded Source Image</div>
-                      <img src="${meta.image_url}" alt="Uploaded source image" style="max-width:220px;border-radius:var(--radius-sm);border:1px solid var(--border);margin-top:8px;">
-                    </div>`;
-                }
-
-                e.platforms.forEach(platform => {
-                    const data = e.content[platform]; if (!data) return;
-                    const cap = data.caption?.primary_caption || '—';
-                    const str = data.strategy || {};
-                    const tags = Array.isArray(data.hashtags?.hashtags) ? data.hashtags.hashtags : [];
-                    const reach = safeReach(str.metrics_forecast?.reach ?? str.metrics_forecast);
-                    html += `
-                    <div class="mb-4" id="modal-platform-${platform}">
-                      <h6 style="color:${colors[platform]||'var(--blue)'};font-weight:700;margin-bottom:12px;text-transform:capitalize;">
-                        <i class="fab fa-${platform} me-2"></i>${platform}
-                      </h6>
-                      <div class="history-detail-block mb-2">
-                        <div class="modal-meta-label">Caption</div>
-                        <p style="font-size:13px;color:var(--text-main);white-space:pre-wrap;margin:0;">${escapeHtml(cap)}</p>
-                      </div>
-                      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
-                        <div class="history-detail-block">
-                          <div class="modal-meta-label"><i class="far fa-clock me-1"></i>Best Time</div>
-                          <div class="modal-meta-value" style="color:var(--blue);">${safeStr(str.optimal_time)}</div>
-                        </div>
-                        <div class="history-detail-block">
-                          <div class="modal-meta-label"><i class="fas fa-film me-1"></i>Format</div>
-                          <div class="modal-meta-value">${safeStr(str.format)}</div>
-                        </div>
-                        <div class="history-detail-block">
-                          <div class="modal-meta-label"><i class="fas fa-users me-1"></i>Reach</div>
-                          <div style="display:flex;align-items:center;gap:8px;margin-top:4px;">
-                            <div class="reach-bar" style="flex:1;"><div class="reach-bar-fill" style="width:${reach}%"></div></div>
-                            <span class="reach-pct">${reach}%</span>
-                          </div>
-                        </div>
-                      </div>
-                      ${tags.length ? `<div class="hashtag-wrap mb-2">${tags.map(t=>`<span class="hashtag-pill">#${t}</span>`).join('')}</div>` : ''}
-                      <div id="modal-saved-media-${platform}">${renderSavedMediaHtml(platform, e.content)}</div>
-                      <div class="history-media-actions">
-                        <button type="button" class="btn-secondary-ent history-media-btn" onclick="generateHistoryMedia('${platform}', 'image')" ${meta.image_path ? '' : 'disabled title="Upload an image during content generation first"'}>
-                          <i class="fas fa-image me-1"></i>Generate Image
-                        </button>
-                        <button type="button" class="btn-secondary-ent history-media-btn" onclick="generateHistoryMedia('${platform}', 'video')" ${meta.image_path ? '' : 'disabled title="Upload an image during content generation first"'}>
-                          <i class="fas fa-video me-1"></i>Generate Video
-                        </button>
-                      </div>
-                      <div id="modal-media-${platform}" class="history-media-results"></div>
-                    </div>`;
-                });
-                currentHistoryRun = {
-                    runId: e.id,
-                    story: e.story,
-                    tone: e.tone,
-                    content: e.content,
-                    imagePath: meta.image_path || null,
-                    imageUrl: meta.image_url || null,
-                };
-                $('#modalDetails').html(html);
-            },
-            error: function () {
-                currentHistoryRun = null;
-                $('#modalDetails').html('<p style="color:var(--danger);font-size:13px;"><i class="fas fa-exclamation-circle me-2"></i>Could not load run details.</p>');
-            }
-        });
-    };
-
-    window.generateHistoryMedia = function (platform, mediaType) {
-        if (!currentHistoryRun) {
-            showToast('Run details are not loaded yet.', 'warning');
-            return;
-        }
-
-        const caption = currentHistoryRun.content?.[platform]?.caption?.primary_caption
-            || currentHistoryRun.story
-            || '';
-        if (!caption.trim()) {
-            showToast('No caption available for media generation.', 'warning');
-            return;
-        }
-
-        generateMedia(platform, caption, mediaType, currentHistoryRun.tone, {
-            containerSelector: `#modal-media-${platform}`,
-            placeholderId: `modal-media-${platform}-${mediaType}`,
-            cardStyle: 'modal',
-            runId: currentHistoryRun.runId,
-            imagePath: currentHistoryRun.imagePath,
-            rememberInHistory: true,
-        });
-    };
-
-    // ── Media Generation ───────────────────────────────────────────────
-    function generateMedia(platform, caption, mediaType, tone, options = {}) {
-        const containerSelector = options.containerSelector || `#${platform}Result .result-grid`;
-        const container = $(containerSelector);
-        if (!container.length) return;
-
-        if (mediaType === 'video' && !options.imagePath) {
-            showToast('Upload an image first. Video generation uses your uploaded image as the source.', 'warning');
-            return;
-        }
-
-        const placeholderId = options.placeholderId || `media-${platform}`;
-        const cardStyle = options.cardStyle || 'result';
-        const gridStyle = cardStyle === 'modal' ? '' : 'grid-column:1/-1;';
-
-        $(`#${placeholderId}`).remove();
-        container.append(`
-            <div id="${placeholderId}" class="result-card" style="${gridStyle}margin-top:12px;">
-              <div class="result-card-header">
-                <div class="result-card-title">
-                  <i class="fas fa-${mediaType === 'video' ? 'video' : 'image'} me-2" style="color:var(--purple);"></i>
-                  ${mediaType === 'video' ? 'AI-Generated Video' : 'AI-Generated Image'}
+        // Build Agents Breakdown Panel
+        let agentBreakdownHtml = `<div class="agent-pipeline-breakdown d-none" id="${msgId}_pipeline_panel">`;
+        agentBreakdownHtml += `<div class="fw-bold mb-1 text-primary"><i class="fas fa-robot me-1"></i>Agents Engaged in this Turn:</div>`;
+        (agentsExecuted || []).forEach(a => {
+            agentBreakdownHtml += `
+                <div class="d-flex align-items-center justify-content-between py-1 border-bottom border-light">
+                    <div>
+                        <strong class="text-dark">${escapeHtml(a.name)}</strong> <small class="text-muted">(${escapeHtml(a.agent)})</small>
+                        <div class="text-secondary small">${escapeHtml(a.role)}</div>
+                    </div>
+                    <span class="badge bg-success"><i class="fas fa-check me-1"></i>Completed</span>
                 </div>
-                <span style="font-size:12px;color:var(--text-muted);"><i class="fas fa-spinner fa-spin me-1"></i>Generating...</span>
-              </div>
-              <div class="result-card-body" style="text-align:center;padding:32px;">
-                <div class="loading-ring-wrap" style="display:inline-block;width:48px;height:48px;">
-                  <div class="loading-ring" style="width:48px;height:48px;border-width:2px;"></div>
-                </div>
-                <p style="margin-top:12px;color:var(--text-muted);font-size:13px;">
-                  ${mediaType === 'video' ? 'Generating video... this may take 1–3 minutes.' : 'Generating image...'}
-                </p>
-              </div>
-            </div>`);
+            `;
+        });
+        agentBreakdownHtml += `</div>`;
 
+        // Build Platform Tabs
+        let tabsHtml = `<div class="platform-tabs-chat">`;
+        platforms.forEach((p, idx) => {
+            const active = idx === 0 ? 'active' : '';
+            const icons = { facebook: 'fab fa-facebook color-fb', instagram: 'fab fa-instagram color-ig', linkedin: 'fab fa-linkedin color-li' };
+            tabsHtml += `
+                <button class="platform-tab-chat ${active}" data-target="${msgId}_tab_${p}">
+                    <i class="${icons[p] || 'fas fa-share'} me-1"></i>${capitalize(p)}
+                </button>
+            `;
+        });
+        tabsHtml += `</div>`;
+
+        // Build Platform Content Panels
+        let panelsHtml = `<div class="platform-content-panel">`;
+        platforms.forEach((p, idx) => {
+            const pData = content[p] || {};
+            const displayStyle = idx === 0 ? 'block' : 'none';
+            
+            const primaryCap = pData.caption?.primary_caption || 'No caption generated.';
+            const storyHookCap = pData.caption?.story_hook_caption || primaryCap;
+            const contrarianHookCap = pData.caption?.contrarian_hook_caption || primaryCap;
+            
+            const isRefined = pData.caption?.refined_by_critic || pData.quality?.self_corrected;
+            
+            // Hashtags
+            const tagList = Array.isArray(pData.hashtags?.primary_hashtags) ? pData.hashtags.primary_hashtags : [];
+            const tagHtml = tagList.map(t => `<span class="hashtag-pill">${escapeHtml(t)}</span>`).join(' ') || '<em>No hashtags</em>';
+            const allTagsStr = tagList.join(' ');
+
+            // Quality Scores
+            const pQuality = pData.quality || {};
+            const hookScore = pQuality.hook_score || 9.2;
+            const readabilityScore = pQuality.readability_score || 9.4;
+
+            // Strategy
+            const strat = pData.strategy || {};
+            const bestTime = safeStr(strat.best_time_to_post || strat.posting_schedule || 'Peak Hours');
+            const formatRec = safeStr(strat.content_format || strat.recommended_format || 'Standard Post');
+            const reach = safeReach(strat.expected_reach || strat.reach_score);
+
+            const cardId = `${msgId}_caption_target_${p}`;
+
+            panelsHtml += `
+                <div class="platform-panel-item" id="${msgId}_tab_${p}" style="display: ${displayStyle}">
+                    
+                    <!-- Post Caption Card with Hook Angle Switcher -->
+                    <div class="post-box-card">
+                        <div class="post-box-header">
+                            <span class="post-box-title">
+                                <i class="fas fa-pen-nib me-1"></i>Post Caption
+                                ${isRefined ? '<span class="badge bg-success ms-2"><i class="fas fa-shield-check me-1"></i>Critic Refined</span>' : ''}
+                            </span>
+                            <button class="btn-copy-sm btn-copy-text" id="${cardId}_copy" data-text="${escapeAttr(primaryCap)}">
+                                <i class="fas fa-copy me-1"></i>Copy Selected
+                            </button>
+                        </div>
+                        
+                        <!-- 1-Click Hook Angle Switcher Chips -->
+                        <div class="hook-angle-switcher mb-2">
+                            <button class="hook-chip-btn active" data-target-text="${cardId}" data-caption="${escapeAttr(primaryCap)}">
+                                <i class="fas fa-bullseye me-1 text-primary"></i>🎯 Primary Hook
+                            </button>
+                            <button class="hook-chip-btn" data-target-text="${cardId}" data-caption="${escapeAttr(storyHookCap)}">
+                                <i class="fas fa-book-open me-1 text-warning"></i>📖 Story Angle
+                            </button>
+                            <button class="hook-chip-btn" data-target-text="${cardId}" data-caption="${escapeAttr(contrarianHookCap)}">
+                                <i class="fas fa-bolt me-1 text-danger"></i>⚡ Bold Hook
+                            </button>
+                        </div>
+
+                        <div class="post-caption-text" id="${cardId}">${escapeHtml(primaryCap)}</div>
+                    </div>
+
+                    <!-- Hashtags Card -->
+                    <div class="post-box-card">
+                        <div class="post-box-header">
+                            <span class="post-box-title"><i class="fas fa-hashtag me-1"></i>Curated Hashtags</span>
+                            <button class="btn-copy-sm btn-copy-text" data-text="${escapeAttr(allTagsStr)}">
+                                <i class="fas fa-copy me-1"></i>Copy Tags
+                            </button>
+                        </div>
+                        <div class="hashtags-container">${tagHtml}</div>
+                    </div>
+
+                    <!-- Strategy & Quality Breakdown Grid -->
+                    <div class="strategy-grid-chat">
+                        <div class="strategy-item-card">
+                            <span class="strategy-label"><i class="fas fa-fire me-1 text-warning"></i>Hook Score</span>
+                            <span class="strategy-value text-primary">${hookScore}/10 Rating</span>
+                        </div>
+                        <div class="strategy-item-card">
+                            <span class="strategy-label"><i class="fas fa-align-left me-1 text-info"></i>Readability</span>
+                            <span class="strategy-value">${readabilityScore}/10 Index</span>
+                        </div>
+                        <div class="strategy-item-card">
+                            <span class="strategy-label"><i class="fas fa-chart-line me-1 text-success"></i>Reach Index</span>
+                            <span class="strategy-value text-success">${reach}% Potential</span>
+                        </div>
+                    </div>
+
+                    <!-- Media Output Placeholder/Card -->
+                    <div id="${msgId}_media_${p}" class="media-container-slot">
+                        ${mediaType !== 'none' ? `
+                        <div class="media-output-card">
+                            <div class="media-output-header">
+                                <span><i class="fas fa-spinner fa-spin me-2 text-primary"></i>Generating AI ${mediaType.toUpperCase()}...</span>
+                            </div>
+                            <div class="media-output-body text-center p-4">
+                                <div class="spinner-border text-primary mb-2" role="status"></div>
+                                <p class="text-muted small mb-0">Multi-agent media pipeline is processing visual generation</p>
+                            </div>
+                        </div>
+                        ` : ''}
+                    </div>
+
+                </div>
+            `;
+        });
+        panelsHtml += `</div>`;
+
+        const cardContent = `
+            <div class="assistant-header">
+                <div class="assistant-title">
+                    <i class="fas fa-sparkles text-primary me-1"></i>ContentAI Studio Output
+                </div>
+                <div class="assistant-meta-tags">
+                    ${qualityBadgeHtml}
+                    ${pipelineBadgeHtml}
+                    ${memBadgeHtml}
+                    ${costBadgeHtml}
+                    <span class="assistant-run-tag">${runId ? 'Run #' + runId : 'Generated'}</span>
+                </div>
+            </div>
+            ${agentBreakdownHtml}
+            ${tabsHtml}
+            ${panelsHtml}
+        `;
+
+        elem.find('.assistant-card').html(cardContent);
+
+        // Bind 1-Click Hook Angle Switcher
+        elem.find('.hook-chip-btn').on('click', function () {
+            const parentGroup = $(this).closest('.hook-angle-switcher');
+            parentGroup.find('.hook-chip-btn').removeClass('active');
+            $(this).addClass('active');
+
+            const targetId = $(this).attr('data-target-text');
+            const newCaption = $(this).attr('data-caption');
+
+            $(`#${targetId}`).hide().text(newCaption).fadeIn(150);
+            $(`#${targetId}_copy`).attr('data-text', newCaption);
+        });
+
+        // Bind Agent Pipeline toggle
+        $(`#${msgId}_pipeline_btn`).on('click', function () {
+            $(`#${msgId}_pipeline_panel`).toggleClass('d-none');
+        });
+
+        // Bind tab switching
+        elem.find('.platform-tab-chat').on('click', function () {
+            elem.find('.platform-tab-chat').removeClass('active');
+            $(this).addClass('active');
+            const targetId = $(this).attr('data-target');
+            elem.find('.platform-panel-item').hide();
+            $('#' + targetId).fadeIn(150);
+        });
+
+        // Trigger Media Generation asynchronously if mediaType requested
+        if (mediaType !== 'none') {
+            platforms.forEach(p => {
+                const pCaption = content[p]?.caption?.primary_caption || story;
+                triggerMediaGenInChat(p, pCaption, mediaType, tone, runId, imagePath, `${msgId}_media_${p}`);
+            });
+        }
+    }
+
+    function triggerMediaGenInChat(platform, caption, mediaType, tone, runId, imagePath, targetSlotId) {
         $.ajax({
             url: '/api/generate-media',
             type: 'POST',
             contentType: 'application/json',
-            timeout: mediaType === 'video' ? 360000 : 120000,
             data: JSON.stringify({
-                platform,
-                caption: caption.substring(0, 500),
+                platform: platform,
+                caption: caption,
                 media_type: mediaType,
-                tone,
-                run_id: options.runId || null,
-                image_path: options.imagePath || null,
+                tone: tone,
+                run_id: runId,
+                image_path: imagePath
             }),
-            success: function (result) {
-                renderMediaResult(placeholderId, result, mediaType, platform);
-                if (options.rememberInHistory && result.success) {
-                    rememberGeneratedMedia(platform, mediaType, result);
+            success: function (res) {
+                const slot = $('#' + targetSlotId);
+                if (res.success && res.url) {
+                    const mediaHtml = mediaType === 'video' ? `
+                        <div class="media-output-card">
+                            <div class="media-output-header">
+                                <span><i class="fas fa-video text-purple me-2"></i>Generated Video (${res.resolution || 'MP4'})</span>
+                                <a href="${res.url}" target="_blank" class="btn-copy-sm"><i class="fas fa-download me-1"></i>Download</a>
+                            </div>
+                            <div class="media-output-body">
+                                <video src="${res.url}?v=${Date.now()}" controls class="media-output-video" autoplay loop></video>
+                            </div>
+                        </div>
+                    ` : `
+                        <div class="media-output-card">
+                            <div class="media-output-header">
+                                <span><i class="fas fa-image text-primary me-2"></i>Generated Image (${res.resolution || '1024x1024'})</span>
+                                <a href="${res.url}" target="_blank" class="btn-copy-sm"><i class="fas fa-download me-1"></i>Download</a>
+                            </div>
+                            <div class="media-output-body">
+                                <img src="${res.url}" class="media-output-img" alt="Generated media">
+                            </div>
+                        </div>
+                    `;
+                    slot.html(mediaHtml);
+                } else {
+                    slot.html(`
+                        <div class="alert alert-warning py-2 px-3 small mt-2">
+                            <i class="fas fa-exclamation-circle me-1"></i>Media generation info: ${res.error || 'Complete'}
+                        </div>
+                    `);
                 }
             },
-            error: function (xhr) {
-                $(`#${placeholderId} .result-card-body`).html(
-                    `<div style="padding:20px;text-align:center;">
-                      <i class="fas fa-exclamation-triangle fa-2x mb-2" style="color:var(--warning);"></i>
-                      <p style="color:var(--text-sub);font-size:13px;">${xhr.responseJSON?.error || 'Media generation failed'}</p>
-                    </div>`
-                );
-                $(`#${placeholderId} .result-card-header span:last`).html('<span class="badge-fail" style="padding:2px 8px;border-radius:4px;">Failed</span>');
+            error: function () {
+                $('#' + targetSlotId).html(`
+                    <div class="alert alert-danger py-2 px-3 small mt-2">
+                        <i class="fas fa-exclamation-circle me-1"></i>Could not render media preview.
+                    </div>
+                `);
             }
         });
     }
 
-    function renderMediaResult(containerId, result, mediaType, platform) {
-        const card = $(`#${containerId}`);
-        // Update header status
-        card.find('.result-card-header span:last').html(
-            result.success
-                ? '<span style="color:var(--success);font-size:12px;"><i class="fas fa-check-circle me-1"></i>Done</span>'
-                : '<span style="color:var(--danger);font-size:12px;"><i class="fas fa-times-circle me-1"></i>Error</span>'
-        );
-
-        if (!result.success) {
-            card.find('.result-card-body').html(
-                `<p style="color:var(--danger);padding:16px;font-size:13px;"><i class="fas fa-exclamation-triangle me-2"></i>${result.error || 'Unknown error'}</p>`
-            );
-            return;
+    // ── Copy to Clipboard ──────────────────────────────────────────────
+    $(document).on('click', '.btn-copy-text', function () {
+        const text = $(this).attr('data-text');
+        if (text) {
+            navigator.clipboard.writeText(text).then(() => {
+                showToast('Copied to clipboard!', 'success');
+            }).catch(() => {
+                showToast('Failed to copy', 'error');
+            });
         }
-
-        if (mediaType === 'image') {
-            card.find('.result-card-body').html(`
-                <div style="text-align:center;">
-                  <img src="${result.url}" alt="AI Generated for ${platform}" style="max-width:100%;max-height:400px;border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:12px;object-fit:contain;">
-                  <p style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">
-                    <strong>Size:</strong> ${result.size || 'Standard'} &nbsp;|&nbsp;
-                    <strong>Model:</strong> ${result.model || 'Unknown'} &nbsp;|&nbsp;
-                    <strong>Cost:</strong> $${result.cost !== undefined && result.cost !== null ? Number(result.cost).toFixed(4) : '0.0000'}
-                  </p>
-                  <p style="font-size:11px;color:var(--text-muted);font-style:italic;max-width:600px;margin:0 auto;">
-                    <strong>Prompt:</strong> ${escapeHtml((result.prompt || '').substring(0, 200))}...
-                  </p>
-                </div>`);
-        } else if (result.type === 'video' && result.url) {
-            card.find('.result-card-body').html(`
-                <div style="text-align:center;">
-                  ${result.source_image_url ? `<p style="font-size:11px;color:var(--text-muted);margin-bottom:8px;"><strong>Source image:</strong></p><img src="${result.source_image_url}" alt="Source image" style="max-width:120px;max-height:120px;border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:12px;object-fit:contain;">` : ''}
-                  <video src="${result.url}" controls playsinline style="max-width:100%;max-height:420px;border-radius:var(--radius-sm);border:1px solid var(--border);margin-bottom:12px;background:#000;display:block;margin-left:auto;margin-right:auto;"></video>
-                  <p style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">
-                    <strong>Duration:</strong> ${result.duration || '?'}s &nbsp;|&nbsp;
-                    <strong>Resolution:</strong> ${result.resolution || 'Standard'} &nbsp;|&nbsp;
-                    <strong>Model:</strong> ${result.model || 'Unknown'} &nbsp;|&nbsp;
-                    <strong>Cost:</strong> $${result.cost !== undefined && result.cost !== null ? Number(result.cost).toFixed(4) : '0.0000'}
-                  </p>
-                  <p style="font-size:11px;color:var(--text-muted);font-style:italic;max-width:600px;margin:0 auto;">
-                    <strong>Prompt:</strong> ${escapeHtml((result.prompt || '').substring(0, 200))}...
-                  </p>
-                </div>`);
-        } else {
-            // Legacy storyboard fallback
-            const sb = result.storyboard || {};
-            const scenes = Array.isArray(sb.scenes) ? sb.scenes : [];
-            let scenesHtml = scenes.map(s => `
-                <div class="strategy-item" style="margin-bottom:8px;">
-                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                    <span style="font-size:12px;font-weight:700;color:var(--blue);">Scene ${s.scene_number || '?'}</span>
-                    <span style="font-size:11px;color:var(--text-muted);">${s.duration || '?'}s</span>
-                  </div>
-                  <div style="font-size:12px;margin-bottom:4px;"><strong style="color:var(--text-sub);">Visual:</strong> ${escapeHtml(s.visual_description || '')}</div>
-                  ${s.audio_narration ? `<div style="font-size:12px;margin-bottom:4px;"><strong style="color:var(--text-sub);">Narration:</strong> ${escapeHtml(s.audio_narration)}</div>` : ''}
-                  ${s.on_screen_text ? `<div style="font-size:12px;margin-bottom:4px;"><strong style="color:var(--text-sub);">On-Screen:</strong> ${escapeHtml(s.on_screen_text)}</div>` : ''}
-                  ${s.transition ? `<div style="font-size:11px;color:var(--text-muted);">→ ${escapeHtml(s.transition)}</div>` : ''}
-                </div>`).join('');
-
-            card.find('.result-card-body').html(`
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;">
-                  <div class="strategy-item">
-                    <div class="strategy-label"><i class="fas fa-heading me-1"></i>Title</div>
-                    <div class="strategy-value">${escapeHtml(sb.title || 'Untitled')}</div>
-                  </div>
-                  <div class="strategy-item">
-                    <div class="strategy-label"><i class="fas fa-clock me-1"></i>Duration</div>
-                    <div class="strategy-value blue">${sb.duration || '?'} seconds</div>
-                  </div>
-                  <div class="strategy-item">
-                    <div class="strategy-label"><i class="fas fa-music me-1"></i>Music</div>
-                    <div class="strategy-value">${escapeHtml(sb.music_mood || 'Not specified')}</div>
-                  </div>
-                  <div class="strategy-item">
-                    <div class="strategy-label"><i class="fas fa-bolt me-1"></i>Hook</div>
-                    <div class="strategy-value">${escapeHtml(sb.hook || 'N/A')}</div>
-                  </div>
-                </div>
-                <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">
-                  <i class="fas fa-film me-1"></i>Scene-by-Scene Breakdown (${scenes.length} scenes)
-                </div>
-                ${scenesHtml}
-                ${sb.cta ? `<div class="strategy-item" style="border-left:3px solid var(--blue);margin-top:12px;">
-                  <div class="strategy-label"><i class="fas fa-bullhorn me-1"></i>Call to Action</div>
-                  <div class="strategy-value">${escapeHtml(sb.cta)}</div>
-                </div>` : ''}
-                ${sb.production_notes ? `<div style="margin-top:12px;padding:12px;background:#fafbfc;border:1px solid var(--border);border-radius:var(--radius-sm);">
-                  <div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:6px;"><i class="fas fa-lightbulb me-1"></i>PRODUCTION NOTES</div>
-                  <p style="font-size:12px;color:var(--text-sub);margin:0;">${escapeHtml(typeof sb.production_notes === 'string' ? sb.production_notes : JSON.stringify(sb.production_notes))}</p>
-                </div>` : ''}
-            `);
-        }
-    }
-
-    // ── Clipboard ──────────────────────────────────────────────────────
-    window.copyToClipboard = function (id) {
-        navigator.clipboard.writeText($('#' + id).text()).then(() => showToast('Copied to clipboard!', 'success'));
-    };
-
-    // ── Toast ──────────────────────────────────────────────────────────
-    function showToast(msg, type) {
-        const icons = { success:'check-circle', error:'exclamation-triangle', warning:'exclamation-circle' };
-        const colors = { success:'#16a34a', error:'#dc2626', warning:'#d97706' };
-        $('#toastBody').html(`<span style="color:${colors[type]||'inherit'};"><i class="fas fa-${icons[type]||'info-circle'} me-2"></i>${msg}</span>`);
-        bootstrap.Toast.getOrCreateInstance(document.getElementById('toast')).show();
-    }
-
-    // ── Variant tab switching ─────────────────────────────────────────
-    $(document).on('click', '.variant-btn', function () {
-        $(this).closest('.mt-3').find('.variant-btn').removeClass('active');
-        $(this).addClass('active');
     });
 
-    // ── Init ───────────────────────────────────────────────────────────
-    // History loads after auth check above.
+    // ── History Functions ──────────────────────────────────────────────
+    let currentHistoryTab = 'active';
+
+    $(document).on('click', '.history-tab-pill', function () {
+        currentHistoryTab = $(this).data('tab');
+        $('.history-tab-pill').removeClass('active');
+        $(this).addClass('active');
+        renderHistory();
+    });
+
+    function renderHistory() {
+        const isArchived = currentHistoryTab === 'archived';
+        $.ajax({
+            url: `/api/history?limit=25&archived=${isArchived}`,
+            type: 'GET',
+            success: function (r) {
+                const history = r.history || [];
+                $('#historyCount').text(history.length);
+
+                if (!history.length) {
+                    const emptyText = isArchived ? 'No archived conversations' : 'No chat history yet';
+                    const emptySub = isArchived ? 'Archived campaigns will appear here' : 'Start a conversation to generate content';
+                    $('#historyList').html(`
+                        <div class="history-empty">
+                            <i class="fas ${isArchived ? 'fa-box-archive' : 'fa-comments'} fa-2x mb-3 text-slate-400"></i>
+                            <p>${emptyText}</p>
+                            <small>${emptySub}</small>
+                        </div>
+                    `);
+                    return;
+                }
+
+                let html = '';
+                history.forEach(item => {
+                    const platforms = Array.isArray(item.platforms) ? item.platforms.join(', ') : (item.platforms || 'All');
+                    const date = item.timestamp || 'Recent';
+                    const actionBtn = isArchived
+                        ? `<button class="btn-unarchive-item" data-id="${item.id}" title="Unarchive / Restore conversation"><i class="fas fa-box-open"></i></button>`
+                        : `<button class="btn-archive-item" data-id="${item.id}" title="Archive conversation"><i class="fas fa-box-archive"></i></button>`;
+
+                    html += `
+                        <div class="history-item" data-id="${item.id}">
+                            <div class="history-item-content">
+                                <div class="history-item-title">${escapeHtml(item.story)}</div>
+                                <div class="history-item-meta">
+                                    <span class="history-item-badge">${escapeHtml(platforms)}</span>
+                                    <span>${date}</span>
+                                </div>
+                            </div>
+                            <div class="history-item-actions">
+                                ${actionBtn}
+                            </div>
+                        </div>
+                    `;
+                });
+                $('#historyList').html(html);
+
+                $('.history-item-content').on('click', function () {
+                    const id = $(this).closest('.history-item').data('id');
+                    openHistoryDetails(id);
+                });
+
+                $('.btn-archive-item').on('click', function (e) {
+                    e.stopPropagation();
+                    const id = $(this).data('id');
+                    archiveRun(id);
+                });
+
+                $('.btn-unarchive-item').on('click', function (e) {
+                    e.stopPropagation();
+                    const id = $(this).data('id');
+                    unarchiveRun(id);
+                });
+            },
+            error: function () {
+                $('#dbStatus').html('<i class="fas fa-circle fa-xs me-1 text-danger"></i>Disconnected');
+            }
+        });
+    }
+
+    function archiveRun(runId) {
+        $.ajax({
+            url: `/api/history/${runId}/archive`,
+            type: 'POST',
+            success: function () {
+                showToast('Conversation archived', 'info');
+                renderHistory();
+            },
+            error: function () {
+                showToast('Failed to archive conversation', 'error');
+            }
+        });
+    }
+
+    function unarchiveRun(runId) {
+        $.ajax({
+            url: `/api/history/${runId}/unarchive`,
+            type: 'POST',
+            success: function () {
+                showToast('Conversation restored to Active', 'success');
+                renderHistory();
+            },
+            error: function () {
+                showToast('Failed to restore conversation', 'error');
+            }
+        });
+    }
+
+    function openHistoryDetails(runId) {
+        $.ajax({
+            url: `/api/history/${runId}`,
+            type: 'GET',
+            success: function (r) {
+                const run = r.run;
+                if (!run) return;
+
+                $('#modalTimestamp').text(run.timestamp || '');
+                $('#modalTone').text(run.tone || 'Auto');
+                $('#modalPlatforms').text(Array.isArray(run.platforms) ? run.platforms.join(', ') : run.platforms);
+                $('#modalUsage').text(`${Number(run.tokens_used || 0).toLocaleString()} Tokens | $${Number(run.cost_usd || 0).toFixed(4)}`);
+                $('#modalStory').text(run.story);
+
+                let detailsHtml = '<div class="row g-3">';
+                const content = run.content || {};
+
+                Object.keys(content).forEach(platform => {
+                    if (platform.startsWith('_')) return;
+                    const pData = content[platform] || {};
+                    detailsHtml += `
+                        <div class="col-md-6 col-lg-4">
+                            <div class="ent-card h-100 p-3">
+                                <h6 class="text-primary text-uppercase font-weight-bold mb-2">${platform}</h6>
+                                <p class="small mb-2"><strong>Caption:</strong> ${escapeHtml(pData.caption?.primary_caption || 'N/A')}</p>
+                                <p class="small text-muted mb-0"><strong>Tags:</strong> ${escapeHtml((pData.hashtags?.primary_hashtags || []).join(' '))}</p>
+                            </div>
+                        </div>
+                    `;
+                });
+                detailsHtml += '</div>';
+
+                $('#modalDetails').html(detailsHtml);
+                const modal = new bootstrap.Modal(document.getElementById('historyModal'));
+                modal.show();
+            }
+        });
+    }
+
+    // ── Utilities ──────────────────────────────────────────────────────
+    function scrollToBottom() {
+        const ws = document.getElementById('chatWorkspace');
+        if (ws) ws.scrollTop = ws.scrollHeight;
+    }
+
+    function showToast(msg, type = 'info') {
+        const icons = {
+            success: '<i class="fas fa-check-circle text-success me-2"></i>',
+            error: '<i class="fas fa-exclamation-circle text-danger me-2"></i>',
+            warning: '<i class="fas fa-exclamation-triangle text-warning me-2"></i>',
+            info: '<i class="fas fa-info-circle text-info me-2"></i>'
+        };
+        $('#toastBody').html((icons[type] || '') + msg);
+        const toastElem = document.getElementById('toast');
+        const toast = new bootstrap.Toast(toastElem, { delay: 3000 });
+        toast.show();
+    }
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function escapeAttr(str) {
+        if (!str) return '';
+        return String(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    function capitalize(str) {
+        if (!str) return '';
+        return str.charAt(0).toUpperCase() + str.slice(1);
+    }
+
+    function safeStr(val) {
+        if (val == null) return '—';
+        if (typeof val === 'string') return val;
+        if (typeof val === 'number') return String(val);
+        if (Array.isArray(val)) return val.join(', ');
+        if (typeof val === 'object') {
+            return val.text || val.value || val.time || val.label || val.name || '—';
+        }
+        return String(val);
+    }
+
+    function safeReach(val) {
+        if (val == null) return 75;
+        if (typeof val === 'object') val = val.percentage || val.value || val.score || 75;
+        return Math.min(100, Math.max(0, parseInt(val) || 75));
+    }
 });

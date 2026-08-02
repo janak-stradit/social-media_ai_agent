@@ -34,10 +34,20 @@ def create_app(config_name='development'):
         return render_template('index.html')
 
     @app.route('/login')
-    def login_redirect():
+    def login_route():
         if get_current_user_id():
             return redirect(url_for('index'))
-        return redirect(url_for('auth.login_page'))
+        return render_template('login.html')
+
+    @app.route('/logout')
+    def logout_route():
+        session.clear()
+        session.modified = True
+        return redirect(url_for('login_route'))
+
+    @app.route('/favicon.ico')
+    def favicon():
+        return '', 204
     
     @app.errorhandler(413)
     def too_large(e):

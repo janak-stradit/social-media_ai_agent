@@ -16,10 +16,16 @@ class StoryAgent:
     def __init__(self):
         self.llm = LLMService()
     
-    def analyze(self, story_text):
-        """Analyze story and return structured insights"""
+    def analyze(self, story_text, memory_context=None, return_usage=False):
+        """Analyze story and return structured insights + usage"""
         user_prompt = f"Analyze this story and return structured insights:\n\n{story_text}"
-        return self.llm.generate_json(self.SYSTEM_PROMPT, user_prompt)
+        if memory_context:
+            user_prompt += f"\n\n{memory_context}"
+            
+        result, usage = self.llm.generate_json(self.SYSTEM_PROMPT, user_prompt, return_usage=True)
+        if return_usage:
+            return result, usage
+        return result
     
     def extract_key_points(self, story_text, max_points=5):
         """Extract key narrative points for social media adaptation"""

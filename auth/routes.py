@@ -65,10 +65,13 @@ def login():
     return jsonify({"success": True, "user": _user_payload(user)})
 
 
-@auth_bp.route("/logout", methods=["POST"])
+@auth_bp.route("/logout", methods=["GET", "POST"])
 def logout():
     session.clear()
-    return jsonify({"success": True})
+    session.modified = True
+    if request.is_json or request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.method == "POST":
+        return jsonify({"success": True})
+    return redirect(url_for("auth.login_page"))
 
 
 @auth_bp.route("/me", methods=["GET"])
