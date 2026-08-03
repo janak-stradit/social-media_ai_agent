@@ -33,6 +33,11 @@ def create_app(config_name='development'):
     def index():
         return render_template('index.html')
 
+    @app.route('/settings')
+    @login_required_page
+    def settings_route():
+        return render_template('settings.html')
+
     @app.route('/login')
     def login_route():
         if get_current_user_id():

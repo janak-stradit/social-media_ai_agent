@@ -16,7 +16,9 @@ try:
         save_run, get_history, get_run_by_id, append_run_media, get_user_usage_stats,
         archive_run, unarchive_run, create_credit_request, get_user_credit_requests,
         get_all_credit_requests, approve_credit_request, reject_credit_request,
-        update_user_credit_limit, get_all_users_credit_summary, get_global_cost_history
+        update_user_credit_limit, get_all_users_credit_summary, get_global_cost_history,
+        get_user_social_accounts, save_social_account, disconnect_social_account,
+        create_scheduled_post, get_user_scheduled_posts, cancel_scheduled_post
     )
     DB_AVAILABLE = True
 except Exception as _db_err:
@@ -758,3 +760,120 @@ def admin_get_global_cost_history():
         })
     except Exception as e:
         return jsonify({'error': str(e), 'success': False}), 500
+
+
+# ── SOCIAL ACCOUNTS & POST SCHEDULING ENDPOINTS ───────────────────────
+
+@api_bp.route('/social/accounts', methods=['GET'])
+@login_required_api
+def get_social_accounts():
+    """Get connected social media accounts for current user"""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({'error': 'Database unavailable'}), 503
+    accounts = get_user_social_accounts(user_id)
+    return jsonify({'success': True, 'accounts': accounts})
+
+
+@api_bp.route('/social/accounts', methods=['POST'])
+@login_required_api
+def save_social_account_endpoint():
+    """Connect or update a social media account"""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({'error': 'Database unavailable'}), 503
+
+    data = request.get_json() or {}
+    platform = (data.get('platform') or '').lower().strip()
+    account_name = data.get('account_name', '').strip()
+    account_id = data.get('account_id', '').strip()
+    access_token = data.get('access_token', '').strip()
+
+    if not platform or platform not in ['facebook', 'instagram', 'linkedin']:
+        return jsonify({'error': 'Valid platform (facebook, instagram, linkedin) is required'}), 400
+    if not account_name:
+        return jsonify({'error': 'Account Name / Handle is required'}), 400
+
+    acc = save_social_account(
+        user_id=user_id,
+        platform=platform,
+        account_name=account_name,
+        account_id=account_id,
+        access_token=access_token
+    )
+    return jsonify({'success': True, 'account': acc})
+
+
+@api_bp.route('/social/accounts/<platform>', methods=['DELETE'])
+@login_required_api
+def disconnect_social_account_endpoint(platform):
+    """Disconnect a social media account"""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({'error': 'Database unavailable'}), 503
+
+    success = disconnect_social_account(user_id, platform.lower())
+    if success:
+        return jsonify({'success': True, 'message': f'{platform.capitalize()} disconnected'})
+    return jsonify({'error': 'Account not found or already disconnected'}), 404
+
+
+@api_bp.route('/social/schedule', methods=['POST'])
+@login_required_api
+def schedule_post_endpoint():
+    """Schedule a post for future publishing"""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({'error': 'Database unavailable'}), 503
+
+    data = request.get_json() or {}
+    platforms = data.get('platforms') or []
+    scheduled_at_str = data.get('scheduled_at')
+    content_json = data.get('content_json') or {}
+    run_id = data.get('run_id')
+
+    if not platforms or not isinstance(platforms, list):
+        return jsonify({'error': 'At least one target platform must be selected'}), 400
+    if not scheduled_at_str:
+        return jsonify({'error': 'Scheduled date and time is required'}), 400
+
+    try:
+        from datetime import datetime
+        scheduled_at = datetime.fromisoformat(scheduled_at_str.replace('Z', '+00:00'))
+    except Exception:
+        return jsonify({'error': 'Invalid scheduled date/time format'}), 400
+
+    post = create_scheduled_post(
+        user_id=user_id,
+        platforms=platforms,
+        scheduled_at=scheduled_at,
+        content_json=content_json,
+        run_id=run_id
+    )
+    return jsonify({'success': True, 'scheduled_post': post})
+
+
+@api_bp.route('/social/scheduled', methods=['GET'])
+@login_required_api
+def get_scheduled_posts_endpoint():
+    """Get list of scheduled posts for current user"""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({'error': 'Database unavailable'}), 503
+
+    posts = get_user_scheduled_posts(user_id)
+    return jsonify({'success': True, 'scheduled_posts': posts})
+
+
+@api_bp.route('/social/scheduled/<int:post_id>/cancel', methods=['POST'])
+@login_required_api
+def cancel_scheduled_post_endpoint(post_id):
+    """Cancel a pending scheduled post"""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({'error': 'Database unavailable'}), 503
+
+    success = cancel_scheduled_post(user_id, post_id)
+    if success:
+        return jsonify({'success': True, 'message': 'Scheduled post cancelled'})
+    return jsonify({'error': 'Post not found or cannot be cancelled'}), 404

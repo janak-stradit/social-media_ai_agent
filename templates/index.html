@@ -25,8 +25,11 @@
         </div>
     </div>
     <nav class="header-nav">
-        <a href="#" class="header-nav-item active"><i class="fas fa-comments me-2"></i>Studio Chat</a>
-        <a href="#" class="header-nav-item" id="headerNewChatBtn"><i class="fas fa-plus me-2"></i>New Chat</a>
+        <a href="/" class="header-nav-item active"><i class="fas fa-comments me-2"></i>Studio Chat</a>
+        <a href="/" class="header-nav-item" id="headerNewChatBtn"><i class="fas fa-plus me-2"></i>New Chat</a>
+        <a href="/settings" class="header-nav-item" title="Social Accounts &amp; Scheduling Studio">
+            <i class="fas fa-plug me-1"></i>Social Accounts &amp; Scheduling
+        </a>
     </nav>
     <div class="header-actions">
         <div class="cost-pill" id="headerCostPill" title="Accumulated User LLM Token Usage & Cost">
@@ -346,6 +349,9 @@
             </div>
             <div class="modal-footer ent-modal-footer">
                 <button type="button" class="btn-secondary-ent" data-bs-dismiss="modal">Close</button>
+                <button type="button" class="btn-submit-emerald ms-2" id="modalScheduleBtn">
+                    <i class="fas fa-calendar-plus me-1"></i>Schedule Campaign Post
+                </button>
             </div>
         </div>
     </div>
@@ -660,6 +666,356 @@
             </div>
             <div class="modal-footer memory-modal-footer-light">
                 <button type="button" class="btn-cancel-light" data-bs-dismiss="modal">Close Diagram</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════ SOCIAL ACCOUNTS & SCHEDULING SETTINGS MODAL ═══════════════════════ -->
+<div class="modal fade" id="socialSettingsModal" tabindex="-1" aria-labelledby="socialSettingsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content social-modal-light">
+            <div class="modal-header social-modal-header-light">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="social-icon-badge"><i class="fas fa-plug"></i></div>
+                    <div>
+                        <h5 class="modal-title text-navy font-bold mb-0" id="socialSettingsModalLabel">Social Media Accounts &amp; Scheduling Studio</h5>
+                        <small class="text-slate-500 font-medium">Connect accounts, view step-by-step setup guides &amp; manage scheduled posts</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-4">
+                
+                <!-- Nav Tabs -->
+                <ul class="nav nav-tabs social-nav-tabs mb-4" id="socialSettingsTab" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="connected-accounts-tab" data-bs-toggle="tab" data-bs-target="#connected-accounts-pane" type="button" role="tab">
+                            <i class="fas fa-link me-2"></i>Connected Accounts
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="setup-guides-tab" data-bs-toggle="tab" data-bs-target="#setup-guides-pane" type="button" role="tab">
+                            <i class="fas fa-book-open me-2"></i>Step-by-Step Connection Guides
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="scheduled-posts-tab" data-bs-toggle="tab" data-bs-target="#scheduled-posts-pane" type="button" role="tab">
+                            <i class="fas fa-calendar-days me-2"></i>Upcoming Scheduled Posts
+                        </button>
+                    </li>
+                </ul>
+
+                <div class="tab-content" id="socialSettingsTabContent">
+                    
+                    <!-- ── TAB 1: CONNECTED ACCOUNTS ── -->
+                    <div class="tab-pane fade show active" id="connected-accounts-pane" role="tabpanel">
+                        <div class="row g-4 mb-4">
+                            <!-- Facebook Account Card -->
+                            <div class="col-md-4">
+                                <div class="social-account-card card-facebook">
+                                    <div class="d-flex align-items-center justify-content-between mb-3">
+                                        <div class="d-flex align-items-center gap-2">
+                                            <div class="platform-icon-circle bg-fb"><i class="fab fa-facebook-f"></i></div>
+                                            <div>
+                                                <h6 class="mb-0 font-bold text-navy">Facebook Page</h6>
+                                                <small class="text-slate-500">Meta Graph API</small>
+                                            </div>
+                                        </div>
+                                        <span class="status-badge badge-disconnected" id="fbStatusBadge"><i class="fas fa-circle-xmark me-1"></i>Not Connected</span>
+                                    </div>
+                                    <div class="account-details-box mb-3">
+                                        <div class="small text-slate-500 mb-1">Connected Page: <strong class="text-navy" id="fbAccountName">—</strong></div>
+                                        <div class="small text-slate-500">Page ID: <span class="font-monospace text-slate-600" id="fbAccountId">—</span></div>
+                                    </div>
+                                    <button type="button" class="btn-connect-platform btn-fb w-100" onclick="openConnectModal('facebook')">
+                                        <i class="fas fa-key me-1"></i>Connect / Configure Facebook
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- Instagram Business Card -->
+                            <div class="col-md-4">
+                                <div class="social-account-card card-instagram">
+                                    <div class="d-flex align-items-center justify-content-between mb-3">
+                                        <div class="d-flex align-items-center gap-2">
+                                            <div class="platform-icon-circle bg-ig"><i class="fab fa-instagram"></i></div>
+                                            <div>
+                                                <h6 class="mb-0 font-bold text-navy">Instagram Business</h6>
+                                                <small class="text-slate-500">Instagram Graph API</small>
+                                            </div>
+                                        </div>
+                                        <span class="status-badge badge-disconnected" id="igStatusBadge"><i class="fas fa-circle-xmark me-1"></i>Not Connected</span>
+                                    </div>
+                                    <div class="account-details-box mb-3">
+                                        <div class="small text-slate-500 mb-1">Connected Handle: <strong class="text-navy" id="igAccountName">—</strong></div>
+                                        <div class="small text-slate-500">Business ID: <span class="font-monospace text-slate-600" id="igAccountId">—</span></div>
+                                    </div>
+                                    <button type="button" class="btn-connect-platform btn-ig w-100" onclick="openConnectModal('instagram')">
+                                        <i class="fas fa-key me-1"></i>Connect / Configure Instagram
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- LinkedIn Account Card -->
+                            <div class="col-md-4">
+                                <div class="social-account-card card-linkedin">
+                                    <div class="d-flex align-items-center justify-content-between mb-3">
+                                        <div class="d-flex align-items-center gap-2">
+                                            <div class="platform-icon-circle bg-li"><i class="fab fa-linkedin-in"></i></div>
+                                            <div>
+                                                <h6 class="mb-0 font-bold text-navy">LinkedIn Account</h6>
+                                                <small class="text-slate-500">Community API v2</small>
+                                            </div>
+                                        </div>
+                                        <span class="status-badge badge-disconnected" id="liStatusBadge"><i class="fas fa-circle-xmark me-1"></i>Not Connected</span>
+                                    </div>
+                                    <div class="account-details-box mb-3">
+                                        <div class="small text-slate-500 mb-1">Member / Org: <strong class="text-navy" id="liAccountName">—</strong></div>
+                                        <div class="small text-slate-500">Author URN: <span class="font-monospace text-slate-600" id="liAccountId">—</span></div>
+                                    </div>
+                                    <button type="button" class="btn-connect-platform btn-li w-100" onclick="openConnectModal('linkedin')">
+                                        <i class="fas fa-key me-1"></i>Connect / Configure LinkedIn
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- ── TAB 2: STEP-BY-STEP GUIDES ── -->
+                    <div class="tab-pane fade" id="setup-guides-pane" role="tabpanel">
+                        <div class="accordion guide-accordion" id="platformGuidesAccordion">
+                            
+                            <!-- Facebook Guide -->
+                            <div class="accordion-item guide-item mb-3">
+                                <h2 class="accordion-header">
+                                    <button class="accordion-button collapsed font-bold text-navy" type="button" data-bs-toggle="collapse" data-bs-target="#guideFacebook">
+                                        <i class="fab fa-facebook color-fb me-2 fa-lg"></i>How to Connect Facebook Page (Meta Graph API)
+                                    </button>
+                                </h2>
+                                <div id="guideFacebook" class="accordion-collapse collapse" data-bs-parent="#platformGuidesAccordion">
+                                    <div class="accordion-body guide-body">
+                                        <ol class="guide-steps-list">
+                                            <li>
+                                                <strong>Step 1: Go to Meta Developers Portal</strong>
+                                                <p class="mb-1 text-slate-600">Navigate to <a href="https://developers.facebook.com/" target="_blank" class="text-primary font-semibold">developers.facebook.com</a> and log in with your Facebook account.</p>
+                                            </li>
+                                            <li>
+                                                <strong>Step 2: Create a Meta App</strong>
+                                                <p class="mb-1 text-slate-600">Click <strong>My Apps</strong> &rarr; <strong>Create App</strong> &rarr; Select <strong>Business</strong> type &rarr; Enter your App Name.</p>
+                                            </li>
+                                            <li>
+                                                <strong>Step 3: Add Facebook Graph API Permissions</strong>
+                                                <p class="mb-1 text-slate-600">Under App Settings &rarr; Tools &rarr; Graph API Explorer, request the following permissions:</p>
+                                                <ul class="badge-list mb-2">
+                                                    <li><code>pages_show_list</code></li>
+                                                    <li><code>pages_read_engagement</code></li>
+                                                    <li><code>pages_manage_posts</code></li>
+                                                </ul>
+                                            </li>
+                                            <li>
+                                                <strong>Step 4: Generate Page Access Token &amp; Page ID</strong>
+                                                <p class="mb-1 text-slate-600">Select your target Facebook Page from the dropdown and click <strong>Generate Access Token</strong>. Copy the User/Page Access Token and Page ID into the Facebook Connection form above.</p>
+                                            </li>
+                                        </ol>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Instagram Guide -->
+                            <div class="accordion-item guide-item mb-3">
+                                <h2 class="accordion-header">
+                                    <button class="accordion-button collapsed font-bold text-navy" type="button" data-bs-toggle="collapse" data-bs-target="#guideInstagram">
+                                        <i class="fab fa-instagram color-ig me-2 fa-lg"></i>How to Connect Instagram Business Account
+                                    </button>
+                                </h2>
+                                <div id="guideInstagram" class="accordion-collapse collapse" data-bs-parent="#platformGuidesAccordion">
+                                    <div class="accordion-body guide-body">
+                                        <ol class="guide-steps-list">
+                                            <li>
+                                                <strong>Step 1: Convert Instagram Account to Professional / Business</strong>
+                                                <p class="mb-1 text-slate-600">In the Instagram mobile app, go to Settings &rarr; Account &rarr; <strong>Switch to Professional Account</strong> (Business or Creator).</p>
+                                            </li>
+                                            <li>
+                                                <strong>Step 2: Connect Instagram Business Account to Facebook Page</strong>
+                                                <p class="mb-1 text-slate-600">Open your Facebook Page &rarr; Settings &rarr; Linked Accounts &rarr; <strong>Instagram</strong> &rarr; Connect Account.</p>
+                                            </li>
+                                            <li>
+                                                <strong>Step 3: Get Instagram Account ID via Graph API</strong>
+                                                <p class="mb-1 text-slate-600">In Graph API Explorer, query <code>GET /me/accounts?fields=instagram_business_account</code> to retrieve your 17-digit Instagram Business ID.</p>
+                                            </li>
+                                            <li>
+                                                <strong>Step 4: Save Instagram Credentials</strong>
+                                                <p class="mb-1 text-slate-600">Copy your Instagram Handle (@yourbrand), Instagram Business ID, and Meta Access Token into the Instagram connection form.</p>
+                                            </li>
+                                        </ol>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- LinkedIn Guide -->
+                            <div class="accordion-item guide-item mb-3">
+                                <h2 class="accordion-header">
+                                    <button class="accordion-button collapsed font-bold text-navy" type="button" data-bs-toggle="collapse" data-bs-target="#guideLinkedIn">
+                                        <i class="fab fa-linkedin color-li me-2 fa-lg"></i>How to Connect LinkedIn Member / Organization
+                                    </button>
+                                </h2>
+                                <div id="guideLinkedIn" class="accordion-collapse collapse" data-bs-parent="#platformGuidesAccordion">
+                                    <div class="accordion-body guide-body">
+                                        <ol class="guide-steps-list">
+                                            <li>
+                                                <strong>Step 1: Open LinkedIn Developer Portal</strong>
+                                                <p class="mb-1 text-slate-600">Go to <a href="https://www.linkedin.com/developers/" target="_blank" class="text-primary font-semibold">linkedin.com/developers</a> and click <strong>Create App</strong>.</p>
+                                            </li>
+                                            <li>
+                                                <strong>Step 2: Request Community Management API Access</strong>
+                                                <p class="mb-1 text-slate-600">Under the <strong>Products</strong> tab, request access to <strong>Share on LinkedIn</strong> and <strong>Community Management API</strong>.</p>
+                                            </li>
+                                            <li>
+                                                <strong>Step 3: Generate OAuth 2.0 Access Token</strong>
+                                                <p class="mb-1 text-slate-600">In the Developer Token Generator tool, authorize permissions <code>w_member_social</code> and <code>w_organization_social</code>.</p>
+                                            </li>
+                                            <li>
+                                                <strong>Step 4: Copy Author URN</strong>
+                                                <p class="mb-1 text-slate-600">Your Author URN looks like <code>urn:li:person:abcdef123</code> for personal profiles or <code>urn:li:organization:123456</code> for company pages. Paste it into the connection form.</p>
+                                            </li>
+                                        </ol>
+                                    </div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+
+                    <!-- ── TAB 3: UPCOMING SCHEDULED POSTS ── -->
+                    <div class="tab-pane fade" id="scheduled-posts-pane" role="tabpanel">
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle scheduled-posts-table">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Campaign Brief / Story</th>
+                                        <th>Target Platforms</th>
+                                        <th>Scheduled Run Time</th>
+                                        <th>Status</th>
+                                        <th class="text-end">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="scheduledPostsTbody">
+                                    <tr>
+                                        <td colspan="6" class="text-center py-4 text-slate-400">Loading scheduled posts...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                </div>
+
+            </div>
+            <div class="modal-footer social-modal-footer-light">
+                <button type="button" class="btn-cancel-light" data-bs-dismiss="modal">Close Settings</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════ PLATFORM CONNECT FORM MODAL ═══════════════════════ -->
+<div class="modal fade" id="connectAccountModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content credit-modal-light">
+            <div class="modal-header credit-modal-header-light">
+                <div class="d-flex align-items-center gap-2">
+                    <div class="credit-icon-badge" id="connectModalIcon"><i class="fas fa-plug"></i></div>
+                    <div>
+                        <h5 class="modal-title text-navy font-bold mb-0" id="connectModalTitle">Connect Account</h5>
+                        <small class="text-slate-500" id="connectModalSub">Enter API credentials &amp; account IDs</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <form id="connectAccountForm">
+                    <input type="hidden" id="connectPlatformInput">
+                    <div class="mb-3">
+                        <label class="form-label text-slate-700 font-semibold" id="accountNameLabel">Account Name / Handle:</label>
+                        <input type="text" class="form-control credit-input-light" id="connectAccountNameInput" placeholder="e.g. @MyBrandOfficial" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-slate-700 font-semibold" id="accountIdLabel">Page ID / Account ID / Author URN:</label>
+                        <input type="text" class="form-control credit-input-light" id="connectAccountIdInput" placeholder="e.g. 109283746592817">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label text-slate-700 font-semibold">Access Token / OAuth Token:</label>
+                        <textarea class="form-control credit-input-light" id="connectAccessTokenInput" rows="3" placeholder="EAABwz... or OAuth Bearer Token"></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer credit-modal-footer-light">
+                <button type="button" class="btn-cancel-light" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn-submit-emerald" id="saveConnectAccountBtn">
+                    <i class="fas fa-check me-1"></i>Save &amp; Connect Account
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════ POST SCHEDULING MODAL ═══════════════════════ -->
+<div class="modal fade" id="schedulePostModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content credit-modal-light">
+            <div class="modal-header credit-modal-header-light">
+                <div class="d-flex align-items-center gap-2">
+                    <div class="credit-icon-badge"><i class="fas fa-calendar-plus"></i></div>
+                    <div>
+                        <h5 class="modal-title text-navy font-bold mb-0">Schedule Social Media Post</h5>
+                        <small class="text-slate-500">Pick publishing date &amp; select target accounts</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <form id="schedulePostForm">
+                    <div class="mb-3">
+                        <label class="form-label text-slate-700 font-semibold">Target Platforms:</label>
+                        <div class="d-flex gap-3">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" value="facebook" id="schedFbCheck" checked>
+                                <label class="form-check-label font-medium text-slate-700" for="schedFbCheck">
+                                    <i class="fab fa-facebook color-fb me-1"></i>Facebook
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" value="instagram" id="schedIgCheck" checked>
+                                <label class="form-check-label font-medium text-slate-700" for="schedIgCheck">
+                                    <i class="fab fa-instagram color-ig me-1"></i>Instagram
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" value="linkedin" id="schedLiCheck" checked>
+                                <label class="form-check-label font-medium text-slate-700" for="schedLiCheck">
+                                    <i class="fab fa-linkedin color-li me-1"></i>LinkedIn
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="schedDateTimeInput" class="form-label text-slate-700 font-semibold">Publish Date &amp; Time:</label>
+                        <input type="datetime-local" class="form-control credit-input-light" id="schedDateTimeInput" required>
+                    </div>
+
+                    <div class="alert alert-info-light mb-0">
+                        <i class="fas fa-circle-info me-2 text-primary"></i>Your generated captions, hashtags, and media assets will be queued for automated publishing at the scheduled time.
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer credit-modal-footer-light">
+                <button type="button" class="btn-cancel-light" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn-submit-emerald" id="confirmSchedulePostBtn">
+                    <i class="fas fa-calendar-check me-1"></i>Confirm Post Schedule
+                </button>
             </div>
         </div>
     </div>

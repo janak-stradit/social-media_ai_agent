@@ -80,6 +80,35 @@ class RunHistory(Base):
     is_archived = Column(Boolean, default=False, nullable=True)
 
 
+class SocialAccount(Base):
+    __tablename__ = "social_accounts"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True)
+    platform = Column(String(32), nullable=False)  # facebook, instagram, linkedin
+    account_name = Column(String(120), nullable=False)
+    account_id = Column(String(120), nullable=True)  # Page ID, IG ID, or Author URN
+    access_token = Column(Text, nullable=True)
+    status = Column(String(32), default="connected", nullable=False)  # connected, disconnected, expired
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+
+class ScheduledPost(Base):
+    __tablename__ = "scheduled_posts"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True)
+    run_id = Column(Integer, nullable=True)
+    platforms = Column(Text, nullable=False)  # JSON or comma-separated string
+    scheduled_at = Column(DateTime, nullable=False)
+    status = Column(String(32), default="pending", nullable=False)  # pending, published, failed, cancelled
+    content_json = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 def init_db():
     """Create schema, tables, and apply lightweight migrations."""
     if not IS_SQLITE:
@@ -533,4 +562,142 @@ def get_global_cost_history(limit: int = 100) -> list[dict]:
                 "cost_usd": round(run.cost_usd or 0.0, 6)
             })
         return history
+
+
+# ── SOCIAL ACCOUNTS & POST SCHEDULING HELPERS ─────────────────────────
+
+def get_user_social_accounts(user_id: int) -> list[dict]:
+    """Fetch all connected social media accounts for a user."""
+    with Session(engine) as session:
+        accounts = session.query(SocialAccount).filter(SocialAccount.user_id == user_id).all()
+        result = []
+        for acc in accounts:
+            result.append({
+                "id": acc.id,
+                "platform": acc.platform,
+                "account_name": acc.account_name,
+                "account_id": acc.account_id,
+                "status": acc.status,
+                "updated_at": acc.updated_at.strftime("%Y-%m-%d %H:%M:%S")
+            })
+        return result
+
+
+def save_social_account(user_id: int, platform: str, account_name: str, account_id: str = None, access_token: str = None) -> dict:
+    """Create or update a connected social media account."""
+    with Session(engine) as session:
+        acc = session.query(SocialAccount).filter(
+            SocialAccount.user_id == user_id,
+            SocialAccount.platform == platform
+        ).first()
+
+        if not acc:
+            acc = SocialAccount(
+                user_id=user_id,
+                platform=platform,
+                account_name=account_name,
+                account_id=account_id,
+                access_token=access_token,
+                status="connected"
+            )
+            session.add(acc)
+        else:
+            acc.account_name = account_name
+            if account_id:
+                acc.account_id = account_id
+            if access_token:
+                acc.access_token = access_token
+            acc.status = "connected"
+            acc.updated_at = datetime.utcnow()
+
+        session.commit()
+        return {
+            "id": acc.id,
+            "platform": acc.platform,
+            "account_name": acc.account_name,
+            "account_id": acc.account_id,
+            "status": acc.status
+        }
+
+
+def disconnect_social_account(user_id: int, platform: str) -> bool:
+    """Set social account status to disconnected."""
+    with Session(engine) as session:
+        acc = session.query(SocialAccount).filter(
+            SocialAccount.user_id == user_id,
+            SocialAccount.platform == platform
+        ).first()
+        if acc:
+            acc.status = "disconnected"
+            acc.updated_at = datetime.utcnow()
+            session.commit()
+            return True
+        return False
+
+
+def create_scheduled_post(user_id: int, platforms: list, scheduled_at: datetime, content_json: dict, run_id: int = None) -> dict:
+    """Schedule a post for future publishing."""
+    with Session(engine) as session:
+        post = ScheduledPost(
+            user_id=user_id,
+            run_id=run_id,
+            platforms=json.dumps(platforms) if isinstance(platforms, list) else str(platforms),
+            scheduled_at=scheduled_at,
+            status="pending",
+            content_json=json.dumps(content_json) if isinstance(content_json, dict) else str(content_json)
+        )
+        session.add(post)
+        session.commit()
+        return {
+            "id": post.id,
+            "platforms": platforms,
+            "scheduled_at": post.scheduled_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "status": post.status
+        }
+
+
+def get_user_scheduled_posts(user_id: int) -> list[dict]:
+    """Retrieve upcoming and past scheduled posts for a user."""
+    with Session(engine) as session:
+        posts = session.query(ScheduledPost).filter(
+            ScheduledPost.user_id == user_id
+        ).order_by(ScheduledPost.scheduled_at.asc()).all()
+
+        results = []
+        for p in posts:
+            try:
+                platforms = json.loads(p.platforms)
+            except Exception:
+                platforms = [p.platforms]
+            try:
+                content = json.loads(p.content_json)
+            except Exception:
+                content = {}
+
+            results.append({
+                "id": p.id,
+                "run_id": p.run_id,
+                "platforms": platforms,
+                "scheduled_at": p.scheduled_at.strftime("%Y-%m-%d %H:%M:%S"),
+                "status": p.status,
+                "story": content.get("story") or content.get("topic") or "Campaign Post",
+                "created_at": p.created_at.strftime("%Y-%m-%d %H:%M:%S")
+            })
+        return results
+
+
+def cancel_scheduled_post(user_id: int, post_id: int) -> bool:
+    """Cancel a pending scheduled post."""
+    with Session(engine) as session:
+        post = session.query(ScheduledPost).filter(
+            ScheduledPost.id == post_id,
+            ScheduledPost.user_id == user_id
+        ).first()
+
+        if post and post.status == "pending":
+            post.status = "cancelled"
+            session.commit()
+            return True
+        return False
+
 
