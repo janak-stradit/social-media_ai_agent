@@ -15,6 +15,9 @@
 <!-- ═══════════════════════ TOP HEADER ═══════════════════════ -->
 <header class="app-header">
     <div class="header-brand">
+        <button type="button" class="btn-sidebar-toggle me-2" id="sidebarToggleBtn" title="Show/Hide Sidebar">
+            <i class="fas fa-bars"></i>
+        </button>
         <div class="brand-logo"><i class="fas fa-robot"></i></div>
         <div class="brand-text">
             <span class="brand-name">ContentAI</span>
@@ -29,6 +32,16 @@
         <div class="cost-pill" id="headerCostPill" title="Accumulated User LLM Token Usage & Cost">
             <i class="fas fa-bolt text-warning me-1"></i><span id="headerTokens">0</span> Tokens &nbsp;|&nbsp; <span id="headerCost">$0.0000</span>
         </div>
+        <div class="credit-pill" id="headerCreditPill" title="User Credit Balance & Limit">
+            <i class="fas fa-wallet text-success me-1"></i>
+            <span id="headerCreditLabel">Credits: <strong id="headerCreditsRemaining">$10.00</strong> / <span id="headerCreditLimit">$10.00</span></span>
+            <button type="button" class="btn-credit-req-xs ms-2" id="headerRequestCreditBtn" title="Request Credit Extension">
+                <i class="fas fa-plus-circle me-1"></i>Request Extension
+            </button>
+        </div>
+        <button type="button" class="btn-admin-portal d-none ms-2" id="headerAdminBtn" title="Open Admin Management Dashboard">
+            <i class="fas fa-user-shield me-1"></i>Admin Portal
+        </button>
         <div class="status-pill"><span class="status-dot-green"></span>Agents Online</div>
         <div class="header-user">
             <div class="header-user-meta">
@@ -48,14 +61,24 @@
 
     <!-- ── SIDEBAR ── -->
     <aside class="sidebar" id="sidebar">
-        <div class="sidebar-top-action">
-            <button class="btn-new-chat w-100" id="newChatBtn">
+        <div class="sidebar-top-action d-flex align-items-center gap-2">
+            <button class="btn-new-chat flex-grow-1" id="newChatBtn">
                 <i class="fas fa-plus me-2"></i>New Conversation
             </button>
+            <button type="button" class="btn-sidebar-hide" id="sidebarHideBtn" title="Hide Sidebar">
+                <i class="fas fa-angles-left"></i>
+            </button>
         </div>
+
+        <!-- Sidebar Campaign Search -->
+        <div class="sidebar-search-box">
+            <i class="fas fa-search sidebar-search-icon"></i>
+            <input type="text" id="sidebarSearchInput" class="sidebar-search-input" placeholder="Search campaigns...">
+        </div>
+
         <div class="sidebar-section">
             <div class="d-flex align-items-center justify-content-between mb-2 px-1">
-                <div class="sidebar-section-title mb-0"><i class="fas fa-clock-rotate-left me-2"></i>Chat History</div>
+                <div class="sidebar-section-title mb-0"><i class="fas fa-clock-rotate-left me-2"></i>History</div>
                 <div class="history-tab-pills">
                     <button type="button" class="history-tab-pill active" id="historyTabActive" data-tab="active">Active</button>
                     <button type="button" class="history-tab-pill" id="historyTabArchived" data-tab="archived"><i class="fas fa-box-archive me-1"></i>Archived</button>
@@ -63,9 +86,9 @@
             </div>
             <div id="historyList" class="history-list">
                 <div class="history-empty">
-                    <i class="fas fa-comments fa-2x mb-3 text-slate-400"></i>
-                    <p>No chat history yet</p>
-                    <small>Start a conversation to generate content</small>
+                    <div class="history-empty-icon"><i class="fas fa-comments"></i></div>
+                    <p class="history-empty-title">No chat history yet</p>
+                    <small class="history-empty-sub">Start a conversation to generate content</small>
                 </div>
             </div>
         </div>
@@ -91,7 +114,10 @@
                 <p class="chat-header-subtitle">Describe your idea, attach visual assets, and set campaign configs below</p>
             </div>
             <div class="d-flex gap-2 align-items-center">
-                <span class="badge-memory" id="memoryIndicatorBadge"><i class="fas fa-brain me-1"></i>RAG Memory Active</span>
+                <span class="badge-memory" id="memoryIndicatorBadge" style="cursor: pointer;" title="Click to view RAG Memory Graph"><i class="fas fa-brain me-1"></i>RAG Memory Active</span>
+                <button type="button" class="btn-memory-graph-trigger" id="openMemoryGraphBtn" title="View Interactive RAG Memory Knowledge Graph">
+                    <i class="fas fa-project-diagram me-1"></i>Memory Graph
+                </button>
                 <span class="badge-enterprise"><i class="fas fa-shield-halved me-1"></i>Enterprise AI</span>
                 <span class="badge-version">v2.5 Critic</span>
             </div>
@@ -320,6 +346,320 @@
             </div>
             <div class="modal-footer ent-modal-footer">
                 <button type="button" class="btn-secondary-ent" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════ CREDIT EXTENSION REQUEST MODAL ═══════════════════════ -->
+<div class="modal fade" id="creditRequestModal" tabindex="-1" aria-labelledby="creditRequestModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content credit-modal-light">
+            <div class="modal-header credit-modal-header-light">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="credit-icon-badge"><i class="fas fa-coins"></i></div>
+                    <div>
+                        <h5 class="modal-title text-navy font-bold mb-0" id="creditRequestModalLabel">Credit Extension Request</h5>
+                        <small class="text-slate-500 font-medium" id="creditModalSubtext">Request additional AI generation credits from Admin</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-4">
+                <!-- Usage Overview Card -->
+                <div class="credit-card-light mb-3">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="text-slate-600 font-medium fs-7"><i class="fas fa-wallet me-1 text-primary"></i>Current Credit Limit:</span>
+                        <strong class="text-navy font-bold" id="modalCreditLimit">$10.00</strong>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <span class="text-slate-600 font-medium fs-7"><i class="fas fa-chart-pie me-1 text-warning"></i>Total Credits Used:</span>
+                        <span class="text-amber-600 font-monospace font-semibold" id="modalUsedCredits">$0.00</span>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-center pt-2 border-top-slate">
+                        <span class="text-slate-700 font-semibold fs-7"><i class="fas fa-circle-dollar-to-slot me-1 text-success"></i>Remaining Balance:</span>
+                        <strong class="text-emerald-600 font-monospace fs-5" id="modalRemainingCredits">$0.00</strong>
+                    </div>
+                </div>
+
+                <div id="pendingRequestNotice" class="alert alert-warning-light d-none mb-3">
+                    <i class="fas fa-clock text-warning me-2"></i>You have a pending credit extension request (<strong id="pendingReqAmount">$10.00</strong>). Submitting again will update your request.
+                </div>
+
+                <form id="creditRequestForm">
+                    <div class="mb-3">
+                        <label for="requestedAmountInput" class="form-label text-slate-700 font-semibold mb-1">Requested Extension Amount ($USD):</label>
+                        <div class="input-group mb-2">
+                            <span class="input-group-text bg-slate-100 text-slate-600 border-slate">$</span>
+                            <input type="number" class="form-control credit-input-light" id="requestedAmountInput" min="1" max="1000" step="1" value="10" required>
+                        </div>
+                        <div class="d-flex gap-2 align-items-center">
+                            <span class="text-slate-500 fs-7">Presets:</span>
+                            <button type="button" class="preset-btn" onclick="$('#requestedAmountInput').val(10)">+$10</button>
+                            <button type="button" class="preset-btn" onclick="$('#requestedAmountInput').val(25)">+$25</button>
+                            <button type="button" class="preset-btn" onclick="$('#requestedAmountInput').val(50)">+$50</button>
+                            <button type="button" class="preset-btn" onclick="$('#requestedAmountInput').val(100)">+$100</button>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label for="requestReasonInput" class="form-label text-slate-700 font-semibold mb-1">Reason / Campaign Note for Admin:</label>
+                        <textarea class="form-control credit-input-light" id="requestReasonInput" rows="3" placeholder="e.g. Running product launch campaign on Facebook & LinkedIn..."></textarea>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer credit-modal-footer-light">
+                <button type="button" class="btn-cancel-light" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn-submit-emerald" id="submitCreditReqBtn">
+                    <i class="fas fa-paper-plane me-1"></i>Submit Extension Request
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════ ADMIN MANAGEMENT PORTAL MODAL ═══════════════════════ -->
+<div class="modal fade" id="adminModal" tabindex="-1" aria-labelledby="adminModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-scrollable">
+        <div class="modal-content ent-modal">
+            <div class="modal-header ent-modal-header bg-gradient-admin">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="card-icon card-icon-purple"><i class="fas fa-user-shield"></i></div>
+                    <div>
+                        <h5 class="modal-title mb-0" id="adminModalLabel">Admin Control Center</h5>
+                        <small class="text-slate-300">Manage user credit limits, approve requests & audit total cost history</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body ent-modal-body p-0">
+                
+                <!-- Admin Navigation Tabs -->
+                <ul class="nav nav-tabs admin-nav-tabs px-3 pt-3 border-bottom-dark" id="adminTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="tab-users-tab" data-bs-toggle="tab" data-bs-target="#tab-users" type="button" role="tab">
+                            <i class="fas fa-users me-2"></i>User Credits &amp; Limits
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link position-relative" id="tab-requests-tab" data-bs-toggle="tab" data-bs-target="#tab-requests" type="button" role="tab">
+                            <i class="fas fa-clock-rotate-left me-2"></i>Extension Requests
+                            <span class="badge bg-danger rounded-pill ms-2 d-none" id="adminPendingBadge">0</span>
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="tab-cost-tab" data-bs-toggle="tab" data-bs-target="#tab-cost" type="button" role="tab">
+                            <i class="fas fa-chart-line me-2"></i>Global Cost History
+                        </button>
+                    </li>
+                </ul>
+
+                <div class="tab-content p-4" id="adminTabContent">
+                    
+                    <!-- TAB 1: USER CREDITS MANAGEMENT -->
+                    <div class="tab-pane fade show active" id="tab-users" role="tabpanel">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="text-light mb-0"><i class="fas fa-users text-primary me-2"></i>Registered Users &amp; Credit Allocations</h6>
+                            <input type="text" id="adminUserSearchInput" class="form-control ent-input form-control-sm w-auto" placeholder="Search by name or email...">
+                        </div>
+                        
+                        <div class="table-responsive">
+                            <table class="table table-dark table-hover align-middle ent-admin-table" id="adminUsersTable">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>User Name</th>
+                                        <th>Email</th>
+                                        <th>Role</th>
+                                        <th>Credit Limit</th>
+                                        <th>Used Cost</th>
+                                        <th>Remaining</th>
+                                        <th>Status</th>
+                                        <th>Actions / Add Credits</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="adminUsersTbody">
+                                    <tr>
+                                        <td colspan="9" class="text-center py-4 text-slate-400">Loading user credits...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- TAB 2: CREDIT EXTENSION REQUESTS -->
+                    <div class="tab-pane fade" id="tab-requests" role="tabpanel">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="text-light mb-0"><i class="fas fa-coins text-warning me-2"></i>Credit Extension Requests</h6>
+                            <div class="btn-group btn-group-sm">
+                                <button type="button" class="btn btn-outline-secondary active" id="filterReqAll">All</button>
+                                <button type="button" class="btn btn-outline-secondary" id="filterReqPending">Pending Only</button>
+                            </div>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-dark table-hover align-middle ent-admin-table" id="adminReqTable">
+                                <thead>
+                                    <tr>
+                                        <th>Req ID</th>
+                                        <th>User</th>
+                                        <th>Current Limit</th>
+                                        <th>Requested Add</th>
+                                        <th>Reason / Note</th>
+                                        <th>Date</th>
+                                        <th>Status</th>
+                                        <th>Decision Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="adminReqTbody">
+                                    <tr>
+                                        <td colspan="8" class="text-center py-4 text-slate-400">Loading extension requests...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <!-- TAB 3: GLOBAL COST HISTORY -->
+                    <div class="tab-pane fade" id="tab-cost" role="tabpanel">
+                        <div class="row mb-3">
+                            <div class="col-md-6">
+                                <div class="admin-stat-card">
+                                    <span class="stat-label">Total System Accumulated Cost</span>
+                                    <h3 class="stat-value text-success mb-0" id="adminTotalSystemCost">$0.0000</h3>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="admin-stat-card">
+                                    <span class="stat-label">Total LLM Tokens Consumed</span>
+                                    <h3 class="stat-value text-warning mb-0" id="adminTotalSystemTokens">0</h3>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="table-responsive">
+                            <table class="table table-dark table-hover align-middle ent-admin-table" id="adminCostHistoryTable">
+                                <thead>
+                                    <tr>
+                                        <th>Run ID</th>
+                                        <th>User Email</th>
+                                        <th>Timestamp</th>
+                                        <th>Prompt Excerpt</th>
+                                        <th>Tone &amp; Channels</th>
+                                        <th>Tokens</th>
+                                        <th>Cost ($USD)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="adminCostHistoryTbody">
+                                    <tr>
+                                        <td colspan="7" class="text-center py-4 text-slate-400">Loading global cost log...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+            <div class="modal-footer ent-modal-footer">
+                <button type="button" class="btn-secondary-ent" data-bs-dismiss="modal">Close Dashboard</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════ RAG MEMORY GRAPH DIAGRAM MODAL ═══════════════════════ -->
+<div class="modal fade" id="memoryGraphModal" tabindex="-1" aria-labelledby="memoryGraphModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content memory-modal-light">
+            <div class="modal-header memory-modal-header-light">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="memory-icon-badge"><i class="fas fa-project-diagram"></i></div>
+                    <div>
+                        <h5 class="modal-title text-navy font-bold mb-0" id="memoryGraphModalLabel">RAG Vector Memory Knowledge Graph</h5>
+                        <small class="text-slate-500 font-medium">Interactive visualization of ChromaDB memory embeddings &amp; campaign relationships</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-4">
+                <!-- Summary Metrics Bar -->
+                <div class="row g-3 mb-3">
+                    <div class="col-md-3">
+                        <div class="mem-stat-card">
+                            <span class="mem-stat-label"><i class="fas fa-brain text-primary me-1"></i>Memory Embeddings</span>
+                            <h4 class="mem-stat-val text-navy mb-0" id="graphTotalMemories">0</h4>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="mem-stat-card">
+                            <span class="mem-stat-label"><i class="fas fa-circle-nodes text-purple me-1"></i>Total Graph Nodes</span>
+                            <h4 class="mem-stat-val text-purple mb-0" id="graphTotalNodes">0</h4>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="mem-stat-card">
+                            <span class="mem-stat-label"><i class="fas fa-diagram-project text-success me-1"></i>Relationships / Edges</span>
+                            <h4 class="mem-stat-val text-success mb-0" id="graphTotalEdges">0</h4>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="mem-stat-card">
+                            <span class="mem-stat-label"><i class="fas fa-database text-warning me-1"></i>Vector Space Engine</span>
+                            <h4 class="mem-stat-val text-warning mb-0 fs-6 mt-1" id="graphVectorEngine">ChromaDB HNSW</h4>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Controls & Legend Bar -->
+                <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="text-slate-600 font-semibold fs-7"><i class="fas fa-filter me-1"></i>Filter Nodes:</span>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn btn-outline-secondary active" id="graphFilterAll">All Nodes</button>
+                            <button type="button" class="btn btn-outline-secondary" id="graphFilterCampaigns">Campaigns</button>
+                            <button type="button" class="btn btn-outline-secondary" id="graphFilterPlatforms">Platforms</button>
+                            <button type="button" class="btn btn-outline-secondary" id="graphFilterTones">Tones</button>
+                        </div>
+                    </div>
+
+                    <div class="d-flex align-items-center gap-3 fs-7 font-medium">
+                        <span class="d-flex align-items-center gap-1"><span class="legend-dot dot-core"></span>Core Bank</span>
+                        <span class="d-flex align-items-center gap-1"><span class="legend-dot dot-campaign"></span>Campaign</span>
+                        <span class="d-flex align-items-center gap-1"><span class="legend-dot dot-platform"></span>Platform</span>
+                        <span class="d-flex align-items-center gap-1"><span class="legend-dot dot-tone"></span>Tone</span>
+                    </div>
+                </div>
+
+                <!-- Main Graph Viewport & Inspector Split -->
+                <div class="row g-3">
+                    <div class="col-lg-8">
+                        <div class="graph-canvas-wrapper position-relative">
+                            <canvas id="memoryGraphCanvas" width="750" height="420"></canvas>
+                            <div class="graph-hint-badge">
+                                <i class="fas fa-hand-pointer me-1"></i>Click node to inspect memory &bull; Drag to move
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-4">
+                        <div class="node-inspector-card">
+                            <div class="inspector-header">
+                                <i class="fas fa-circle-info me-2 text-primary"></i>
+                                <span class="font-bold text-navy">Node Inspector</span>
+                            </div>
+                            <div id="inspectorContent" class="inspector-body">
+                                <div class="text-center py-5 text-slate-400">
+                                    <i class="fas fa-mouse-pointer fa-2x mb-2"></i>
+                                    <p class="mb-0">Click any graph node to inspect vector embedding details &amp; connections</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+            <div class="modal-footer memory-modal-footer-light">
+                <button type="button" class="btn-cancel-light" data-bs-dismiss="modal">Close Diagram</button>
             </div>
         </div>
     </div>

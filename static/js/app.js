@@ -15,6 +15,34 @@ $(document).ready(function () {
         }
     });
 
+    // ── Sidebar Toggle (Show / Hide) ──────────────────────────────────
+    function toggleSidebar(forceState) {
+        const sidebar = $('#sidebar');
+        const chatMain = $('.chat-main');
+        const isHidden = forceState !== undefined ? !forceState : !sidebar.hasClass('hidden');
+
+        if (isHidden) {
+            sidebar.addClass('hidden');
+            chatMain.addClass('expanded');
+            $('#sidebarToggleBtn').html('<i class="fas fa-indent"></i>').attr('title', 'Show Sidebar');
+            localStorage.setItem('sidebar_hidden', 'true');
+        } else {
+            sidebar.removeClass('hidden');
+            chatMain.removeClass('expanded');
+            $('#sidebarToggleBtn').html('<i class="fas fa-bars"></i>').attr('title', 'Hide Sidebar');
+            localStorage.setItem('sidebar_hidden', 'false');
+        }
+    }
+
+    $('#sidebarToggleBtn, #sidebarHideBtn').on('click', function () {
+        toggleSidebar();
+    });
+
+    // Restore saved sidebar preference
+    if (localStorage.getItem('sidebar_hidden') === 'true') {
+        toggleSidebar(false);
+    }
+
     // ── User Auth & Metrics Init ──────────────────────────────────────
     function loadCurrentUser() {
         return $.ajax({
@@ -40,6 +68,40 @@ $(document).ready(function () {
                 if (r.success) {
                     $('#headerTokens').text(Number(r.total_tokens || 0).toLocaleString());
                     $('#headerCost').text('$' + Number(r.total_cost_usd || 0).toFixed(4));
+
+                    const rem = Number(r.remaining_credits || 0).toFixed(2);
+                    const lim = Number(r.credit_limit || 10).toFixed(2);
+                    const used = Number(r.used_credits || 0).toFixed(2);
+
+                    $('#headerCreditsRemaining').text('$' + rem);
+                    $('#headerCreditLimit').text('$' + lim);
+                    $('#modalCreditLimit').text('$' + lim);
+                    $('#modalUsedCredits').text('$' + used);
+                    $('#modalRemainingCredits').text('$' + rem);
+
+                    // Update credit pill badge class
+                    const pill = $('#headerCreditPill');
+                    pill.removeClass('warn danger');
+                    if (r.remaining_credits <= 0) {
+                        pill.addClass('danger');
+                    } else if (r.remaining_credits < 2.0) {
+                        pill.addClass('warn');
+                    }
+
+                    // Show Admin Portal button if user is admin
+                    if (r.is_admin) {
+                        $('#headerAdminBtn').removeClass('d-none');
+                    } else {
+                        $('#headerAdminBtn').addClass('d-none');
+                    }
+
+                    // Show pending request notice if user has pending request
+                    if (r.has_pending_request && r.pending_request) {
+                        $('#pendingRequestNotice').removeClass('d-none');
+                        $('#pendingReqAmount').text('$' + Number(r.pending_request.requested_amount || 10).toFixed(2));
+                    } else {
+                        $('#pendingRequestNotice').addClass('d-none');
+                    }
                 }
             }
         });
@@ -296,13 +358,33 @@ $(document).ready(function () {
             },
             error: function (xhr) {
                 clearInterval(iv);
-                const errText = xhr.responseJSON?.error || 'Generation failed';
-                assistantElem.find('.assistant-card').html(`
-                    <div class="alert alert-danger mb-0">
-                        <i class="fas fa-exclamation-triangle me-2"></i><strong>Error:</strong> ${errText}
-                    </div>
-                `);
-                showToast('Generation error: ' + errText, 'error');
+                const res = xhr.responseJSON || {};
+                const errText = res.error || 'Generation failed';
+
+                if (xhr.status === 402 || res.credit_limit_exceeded) {
+                    assistantElem.find('.assistant-card').html(`
+                        <div class="alert alert-warning mb-0">
+                            <i class="fas fa-coins me-2"></i><strong>Credit Limit Reached:</strong> ${escapeHtml(errText)}
+                            <div class="mt-2">
+                                <button type="button" class="btn btn-sm btn-warning font-weight-bold" id="inlineRequestCreditBtn">
+                                    <i class="fas fa-plus-circle me-1"></i>Request Credit Extension
+                                </button>
+                            </div>
+                        </div>
+                    `);
+                    $('#inlineRequestCreditBtn').on('click', function () {
+                        openCreditRequestModal();
+                    });
+                    showToast('Credit limit reached. Please request a credit extension.', 'warning');
+                    openCreditRequestModal();
+                } else {
+                    assistantElem.find('.assistant-card').html(`
+                        <div class="alert alert-danger mb-0">
+                            <i class="fas fa-exclamation-triangle me-2"></i><strong>Error:</strong> ${escapeHtml(errText)}
+                        </div>
+                    `);
+                    showToast('Generation error: ' + errText, 'error');
+                }
             }
         });
     };
@@ -695,70 +777,119 @@ $(document).ready(function () {
     function renderHistory() {
         const isArchived = currentHistoryTab === 'archived';
         $.ajax({
-            url: `/api/history?limit=25&archived=${isArchived}`,
+            url: `/api/history?limit=30&archived=${isArchived}`,
             type: 'GET',
             success: function (r) {
                 const history = r.history || [];
+                window._allHistoryItems = history;
                 $('#historyCount').text(history.length);
 
-                if (!history.length) {
-                    const emptyText = isArchived ? 'No archived conversations' : 'No chat history yet';
-                    const emptySub = isArchived ? 'Archived campaigns will appear here' : 'Start a conversation to generate content';
-                    $('#historyList').html(`
-                        <div class="history-empty">
-                            <i class="fas ${isArchived ? 'fa-box-archive' : 'fa-comments'} fa-2x mb-3 text-slate-400"></i>
-                            <p>${emptyText}</p>
-                            <small>${emptySub}</small>
-                        </div>
-                    `);
-                    return;
+                const searchQuery = $('#sidebarSearchInput').val() || '';
+                if (searchQuery.trim()) {
+                    filterAndRenderHistory(searchQuery.trim(), isArchived);
+                } else {
+                    renderHistoryList(history, isArchived);
                 }
-
-                let html = '';
-                history.forEach(item => {
-                    const platforms = Array.isArray(item.platforms) ? item.platforms.join(', ') : (item.platforms || 'All');
-                    const date = item.timestamp || 'Recent';
-                    const actionBtn = isArchived
-                        ? `<button class="btn-unarchive-item" data-id="${item.id}" title="Unarchive / Restore conversation"><i class="fas fa-box-open"></i></button>`
-                        : `<button class="btn-archive-item" data-id="${item.id}" title="Archive conversation"><i class="fas fa-box-archive"></i></button>`;
-
-                    html += `
-                        <div class="history-item" data-id="${item.id}">
-                            <div class="history-item-content">
-                                <div class="history-item-title">${escapeHtml(item.story)}</div>
-                                <div class="history-item-meta">
-                                    <span class="history-item-badge">${escapeHtml(platforms)}</span>
-                                    <span>${date}</span>
-                                </div>
-                            </div>
-                            <div class="history-item-actions">
-                                ${actionBtn}
-                            </div>
-                        </div>
-                    `;
-                });
-                $('#historyList').html(html);
-
-                $('.history-item-content').on('click', function () {
-                    const id = $(this).closest('.history-item').data('id');
-                    openHistoryDetails(id);
-                });
-
-                $('.btn-archive-item').on('click', function (e) {
-                    e.stopPropagation();
-                    const id = $(this).data('id');
-                    archiveRun(id);
-                });
-
-                $('.btn-unarchive-item').on('click', function (e) {
-                    e.stopPropagation();
-                    const id = $(this).data('id');
-                    unarchiveRun(id);
-                });
             },
             error: function () {
                 $('#dbStatus').html('<i class="fas fa-circle fa-xs me-1 text-danger"></i>Disconnected');
             }
+        });
+    }
+
+    function filterAndRenderHistory(query, isArchived) {
+        if (!window._allHistoryItems) return;
+        const q = query.toLowerCase();
+        const filtered = window._allHistoryItems.filter(item => 
+            (item.story && item.story.toLowerCase().includes(q)) ||
+            (item.tone && item.tone.toLowerCase().includes(q)) ||
+            (Array.isArray(item.platforms) && item.platforms.join(' ').toLowerCase().includes(q))
+        );
+        renderHistoryList(filtered, isArchived);
+    }
+
+    $('#sidebarSearchInput').on('input', function () {
+        const q = $(this).val().toLowerCase().trim();
+        const isArchived = currentHistoryTab === 'archived';
+        if (q) {
+            filterAndRenderHistory(q, isArchived);
+        } else if (window._allHistoryItems) {
+            renderHistoryList(window._allHistoryItems, isArchived);
+        }
+    });
+
+    function renderHistoryList(items, isArchived) {
+        if (!items.length) {
+            const emptyText = isArchived ? 'No archived campaigns' : 'No chat history yet';
+            const emptySub = isArchived ? 'Archived items will appear here' : 'Start a conversation to generate content';
+            $('#historyList').html(`
+                <div class="history-empty">
+                    <div class="history-empty-icon"><i class="fas ${isArchived ? 'fa-box-archive' : 'fa-comments'}"></i></div>
+                    <p class="history-empty-title">${emptyText}</p>
+                    <small class="history-empty-sub">${emptySub}</small>
+                </div>
+            `);
+            return;
+        }
+
+        let html = '';
+        items.forEach(item => {
+            const platformList = Array.isArray(item.platforms) ? item.platforms : [];
+            const platformBadges = platformList.map(p => {
+                const icons = {
+                    facebook: '<i class="fab fa-facebook color-fb me-1"></i>',
+                    instagram: '<i class="fab fa-instagram color-ig me-1"></i>',
+                    linkedin: '<i class="fab fa-linkedin color-li me-1"></i>'
+                };
+                return `<span class="history-platform-tag">${icons[p] || ''}${p.toUpperCase()}</span>`;
+            }).join(' ');
+
+            const toneTag = item.tone && item.tone !== 'Auto' ? `<span class="history-tone-tag"><i class="fas fa-sliders me-1"></i>${escapeHtml(item.tone)}</span>` : '';
+            const dateStr = item.timestamp || 'Recent';
+
+            const actionBtn = isArchived
+                ? `<button class="btn-history-icon btn-unarchive-item" data-id="${item.id}" title="Restore conversation"><i class="fas fa-box-open"></i></button>`
+                : `<button class="btn-history-icon btn-archive-item" data-id="${item.id}" title="Archive conversation"><i class="fas fa-box-archive"></i></button>`;
+
+            html += `
+                <div class="history-card" data-id="${item.id}">
+                    <div class="history-card-header">
+                        <div class="history-card-title">${escapeHtml(item.story)}</div>
+                        <div class="history-card-actions">
+                            ${actionBtn}
+                        </div>
+                    </div>
+                    <div class="history-card-meta">
+                        <div class="history-tags-row">
+                            ${platformBadges}
+                            ${toneTag}
+                        </div>
+                        <span class="history-date">${dateStr}</span>
+                    </div>
+                </div>
+            `;
+        });
+
+        $('#historyList').html(html);
+
+        $('.history-card').on('click', function (e) {
+            if ($(e.target).closest('.history-card-actions').length) return;
+            $('.history-card').removeClass('active');
+            $(this).addClass('active');
+            const id = $(this).data('id');
+            openHistoryDetails(id);
+        });
+
+        $('.btn-archive-item').on('click', function (e) {
+            e.stopPropagation();
+            const id = $(this).data('id');
+            archiveRun(id);
+        });
+
+        $('.btn-unarchive-item').on('click', function (e) {
+            e.stopPropagation();
+            const id = $(this).data('id');
+            unarchiveRun(id);
         });
     }
 
@@ -879,4 +1010,641 @@ $(document).ready(function () {
         if (typeof val === 'object') val = val.percentage || val.value || val.score || 75;
         return Math.min(100, Math.max(0, parseInt(val) || 75));
     }
+
+    // ── Credit Extension Modal Handlers ────────────────────────────────
+    function openCreditRequestModal() {
+        loadUserUsageMetrics();
+        const modalElem = document.getElementById('creditRequestModal');
+        if (modalElem) {
+            const modal = bootstrap.Modal.getOrCreateInstance(modalElem);
+            modal.show();
+        }
+    }
+
+    $('#headerRequestCreditBtn').on('click', function () {
+        openCreditRequestModal();
+    });
+
+    $('#submitCreditReqBtn').on('click', function () {
+        const amount = parseFloat($('#requestedAmountInput').val());
+        const reason = $('#requestReasonInput').val().trim();
+
+        if (isNaN(amount) || amount <= 0) {
+            showToast('Please enter a valid requested amount greater than 0', 'warning');
+            return;
+        }
+
+        const btn = $(this);
+        btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Submitting...');
+
+        $.ajax({
+            url: '/api/credit-requests',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ requested_amount: amount, reason: reason }),
+            success: function (r) {
+                if (r.success) {
+                    showToast(r.message || 'Credit extension request submitted to admin!', 'success');
+                    const modalElem = document.getElementById('creditRequestModal');
+                    if (modalElem) {
+                        const modal = bootstrap.Modal.getInstance(modalElem);
+                        if (modal) modal.hide();
+                    }
+                    loadUserUsageMetrics();
+                } else {
+                    showToast('Submission failed: ' + (r.error || 'Unknown error'), 'error');
+                }
+            },
+            error: function (xhr) {
+                showToast('Error submitting request: ' + (xhr.responseJSON?.error || 'Failed'), 'error');
+            },
+            complete: function () {
+                btn.prop('disabled', false).html('<i class="fas fa-paper-plane me-1"></i>Submit Extension Request');
+            }
+        });
+    });
+
+    // ── Admin Portal Handlers ─────────────────────────────────────────
+    $('#headerAdminBtn').on('click', function () {
+        openAdminModal();
+    });
+
+    function openAdminModal() {
+        loadAdminUsers();
+        loadAdminRequests();
+        loadAdminCostHistory();
+        const modalElem = document.getElementById('adminModal');
+        if (modalElem) {
+            const modal = bootstrap.Modal.getOrCreateInstance(modalElem);
+            modal.show();
+        }
+    }
+
+    function loadAdminUsers() {
+        $.ajax({
+            url: '/api/admin/users',
+            type: 'GET',
+            success: function (r) {
+                if (!r.success) return;
+                const users = r.users || [];
+                window._allAdminUsers = users;
+                renderAdminUsersTable(users);
+            }
+        });
+    }
+
+    function renderAdminUsersTable(users) {
+        let html = '';
+        if (!users.length) {
+            html = '<tr><td colspan="9" class="text-center py-4 text-slate-400">No registered users found.</td></tr>';
+        } else {
+            users.forEach(u => {
+                const roleBadge = u.is_admin ? '<span class="badge bg-purple">Admin</span>' : '<span class="badge bg-secondary">User</span>';
+                const statusBadge = u.remaining_credits > 0 ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-danger">Exhausted</span>';
+                const pendingBadge = u.has_pending_request ? '<span class="badge bg-warning text-dark ms-1">Req Pending</span>' : '';
+
+                html += `
+                    <tr>
+                        <td>${u.id}</td>
+                        <td><strong>${escapeHtml(u.name)}</strong></td>
+                        <td>${escapeHtml(u.email)}</td>
+                        <td>${roleBadge}</td>
+                        <td><span class="font-monospace text-light">$${Number(u.credit_limit).toFixed(2)}</span></td>
+                        <td><span class="font-monospace text-warning">$${Number(u.used_credits).toFixed(4)}</span></td>
+                        <td><span class="font-monospace text-success">$${Number(u.remaining_credits).toFixed(4)}</span></td>
+                        <td>${statusBadge} ${pendingBadge}</td>
+                        <td>
+                            <div class="d-flex gap-1 align-items-center">
+                                <button type="button" class="btn-xs-credit btn-xs-credit-add" onclick="adminAddCredits(${u.id}, 10)">+$10</button>
+                                <button type="button" class="btn-xs-credit btn-xs-credit-add" onclick="adminAddCredits(${u.id}, 50)">+$50</button>
+                                <button type="button" class="btn btn-outline-info btn-xs" onclick="adminSetCustomCredit(${u.id}, ${u.credit_limit})">Set Limit</button>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+        $('#adminUsersTbody').html(html);
+    }
+
+    $('#adminUserSearchInput').on('input', function () {
+        const q = $(this).val().toLowerCase().trim();
+        if (!window._allAdminUsers) return;
+        if (!q) {
+            renderAdminUsersTable(window._allAdminUsers);
+        } else {
+            const filtered = window._allAdminUsers.filter(u => 
+                u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
+            );
+            renderAdminUsersTable(filtered);
+        }
+    });
+
+    window.adminAddCredits = function (userId, addAmount) {
+        $.ajax({
+            url: `/api/admin/users/${userId}/credits`,
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ add_amount: addAmount }),
+            success: function (r) {
+                if (r.success) {
+                    showToast(`Added +$${addAmount} credits to user!`, 'success');
+                    loadAdminUsers();
+                    loadUserUsageMetrics();
+                }
+            },
+            error: function (xhr) {
+                showToast('Failed to update credits: ' + (xhr.responseJSON?.error || 'Error'), 'error');
+            }
+        });
+    };
+
+    window.adminSetCustomCredit = function (userId, currentLimit) {
+        const input = prompt(`Set new credit limit ($USD) for User ID ${userId}:`, currentLimit);
+        if (input === null) return;
+        const newLimit = parseFloat(input);
+        if (isNaN(newLimit) || newLimit < 0) {
+            showToast('Invalid credit limit value', 'warning');
+            return;
+        }
+
+        $.ajax({
+            url: `/api/admin/users/${userId}/credits`,
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ new_limit: newLimit }),
+            success: function (r) {
+                if (r.success) {
+                    showToast(`Updated credit limit to $${newLimit.toFixed(2)}!`, 'success');
+                    loadAdminUsers();
+                    loadUserUsageMetrics();
+                }
+            },
+            error: function (xhr) {
+                showToast('Failed to update limit: ' + (xhr.responseJSON?.error || 'Error'), 'error');
+            }
+        });
+    };
+
+    function loadAdminRequests() {
+        $.ajax({
+            url: '/api/admin/credit-requests',
+            type: 'GET',
+            success: function (r) {
+                if (!r.success) return;
+                const requests = r.requests || [];
+                window._allAdminReqs = requests;
+                
+                const pendingCount = requests.filter(req => req.status === 'pending').length;
+                if (pendingCount > 0) {
+                    $('#adminPendingBadge').text(pendingCount).removeClass('d-none');
+                } else {
+                    $('#adminPendingBadge').addClass('d-none');
+                }
+
+                renderAdminReqTable(requests);
+            }
+        });
+    }
+
+    function renderAdminReqTable(reqs) {
+        let html = '';
+        if (!reqs.length) {
+            html = '<tr><td colspan="8" class="text-center py-4 text-slate-400">No credit extension requests found.</td></tr>';
+        } else {
+            reqs.forEach(req => {
+                let statusBadge = '<span class="badge bg-warning text-dark">Pending</span>';
+                if (req.status === 'approved') statusBadge = '<span class="badge bg-success">Approved</span>';
+                if (req.status === 'rejected') statusBadge = '<span class="badge bg-danger">Rejected</span>';
+
+                let actionBtns = '—';
+                if (req.status === 'pending') {
+                    actionBtns = `
+                        <div class="btn-group btn-group-sm">
+                            <button type="button" class="btn btn-success btn-xs" onclick="adminApproveReq(${req.id})">
+                                <i class="fas fa-check me-1"></i>Approve (+$${req.requested_amount})
+                            </button>
+                            <button type="button" class="btn btn-danger btn-xs" onclick="adminRejectReq(${req.id})">
+                                <i class="fas fa-times me-1"></i>Reject
+                            </button>
+                        </div>
+                    `;
+                }
+
+                html += `
+                    <tr>
+                        <td>#${req.id}</td>
+                        <td><strong>${escapeHtml(req.user_name)}</strong><br><small class="text-slate-400">${escapeHtml(req.user_email)}</small></td>
+                        <td>$${Number(req.current_limit).toFixed(2)}</td>
+                        <td><strong class="text-success">+$${Number(req.requested_amount).toFixed(2)}</strong></td>
+                        <td style="max-width: 250px;">${escapeHtml(req.reason || '—')}</td>
+                        <td>${req.created_at}</td>
+                        <td>${statusBadge}</td>
+                        <td>${actionBtns}</td>
+                    </tr>
+                `;
+            });
+        }
+        $('#adminReqTbody').html(html);
+    }
+
+    $('#filterReqAll').on('click', function () {
+        $(this).addClass('active').siblings().removeClass('active');
+        if (window._allAdminReqs) renderAdminReqTable(window._allAdminReqs);
+    });
+
+    $('#filterReqPending').on('click', function () {
+        $(this).addClass('active').siblings().removeClass('active');
+        if (window._allAdminReqs) {
+            renderAdminReqTable(window._allAdminReqs.filter(r => r.status === 'pending'));
+        }
+    });
+
+    window.adminApproveReq = function (reqId) {
+        $.ajax({
+            url: `/api/admin/credit-requests/${reqId}/approve`,
+            type: 'POST',
+            success: function (r) {
+                if (r.success) {
+                    showToast('Request approved! User credit limit increased.', 'success');
+                    loadAdminRequests();
+                    loadAdminUsers();
+                    loadUserUsageMetrics();
+                }
+            },
+            error: function (xhr) {
+                showToast('Approval failed: ' + (xhr.responseJSON?.error || 'Error'), 'error');
+            }
+        });
+    };
+
+    window.adminRejectReq = function (reqId) {
+        $.ajax({
+            url: `/api/admin/credit-requests/${reqId}/reject`,
+            type: 'POST',
+            success: function (r) {
+                if (r.success) {
+                    showToast('Request rejected.', 'info');
+                    loadAdminRequests();
+                }
+            },
+            error: function (xhr) {
+                showToast('Rejection failed: ' + (xhr.responseJSON?.error || 'Error'), 'error');
+            }
+        });
+    };
+
+    function loadAdminCostHistory() {
+        $.ajax({
+            url: '/api/admin/cost-history?limit=100',
+            type: 'GET',
+            success: function (r) {
+                if (!r.success) return;
+                const history = r.history || [];
+                const summary = r.summary || {};
+
+                $('#adminTotalSystemCost').text('$' + Number(summary.total_system_cost_usd || 0).toFixed(4));
+                $('#adminTotalSystemTokens').text(Number(summary.total_tokens || 0).toLocaleString());
+
+                let html = '';
+                if (!history.length) {
+                    html = '<tr><td colspan="7" class="text-center py-4 text-slate-400">No generation history recorded.</td></tr>';
+                } else {
+                    history.forEach(h => {
+                        html += `
+                            <tr>
+                                <td>#${h.id}</td>
+                                <td>${escapeHtml(h.user_email)}</td>
+                                <td>${h.timestamp}</td>
+                                <td style="max-width: 280px;" class="text-truncate" title="${escapeAttr(h.story)}">${escapeHtml(h.story)}</td>
+                                <td><span class="badge bg-secondary me-1">${h.tone || 'Auto'}</span> <small class="text-slate-400">${(h.platforms || []).join(', ')}</small></td>
+                                <td><span class="font-monospace">${Number(h.tokens_used).toLocaleString()}</span></td>
+                                <td><strong class="text-warning font-monospace">$${Number(h.cost_usd).toFixed(6)}</strong></td>
+                            </tr>
+                        `;
+                    });
+                }
+                $('#adminCostHistoryTbody').html(html);
+            }
+        });
+    }
+
+    // ── RAG Memory Knowledge Graph Visualizer ─────────────────────────────
+    let graphAnimationId = null;
+    let graphNodes = [];
+    let graphEdges = [];
+    let graphSelectedNode = null;
+    let graphDraggedNode = null;
+
+    $('#openMemoryGraphBtn, #memoryIndicatorBadge').on('click', function () {
+        openMemoryGraphModal();
+    });
+
+    function openMemoryGraphModal() {
+        const modalElem = document.getElementById('memoryGraphModal');
+        if (modalElem) {
+            const modal = bootstrap.Modal.getOrCreateInstance(modalElem);
+            modal.show();
+            loadMemoryGraphData();
+        }
+    }
+
+    function loadMemoryGraphData() {
+        $.ajax({
+            url: '/api/memory/graph',
+            type: 'GET',
+            success: function (r) {
+                if (!r.success) return;
+                const summary = r.summary || {};
+                $('#graphTotalMemories').text(summary.total_memories || 0);
+                $('#graphTotalNodes').text(summary.total_nodes || 0);
+                $('#graphTotalEdges').text(summary.total_edges || 0);
+                $('#graphVectorEngine').text(summary.vector_space || 'ChromaDB HNSW');
+
+                initMemoryGraphCanvas(r.nodes || [], r.edges || []);
+            }
+        });
+    }
+
+    function initMemoryGraphCanvas(rawNodes, rawEdges) {
+        const canvas = document.getElementById('memoryGraphCanvas');
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        const width = canvas.width;
+        const height = canvas.height;
+
+        const colors = {
+            core: '#4f46e5',
+            campaign: '#2563eb',
+            platform: '#8b5cf6',
+            tone: '#f59e0b'
+        };
+        const radii = {
+            core: 22,
+            campaign: 14,
+            platform: 16,
+            tone: 14
+        };
+
+        graphNodes = rawNodes.map((n, idx) => {
+            let x, y;
+            if (n.type === 'core') {
+                x = width / 2;
+                y = height / 2;
+            } else {
+                const angle = (idx / rawNodes.length) * Math.PI * 2;
+                const radius = 110 + Math.random() * 90;
+                x = width / 2 + Math.cos(angle) * radius;
+                y = height / 2 + Math.sin(angle) * radius;
+            }
+            return {
+                ...n,
+                x: x,
+                y: y,
+                vx: 0,
+                vy: 0,
+                color: colors[n.type] || '#64748b',
+                radius: radii[n.type] || 12
+            };
+        });
+
+        const nodeMap = {};
+        graphNodes.forEach(n => nodeMap[n.id] = n);
+
+        graphEdges = rawEdges.map(e => ({
+            source: nodeMap[e.from],
+            target: nodeMap[e.to],
+            label: e.label,
+            type: e.type
+        })).filter(e => e.source && e.target);
+
+        const coreNode = graphNodes.find(n => n.type === 'core');
+        selectGraphNode(coreNode || graphNodes[0]);
+
+        let isDragging = false;
+        let dragOffsetX = 0;
+        let dragOffsetY = 0;
+
+        canvas.onmousedown = function (e) {
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            for (let i = graphNodes.length - 1; i >= 0; i--) {
+                const n = graphNodes[i];
+                const dx = mouseX - n.x;
+                const dy = mouseY - n.y;
+                if (dx * dx + dy * dy <= n.radius * n.radius) {
+                    graphDraggedNode = n;
+                    isDragging = true;
+                    dragOffsetX = dx;
+                    dragOffsetY = dy;
+                    selectGraphNode(n);
+                    break;
+                }
+            }
+        };
+
+        canvas.onmousemove = function (e) {
+            if (isDragging && graphDraggedNode) {
+                const rect = canvas.getBoundingClientRect();
+                graphDraggedNode.x = e.clientX - rect.left - dragOffsetX;
+                graphDraggedNode.y = e.clientY - rect.top - dragOffsetY;
+            }
+        };
+
+        canvas.onmouseup = function () {
+            isDragging = false;
+            graphDraggedNode = null;
+        };
+
+        $('#graphFilterAll').off('click').on('click', function () {
+            $(this).addClass('active').siblings().removeClass('active');
+            filterGraphType(null);
+        });
+        $('#graphFilterCampaigns').off('click').on('click', function () {
+            $(this).addClass('active').siblings().removeClass('active');
+            filterGraphType('campaign');
+        });
+        $('#graphFilterPlatforms').off('click').on('click', function () {
+            $(this).addClass('active').siblings().removeClass('active');
+            filterGraphType('platform');
+        });
+        $('#graphFilterTones').off('click').on('click', function () {
+            $(this).addClass('active').siblings().removeClass('active');
+            filterGraphType('tone');
+        });
+
+        function filterGraphType(targetType) {
+            graphNodes.forEach(n => {
+                if (!targetType || n.type === 'core' || n.type === targetType) {
+                    n.hidden = false;
+                } else {
+                    n.hidden = true;
+                }
+            });
+        }
+
+        if (graphAnimationId) cancelAnimationFrame(graphAnimationId);
+
+        function stepPhysics() {
+            ctx.clearRect(0, 0, width, height);
+
+            for (let i = 0; i < graphNodes.length; i++) {
+                for (let j = i + 1; j < graphNodes.length; j++) {
+                    const n1 = graphNodes[i];
+                    const n2 = graphNodes[j];
+                    if (n1.hidden || n2.hidden) continue;
+
+                    const dx = n2.x - n1.x;
+                    const dy = n2.y - n1.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                    const minDist = n1.radius + n2.radius + 35;
+
+                    if (dist < minDist) {
+                        const force = (minDist - dist) / dist * 0.15;
+                        const fx = dx * force;
+                        const fy = dy * force;
+                        if (n1 !== graphDraggedNode && n1.type !== 'core') { n1.x -= fx; n1.y -= fy; }
+                        if (n2 !== graphDraggedNode && n2.type !== 'core') { n2.x += fx; n2.y += fy; }
+                    }
+                }
+            }
+
+            graphEdges.forEach(e => {
+                if (e.source.hidden || e.target.hidden) return;
+                const dx = e.target.x - e.source.x;
+                const dy = e.target.y - e.source.y;
+                const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+                const targetDist = 110;
+                const force = (dist - targetDist) * 0.005;
+
+                const fx = (dx / dist) * force;
+                const fy = (dy / dist) * force;
+
+                if (e.source !== graphDraggedNode && e.source.type !== 'core') {
+                    e.source.x += fx; e.source.y += fy;
+                }
+                if (e.target !== graphDraggedNode && e.target.type !== 'core') {
+                    e.target.x -= fx; e.target.y -= fy;
+                }
+
+                ctx.beginPath();
+                ctx.moveTo(e.source.x, e.source.y);
+                ctx.lineTo(e.target.x, e.target.y);
+                ctx.strokeStyle = (graphSelectedNode && (e.source === graphSelectedNode || e.target === graphSelectedNode))
+                    ? '#2563eb' : '#cbd5e1';
+                ctx.lineWidth = (graphSelectedNode && (e.source === graphSelectedNode || e.target === graphSelectedNode)) ? 2.5 : 1.2;
+                ctx.stroke();
+            });
+
+            graphNodes.forEach(n => {
+                if (n.hidden) return;
+
+                n.x = Math.max(n.radius, Math.min(width - n.radius, n.x));
+                n.y = Math.max(n.radius, Math.min(height - n.radius, n.y));
+
+                if (n === graphSelectedNode) {
+                    ctx.beginPath();
+                    ctx.arc(n.x, n.y, n.radius + 7, 0, Math.PI * 2);
+                    ctx.fillStyle = 'rgba(37, 99, 235, 0.25)';
+                    ctx.fill();
+
+                    ctx.beginPath();
+                    ctx.arc(n.x, n.y, n.radius + 3, 0, Math.PI * 2);
+                    ctx.strokeStyle = '#2563eb';
+                    ctx.lineWidth = 2;
+                    ctx.stroke();
+                }
+
+                ctx.beginPath();
+                ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
+                ctx.fillStyle = n.color;
+                ctx.fill();
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#ffffff';
+                ctx.stroke();
+
+                ctx.font = '600 11px Inter, sans-serif';
+                ctx.fillStyle = '#1e293b';
+                ctx.textAlign = 'center';
+                ctx.fillText(n.label, n.x, n.y + n.radius + 14);
+            });
+
+            graphAnimationId = requestAnimationFrame(stepPhysics);
+        }
+
+        stepPhysics();
+    }
+
+    function selectGraphNode(node) {
+        if (!node) return;
+        graphSelectedNode = node;
+
+        let html = `
+            <div class="inspector-section mb-3">
+                <span class="badge badge-node-type type-${node.type} mb-2">${node.type.toUpperCase()} NODE</span>
+                <h6 class="font-bold text-navy mb-1">${escapeHtml(node.label)}</h6>
+                <small class="text-slate-500 font-monospace">Node ID: ${escapeHtml(node.id)}</small>
+            </div>
+        `;
+
+        if (node.type === 'campaign') {
+            html += `
+                <div class="inspector-meta-box mb-3">
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-slate-500">Run ID:</span>
+                        <strong class="text-navy">#${node.run_id}</strong>
+                    </div>
+                    <div class="d-flex justify-content-between mb-1">
+                        <span class="text-slate-500">Tone:</span>
+                        <span class="badge bg-warning text-dark">${escapeHtml(node.tone)}</span>
+                    </div>
+                    <div class="d-flex justify-content-between">
+                        <span class="text-slate-500">Target Platforms:</span>
+                        <span class="badge bg-primary">${escapeHtml(node.platforms || 'FB, IG, LI')}</span>
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="font-semibold text-slate-700 fs-7 mb-1 d-block">Indexed Vector Document Snippet:</label>
+                    <div class="doc-snippet-box">${escapeHtml(node.full_text || '—')}</div>
+                </div>
+            `;
+        } else if (node.type === 'core') {
+            html += `
+                <div class="inspector-meta-box mb-3">
+                    <p class="small text-slate-600 mb-0">Central RAG vector store holding brand embeddings in ChromaDB. Provides semantic retrieval for agent multi-turn generation.</p>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="inspector-meta-box mb-3">
+                    <p class="small text-slate-600 mb-0">Connected entity node representing shared ${node.type} attribute across campaign memory items.</p>
+                </div>
+            `;
+        }
+
+        const connected = graphEdges
+            .filter(e => e.source === node || e.target === node)
+            .map(e => e.source === node ? e.target : e.source);
+
+        if (connected.length) {
+            html += `
+                <div>
+                    <label class="font-semibold text-slate-700 fs-7 mb-1 d-block">Connected Nodes (${connected.length}):</label>
+                    <div class="d-flex gap-1 flex-wrap">
+                        ${connected.map(c => `<span class="connected-node-tag" onclick="selectGraphNodeById('${c.id}')">${escapeHtml(c.label)}</span>`).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        $('#inspectorContent').html(html);
+    }
+
+    window.selectGraphNodeById = function (id) {
+        const target = graphNodes.find(n => n.id === id);
+        if (target) selectGraphNode(target);
+    };
 });

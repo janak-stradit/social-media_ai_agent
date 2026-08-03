@@ -1,11 +1,19 @@
-import chromadb
-from chromadb.config import Settings
+try:
+    import chromadb
+    from chromadb.config import Settings
+    HAS_CHROMA = True
+except ImportError:
+    HAS_CHROMA = False
 from config import Config
 import json
 import uuid
 
 class MemoryService:
     def __init__(self):
+        if not HAS_CHROMA:
+            print("[MemoryService] chromadb not installed. Running in RAG memory DB fallback mode.")
+            self.enabled = False
+            return
         try:
             self.client = chromadb.PersistentClient(
                 path=Config.CHROMA_PERSIST_DIR,
@@ -128,3 +136,159 @@ class MemoryService:
             lines.append(f"Memory #{idx}: {item['content']}")
         lines.append("Instructions: Use the brand voice, themes, and winning patterns above for consistency.\n--- END MEMORY CONTEXT ---\n")
         return "\n".join(lines)
+
+    def get_memory_graph_data(self, user_id=None):
+        """Retrieve vector memory documents and build graph nodes + edge connections."""
+        nodes = [
+            {
+                "id": "core_rag",
+                "label": "Brand RAG Memory Core",
+                "type": "core",
+                "group": "core",
+                "info": "Central ChromaDB Vector Store holding brand embeddings"
+            }
+        ]
+        edges = []
+
+        # Static entity nodes for platforms
+        platforms_map = {
+            "facebook": {"id": "plat_facebook", "label": "Facebook", "type": "platform", "group": "platform"},
+            "instagram": {"id": "plat_instagram", "label": "Instagram", "type": "platform", "group": "platform"},
+            "linkedin": {"id": "plat_linkedin", "label": "LinkedIn", "type": "platform", "group": "platform"}
+        }
+        added_nodes = {"core_rag"}
+
+        for p_id, p_data in platforms_map.items():
+            nodes.append(p_data)
+            added_nodes.add(p_data["id"])
+
+        fetched_count = 0
+        if self.enabled:
+            try:
+                where_filter = {"user_id": str(user_id)} if user_id else None
+                kwargs = {"limit": 50}
+                if where_filter:
+                    kwargs["where"] = where_filter
+
+                records = self.collection.get(**kwargs)
+                ids = records.get("ids", [])
+                documents = records.get("documents", [])
+                metadatas = records.get("metadatas", [])
+
+                fetched_count = len(ids)
+
+                for doc_id, doc_text, meta in zip(ids, documents, metadatas):
+                    meta = meta or {}
+                    run_id = meta.get("run_id") or doc_id
+                    tone = meta.get("tone") or "Auto"
+                    platforms_str = meta.get("platforms") or ""
+
+                    # Excerpt story
+                    story_excerpt = doc_text.split("\n")[0].replace("Brief: ", "")
+                    if len(story_excerpt) > 40:
+                        story_excerpt = story_excerpt[:40] + "..."
+
+                    node_id = f"mem_{doc_id}"
+                    if node_id not in added_nodes:
+                        nodes.append({
+                            "id": node_id,
+                            "label": story_excerpt or f"Run #{run_id}",
+                            "type": "campaign",
+                            "group": "campaign",
+                            "full_text": doc_text,
+                            "tone": tone,
+                            "platforms": platforms_str,
+                            "run_id": run_id
+                        })
+                        added_nodes.add(node_id)
+                        edges.append({"from": "core_rag", "to": node_id, "label": "stores", "type": "memory"})
+
+                    # Connect campaign to tone node
+                    if tone and tone != "Auto":
+                        tone_node_id = f"tone_{tone.lower()}"
+                        if tone_node_id not in added_nodes:
+                            nodes.append({
+                                "id": tone_node_id,
+                                "label": f"{tone.capitalize()} Tone",
+                                "type": "tone",
+                                "group": "tone"
+                            })
+                            added_nodes.add(tone_node_id)
+                        edges.append({"from": node_id, "to": tone_node_id, "label": "uses_tone", "type": "tone"})
+
+                    # Connect campaign to platform nodes
+                    if platforms_str:
+                        p_list = [p.strip().lower() for p in platforms_str.split(",") if p.strip()]
+                        for p in p_list:
+                            if p in platforms_map:
+                                edges.append({"from": node_id, "to": platforms_map[p]["id"], "label": "targets", "type": "platform"})
+
+            except Exception as err:
+                print(f"[MemoryService] get_memory_graph_data warning: {err}")
+
+        # Fallback to database history runs if ChromaDB collection has no records or disabled
+        if fetched_count == 0:
+            try:
+                from db import get_all_history
+                db_runs = get_all_history(limit=30, user_id=user_id)
+                fetched_count = len(db_runs)
+
+                for run in db_runs:
+                    story = run.get("story", "")
+                    run_id = run.get("id")
+                    tone = run.get("tone") or "Auto"
+                    platforms = run.get("platforms") or []
+                    platforms_str = ",".join(platforms) if isinstance(platforms, list) else str(platforms)
+
+                    story_excerpt = story[:40] + "..." if len(story) > 40 else story
+
+                    node_id = f"mem_db_{run_id}"
+                    if node_id not in added_nodes:
+                        nodes.append({
+                            "id": node_id,
+                            "label": story_excerpt or f"Run #{run_id}",
+                            "type": "campaign",
+                            "group": "campaign",
+                            "full_text": f"Brief: {story}\nTone: {tone}\nPlatforms: {platforms_str}",
+                            "tone": tone,
+                            "platforms": platforms_str,
+                            "run_id": run_id
+                        })
+                        added_nodes.add(node_id)
+                        edges.append({"from": "core_rag", "to": node_id, "label": "stores", "type": "memory"})
+
+                    if tone and tone != "Auto":
+                        tone_node_id = f"tone_{tone.lower()}"
+                        if tone_node_id not in added_nodes:
+                            nodes.append({
+                                "id": tone_node_id,
+                                "label": f"{tone.capitalize()} Tone",
+                                "type": "tone",
+                                "group": "tone"
+                            })
+                            added_nodes.add(tone_node_id)
+                        edges.append({"from": node_id, "to": tone_node_id, "label": "uses_tone", "type": "tone"})
+
+                    if platforms:
+                        for p in platforms:
+                            p_key = p.strip().lower()
+                            if p_key in platforms_map:
+                                edges.append({"from": node_id, "to": platforms_map[p_key]["id"], "label": "targets", "type": "platform"})
+
+            except Exception as db_err:
+                print(f"[MemoryService] DB history fallback warning: {db_err}")
+
+        # Summary statistics
+        summary = {
+            "total_memories": fetched_count,
+            "vector_space": "ChromaDB Cosine HNSW" if self.enabled else "RAG DB Memory Store",
+            "total_nodes": len(nodes),
+            "total_edges": len(edges)
+        }
+
+        return {
+            "success": True,
+            "nodes": nodes,
+            "edges": edges,
+            "summary": summary
+        }

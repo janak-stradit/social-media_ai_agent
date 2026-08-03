@@ -10,8 +10,17 @@ $(function () {
         $('#authSubmit').html(
             mode === 'register'
                 ? '<i class="fas fa-user-plus me-2"></i>Create Account'
-                : '<i class="fas fa-right-to-bracket me-2"></i>Sign In'
+                : '<i class="fas fa-arrow-right-to-bracket me-2"></i>Sign In to Workspace'
         );
+    });
+
+    $('#fillAdminCredentialsBtn').on('click', function () {
+        if (mode !== 'login') {
+            $('.auth-tab[data-mode="login"]').trigger('click');
+        }
+        $('#authEmail').val('admin@contentai.com');
+        $('#authPassword').val('admin123');
+        $('#authError').addClass('d-none');
     });
 
     $('#authForm').on('submit', function (e) {

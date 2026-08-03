@@ -14,6 +14,8 @@ def _user_payload(user) -> dict:
         "name": user.name,
         "email": user.email,
         "initials": initials,
+        "is_admin": bool(getattr(user, "is_admin", False)),
+        "credit_limit": round(float(getattr(user, "credit_limit", 10.0) or 10.0), 2),
     }
 
 

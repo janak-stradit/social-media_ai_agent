@@ -9,40 +9,59 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
 </head>
-<body class="auth-body">
+<body class="auth-body-light">
 <div class="auth-shell">
-    <div class="auth-card">
+    <div class="auth-card-light">
+        <!-- Brand Header -->
         <div class="auth-brand">
             <div class="brand-logo"><i class="fas fa-robot"></i></div>
             <div>
                 <h1 class="auth-title">ContentAI</h1>
-                <p class="auth-subtitle">Sign in to access your content workspace</p>
+                <p class="auth-subtitle">Enterprise Autonomous Social Media Studio</p>
             </div>
         </div>
 
+        <!-- Auth Mode Tabs -->
         <div class="auth-tabs">
-            <button type="button" class="auth-tab active" data-mode="login">Sign In</button>
-            <button type="button" class="auth-tab" data-mode="register">Create Account</button>
+            <button type="button" class="auth-tab active" data-mode="login"><i class="fas fa-right-to-bracket me-1"></i>Sign In</button>
+            <button type="button" class="auth-tab" data-mode="register"><i class="fas fa-user-plus me-1"></i>Create Account</button>
         </div>
 
+        <!-- Form -->
         <form id="authForm" class="auth-form">
             <div id="nameField" class="d-none">
                 <label class="auth-label" for="authName">Full Name</label>
-                <input id="authName" type="text" class="auth-input" placeholder="Your name">
+                <div class="auth-input-group">
+                    <i class="fas fa-user auth-input-icon"></i>
+                    <input id="authName" type="text" class="auth-input" placeholder="e.g. Alex Morgan">
+                </div>
             </div>
+            
             <div>
-                <label class="auth-label" for="authEmail">Email</label>
-                <input id="authEmail" type="email" class="auth-input" placeholder="you@company.com" required>
+                <label class="auth-label" for="authEmail">Work Email</label>
+                <div class="auth-input-group">
+                    <i class="fas fa-envelope auth-input-icon"></i>
+                    <input id="authEmail" type="email" class="auth-input" placeholder="name@company.com" required>
+                </div>
             </div>
+
             <div>
                 <label class="auth-label" for="authPassword">Password</label>
-                <input id="authPassword" type="password" class="auth-input" placeholder="Minimum 6 characters" required>
+                <div class="auth-input-group">
+                    <i class="fas fa-lock auth-input-icon"></i>
+                    <input id="authPassword" type="password" class="auth-input" placeholder="••••••••" required>
+                </div>
             </div>
+
             <div id="authError" class="auth-error d-none"></div>
-            <button id="authSubmit" type="submit" class="btn-primary-ent w-100">
-                <i class="fas fa-right-to-bracket me-2"></i>Sign In
+
+            <button id="authSubmit" type="submit" class="btn-auth-submit">
+                <i class="fas fa-arrow-right-to-bracket me-2"></i>Sign In to Workspace
             </button>
         </form>
+
+        <!-- Admin Quick Fill Box -->
+
     </div>
 </div>
 

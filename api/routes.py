@@ -2,7 +2,7 @@ from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 import os
 import uuid
-from auth.utils import get_current_user_id, login_required_api
+from auth.utils import get_current_user_id, login_required_api, admin_required_api
 from agents.story_agent import StoryAgent
 from agents.vision_agent import VisionAgent
 from agents.caption_agent import CaptionAgent
@@ -12,7 +12,12 @@ from agents.reviewer_agent import ReviewerAgent
 from services.memory_service import MemoryService
 
 try:
-    from db import save_run, get_history, get_run_by_id, append_run_media, get_user_usage_stats, archive_run, unarchive_run
+    from db import (
+        save_run, get_history, get_run_by_id, append_run_media, get_user_usage_stats,
+        archive_run, unarchive_run, create_credit_request, get_user_credit_requests,
+        get_all_credit_requests, approve_credit_request, reject_credit_request,
+        update_user_credit_limit, get_all_users_credit_summary, get_global_cost_history
+    )
     DB_AVAILABLE = True
 except Exception as _db_err:
     DB_AVAILABLE = False
@@ -75,6 +80,17 @@ def health_check():
         'service': 'Social Media AI Agent',
         'version': '3.0.0'
     })
+
+@api_bp.route('/memory/graph', methods=['GET'])
+@login_required_api
+def get_memory_graph():
+    """Return nodes, edges, and vector space metrics for interactive RAG Memory Graph Diagram."""
+    user_id = get_current_user_id()
+    try:
+        data = memory_service.get_memory_graph_data(user_id=user_id)
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({'error': str(e), 'success': False}), 500
 
 @api_bp.route('/metrics/usage', methods=['GET'])
 @login_required_api
@@ -163,6 +179,23 @@ def generate_content():
     include_strategy = data.get('include_strategy', True)
     previous_context = data.get('previous_context')
     user_id = get_current_user_id()
+
+    # Credit Limit Check
+    if DB_AVAILABLE and user_id:
+        try:
+            stats = get_user_usage_stats(user_id)
+            if stats.get("remaining_credits", 0.0) <= 0.0:
+                limit_val = stats.get("credit_limit", 10.0)
+                return jsonify({
+                    'error': f'Credit limit reached (${limit_val:.2f}). Please request a credit extension from admin.',
+                    'credit_limit_exceeded': True,
+                    'credit_limit': limit_val,
+                    'used_credits': stats.get("used_credits", 0.0),
+                    'remaining_credits': 0.0,
+                    'has_pending_request': stats.get("has_pending_request", False)
+                }), 402
+        except Exception as _cred_err:
+            current_app.logger.warning(f"[Credits] Check error: {_cred_err}")
 
     # Multi-Turn Refinement Context Integration
     if previous_context:
@@ -510,6 +543,23 @@ def generate_media():
     image_path = data.get('image_path')
     user_id    = get_current_user_id()
 
+    # Credit Limit Check
+    if DB_AVAILABLE and user_id:
+        try:
+            stats = get_user_usage_stats(user_id)
+            if stats.get("remaining_credits", 0.0) <= 0.0:
+                limit_val = stats.get("credit_limit", 10.0)
+                return jsonify({
+                    'error': f'Credit limit reached (${limit_val:.2f}). Please request a credit extension from admin.',
+                    'credit_limit_exceeded': True,
+                    'credit_limit': limit_val,
+                    'used_credits': stats.get("used_credits", 0.0),
+                    'remaining_credits': 0.0,
+                    'has_pending_request': stats.get("has_pending_request", False)
+                }), 402
+        except Exception as _cred_err:
+            current_app.logger.warning(f"[Credits] Check error: {_cred_err}")
+
     if not caption:
         return jsonify({'error': 'caption is required'}), 400
     if platform not in ['facebook', 'instagram', 'linkedin']:
@@ -541,5 +591,170 @@ def generate_media():
 
         return jsonify(result)
 
+    except Exception as e:
+        return jsonify({'error': str(e), 'success': False}), 500
+
+
+# ── Credit Extension Requests Endpoints (User Side) ─────────────────────────
+
+@api_bp.route('/credit-requests', methods=['POST'])
+@login_required_api
+def request_credit_extension():
+    """Submit a credit extension request to the admin."""
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+
+    user_id = get_current_user_id()
+    data = request.get_json() or {}
+    
+    try:
+        requested_amount = float(data.get('requested_amount', 10.0))
+        if requested_amount <= 0:
+            return jsonify({'error': 'Requested amount must be greater than 0'}), 400
+    except (ValueError, TypeError):
+        return jsonify({'error': 'Invalid requested amount'}), 400
+
+    reason = (data.get('reason') or '').strip()
+
+    try:
+        res = create_credit_request(user_id=user_id, requested_amount=requested_amount, reason=reason)
+        return jsonify({'success': True, 'credit_request': res, 'message': 'Credit extension request submitted to admin for approval.'})
+    except Exception as e:
+        return jsonify({'error': str(e), 'success': False}), 500
+
+
+@api_bp.route('/credit-requests/my', methods=['GET'])
+@login_required_api
+def get_my_credit_requests():
+    """Get list of current user's credit extension requests."""
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+
+    user_id = get_current_user_id()
+    try:
+        requests_list = get_user_credit_requests(user_id)
+        return jsonify({'success': True, 'requests': requests_list})
+    except Exception as e:
+        return jsonify({'error': str(e), 'success': False}), 500
+
+
+# ── Admin Credit & Cost Management Endpoints ───────────────────────────────
+
+@api_bp.route('/admin/users', methods=['GET'])
+@login_required_api
+@admin_required_api
+def admin_get_all_users():
+    """List all users with credit limits, used credits, remaining credits, and roles."""
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        users = get_all_users_credit_summary()
+        return jsonify({'success': True, 'users': users})
+    except Exception as e:
+        return jsonify({'error': str(e), 'success': False}), 500
+
+
+@api_bp.route('/admin/users/<int:target_user_id>/credits', methods=['POST'])
+@login_required_api
+@admin_required_api
+def admin_update_user_credits(target_user_id):
+    """Admin endpoint to add or set credits for a specific user."""
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+
+    data = request.get_json() or {}
+    new_limit = data.get('new_limit')
+    add_amount = data.get('add_amount')
+
+    if new_limit is None and add_amount is None:
+        return jsonify({'error': 'Specify either new_limit or add_amount'}), 400
+
+    try:
+        res = update_user_credit_limit(
+            user_id=target_user_id,
+            new_limit=float(new_limit) if new_limit is not None else None,
+            add_amount=float(add_amount) if add_amount is not None else None
+        )
+        if not res:
+            return jsonify({'error': 'User not found'}), 404
+
+        return jsonify({'success': True, 'user': res, 'message': 'User credit limit updated successfully.'})
+    except Exception as e:
+        return jsonify({'error': str(e), 'success': False}), 500
+
+
+@api_bp.route('/admin/credit-requests', methods=['GET'])
+@login_required_api
+@admin_required_api
+def admin_get_credit_requests():
+    """List all credit extension requests across all users."""
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        status_filter = request.args.get('status')
+        requests_list = get_all_credit_requests(status_filter=status_filter)
+        return jsonify({'success': True, 'requests': requests_list})
+    except Exception as e:
+        return jsonify({'error': str(e), 'success': False}), 500
+
+
+@api_bp.route('/admin/credit-requests/<int:req_id>/approve', methods=['POST'])
+@login_required_api
+@admin_required_api
+def admin_approve_request(req_id):
+    """Approve a pending credit extension request."""
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        res = approve_credit_request(req_id)
+        if not res:
+            return jsonify({'error': 'Pending request not found'}), 404
+
+        return jsonify({'success': True, 'result': res, 'message': 'Credit extension approved and limit increased.'})
+    except Exception as e:
+        return jsonify({'error': str(e), 'success': False}), 500
+
+
+@api_bp.route('/admin/credit-requests/<int:req_id>/reject', methods=['POST'])
+@login_required_api
+@admin_required_api
+def admin_reject_request(req_id):
+    """Reject a pending credit extension request."""
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        res = reject_credit_request(req_id)
+        if not res:
+            return jsonify({'error': 'Pending request not found'}), 404
+
+        return jsonify({'success': True, 'result': res, 'message': 'Credit extension request rejected.'})
+    except Exception as e:
+        return jsonify({'error': str(e), 'success': False}), 500
+
+
+@api_bp.route('/admin/cost-history', methods=['GET'])
+@login_required_api
+@admin_required_api
+def admin_get_global_cost_history():
+    """List global cost history across all users."""
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    try:
+        limit = min(int(request.args.get('limit', 100)), 500)
+        history = get_global_cost_history(limit=limit)
+        
+        # Calculate total aggregate cost across history
+        total_system_cost = sum(h.get('cost_usd', 0.0) for h in history)
+        total_tokens = sum(h.get('tokens_used', 0) for h in history)
+        
+        return jsonify({
+            'success': True,
+            'history': history,
+            'count': len(history),
+            'summary': {
+                'total_system_cost_usd': round(total_system_cost, 6),
+                'total_tokens': total_tokens
+            }
+        })
     except Exception as e:
         return jsonify({'error': str(e), 'success': False}), 500
