@@ -18,6 +18,9 @@ class Config:
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
     Z_AI_API_KEY = os.getenv('Z_AI_API_KEY')
     Z_AI_BASE_URL = os.getenv('Z_AI_BASE_URL', 'https://api.z.ai/api/paas/v4/')
+    GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+    GEMINI_VIDEO_MODEL = os.getenv('GEMINI_VIDEO_MODEL', 'veo-3.1-generate-preview')
+    GENERATE_NATIVE_AUDIO = os.getenv('GENERATE_NATIVE_AUDIO', 'true').lower() == 'true'
     
     # AWS Bedrock Config
     AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')

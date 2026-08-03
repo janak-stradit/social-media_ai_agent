@@ -43,12 +43,31 @@ class HashtagAgent:
 
         result, usage = self.llm.generate_json(system_prompt, user_prompt, return_usage=True)
         
+        if not isinstance(result, dict):
+            result = {}
+
+        hashtags_list = result.get('hashtags')
+        if not isinstance(hashtags_list, list) or not hashtags_list:
+            themes = story_analysis.get('themes', ['Marketing', 'AI']) if isinstance(story_analysis, dict) else ['Marketing', 'AI']
+            clean_themes = [f"#{str(t).replace(' ', '').replace('-', '')}" for t in themes[:3]]
+            result['hashtags'] = clean_themes + [
+                f"#{platform.capitalize()}Strategy",
+                "#VortexSocial",
+                "#ContentAI",
+                "#DigitalGrowth",
+                "#SocialMediaMarketing",
+                "#TrendingNow"
+            ]
+        
         # Store for future trend analysis
-        self.memory.store_content(
-            f"hashtag_{platform}_{hash(str(result))}",
-            ' '.join(result.get('hashtags', [])),
-            {'type': 'hashtag', 'platform': platform}
-        )
+        try:
+            self.memory.store_content(
+                f"hashtag_{platform}_{hash(str(result))}",
+                ' '.join(result.get('hashtags', [])),
+                {'type': 'hashtag', 'platform': platform}
+            )
+        except Exception as mem_err:
+            print(f"[HashtagAgent] Memory store notice: {mem_err}")
         
         result['_usage'] = usage
         return result

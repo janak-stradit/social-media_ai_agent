@@ -852,6 +852,74 @@ class MediaGenerationService:
                 "error": str(e),
             }
 
+    def _generate_google_gemini_video(self, prompt: str, platform: str, image_path: str = None) -> dict:
+        """Generate a video using Google Gemini / Veo Video Generation API via google-genai SDK."""
+        google_key = getattr(Config, 'GOOGLE_API_KEY', None) or os.getenv("GOOGLE_API_KEY")
+        if not google_key:
+            raise RuntimeError("GOOGLE_API_KEY is missing in your environment or config file.")
+
+        try:
+            import google.genai as genai
+            from google.genai import types
+        except ImportError:
+            raise RuntimeError("The 'google-genai' package is required. Run 'pip install google-genai'.")
+
+        model_name = getattr(Config, 'GEMINI_VIDEO_MODEL', 'veo-3.1-generate-preview')
+        print(f"[Media Service] Initiating Google Gemini Video generation with model: {model_name}...")
+
+        client = genai.Client(api_key=google_key)
+        aspect_ratio = "9:16" if platform == "instagram" else "16:9"
+
+        gen_kwargs = {
+            "model": model_name,
+            "prompt": prompt[:512],
+            "config": types.GenerateVideosConfig(
+                aspect_ratio=aspect_ratio,
+                duration_seconds=5,
+                number_of_videos=1,
+                generate_audio=getattr(Config, 'GENERATE_NATIVE_AUDIO', True),
+            )
+        }
+
+        resolved_image = self._resolve_image_path(image_path)
+        if resolved_image and os.path.exists(resolved_image):
+            try:
+                with open(resolved_image, "rb") as f:
+                    img_bytes = f.read()
+                gen_kwargs["image"] = types.Image(image_bytes=img_bytes, mime_type="image/jpeg")
+            except Exception as img_err:
+                print(f"[Media Service] Warning loading image for Gemini Video: {img_err}")
+
+        operation = client.models.generate_videos(**gen_kwargs)
+
+        print("[Media Service] Polling Google Gemini Video operation (Native Single-Pass Video + Audio)...")
+        deadline = time.time() + 300
+        while not operation.done and time.time() < deadline:
+            time.sleep(8)
+            operation = client.operations.get(operation)
+
+        if not operation.done:
+            raise RuntimeError("Google Gemini Video generation operation timed out after 300s.")
+
+        result = operation.result
+        if not result or not getattr(result, 'generated_videos', None):
+            raise RuntimeError("Google Gemini Video generation returned empty result.")
+
+        generated_video = result.generated_videos[0]
+        filename = f"gemini_video_{uuid.uuid4().hex[:8]}.mp4"
+        filepath = os.path.join(self.upload_folder, filename)
+
+        client.files.download(file=generated_video.video, destination=filepath)
+        return {
+            "success": True,
+            "url": f"/static/uploads/{filename}",
+            "prompt": prompt,
+            "model": model_name,
+            "provider": "Google Gemini (Veo)",
+            "has_native_audio": getattr(Config, 'GENERATE_NATIVE_AUDIO', True),
+            "audio_mode": "single_pass_native"
+        }
+
     # ── Video Generation ───────────────────────────────────────────────────
     def generate_video(self, caption: str, platform: str, tone: str = None, image_path: str = None) -> dict:
         """Generate an actual MP4 video from caption/story text and optional reference image."""
@@ -870,11 +938,25 @@ class MediaGenerationService:
 
         try:
             try:
-                result = self._generate_video_bedrock(prompt, platform, image_path=resolved_image)
-            except Exception as bedrock_err:
-                err_msg = str(bedrock_err)
-                print(f"[Media Service] Bedrock video generation failed: {err_msg}")
-                if "Access denied" in err_msg or "ResourceNotFoundException" in err_msg or "legacy" in err_msg.lower():
+                # Check if Gemini / Google API key is set or media provider is gemini
+                if (Config.MEDIA_PROVIDER == 'gemini' or os.getenv('MEDIA_PROVIDER') == 'gemini' or Config.GOOGLE_API_KEY or os.getenv('GOOGLE_API_KEY')):
+                    print("[Media Service] Attempting video generation via Google Gemini / Veo...")
+                    result = self._generate_google_gemini_video(prompt, platform, image_path=resolved_image)
+                else:
+                    result = self._generate_video_bedrock(prompt, platform, image_path=resolved_image)
+            except Exception as primary_err:
+                err_msg = str(primary_err)
+                print(f"[Media Service] Primary video generation failed: {err_msg}")
+                # Fallback to Bedrock if Gemini failed but Bedrock client is available
+                if (Config.GOOGLE_API_KEY or os.getenv('GOOGLE_API_KEY')) and self.bedrock_client:
+                    print("[Media Service] Falling back to AWS Bedrock Nova Reel...")
+                    try:
+                        result = self._generate_video_bedrock(prompt, platform, image_path=resolved_image)
+                    except Exception as fallback_err:
+                        fallback_msg = str(fallback_err)
+                        print(f"[Media Service] Bedrock video generation fallback failed: {fallback_msg}")
+                        raise fallback_err
+                elif "Access denied" in err_msg or "ResourceNotFoundException" in err_msg or "legacy" in err_msg.lower():
                     return {
                         "success": False,
                         "type": "video",
@@ -885,9 +967,24 @@ class MediaGenerationService:
                             "and request access for Amazon Nova Reel (for videos)."
                         )
                     }
-                raise bedrock_err
+                else:
+                    raise primary_err
 
-            # --- Video Post-processing (Cropping, Resizing, and optional Audio Merging) ---
+            # --- Single-Pass Native Video + Audio Optimization ---
+            if result.get("url") and result.get("has_native_audio"):
+                print("[Media Service] Single-pass native video+audio generated successfully. Skipping separate TTS audio merging.")
+                return {
+                    "success": True,
+                    "type": "video",
+                    "platform": platform,
+                    "url": result["url"],
+                    "prompt": prompt,
+                    "provider": result.get("provider", "Google Gemini (Veo)"),
+                    "has_native_audio": True,
+                    "audio_mode": "single_pass_native"
+                }
+
+            # --- Video Post-processing for Silent Video Models (Fallback/AWS Bedrock) ---
             if result.get("url"):
                 try:
                     # Resolve silent video path

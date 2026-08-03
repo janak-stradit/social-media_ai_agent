@@ -155,21 +155,21 @@ def init_db():
             admin_user = session.query(User).filter(User.is_admin == True).first()
             if not admin_user:
                 # Check if admin email exists
-                existing = session.query(User).filter(User.email == "admin@contentai.com").first()
+                existing = session.query(User).filter((User.email == "admin@vortexsocial.ai") | (User.email == "admin@contentai.com")).first()
                 if existing:
                     existing.is_admin = True
                     existing.credit_limit = max(existing.credit_limit or 10.0, 1000.0)
                 else:
                     new_admin = User(
                         name="System Admin",
-                        email="admin@contentai.com",
+                        email="admin@vortexsocial.ai",
                         password_hash=generate_password_hash("admin123"),
                         credit_limit=1000.0,
                         is_admin=True
                     )
                     session.add(new_admin)
                 session.commit()
-                print("[DB] Default Admin user (admin@contentai.com / admin123) initialized.")
+                print("[DB] Default Admin user (admin@vortexsocial.ai / admin123) initialized.")
     except Exception as seed_err:
         print(f"[DB] Warning seeding admin user: {seed_err}")
 

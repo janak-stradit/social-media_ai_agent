@@ -101,8 +101,8 @@ class LLMService:
             "model": model_name
         }
 
-    def generate(self, system_prompt, user_prompt, temperature=0.7, max_tokens=2500, return_usage=False):
-        """Generate text using available LLM providers in sequence with optional token/cost metrics"""
+    def generate(self, system_prompt, user_prompt, temperature=0.7, max_tokens=1000, return_usage=False):
+        """Generate text using available LLM providers in sequence with optimal token budgeting."""
         last_error = None
         for provider in self.providers:
             try:
@@ -199,8 +199,8 @@ class LLMService:
         # Attempt 4: Fallback parse
         return json.loads(cleaned)
 
-    def generate_json(self, system_prompt, user_prompt, temperature=0.5, max_tokens=2500, return_usage=False):
-        """Generate structured JSON response with optional token/cost metrics"""
+    def generate_json(self, system_prompt, user_prompt, temperature=0.5, max_tokens=1200, return_usage=False):
+        """Generate structured JSON response with optimal token budgeting."""
         last_error = None
         for provider in self.providers:
             try:

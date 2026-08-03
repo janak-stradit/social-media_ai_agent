@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Social Media Settings &amp; Scheduling — ContentAI</title>
+    <title>Social Media Settings &amp; Scheduling — VortexSocial AI</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -16,7 +16,7 @@
     <div class="header-brand">
         <div class="brand-logo"><i class="fas fa-robot"></i></div>
         <div class="brand-text">
-            <span class="brand-name">ContentAI</span>
+            <span class="brand-name">VortexSocial AI</span>
             <span class="brand-tagline">Settings Studio</span>
         </div>
     </div>
@@ -25,18 +25,45 @@
         <a href="/settings" class="header-nav-item active"><i class="fas fa-plug me-1"></i>Social Accounts &amp; Scheduling</a>
     </nav>
     <div class="header-actions">
-        <a href="/" class="btn-secondary-ent text-decoration-none">
+        <a href="/" class="btn-secondary-ent text-decoration-none me-2">
             <i class="fas fa-arrow-left me-1"></i>Back to Studio Chat
         </a>
-        <div class="header-user">
-            <div class="header-user-meta">
-                <span class="header-user-name" id="headerUserLabel">User</span>
-                <span class="header-user-email" id="headerUserEmail"></span>
-            </div>
-            <div class="header-avatar" id="headerUserAvatar">U</div>
-            <a href="/logout" class="btn-secondary-ent btn-logout text-decoration-none">
-                <i class="fas fa-right-from-bracket me-1"></i>Logout
-            </a>
+        
+        <!-- User Profile & System Settings Dropdown -->
+        <div class="dropdown">
+            <button class="header-user-btn border-0 bg-transparent dropdown-toggle d-flex align-items-center gap-2 p-1 rounded-3" type="button" id="userMenuDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                <div class="header-avatar" id="headerUserAvatar">U</div>
+                <div class="header-user-meta text-start me-1">
+                    <span class="header-user-name d-block font-bold" id="headerUserLabel">User</span>
+                    <span class="header-user-email d-block text-slate-500 fs-8" id="headerUserEmail">user@vortexsocial.ai</span>
+                </div>
+            </button>
+
+            <ul class="dropdown-menu dropdown-menu-end user-dropdown-menu shadow-lg rounded-4 p-3 border mt-2" aria-labelledby="userMenuDropdown" style="min-width: 320px;">
+                
+                <!-- Section 1: Quick Studio Links -->
+                <li class="dropdown-header text-uppercase text-slate-400 font-bold fs-8 tracking-wider mb-1 px-1">Studio Tools</li>
+                <li>
+                    <a class="dropdown-item py-2 px-3 rounded-2 font-medium" href="/">
+                        <i class="fas fa-comments text-primary me-2"></i>Studio Chat
+                    </a>
+                </li>
+                <li>
+                    <button class="dropdown-item py-2 px-3 rounded-2 text-navy font-medium" type="button" id="headerModelInfoBtn">
+                        <i class="fas fa-microchip text-info me-2"></i>AI Models &amp; Purpose Matrix
+                    </button>
+                </li>
+
+                <li><hr class="dropdown-divider my-2"></li>
+
+                <!-- Section 2: Logout -->
+                <li>
+                    <a class="dropdown-item text-danger py-2 px-3 rounded-2 font-semibold" href="/logout">
+                        <i class="fas fa-right-from-bracket me-2"></i>Sign Out
+                    </a>
+                </li>
+
+            </ul>
         </div>
     </div>
 </header>
@@ -327,6 +354,35 @@
                 <button type="button" class="btn-submit-emerald" id="saveConnectAccountBtn">
                     <i class="fas fa-check me-1"></i>Save &amp; Connect Account
                 </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════ AI MODELS & PURPOSE ARCHITECTURE MODAL ═══════════════════════ -->
+<div class="modal fade" id="modelArchitectureModal" tabindex="-1" aria-labelledby="modelArchitectureModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content model-modal-light">
+            <div class="modal-header model-modal-header-light">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="model-icon-badge"><i class="fas fa-microchip"></i></div>
+                    <div>
+                        <h5 class="modal-title text-navy font-bold mb-0" id="modelArchitectureModalLabel">Active AI Models &amp; Purpose Matrix</h5>
+                        <small class="text-slate-500 font-medium">Real-time model engine assignments for text generation, vision, images, videos &amp; RAG memory</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="row g-4" id="modelsInfoCardsContainer">
+                    <div class="col-12 text-center py-5 text-slate-400">
+                        <i class="fas fa-spinner fa-spin fa-2x mb-2"></i>
+                        <p>Loading AI Model configurations...</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer model-modal-footer-light">
+                <button type="button" class="btn-cancel-light" data-bs-dismiss="modal">Close Inspector</button>
             </div>
         </div>
     </div>

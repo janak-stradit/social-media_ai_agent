@@ -66,33 +66,44 @@ $(document).ready(function () {
             type: 'GET',
             success: function (r) {
                 if (r.success) {
-                    $('#headerTokens').text(Number(r.total_tokens || 0).toLocaleString());
-                    $('#headerCost').text('$' + Number(r.total_cost_usd || 0).toFixed(4));
-
+                    const formattedTokens = Number(r.total_tokens || 0).toLocaleString() + ' Tokens';
+                    const formattedCost = '$' + Number(r.total_cost_usd || 0).toFixed(4);
                     const rem = Number(r.remaining_credits || 0).toFixed(2);
                     const lim = Number(r.credit_limit || 10).toFixed(2);
                     const used = Number(r.used_credits || 0).toFixed(2);
 
+                    $('#headerTokens').text(Number(r.total_tokens || 0).toLocaleString());
+                    $('#headerCost').text(formattedCost);
+                    $('#dropHeaderTokens').text(formattedTokens);
+                    $('#dropHeaderCost').text(formattedCost);
+
                     $('#headerCreditsRemaining').text('$' + rem);
                     $('#headerCreditLimit').text('$' + lim);
+                    $('#dropHeaderCreditsRemaining').text('$' + rem);
+                    $('#dropHeaderCreditLimit').text('$' + lim);
+
                     $('#modalCreditLimit').text('$' + lim);
                     $('#modalUsedCredits').text('$' + used);
                     $('#modalRemainingCredits').text('$' + rem);
 
                     // Update credit pill badge class
                     const pill = $('#headerCreditPill');
-                    pill.removeClass('warn danger');
-                    if (r.remaining_credits <= 0) {
-                        pill.addClass('danger');
-                    } else if (r.remaining_credits < 2.0) {
-                        pill.addClass('warn');
+                    if (pill.length) {
+                        pill.removeClass('warn danger');
+                        if (r.remaining_credits <= 0) {
+                            pill.addClass('danger');
+                        } else if (r.remaining_credits < 2.0) {
+                            pill.addClass('warn');
+                        }
                     }
 
                     // Show Admin Portal button if user is admin
                     if (r.is_admin) {
                         $('#headerAdminBtn').removeClass('d-none');
+                        $('#dropAdminPortalLi').removeClass('d-none');
                     } else {
                         $('#headerAdminBtn').addClass('d-none');
+                        $('#dropAdminPortalLi').addClass('d-none');
                     }
 
                     // Show pending request notice if user has pending request
@@ -106,6 +117,27 @@ $(document).ready(function () {
             }
         });
     }
+
+    $('#dropHeaderModelInfoBtn').on('click', function () {
+        openModelArchitectureModal();
+    });
+
+    $('#dropHeaderAdminBtn').on('click', function () {
+        const modalElem = document.getElementById('adminModal');
+        if (modalElem) {
+            const modal = bootstrap.Modal.getOrCreateInstance(modalElem);
+            modal.show();
+            if (typeof loadAdminPortalData === 'function') loadAdminPortalData();
+        }
+    });
+
+    $('#dropRequestCreditBtn').on('click', function () {
+        const modalElem = document.getElementById('creditRequestModal');
+        if (modalElem) {
+            const modal = bootstrap.Modal.getOrCreateInstance(modalElem);
+            modal.show();
+        }
+    });
 
     $('#logoutBtn').on('click', function () {
         $.ajax({
@@ -545,7 +577,14 @@ $(document).ready(function () {
             const isRefined = pData.caption?.refined_by_critic || pData.quality?.self_corrected;
             
             // Hashtags
-            const tagList = Array.isArray(pData.hashtags?.primary_hashtags) ? pData.hashtags.primary_hashtags : [];
+            const rawTags = pData.hashtags;
+            const tagList = Array.isArray(rawTags) 
+                ? rawTags 
+                : (Array.isArray(rawTags?.hashtags) 
+                    ? rawTags.hashtags 
+                    : (Array.isArray(rawTags?.primary_hashtags) 
+                        ? rawTags.primary_hashtags 
+                        : []));
             const tagHtml = tagList.map(t => `<span class="hashtag-pill">${escapeHtml(t)}</span>`).join(' ') || '<em>No hashtags</em>';
             const allTagsStr = tagList.join(' ');
 
@@ -643,7 +682,7 @@ $(document).ready(function () {
         const cardContent = `
             <div class="assistant-header">
                 <div class="assistant-title">
-                    <i class="fas fa-sparkles text-primary me-1"></i>ContentAI Studio Output
+                    <i class="fas fa-sparkles text-primary me-1"></i>VortexSocial Studio Output
                 </div>
                 <div class="assistant-meta-tags">
                     ${qualityBadgeHtml}
@@ -941,12 +980,14 @@ $(document).ready(function () {
                 Object.keys(content).forEach(platform => {
                     if (platform.startsWith('_')) return;
                     const pData = content[platform] || {};
+                    const rawH = pData.hashtags;
+                    const hTags = Array.isArray(rawH) ? rawH : (Array.isArray(rawH?.hashtags) ? rawH.hashtags : (Array.isArray(rawH?.primary_hashtags) ? rawH.primary_hashtags : []));
                     detailsHtml += `
                         <div class="col-md-6 col-lg-4">
                             <div class="ent-card h-100 p-3">
                                 <h6 class="text-primary text-uppercase font-weight-bold mb-2">${platform}</h6>
                                 <p class="small mb-2"><strong>Caption:</strong> ${escapeHtml(pData.caption?.primary_caption || 'N/A')}</p>
-                                <p class="small text-muted mb-0"><strong>Tags:</strong> ${escapeHtml((pData.hashtags?.primary_hashtags || []).join(' '))}</p>
+                                <p class="small text-muted mb-0"><strong>Tags:</strong> ${escapeHtml(hTags.join(' '))}</p>
                             </div>
                         </div>
                     `;
@@ -1885,4 +1926,108 @@ $(document).ready(function () {
             }
         });
     });
+
+    // ── AI Models & Purpose Inspector Handler ─────────────────────────────
+    $('#headerModelInfoBtn').on('click', function () {
+        openModelArchitectureModal();
+    });
+
+    function openModelArchitectureModal() {
+        const modalElem = document.getElementById('modelArchitectureModal');
+        if (modalElem) {
+            const modal = bootstrap.Modal.getOrCreateInstance(modalElem);
+            modal.show();
+            loadModelsInfoData();
+        }
+    }
+
+    function loadModelsInfoData() {
+        $.ajax({
+            url: '/api/models/info',
+            type: 'GET',
+            success: function (r) {
+                if (!r.success || !r.models) return;
+
+                const summary = r.summary || {};
+                const categoryIcons = {
+                    llm: { icon: 'fa-brain', class: 'cat-llm' },
+                    vision: { icon: 'fa-eye', class: 'cat-vision' },
+                    image: { icon: 'fa-image', class: 'cat-image' },
+                    video: { icon: 'fa-video', class: 'cat-video' },
+                    memory: { icon: 'fa-database', class: 'cat-memory' }
+                };
+
+                let html = `
+                    <div class="col-12 mb-2">
+                        <div class="runtime-metrics-bar p-3 bg-slate-50 border rounded-3 d-flex flex-wrap align-items-center justify-content-between gap-3">
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge bg-success-subtle text-success border border-success-subtle px-2.5 py-1.5 font-bold fs-8">
+                                    <i class="fas fa-circle-check me-1"></i>Runtime Active
+                                </span>
+                                <span class="text-slate-600 font-semibold fs-7">
+                                    AWS Region: <strong class="text-navy">${escapeHtml(summary.aws_region || 'us-east-1')}</strong>
+                                </span>
+                            </div>
+                            <div class="d-flex gap-4 fs-7">
+                                <div><span class="text-slate-500">User Runs:</span> <strong class="text-navy">${summary.total_user_runs || 0}</strong></div>
+                                <div><span class="text-slate-500">Tokens:</span> <strong class="text-navy font-monospace">${Number(summary.total_tokens_used || 0).toLocaleString()}</strong></div>
+                                <div><span class="text-slate-500">Cost USD:</span> <strong class="text-emerald font-monospace">$${Number(summary.total_cost_usd || 0).toFixed(4)}</strong></div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                r.models.forEach(m => {
+                    const iconMeta = categoryIcons[m.category] || { icon: 'fa-microchip', class: 'cat-llm' };
+                    const agentTags = (m.agents || []).map(a => `<span class="agent-pill-tag"><i class="fas fa-robot me-1"></i>${a}</span>`).join(' ');
+
+                    const statusBadges = {
+                        ACTIVE: '<span class="badge bg-success text-white"><i class="fas fa-circle me-1 fs-9"></i>ACTIVE</span>',
+                        ONLINE: '<span class="badge bg-primary text-white"><i class="fas fa-signal me-1 fs-9"></i>ONLINE</span>',
+                        STANDBY: '<span class="badge bg-secondary text-white"><i class="fas fa-pause me-1 fs-9"></i>STANDBY</span>'
+                    };
+
+                    html += `
+                        <div class="col-md-6 col-lg-4">
+                            <div class="model-purpose-card">
+                                <div class="d-flex align-items-center justify-content-between mb-3">
+                                    <div class="d-flex align-items-center gap-3">
+                                        <div class="cat-icon-box ${iconMeta.class}">
+                                            <i class="fas ${iconMeta.icon}"></i>
+                                        </div>
+                                        <div>
+                                            <h6 class="font-bold text-navy mb-0">${escapeHtml(m.purpose)}</h6>
+                                            <small class="text-primary font-semibold">${escapeHtml(m.provider)}</small>
+                                        </div>
+                                    </div>
+                                    ${statusBadges[m.status] || '<span class="badge bg-info text-white">ONLINE</span>'}
+                                </div>
+                                <div class="mb-3">
+                                    <span class="small text-slate-500 d-block mb-1">Active Model Slug:</span>
+                                    <span class="slug-badge"><i class="fas fa-code-branch me-1 text-slate-400"></i>${escapeHtml(m.model_name)}</span>
+                                </div>
+                                <p class="small text-slate-600 mb-3 flex-grow-1" style="font-size: 12px; line-height: 1.5;">${escapeHtml(m.description)}</p>
+                                <div class="pt-2 border-top">
+                                    <small class="text-slate-500 font-semibold d-block mb-2">Assigned Agents &amp; Services:</small>
+                                    <div class="d-flex gap-1 flex-wrap">
+                                        ${agentTags}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                $('#modelsInfoCardsContainer').html(html);
+            },
+            error: function () {
+                $('#modelsInfoCardsContainer').html(`
+                    <div class="col-12 text-center py-5 text-danger">
+                        <i class="fas fa-triangle-exclamation fa-2x mb-2"></i>
+                        <p>Failed to load dynamic AI Model architecture information.</p>
+                    </div>
+                `);
+            }
+        });
+    }
 });

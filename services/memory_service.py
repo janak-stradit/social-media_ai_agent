@@ -112,7 +112,7 @@ class MemoryService:
     def get_trending_hashtags(self, category=None):
         """Retrieve trending hashtags from memory or return default niche recommendations"""
         if not self.enabled:
-            return ["#ContentAI", "#ViralMarketing", "#SocialStrategy"]
+            return ["#VortexSocial", "#ViralMarketing", "#SocialStrategy"]
         try:
             results = self.collection.query(
                 query_texts=[category or "trending hashtags"],
@@ -124,7 +124,7 @@ class MemoryService:
                 return docs
         except Exception as e:
             print(f"[MemoryService] get_trending_hashtags notice: {e}")
-        return ["#ContentAI", "#AIStrategy", "#GrowthMarketing", "#DigitalGrowth"]
+        return ["#VortexSocial", "#AIStrategy", "#GrowthMarketing", "#DigitalGrowth"]
 
     def format_memory_prompt(self, retrieved_items):
         """Format retrieved memories into prompt section for agents"""

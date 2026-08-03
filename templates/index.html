@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ContentAI — Enterprise Social Media Platform</title>
+    <title>VortexSocial AI — Enterprise Social Media Platform</title>
     <meta name="description" content="Enterprise AI-powered social media content generation platform. Chat with multi-agent AI to create platform-optimized captions, hashtags, and visual assets.">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
@@ -20,41 +20,88 @@
         </button>
         <div class="brand-logo"><i class="fas fa-robot"></i></div>
         <div class="brand-text">
-            <span class="brand-name">ContentAI</span>
+            <span class="brand-name">VortexSocial AI</span>
             <span class="brand-tagline">Chat Assistant</span>
         </div>
     </div>
     <nav class="header-nav">
         <a href="/" class="header-nav-item active"><i class="fas fa-comments me-2"></i>Studio Chat</a>
         <a href="/" class="header-nav-item" id="headerNewChatBtn"><i class="fas fa-plus me-2"></i>New Chat</a>
-        <a href="/settings" class="header-nav-item" title="Social Accounts &amp; Scheduling Studio">
-            <i class="fas fa-plug me-1"></i>Social Accounts &amp; Scheduling
-        </a>
     </nav>
     <div class="header-actions">
-        <div class="cost-pill" id="headerCostPill" title="Accumulated User LLM Token Usage & Cost">
-            <i class="fas fa-bolt text-warning me-1"></i><span id="headerTokens">0</span> Tokens &nbsp;|&nbsp; <span id="headerCost">$0.0000</span>
-        </div>
-        <div class="credit-pill" id="headerCreditPill" title="User Credit Balance & Limit">
-            <i class="fas fa-wallet text-success me-1"></i>
-            <span id="headerCreditLabel">Credits: <strong id="headerCreditsRemaining">$10.00</strong> / <span id="headerCreditLimit">$10.00</span></span>
-            <button type="button" class="btn-credit-req-xs ms-2" id="headerRequestCreditBtn" title="Request Credit Extension">
-                <i class="fas fa-plus-circle me-1"></i>Request Extension
+        <!-- Status Pill -->
+        <div class="status-pill me-2"><span class="status-dot-green"></span>Agents Online</div>
+        
+        <!-- User Profile & System Settings Dropdown -->
+        <div class="dropdown">
+            <button class="header-user-btn border-0 bg-transparent dropdown-toggle d-flex align-items-center gap-2 p-1 rounded-3" type="button" id="userMenuDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                <div class="header-avatar" id="headerUserAvatar">U</div>
+                <div class="header-user-meta text-start me-1">
+                    <span class="header-user-name d-block font-bold" id="headerUserLabel">User</span>
+                    <span class="header-user-email d-block text-slate-500 fs-8" id="headerUserEmail">user@vortexsocial.ai</span>
+                </div>
             </button>
-        </div>
-        <button type="button" class="btn-admin-portal d-none ms-2" id="headerAdminBtn" title="Open Admin Management Dashboard">
-            <i class="fas fa-user-shield me-1"></i>Admin Portal
-        </button>
-        <div class="status-pill"><span class="status-dot-green"></span>Agents Online</div>
-        <div class="header-user">
-            <div class="header-user-meta">
-                <span class="header-user-name" id="headerUserLabel">User</span>
-                <span class="header-user-email" id="headerUserEmail"></span>
-            </div>
-            <div class="header-avatar" id="headerUserAvatar">U</div>
-            <button type="button" class="btn-secondary-ent btn-logout" id="logoutBtn">
-                <i class="fas fa-right-from-bracket me-1"></i>Logout
-            </button>
+
+            <ul class="dropdown-menu dropdown-menu-end user-dropdown-menu shadow-lg rounded-4 p-3 border mt-2" aria-labelledby="userMenuDropdown" style="min-width: 320px;">
+                
+                <!-- Section 1: Usage & Credit Summary Cards -->
+                <li class="dropdown-header text-uppercase text-slate-400 font-bold fs-8 tracking-wider mb-2 px-1">Usage &amp; Credits</li>
+                <li class="px-1 mb-2">
+                    <div class="dropdown-card bg-slate-50 p-2.5 rounded-3 border mb-2">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span class="small font-semibold text-slate-600"><i class="fas fa-bolt text-warning me-1"></i>LLM Tokens</span>
+                            <strong class="font-monospace fs-7 text-navy" id="dropHeaderTokens">0 Tokens</strong>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="small text-slate-500">Total Usage Cost:</span>
+                            <span class="font-monospace text-slate-600 fs-7" id="dropHeaderCost">$0.0000</span>
+                        </div>
+                    </div>
+
+                    <div class="dropdown-card bg-slate-50 p-2.5 rounded-3 border">
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <span class="small font-semibold text-slate-600"><i class="fas fa-wallet text-success me-1"></i>Credit Balance</span>
+                            <strong class="font-monospace fs-7 text-emerald" id="dropHeaderCreditsRemaining">$10.00</strong>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="small text-slate-500">Limit: <span id="dropHeaderCreditLimit">$10.00</span></span>
+                            <button type="button" class="btn-credit-req-xs ms-2" id="dropRequestCreditBtn" title="Request Credit Extension">
+                                <i class="fas fa-plus-circle me-1"></i>Extend
+                            </button>
+                        </div>
+                    </div>
+                </li>
+
+                <li><hr class="dropdown-divider my-2"></li>
+
+                <!-- Section 2: Quick Studio Links -->
+                <li class="dropdown-header text-uppercase text-slate-400 font-bold fs-8 tracking-wider mb-1 px-1">Studio Tools</li>
+                <li>
+                    <a class="dropdown-item py-2 px-3 rounded-2 font-medium" href="/settings">
+                        <i class="fas fa-plug text-primary me-2"></i>Social Accounts &amp; Scheduling
+                    </a>
+                </li>
+                <li>
+                    <button class="dropdown-item py-2 px-3 rounded-2 text-navy font-medium" type="button" id="dropHeaderModelInfoBtn">
+                        <i class="fas fa-microchip text-info me-2"></i>AI Models &amp; Purpose Matrix
+                    </button>
+                </li>
+                <li id="dropAdminPortalLi" class="d-none">
+                    <button class="dropdown-item py-2 px-3 rounded-2 text-indigo font-medium" type="button" id="dropHeaderAdminBtn">
+                        <i class="fas fa-user-shield text-indigo me-2"></i>Admin Management Portal
+                    </button>
+                </li>
+
+                <li><hr class="dropdown-divider my-2"></li>
+
+                <!-- Section 3: Logout -->
+                <li>
+                    <button class="dropdown-item text-danger py-2 px-3 rounded-2 font-semibold" type="button" id="logoutBtn">
+                        <i class="fas fa-right-from-bracket me-2"></i>Sign Out
+                    </button>
+                </li>
+
+            </ul>
         </div>
     </div>
 </header>
@@ -1016,6 +1063,35 @@
                 <button type="button" class="btn-submit-emerald" id="confirmSchedulePostBtn">
                     <i class="fas fa-calendar-check me-1"></i>Confirm Post Schedule
                 </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ═══════════════════════ AI MODELS & PURPOSE ARCHITECTURE MODAL ═══════════════════════ -->
+<div class="modal fade" id="modelArchitectureModal" tabindex="-1" aria-labelledby="modelArchitectureModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-content model-modal-light">
+            <div class="modal-header model-modal-header-light">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="model-icon-badge"><i class="fas fa-microchip"></i></div>
+                    <div>
+                        <h5 class="modal-title text-navy font-bold mb-0" id="modelArchitectureModalLabel">Active AI Models &amp; Purpose Matrix</h5>
+                        <small class="text-slate-500 font-medium">Real-time model engine assignments for text generation, vision, images, videos &amp; RAG memory</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-4">
+                <div class="row g-4" id="modelsInfoCardsContainer">
+                    <div class="col-12 text-center py-5 text-slate-400">
+                        <i class="fas fa-spinner fa-spin fa-2x mb-2"></i>
+                        <p>Loading AI Model configurations...</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer model-modal-footer-light">
+                <button type="button" class="btn-cancel-light" data-bs-dismiss="modal">Close Inspector</button>
             </div>
         </div>
     </div>

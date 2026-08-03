@@ -18,7 +18,7 @@ $(function () {
         if (mode !== 'login') {
             $('.auth-tab[data-mode="login"]').trigger('click');
         }
-        $('#authEmail').val('admin@contentai.com');
+        $('#authEmail').val('admin@vortexsocial.ai');
         $('#authPassword').val('admin123');
         $('#authError').addClass('d-none');
     });

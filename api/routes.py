@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 import os
 import uuid
+from config import Config
 from auth.utils import get_current_user_id, login_required_api, admin_required_api
 from agents.story_agent import StoryAgent
 from agents.vision_agent import VisionAgent
@@ -82,6 +83,141 @@ def health_check():
         'service': 'Social Media AI Agent',
         'version': '3.0.0'
     })
+
+
+@api_bp.route('/models/info', methods=['GET'])
+@login_required_api
+def get_models_info():
+    """Return 100% dynamic live runtime AI model status, active providers, and agent purpose mappings"""
+    user_id = get_current_user_id()
+
+    # 1. Dynamic Text & LLM Agent Model Detection
+    text_model = getattr(Config, 'BEDROCK_TEXT_MODEL', 'amazon.nova-lite-v1:0')
+    if getattr(Config, 'AWS_ACCESS_KEY_ID', None) or getattr(Config, 'AWS_PROFILE', None):
+        text_provider = f"AWS Bedrock ({getattr(Config, 'AWS_REGION', 'us-east-1')})"
+        text_status = "ACTIVE"
+    elif getattr(Config, 'OPENAI_API_KEY', None):
+        text_model = getattr(Config, 'AGENTSCOPE_MODEL', 'gpt-4o')
+        text_provider = "OpenAI / OpenRouter API"
+        text_status = "ACTIVE"
+    else:
+        text_provider = "System Default Engine"
+        text_status = "ONLINE"
+
+    # 2. Dynamic Vision Model Detection
+    vision_model = getattr(Config, 'BEDROCK_VISION_MODEL', 'amazon.nova-lite-v1:0')
+    vision_prov = getattr(Config, 'VISION_PROVIDER', 'bedrock')
+    vision_status = "ACTIVE" if (getattr(Config, 'AWS_ACCESS_KEY_ID', None) or getattr(Config, 'AWS_PROFILE', None)) else "ONLINE"
+
+    # 3. Dynamic Image Generation Model Detection
+    if getattr(Config, 'Z_AI_API_KEY', None):
+        image_model = getattr(Config, 'Z_AI_IMAGE_MODEL', 'cogview-4-250304')
+        image_provider = "Z.AI GLM (CogView-4)"
+        image_status = "ACTIVE"
+    elif getattr(Config, 'AWS_ACCESS_KEY_ID', None) or getattr(Config, 'AWS_PROFILE', None):
+        image_model = getattr(Config, 'BEDROCK_IMAGE_MODEL', 'amazon.nova-canvas-v1:0')
+        image_provider = f"AWS Bedrock Nova Canvas ({getattr(Config, 'AWS_REGION', 'us-east-1')})"
+        image_status = "ACTIVE"
+    else:
+        image_model = getattr(Config, 'IMAGE_MODEL', 'openai/dall-e-3')
+        image_provider = "OpenAI DALL-E"
+        image_status = "STANDBY"
+
+    # 4. Dynamic Video Generation Model Detection
+    if getattr(Config, 'GOOGLE_API_KEY', None) or os.getenv('GOOGLE_API_KEY'):
+        video_model = getattr(Config, 'GEMINI_VIDEO_MODEL', 'veo-3.1-generate-preview')
+        video_provider = "Google Gemini (Veo 3.1)"
+        video_status = "ACTIVE"
+    elif getattr(Config, 'Z_AI_API_KEY', None):
+        video_model = getattr(Config, 'Z_AI_VIDEO_MODEL', 'cogvideox-3')
+        video_provider = "Z.AI (CogVideoX-3)"
+        video_status = "ACTIVE"
+    elif getattr(Config, 'AWS_ACCESS_KEY_ID', None) or getattr(Config, 'AWS_PROFILE', None):
+        video_model = getattr(Config, 'BEDROCK_VIDEO_MODEL', 'amazon.nova-reel-v1:0')
+        video_provider = f"AWS Bedrock Nova Reel ({getattr(Config, 'AWS_REGION', 'us-east-1')})"
+        video_status = "ACTIVE"
+    else:
+        video_model = getattr(Config, 'VIDEO_MODEL', 'google/veo-3.1-lite')
+        video_provider = "OpenRouter Video API"
+        video_status = "STANDBY"
+
+    # 5. Dynamic RAG Memory Engine Stats
+    try:
+        mem_stats = memory_service.get_stats()
+        mem_count = mem_stats.get('total_memories', 0)
+    except Exception:
+        mem_count = 0
+
+    mem_model = "ChromaDB + SentenceTransformers (all-MiniLM-L6-v2)"
+    mem_provider = f"Local Vector Store ({mem_count} Memory Nodes)"
+
+    # Live Usage Stats
+    usage_data = {}
+    if DB_AVAILABLE and user_id:
+        try:
+            usage_data = get_user_usage_stats(user_id)
+        except Exception:
+            pass
+
+    models_info = [
+        {
+            "purpose": "Text & Campaign Copy Generation",
+            "category": "llm",
+            "model_name": text_model,
+            "provider": text_provider,
+            "status": text_status,
+            "agents": ["StoryAgent", "CaptionAgent", "HashtagAgent", "StrategyAgent", "ReviewerAgent"],
+            "description": f"Powers multi-agent campaign reasoning, platform captions, and tone compliance. Total user runs processed: {usage_data.get('total_runs', 0)}."
+        },
+        {
+            "purpose": "Vision & Visual Media Analysis",
+            "category": "vision",
+            "model_name": vision_model,
+            "provider": f"AWS Bedrock ({vision_prov})",
+            "status": vision_status,
+            "agents": ["VisionAgent"],
+            "description": "Analyzes uploaded user images and video clips to extract contextual scenes, text overlays, and visual color palettes."
+        },
+        {
+            "purpose": "AI Image Asset Generation",
+            "category": "image",
+            "model_name": image_model,
+            "provider": image_provider,
+            "status": image_status,
+            "agents": ["MediaGenerationService"],
+            "description": "Synthesizes high-resolution 1:1, 4:5, and 16:9 visual marketing assets tailored for Instagram, Facebook, and LinkedIn."
+        },
+        {
+            "purpose": "AI Motion & Video Generation",
+            "category": "video",
+            "model_name": video_model,
+            "provider": video_provider,
+            "status": video_status,
+            "agents": ["MediaGenerationService"],
+            "description": "Generates 4 to 6-second HD promo video clips, motion reels, and brand video teasers."
+        },
+        {
+            "purpose": "RAG Memory & Knowledge Graph",
+            "category": "memory",
+            "model_name": mem_model,
+            "provider": mem_provider,
+            "status": "ONLINE",
+            "agents": ["MemoryService", "RAG Engine"],
+            "description": f"Stores vector embeddings of past successful campaigns, brand voice memory, and interactive knowledge graph nodes."
+        }
+    ]
+
+    runtime_summary = {
+        "user_id": user_id,
+        "active_models_count": len(models_info),
+        "total_user_runs": usage_data.get('total_runs', 0),
+        "total_tokens_used": usage_data.get('total_tokens', 0),
+        "total_cost_usd": round(usage_data.get('total_cost_usd', 0.0), 4),
+        "aws_region": getattr(Config, 'AWS_REGION', 'us-east-1'),
+        "s3_bucket": getattr(Config, 'AWS_S3_BUCKET', 'N/A')
+    }
+
+    return jsonify({'success': True, 'models': models_info, 'summary': runtime_summary})
 
 @api_bp.route('/memory/graph', methods=['GET'])
 @login_required_api
