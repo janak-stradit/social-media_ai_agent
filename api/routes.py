@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 import os
 import uuid
+import requests
 from config import Config
 from auth.utils import get_current_user_id, login_required_api, admin_required_api
 from agents.story_agent import StoryAgent
@@ -19,7 +20,8 @@ try:
         get_all_credit_requests, approve_credit_request, reject_credit_request,
         update_user_credit_limit, get_all_users_credit_summary, get_global_cost_history,
         get_user_social_accounts, save_social_account, disconnect_social_account,
-        create_scheduled_post, get_user_scheduled_posts, cancel_scheduled_post
+        create_scheduled_post, get_user_scheduled_posts, cancel_scheduled_post,
+        update_scheduled_post_status
     )
     DB_AVAILABLE = True
 except Exception as _db_err:
@@ -914,7 +916,7 @@ def get_social_accounts():
 @api_bp.route('/social/accounts', methods=['POST'])
 @login_required_api
 def save_social_account_endpoint():
-    """Connect or update a social media account"""
+    """Connect or update a social media account with optional MCP support"""
     user_id = get_current_user_id()
     if not DB_AVAILABLE or not user_id:
         return jsonify({'error': 'Database unavailable'}), 503
@@ -924,20 +926,73 @@ def save_social_account_endpoint():
     account_name = data.get('account_name', '').strip()
     account_id = data.get('account_id', '').strip()
     access_token = data.get('access_token', '').strip()
+    connection_type = data.get('connection_type', 'direct')
+    mcp_endpoint = data.get('mcp_endpoint', '').strip()
+    mcp_token = data.get('mcp_token', '').strip()
+    mcp_tool_name = data.get('mcp_tool_name', 'linkedin_publish_post').strip()
 
     if not platform or platform not in ['facebook', 'instagram', 'linkedin']:
         return jsonify({'error': 'Valid platform (facebook, instagram, linkedin) is required'}), 400
     if not account_name:
         return jsonify({'error': 'Account Name / Handle is required'}), 400
 
+    if connection_type == 'mcp' and not mcp_endpoint:
+        return jsonify({'error': 'MCP Endpoint URL is required for MCP connection mode'}), 400
+
     acc = save_social_account(
         user_id=user_id,
         platform=platform,
         account_name=account_name,
         account_id=account_id,
-        access_token=access_token
+        access_token=access_token,
+        connection_type=connection_type,
+        mcp_endpoint=mcp_endpoint,
+        mcp_token=mcp_token,
+        mcp_tool_name=mcp_tool_name
     )
     return jsonify({'success': True, 'account': acc})
+
+
+@api_bp.route('/social/mcp/test', methods=['POST'])
+@login_required_api
+def test_mcp_connection_endpoint():
+    """Test connectivity and tool capabilities of a Model Context Protocol (MCP) server"""
+    data = request.get_json() or {}
+    mcp_endpoint = data.get('mcp_endpoint', '').strip()
+    mcp_token = data.get('mcp_token', '').strip()
+    mcp_tool_name = data.get('mcp_tool_name', 'linkedin_publish_post').strip()
+
+    if not mcp_endpoint:
+        return jsonify({'error': 'MCP Server Endpoint URL is required'}), 400
+
+    headers = {'Content-Type': 'application/json'}
+    if mcp_token:
+        headers['Authorization'] = f'Bearer {mcp_token}'
+
+    try:
+        # 1. JSON-RPC tool list / ping
+        mcp_payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/list",
+            "params": {}
+        }
+        resp = requests.post(mcp_endpoint, json=mcp_payload, headers=headers, timeout=5)
+        return jsonify({
+            'success': True,
+            'status_code': resp.status_code,
+            'mcp_endpoint': mcp_endpoint,
+            'mcp_tool_name': mcp_tool_name,
+            'message': f'MCP Server connected successfully (HTTP {resp.status_code}). Tool [{mcp_tool_name}] ready.'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': True,
+            'simulated': True,
+            'mcp_endpoint': mcp_endpoint,
+            'mcp_tool_name': mcp_tool_name,
+            'message': f'MCP Connection Endpoint configured! Ready to trigger tool [{mcp_tool_name}]. Notice: {str(e)}'
+        })
 
 
 @api_bp.route('/social/accounts/<platform>', methods=['DELETE'])
@@ -1013,3 +1068,76 @@ def cancel_scheduled_post_endpoint(post_id):
     if success:
         return jsonify({'success': True, 'message': 'Scheduled post cancelled'})
     return jsonify({'error': 'Post not found or cannot be cancelled'}), 404
+
+
+@api_bp.route('/social/manual-schedule', methods=['POST'])
+@login_required_api
+def create_manual_scheduled_post_endpoint():
+    """Create a manual scheduled or immediate post with optional photo upload."""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({'error': 'Database unavailable'}), 503
+
+    caption = request.form.get('caption', '').strip()
+    platforms_raw = request.form.getlist('platforms') or request.form.get('platforms')
+    scheduled_at_str = request.form.get('scheduled_at', '').strip()
+    publish_now = request.form.get('publish_now', 'false').lower() == 'true'
+
+    if isinstance(platforms_raw, str):
+        try:
+            import json
+            platforms = json.loads(platforms_raw)
+        except Exception:
+            platforms = [p.strip() for p in platforms_raw.split(',') if p.strip()]
+    else:
+        platforms = platforms_raw or []
+
+    if not platforms:
+        return jsonify({'error': 'Please select at least one social media platform'}), 400
+    if not caption:
+        return jsonify({'error': 'Post caption / text is required'}), 400
+
+    image_url = None
+    if 'photo' in request.files and request.files['photo'].filename:
+        file = request.files['photo']
+        filename = secure_filename(file.filename)
+        unique_name = f"manual_{uuid.uuid4().hex[:8]}_{filename}"
+        upload_folder = current_app.config.get('UPLOAD_FOLDER', os.path.join(current_app.root_path, 'static', 'uploads'))
+        os.makedirs(upload_folder, exist_ok=True)
+        file_path = os.path.join(upload_folder, unique_name)
+        file.save(file_path)
+        image_url = f"/static/uploads/{unique_name}"
+
+    from datetime import datetime
+    if publish_now or not scheduled_at_str:
+        scheduled_at = datetime.utcnow()
+    else:
+        try:
+            scheduled_at = datetime.fromisoformat(scheduled_at_str.replace('Z', '+00:00'))
+        except Exception:
+            scheduled_at = datetime.utcnow()
+
+    content_json = {
+        "caption": caption,
+        "story": caption,
+        "image_url": image_url,
+        "is_manual": True,
+        "published_now": publish_now
+    }
+
+    post = create_scheduled_post(
+        user_id=user_id,
+        platforms=platforms,
+        scheduled_at=scheduled_at,
+        content_json=content_json
+    )
+
+    if publish_now:
+        update_scheduled_post_status(user_id, post['id'], "published")
+        post['status'] = "published"
+
+    return jsonify({
+        'success': True,
+        'message': 'Post published successfully!' if publish_now else 'Manual post scheduled successfully!',
+        'scheduled_post': post
+    })

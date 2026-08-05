@@ -90,6 +90,10 @@ class SocialAccount(Base):
     account_name = Column(String(120), nullable=False)
     account_id = Column(String(120), nullable=True)  # Page ID, IG ID, or Author URN
     access_token = Column(Text, nullable=True)
+    connection_type = Column(String(32), default="direct", nullable=False)  # direct, mcp
+    mcp_endpoint = Column(Text, nullable=True)
+    mcp_token = Column(Text, nullable=True)
+    mcp_tool_name = Column(String(120), default="linkedin_publish_post", nullable=True)
     status = Column(String(32), default="connected", nullable=False)  # connected, disconnected, expired
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
@@ -122,30 +126,33 @@ def init_db():
         run_tbl = f'"{SCHEMA}".run_history' if not IS_SQLITE else 'run_history'
         usr_tbl = f'"{SCHEMA}".users' if not IS_SQLITE else 'users'
         
-        try:
-            conn.execute(text(f'ALTER TABLE {run_tbl} ADD COLUMN user_id INTEGER'))
-        except Exception:
-            pass
-        try:
-            conn.execute(text(f'ALTER TABLE {run_tbl} ADD COLUMN tokens_used INTEGER DEFAULT 0'))
-        except Exception:
-            pass
-        try:
-            conn.execute(text(f'ALTER TABLE {run_tbl} ADD COLUMN cost_usd DOUBLE PRECISION DEFAULT 0.0'))
-        except Exception:
-            pass
-        try:
-            conn.execute(text(f'ALTER TABLE {run_tbl} ADD COLUMN is_archived BOOLEAN DEFAULT FALSE'))
-        except Exception:
-            pass
-        try:
-            conn.execute(text(f'ALTER TABLE {usr_tbl} ADD COLUMN credit_limit DOUBLE PRECISION DEFAULT 10.0'))
-        except Exception:
-            pass
-        try:
-            conn.execute(text(f'ALTER TABLE {usr_tbl} ADD COLUMN is_admin BOOLEAN DEFAULT FALSE'))
-        except Exception:
-            pass
+        for alter_cmd in [
+            f'ALTER TABLE {run_tbl} ADD COLUMN user_id INTEGER',
+            f'ALTER TABLE {run_tbl} ADD COLUMN tokens_used INTEGER DEFAULT 0',
+            f'ALTER TABLE {run_tbl} ADD COLUMN cost_usd DOUBLE PRECISION DEFAULT 0.0',
+            f'ALTER TABLE {run_tbl} ADD COLUMN is_archived BOOLEAN DEFAULT FALSE',
+            f'ALTER TABLE {usr_tbl} ADD COLUMN credit_limit DOUBLE PRECISION DEFAULT 10.0',
+            f'ALTER TABLE {usr_tbl} ADD COLUMN is_admin BOOLEAN DEFAULT FALSE'
+        ]:
+            try:
+                with engine.begin() as sub_conn:
+                    sub_conn.execute(text(alter_cmd))
+            except Exception:
+                pass
+
+        soc_tbl = f'"{SCHEMA}".social_accounts' if not IS_SQLITE else 'social_accounts'
+        for col_name, col_type in [
+            ("connection_type", "VARCHAR(32) DEFAULT 'direct'"),
+            ("mcp_endpoint", "TEXT"),
+            ("mcp_token", "TEXT"),
+            ("mcp_tool_name", "VARCHAR(120) DEFAULT 'linkedin_publish_post'")
+        ]:
+            try:
+                with engine.begin() as sub_conn:
+                    sub_conn.execute(text(f'ALTER TABLE {soc_tbl} ADD COLUMN {col_name} {col_type}'))
+            except Exception:
+                pass
+
         conn.commit()
 
     # Seed default admin if no admin user exists
@@ -577,14 +584,17 @@ def get_user_social_accounts(user_id: int) -> list[dict]:
                 "platform": acc.platform,
                 "account_name": acc.account_name,
                 "account_id": acc.account_id,
+                "connection_type": getattr(acc, "connection_type", "direct") or "direct",
+                "mcp_endpoint": getattr(acc, "mcp_endpoint", None),
+                "mcp_tool_name": getattr(acc, "mcp_tool_name", "linkedin_publish_post") or "linkedin_publish_post",
                 "status": acc.status,
                 "updated_at": acc.updated_at.strftime("%Y-%m-%d %H:%M:%S")
             })
         return result
 
 
-def save_social_account(user_id: int, platform: str, account_name: str, account_id: str = None, access_token: str = None) -> dict:
-    """Create or update a connected social media account."""
+def save_social_account(user_id: int, platform: str, account_name: str, account_id: str = None, access_token: str = None, connection_type: str = "direct", mcp_endpoint: str = None, mcp_token: str = None, mcp_tool_name: str = None) -> dict:
+    """Create or update a connected social media account with optional MCP support."""
     with Session(engine) as session:
         acc = session.query(SocialAccount).filter(
             SocialAccount.user_id == user_id,
@@ -598,6 +608,10 @@ def save_social_account(user_id: int, platform: str, account_name: str, account_
                 account_name=account_name,
                 account_id=account_id,
                 access_token=access_token,
+                connection_type=connection_type or "direct",
+                mcp_endpoint=mcp_endpoint,
+                mcp_token=mcp_token,
+                mcp_tool_name=mcp_tool_name or "linkedin_publish_post",
                 status="connected"
             )
             session.add(acc)
@@ -607,6 +621,14 @@ def save_social_account(user_id: int, platform: str, account_name: str, account_
                 acc.account_id = account_id
             if access_token:
                 acc.access_token = access_token
+            if connection_type:
+                acc.connection_type = connection_type
+            if mcp_endpoint is not None:
+                acc.mcp_endpoint = mcp_endpoint
+            if mcp_token is not None:
+                acc.mcp_token = mcp_token
+            if mcp_tool_name is not None:
+                acc.mcp_tool_name = mcp_tool_name
             acc.status = "connected"
             acc.updated_at = datetime.utcnow()
 
@@ -616,6 +638,9 @@ def save_social_account(user_id: int, platform: str, account_name: str, account_
             "platform": acc.platform,
             "account_name": acc.account_name,
             "account_id": acc.account_id,
+            "connection_type": getattr(acc, "connection_type", "direct"),
+            "mcp_endpoint": getattr(acc, "mcp_endpoint", None),
+            "mcp_tool_name": getattr(acc, "mcp_tool_name", "linkedin_publish_post"),
             "status": acc.status
         }
 
@@ -680,7 +705,8 @@ def get_user_scheduled_posts(user_id: int) -> list[dict]:
                 "platforms": platforms,
                 "scheduled_at": p.scheduled_at.strftime("%Y-%m-%d %H:%M:%S"),
                 "status": p.status,
-                "story": content.get("story") or content.get("topic") or "Campaign Post",
+                "content_json": content,
+                "story": content.get("story") or content.get("caption") or "Campaign Post",
                 "created_at": p.created_at.strftime("%Y-%m-%d %H:%M:%S")
             })
         return results
@@ -688,6 +714,7 @@ def get_user_scheduled_posts(user_id: int) -> list[dict]:
 
 def cancel_scheduled_post(user_id: int, post_id: int) -> bool:
     """Cancel a pending scheduled post."""
+    from sqlalchemy.orm import Session
     with Session(engine) as session:
         post = session.query(ScheduledPost).filter(
             ScheduledPost.id == post_id,
@@ -696,6 +723,22 @@ def cancel_scheduled_post(user_id: int, post_id: int) -> bool:
 
         if post and post.status == "pending":
             post.status = "cancelled"
+            session.commit()
+            return True
+        return False
+
+
+def update_scheduled_post_status(user_id: int, post_id: int, status: str) -> bool:
+    """Update status of a scheduled post."""
+    from sqlalchemy.orm import Session
+    with Session(engine) as session:
+        post = session.query(ScheduledPost).filter(
+            ScheduledPost.id == post_id,
+            ScheduledPost.user_id == user_id
+        ).first()
+
+        if post:
+            post.status = status
             session.commit()
             return True
         return False

@@ -1,5 +1,15 @@
-$(document.body).ready(function () {
+$(document).ready(function () {
     let currentSocialAccounts = [];
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function escapeAttr(str) {
+        if (!str) return '';
+        return String(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
 
     // Load current user info
     $.ajax({
@@ -17,6 +27,11 @@ $(document.body).ready(function () {
     // Load social accounts and scheduled posts on page load
     loadUserSocialAccounts();
     loadScheduledPosts();
+
+    // Reload scheduled posts when switching to Tab 3
+    $('#scheduled-posts-tab').on('shown.bs.tab', function () {
+        loadScheduledPosts();
+    });
 
     function loadUserSocialAccounts() {
         $.ajax({
@@ -46,15 +61,32 @@ $(document.body).ready(function () {
                             $('#igAccountName').text(acc.account_name || 'Instagram Account');
                             $('#igAccountId').text(acc.account_id || 'N/A');
                         } else if (acc.platform === 'linkedin') {
-                            $('#liStatusBadge').removeClass('badge-disconnected').addClass('badge-connected').html('<i class="fas fa-circle-check me-1"></i>Connected');
-                            $('#liAccountName').text(acc.account_name || 'LinkedIn Account');
-                            $('#liAccountId').text(acc.account_id || 'N/A');
+                            if (acc.connection_type === 'mcp') {
+                                $('#liStatusBadge').removeClass('badge-disconnected').addClass('badge-connected bg-purple text-white').html('<i class="fas fa-network-wired me-1"></i>MCP Connected');
+                                $('#liAccountName').text((acc.account_name || 'LinkedIn Account') + ' (MCP)');
+                                $('#liAccountId').text(acc.mcp_endpoint || acc.account_id || 'N/A');
+                            } else {
+                                $('#liStatusBadge').removeClass('badge-disconnected').addClass('badge-connected').html('<i class="fas fa-circle-check me-1"></i>Connected');
+                                $('#liAccountName').text(acc.account_name || 'LinkedIn Account');
+                                $('#liAccountId').text(acc.account_id || 'N/A');
+                            }
                         }
                     }
                 });
             }
         });
     }
+
+    $('input[name="connectionType"]').on('change', function () {
+        const val = $(this).val();
+        if (val === 'mcp') {
+            $('#mcpFieldsContainer').removeClass('d-none');
+            $('#directFieldsContainer').addClass('d-none');
+        } else {
+            $('#directFieldsContainer').removeClass('d-none');
+            $('#mcpFieldsContainer').addClass('d-none');
+        }
+    });
 
     window.openConnectModal = function (platform) {
         const titles = {
@@ -76,19 +108,80 @@ $(document.body).ready(function () {
         $('#connectAccountNameInput').val(existing.account_name || '');
         $('#connectAccountIdInput').val(existing.account_id || '');
         $('#connectAccessTokenInput').val(existing.access_token || '');
+        $('#mcpEndpointInput').val(existing.mcp_endpoint || '');
+        $('#mcpTokenInput').val('');
+        $('#mcpToolNameInput').val(existing.mcp_tool_name || 'linkedin_publish_post');
+
+        if (platform === 'linkedin') {
+            $('#connectionTypeSelector').removeClass('d-none');
+            if (existing.connection_type === 'mcp') {
+                $('#connTypeMcp').prop('checked', true).trigger('change');
+            } else {
+                $('#connTypeDirect').prop('checked', true).trigger('change');
+            }
+        } else {
+            $('#connectionTypeSelector').addClass('d-none');
+            $('#connTypeDirect').prop('checked', true).trigger('change');
+        }
 
         const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('connectAccountModal'));
         modal.show();
     };
+
+    $('#testMcpConnBtn').on('click', function () {
+        const endpoint = $('#mcpEndpointInput').val().trim();
+        const token = $('#mcpTokenInput').val().trim();
+        const toolName = $('#mcpToolNameInput').val().trim();
+
+        if (!endpoint) {
+            showToast('Please enter an MCP Server Endpoint URL', 'error');
+            return;
+        }
+
+        const btn = $(this);
+        btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Testing MCP Server...');
+
+        $.ajax({
+            url: '/api/social/mcp/test',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                mcp_endpoint: endpoint,
+                mcp_token: token,
+                mcp_tool_name: toolName
+            }),
+            success: function (r) {
+                btn.prop('disabled', false).html('<i class="fas fa-vial me-1"></i>Test MCP Server Connection');
+                if (r.success) {
+                    showToast(r.message || 'MCP Server connected cleanly!', 'success');
+                } else {
+                    showToast(r.error || 'MCP Server connection failed', 'error');
+                }
+            },
+            error: function (xhr) {
+                btn.prop('disabled', false).html('<i class="fas fa-vial me-1"></i>Test MCP Server Connection');
+                showToast('MCP Server Test Error: ' + (xhr.responseJSON?.error || 'Connection Failed'), 'error');
+            }
+        });
+    });
 
     $('#saveConnectAccountBtn').on('click', function () {
         const platform = $('#connectPlatformInput').val();
         const accountName = $('#connectAccountNameInput').val().trim();
         const accountId = $('#connectAccountIdInput').val().trim();
         const accessToken = $('#connectAccessTokenInput').val().trim();
+        const connectionType = $('input[name="connectionType"]:checked').val() || 'direct';
+        const mcpEndpoint = $('#mcpEndpointInput').val().trim();
+        const mcpToken = $('#mcpTokenInput').val().trim();
+        const mcpToolName = $('#mcpToolNameInput').val().trim();
 
         if (!accountName) {
             showToast('Please enter an Account Name or Handle', 'error');
+            return;
+        }
+
+        if (platform === 'linkedin' && connectionType === 'mcp' && !mcpEndpoint) {
+            showToast('Please enter an MCP Server Endpoint URL', 'error');
             return;
         }
 
@@ -100,17 +193,21 @@ $(document.body).ready(function () {
                 platform: platform,
                 account_name: accountName,
                 account_id: accountId,
-                access_token: accessToken
+                access_token: accessToken,
+                connection_type: connectionType,
+                mcp_endpoint: mcpEndpoint,
+                mcp_token: mcpToken,
+                mcp_tool_name: mcpToolName
             }),
             success: function (r) {
                 if (r.success) {
-                    showToast(`${platform.toUpperCase()} account connected successfully!`, 'success');
+                    showToast(`${platform.toUpperCase()} account connected via ${connectionType.toUpperCase()} mode!`, 'success');
                     bootstrap.Modal.getInstance(document.getElementById('connectAccountModal')).hide();
                     loadUserSocialAccounts();
                 }
             },
             error: function (xhr) {
-                showToast('Failed to connect: ' + (xhr.responseJSON?.error || 'Error'), 'error');
+                showToast('Connection failed: ' + (xhr.responseJSON?.error || 'Error'), 'error');
             }
         });
     });
@@ -125,7 +222,7 @@ $(document.body).ready(function () {
                 if (!posts.length) {
                     $('#scheduledPostsTbody').html(`
                         <tr>
-                            <td colspan="6" class="text-center py-4 text-slate-400">No scheduled posts found. Use "Schedule Campaign Post" on any generated run in the Studio.</td>
+                            <td colspan="6" class="text-center py-4 text-slate-400">No scheduled posts found. Click "+ Create Manual Post" above to schedule a post manually!</td>
                         </tr>
                     `);
                     return;
@@ -135,8 +232,21 @@ $(document.body).ready(function () {
                 posts.forEach(p => {
                     const platforms = Array.isArray(p.platforms) ? p.platforms.map(pl => {
                         const icons = { facebook: '<i class="fab fa-facebook color-fb me-1"></i>', instagram: '<i class="fab fa-instagram color-ig me-1"></i>', linkedin: '<i class="fab fa-linkedin color-li me-1"></i>' };
-                        return `${icons[pl] || ''}${pl.toUpperCase()}`;
-                    }).join(' ') : p.platforms;
+                        return `<span class="badge bg-light text-navy border me-1">${icons[pl] || ''}${pl.toUpperCase()}</span>`;
+                    }).join('') : p.platforms;
+
+                    let cJson = {};
+                    if (typeof p.content_json === 'string') {
+                        try { cJson = JSON.parse(p.content_json); } catch (e) {}
+                    } else if (typeof p.content_json === 'object') {
+                        cJson = p.content_json || {};
+                    }
+
+                    const mediaUrl = cJson.image_url || cJson.media_url || p.media_url;
+                    const mediaTag = mediaUrl ? `<img src="${mediaUrl}" class="rounded-2 me-2 border shadow-xs" style="width: 38px; height: 38px; object-fit: cover;">` : '<div class="rounded-2 me-2 bg-light d-inline-flex align-items-center justify-content-center border" style="width: 38px; height: 38px;"><i class="fas fa-file-text text-slate-400"></i></div>';
+
+                    const storyText = cJson.caption || cJson.story || p.story || 'Custom Manual Post';
+                    const manualBadge = cJson.is_manual ? '<span class="badge bg-info text-dark ms-1">Manual</span>' : '';
 
                     const statusBadges = {
                         pending: '<span class="badge bg-warning text-dark"><i class="fas fa-clock me-1"></i>Pending</span>',
@@ -152,7 +262,15 @@ $(document.body).ready(function () {
                     html += `
                         <tr>
                             <td class="font-monospace">#${p.id}</td>
-                            <td style="max-width: 280px;" class="text-truncate" title="${escapeAttr(p.story)}">${escapeHtml(p.story)}</td>
+                            <td style="max-width: 300px;">
+                                <div class="d-flex align-items-center">
+                                    ${mediaTag}
+                                    <div class="text-truncate">
+                                        <span class="fw-semibold text-slate-800" title="${escapeHtml(storyText)}">${escapeHtml(storyText)}</span>
+                                        ${manualBadge}
+                                    </div>
+                                </div>
+                            </td>
                             <td>${platforms}</td>
                             <td class="font-monospace text-navy font-semibold">${p.scheduled_at}</td>
                             <td>${statusBadges[p.status] || p.status}</td>
@@ -161,9 +279,123 @@ $(document.body).ready(function () {
                     `;
                 });
                 $('#scheduledPostsTbody').html(html);
+            },
+            error: function (xhr) {
+                console.error("Error loading scheduled posts:", xhr);
+                $('#scheduledPostsTbody').html(`
+                    <tr>
+                        <td colspan="6" class="text-center py-4 text-danger">
+                            <i class="fas fa-exclamation-triangle me-1"></i>Failed to load scheduled posts. (HTTP ${xhr.status})
+                        </td>
+                    </tr>
+                `);
             }
         });
     }
+
+    window.loadScheduledPosts = loadScheduledPosts;
+
+    window.openManualPostModal = function () {
+        // Switch to Tab 3: Upcoming Scheduled Posts
+        try {
+            const scheduledTabBtn = document.getElementById('scheduled-posts-tab');
+            if (scheduledTabBtn) {
+                bootstrap.Tab.getOrCreateInstance(scheduledTabBtn).show();
+            }
+        } catch (e) {}
+
+        $('#manualPostCaption').val('');
+        $('#manualPostPhotoInput').val('');
+        $('#manualPostPhotoPreview').attr('src', '');
+        $('#manualPostPreviewContainer').addClass('d-none');
+
+        const now = new Date();
+        now.setHours(now.getHours() + 1);
+        now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+        const defaultIso = now.toISOString().slice(0, 16);
+        $('#manualPostScheduleTime').val(defaultIso);
+
+        const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('createManualPostModal'));
+        modal.show();
+    };
+
+    $('#manualPostPhotoInput').on('change', function (e) {
+        const file = e.target.files[0];
+        if (file) {
+            const reader = new FileReader();
+            reader.onload = function (evt) {
+                $('#manualPostPhotoPreview').attr('src', evt.target.result);
+                $('#manualPostPreviewContainer').removeClass('d-none');
+            };
+            reader.readAsDataURL(file);
+        }
+    });
+
+    $('#removeManualPhotoBtn').on('click', function () {
+        $('#manualPostPhotoInput').val('');
+        $('#manualPostPhotoPreview').attr('src', '');
+        $('#manualPostPreviewContainer').addClass('d-none');
+    });
+
+    function submitManualPost(publishNow) {
+        const caption = $('#manualPostCaption').val().trim();
+        const scheduledAt = $('#manualPostScheduleTime').val();
+        const selectedPlatforms = [];
+        $('input[name="manualPlatforms"]:checked').each(function () {
+            selectedPlatforms.push($(this).val());
+        });
+
+        if (!selectedPlatforms.length) {
+            showToast('Please select at least one target social media platform.', 'warning');
+            return;
+        }
+
+        if (!caption) {
+            showToast('Please enter a post caption / text content.', 'warning');
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append('caption', caption);
+        formData.append('scheduled_at', scheduledAt);
+        formData.append('publish_now', publishNow ? 'true' : 'false');
+
+        selectedPlatforms.forEach(p => formData.append('platforms', p));
+
+        const photoFile = $('#manualPostPhotoInput')[0].files[0];
+        if (photoFile) {
+            formData.append('photo', photoFile);
+        }
+
+        const targetBtn = publishNow ? $('#publishManualNowBtn') : $('#saveManualScheduleBtn');
+        const originalText = targetBtn.html();
+        targetBtn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Processing...');
+
+        $.ajax({
+            url: '/api/social/manual-schedule',
+            type: 'POST',
+            data: formData,
+            processData: false,
+            contentType: false,
+            success: function (r) {
+                targetBtn.prop('disabled', false).html(originalText);
+                if (r.success) {
+                    showToast(r.message || 'Manual post created successfully!', 'success');
+                    bootstrap.Modal.getInstance(document.getElementById('createManualPostModal')).hide();
+                    loadScheduledPosts();
+                } else {
+                    showToast(r.error || 'Failed to create post', 'error');
+                }
+            },
+            error: function (xhr) {
+                targetBtn.prop('disabled', false).html(originalText);
+                showToast('Post creation failed: ' + (xhr.responseJSON?.error || 'Error'), 'error');
+            }
+        });
+    }
+
+    $('#saveManualScheduleBtn').on('click', function () { submitManualPost(false); });
+    $('#publishManualNowBtn').on('click', function () { submitManualPost(true); });
 
     window.cancelScheduledPostItem = function (postId) {
         if (!confirm('Are you sure you want to cancel this scheduled post?')) return;

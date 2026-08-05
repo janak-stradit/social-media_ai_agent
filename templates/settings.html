@@ -78,9 +78,12 @@
                 <h2 class="font-bold text-navy mb-1"><i class="fas fa-plug text-primary me-2"></i>Social Accounts &amp; Post Scheduling Studio</h2>
                 <p class="text-slate-500 mb-0 font-medium">Connect your Facebook, Instagram, and LinkedIn accounts, follow setup guides, and manage upcoming scheduled posts.</p>
             </div>
-            <div class="d-flex gap-2">
-                <a href="/" class="btn-auth-submit text-decoration-none py-2 px-3 fs-7">
-                    <i class="fas fa-plus me-1"></i>Create New Campaign
+            <div class="d-flex gap-2.5 align-items-center">
+                <button type="button" class="btn-header-emerald text-decoration-none" onclick="openManualPostModal()">
+                    <i class="fas fa-edit me-1.5"></i>Create Manual Post
+                </button>
+                <a href="/" class="btn-header-primary text-decoration-none">
+                    <i class="fas fa-plus me-1.5"></i>Create New Campaign
                 </a>
             </div>
         </div>
@@ -283,6 +286,35 @@
                                     </ol>
                                 </div>
                             </div>
+                        <!-- LinkedIn MCP Guide -->
+                        <div class="accordion-item guide-item mb-3">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed font-bold text-navy" type="button" data-bs-toggle="collapse" data-bs-target="#guideLinkedInMcp">
+                                    <i class="fas fa-network-wired text-indigo me-2 fa-lg"></i>How to Connect LinkedIn via MCP (Model Context Protocol) Server
+                                </button>
+                            </h2>
+                            <div id="guideLinkedInMcp" class="accordion-collapse collapse" data-bs-parent="#platformGuidesAccordion">
+                                <div class="accordion-body guide-body">
+                                    <ol class="guide-steps-list">
+                                        <li>
+                                            <strong>Step 1: Launch or Locate your LinkedIn MCP Server</strong>
+                                            <p class="mb-1 text-slate-600">Start an active MCP Server implementing LinkedIn tool specifications (e.g. <code>http://127.0.0.1:8000/mcp</code>).</p>
+                                        </li>
+                                        <li>
+                                            <strong>Step 2: Ensure Tool Registration</strong>
+                                            <p class="mb-1 text-slate-600">Verify your MCP server exposes tool <code>linkedin_publish_post</code> or custom tool name with parameters <code>author_urn</code> and <code>commentary</code>.</p>
+                                        </li>
+                                        <li>
+                                            <strong>Step 3: Copy MCP Server Endpoint &amp; Token</strong>
+                                            <p class="mb-1 text-slate-600">Copy your MCP Endpoint URL and optional Bearer Token into the <strong>LinkedIn Account Connection Modal &rarr; MCP Mode</strong>.</p>
+                                        </li>
+                                        <li>
+                                            <strong>Step 4: Click Test MCP Server Connection</strong>
+                                            <p class="mb-1 text-slate-600">Click <strong>Test MCP Server Connection</strong> to verify JSON-RPC tool availability, then click <strong>Save &amp; Connect Account</strong>.</p>
+                                        </li>
+                                    </ol>
+                                </div>
+                            </div>
                         </div>
 
                     </div>
@@ -290,6 +322,16 @@
 
                 <!-- ── TAB 3: UPCOMING SCHEDULED POSTS ── -->
                 <div class="tab-pane fade" id="scheduled-posts-pane" role="tabpanel">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div>
+                            <h6 class="font-bold text-navy mb-0"><i class="fas fa-calendar-alt text-emerald me-2"></i>Upcoming &amp; Past Scheduled Campaigns</h6>
+                            <small class="text-slate-500">View automated AI runs or manually schedule custom social media posts</small>
+                        </div>
+                        <button type="button" class="btn btn-emerald btn-sm px-3 py-2 font-bold shadow-sm" onclick="openManualPostModal()">
+                            <i class="fas fa-plus-circle me-1"></i>Create Manual Post
+                        </button>
+                    </div>
+
                     <div class="table-responsive">
                         <table class="table table-hover align-middle scheduled-posts-table">
                             <thead>
@@ -318,6 +360,97 @@
     </div>
 </div>
 
+<!-- ═══════════════════════ MANUAL POST CREATOR & SCHEDULER MODAL ═══════════════════════ -->
+<div class="modal fade" id="createManualPostModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content credit-modal-light">
+            <div class="modal-header credit-modal-header-light">
+                <div class="d-flex align-items-center gap-2">
+                    <div class="credit-icon-badge bg-emerald-badge"><i class="fas fa-edit"></i></div>
+                    <div>
+                        <h5 class="modal-title text-navy font-bold mb-0">Create Manual Social Post</h5>
+                        <small class="text-slate-500">Upload media, select target platforms, write custom caption, and schedule or publish</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4">
+                <form id="createManualPostForm" enctype="multipart/form-data">
+                    
+                    <!-- Target Social Platforms Checkboxes -->
+                    <div class="mb-3">
+                        <label class="form-label text-slate-700 font-bold small text-uppercase tracking-wider">Select Target Social Media Platforms:</label>
+                        <div class="d-flex gap-3 flex-wrap">
+                            <label class="platform-check-card flex-fill">
+                                <input type="checkbox" name="manualPlatforms" value="facebook" checked>
+                                <div class="platform-check-content">
+                                    <i class="fab fa-facebook color-fb fa-lg me-2"></i>
+                                    <span class="font-bold text-slate-800">Facebook Page</span>
+                                </div>
+                            </label>
+
+                            <label class="platform-check-card flex-fill">
+                                <input type="checkbox" name="manualPlatforms" value="instagram" checked>
+                                <div class="platform-check-content">
+                                    <i class="fab fa-instagram color-ig fa-lg me-2"></i>
+                                    <span class="font-bold text-slate-800">Instagram Business</span>
+                                </div>
+                            </label>
+
+                            <label class="platform-check-card flex-fill">
+                                <input type="checkbox" name="manualPlatforms" value="linkedin" checked>
+                                <div class="platform-check-content">
+                                    <i class="fab fa-linkedin color-li fa-lg me-2"></i>
+                                    <span class="font-bold text-slate-800">LinkedIn Account</span>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Post Caption / Content -->
+                    <div class="mb-3">
+                        <label class="form-label text-slate-700 font-semibold">Post Caption / Text Content:</label>
+                        <textarea class="form-control credit-input-light" id="manualPostCaption" rows="4" placeholder="Write your post caption, dialogue, or story here... (hashtags supported)" required></textarea>
+                    </div>
+
+                    <!-- Photo / Media Upload -->
+                    <div class="mb-3">
+                        <label class="form-label text-slate-700 font-semibold">Upload Photo / Image Attachment (Optional):</label>
+                        <input type="file" class="form-control credit-input-light" id="manualPostPhotoInput" accept="image/*,video/*">
+                        
+                        <!-- Image Preview Box -->
+                        <div class="mt-2 d-none" id="manualPostPreviewContainer">
+                            <div class="position-relative d-inline-block border rounded-3 p-1 bg-light">
+                                <img id="manualPostPhotoPreview" src="" alt="Photo Preview" style="max-height: 180px; max-width: 100%; border-radius: 6px; object-fit: contain;">
+                                <button type="button" class="btn btn-danger btn-sm position-absolute top-0 end-0 m-1 rounded-circle p-0" style="width:24px; height:24px; line-height:22px;" id="removeManualPhotoBtn">&times;</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Date & Time Picker -->
+                    <div class="mb-3">
+                        <label class="form-label text-slate-700 font-semibold">Scheduled Date &amp; Time:</label>
+                        <input type="datetime-local" class="form-control credit-input-light" id="manualPostScheduleTime">
+                        <small class="text-slate-500">Pick when this post should be published automatically.</small>
+                    </div>
+
+                </form>
+            </div>
+            <div class="modal-footer credit-modal-footer-light d-flex justify-content-between">
+                <button type="button" class="btn btn-outline-primary font-bold px-3 py-2" id="publishManualNowBtn">
+                    <i class="fas fa-paper-plane me-1"></i>Publish Immediately
+                </button>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn-cancel-light" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn-submit-emerald" id="saveManualScheduleBtn">
+                        <i class="fas fa-calendar-plus me-1"></i>Schedule Post
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- ═══════════════════════ PLATFORM CONNECT FORM MODAL ═══════════════════════ -->
 <div class="modal fade" id="connectAccountModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -335,18 +468,64 @@
             <div class="modal-body p-4">
                 <form id="connectAccountForm">
                     <input type="hidden" id="connectPlatformInput">
+                    
+                    <!-- Connection Mode Selector (Shown for LinkedIn) -->
+                    <div class="mb-3 d-none" id="connectionTypeSelector">
+                        <label class="form-label text-slate-700 font-bold small text-uppercase tracking-wider">Connection Mode:</label>
+                        <div class="d-flex gap-2">
+                            <input type="radio" class="btn-check" name="connectionType" id="connTypeDirect" value="direct" checked>
+                            <label class="btn btn-outline-primary btn-sm flex-fill font-semibold py-2" for="connTypeDirect">
+                                <i class="fas fa-key me-1"></i>Direct OAuth / Token
+                            </label>
+
+                            <input type="radio" class="btn-check" name="connectionType" id="connTypeMcp" value="mcp">
+                            <label class="btn btn-outline-indigo btn-sm flex-fill font-semibold py-2" for="connTypeMcp">
+                                <i class="fas fa-network-wired me-1"></i>MCP (Model Context Protocol)
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- Account Name / Handle -->
                     <div class="mb-3">
                         <label class="form-label text-slate-700 font-semibold" id="accountNameLabel">Account Name / Handle:</label>
                         <input type="text" class="form-control credit-input-light" id="connectAccountNameInput" placeholder="e.g. @MyBrandOfficial" required>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label text-slate-700 font-semibold" id="accountIdLabel">Page ID / Account ID / Author URN:</label>
-                        <input type="text" class="form-control credit-input-light" id="connectAccountIdInput" placeholder="e.g. 109283746592817">
+
+                    <!-- Direct Fields Container -->
+                    <div id="directFieldsContainer">
+                        <div class="mb-3">
+                            <label class="form-label text-slate-700 font-semibold" id="accountIdLabel">Page ID / Account ID / Author URN:</label>
+                            <input type="text" class="form-control credit-input-light" id="connectAccountIdInput" placeholder="e.g. 109283746592817 or urn:li:person:123456">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-slate-700 font-semibold">Access Token / OAuth Token:</label>
+                            <textarea class="form-control credit-input-light" id="connectAccessTokenInput" rows="3" placeholder="EAABwz... or OAuth Bearer Token"></textarea>
+                        </div>
                     </div>
-                    <div class="mb-3">
-                        <label class="form-label text-slate-700 font-semibold">Access Token / OAuth Token:</label>
-                        <textarea class="form-control credit-input-light" id="connectAccessTokenInput" rows="3" placeholder="EAABwz... or OAuth Bearer Token"></textarea>
+
+                    <!-- MCP Server Fields Container (Shown when MCP selected) -->
+                    <div id="mcpFieldsContainer" class="d-none">
+                        <div class="alert alert-indigo-light p-2.5 mb-3 rounded-3 fs-8">
+                            <i class="fas fa-network-wired me-1 text-indigo font-bold"></i>
+                            <strong>Model Context Protocol (MCP) Mode:</strong> Posts will be published via an active MCP Server tool endpoint.
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-slate-700 font-semibold">MCP Server Endpoint URL:</label>
+                            <input type="url" class="form-control credit-input-light" id="mcpEndpointInput" placeholder="e.g. http://127.0.0.1:8000/mcp or https://mcp.company.com">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-slate-700 font-semibold">MCP Bearer Token (Optional):</label>
+                            <input type="password" class="form-control credit-input-light" id="mcpTokenInput" placeholder="mcp-bearer-token-123456">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label text-slate-700 font-semibold">MCP Tool Name:</label>
+                            <input type="text" class="form-control credit-input-light" id="mcpToolNameInput" value="linkedin_publish_post" placeholder="linkedin_publish_post">
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-indigo w-100 font-semibold mb-2" id="testMcpConnBtn">
+                            <i class="fas fa-vial me-1"></i>Test MCP Server Connection
+                        </button>
                     </div>
+
                 </form>
             </div>
             <div class="modal-footer credit-modal-footer-light">
