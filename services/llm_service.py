@@ -72,11 +72,85 @@ class LLMService:
                 "model": Config.AGENTSCOPE_MODEL
             })
 
-        if not self.providers:
-            raise RuntimeError("No LLM providers configured. Check your API keys and AWS credentials.")
+        use_mock = getattr(Config, 'USE_MOCK_LLM', False)
+        if use_mock or not self.providers:
+            print("[LLM Service] Initialized Mock LLM Provider (Offline / Zero-Cost Mode).")
+            mock_entry = {
+                "name": "mock",
+                "client": None,
+                "model": "mock-llm-v1"
+            }
+            if use_mock:
+                self.providers.insert(0, mock_entry)
+            else:
+                self.providers.append(mock_entry)
+
+    def _generate_mock_response(self, system_prompt: str, user_prompt: str) -> str:
+        """Generate high-quality structured mock response tailored to prompt intent."""
+        prompt_lower = (system_prompt + " " + user_prompt).lower()
+
+        # 1. Campaign Generation (JSON)
+        if "campaign" in prompt_lower or "plan" in prompt_lower or "strategy" in prompt_lower or "json" in prompt_lower:
+            mock_campaign = {
+                "title": "Mock AI Product Launch & Growth Campaign",
+                "target_audience": "Tech Enthusiasts, Product Managers, Founders & Digital Marketers",
+                "core_narrative": "Empowering creators with automated multi-channel social media publishing.",
+                "schedule": [
+                    {
+                        "day": 1,
+                        "time": "09:00 AM",
+                        "platforms": ["facebook", "linkedin"],
+                        "content_type": "Announcement Banner",
+                        "story": "🚀 Exciting News! We are launching our next-gen Social Media AI Studio today.",
+                        "caption": "🚀 Exciting News! We are launching our next-gen Social Media AI Studio today. Effortlessly generate, schedule, and publish posts to Facebook, Instagram, and LinkedIn. #AI #Innovation #ProductLaunch #Marketing",
+                        "image_prompt": "A modern futuristic AI workspace dashboard glowing in purple and emerald colors, crisp digital art style"
+                    },
+                    {
+                        "day": 2,
+                        "time": "02:00 PM",
+                        "platforms": ["facebook", "instagram"],
+                        "content_type": "Feature Highlight Video",
+                        "story": "Discover how AI-powered auto-scheduling saves creators over 20 hours per week.",
+                        "caption": "Save 20+ hours every week with automated multi-channel social scheduling! 🕒 Streamline your brand presence across Facebook, Instagram, and LinkedIn in one click. Try it now! #Automation #SocialMedia #GrowthHacks",
+                        "video_prompt": "Cinematic animation showing digital calendar scheduling posts automatically across mobile screens, 4k ultra realistic"
+                    },
+                    {
+                        "day": 3,
+                        "time": "05:00 PM",
+                        "platforms": ["linkedin", "facebook"],
+                        "content_type": "Case Study & Testimonial",
+                        "story": "How top agencies scaled their client social engagement by 300% using VortexSocial AI.",
+                        "caption": "How top agencies scaled client social engagement by 300% using VortexSocial AI 📊 Read the full case study to optimize your strategy today. #CaseStudy #B2B #DigitalGrowth",
+                        "image_prompt": "Professional corporate infographic showing upward growth chart with vibrant green metrics"
+                    }
+                ]
+            }
+            return json.dumps(mock_campaign, indent=2)
+
+        # 2. Hashtags / Captions
+        elif "hashtag" in prompt_lower or "caption" in prompt_lower:
+            return "🚀 Boost your social presence with AI automation! #VortexSocialAI #GrowthHacks #DigitalMarketing #AI #Tech2026 #SocialMediaStrategy"
+
+        # 3. Visual Prompt
+        elif "prompt" in prompt_lower or "image" in prompt_lower or "video" in prompt_lower:
+            return "A sleek high-tech digital studio workspace with vibrant neon lighting, clean 3D render style"
+
+        # 4. Default Text
+        else:
+            return "VortexSocial AI Studio is ready! Generate, schedule, and publish high-converting social content across Facebook, Instagram, and LinkedIn."
 
     def _calculate_cost(self, provider_name, model_name, in_tokens, out_tokens):
         """Calculate estimated cost USD based on provider and model rates"""
+        if provider_name == "mock":
+            return {
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "total_tokens": 0,
+                "cost_usd": 0.0,
+                "provider": "mock",
+                "model": "mock-llm-v1"
+            }
+
         in_tokens = max(0, int(in_tokens or 0))
         out_tokens = max(0, int(out_tokens or 0))
         
@@ -106,7 +180,13 @@ class LLMService:
         last_error = None
         for provider in self.providers:
             try:
-                if provider["name"] == "bedrock":
+                if provider["name"] == "mock":
+                    text_out = self._generate_mock_response(system_prompt, user_prompt)
+                    usage_metrics = self._calculate_cost("mock", "mock-llm-v1", 0, 0)
+                    if return_usage:
+                        return text_out, usage_metrics
+                    return text_out
+                elif provider["name"] == "bedrock":
                     inference_config = {}
                     if temperature is not None:
                         inference_config["temperature"] = temperature

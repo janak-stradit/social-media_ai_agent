@@ -22,6 +22,9 @@ class Config:
     GEMINI_VIDEO_MODEL = os.getenv('GEMINI_VIDEO_MODEL', 'veo-3.1-generate-preview')
     GENERATE_NATIVE_AUDIO = os.getenv('GENERATE_NATIVE_AUDIO', 'true').lower() == 'true'
     
+    # Mock LLM Mode toggle (true/false)
+    USE_MOCK_LLM = os.getenv('USE_MOCK_LLM', 'false').lower() in ('true', '1', 'yes')
+    
     # AWS Bedrock Config
     AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
     AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')

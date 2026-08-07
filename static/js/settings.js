@@ -475,6 +475,7 @@ $(document).ready(function () {
                                 <span class="badge bg-success-subtle text-success border border-success-subtle px-2.5 py-1.5 font-bold fs-8">
                                     <i class="fas fa-circle-check me-1"></i>Runtime Active
                                 </span>
+                                ${summary.use_mock_llm ? '<span class="badge bg-purple text-white px-2.5 py-1.5 font-bold fs-8"><i class="fas fa-vial me-1"></i>MOCK LLM MODE (OFFLINE & FREE)</span>' : ''}
                                 <span class="text-slate-600 font-semibold fs-7">
                                     AWS Region: <strong class="text-navy">${escapeHtml(summary.aws_region || 'us-east-1')}</strong>
                                 </span>
@@ -541,4 +542,31 @@ $(document).ready(function () {
             }
         });
     }
+
+    window.testLiveAccountConnection = function (platform) {
+        showToast(`Testing live ${platform.toUpperCase()} API credentials...`, 'info');
+        $.ajax({
+            url: `/api/social/verify/${platform}`,
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ platform: platform }),
+            success: function (r) {
+                if (r.success && r.verified) {
+                    showToast(r.message || `${platform.toUpperCase()} API credentials verified cleanly!`, 'success');
+                    if (r.page_name) {
+                        alert(`LIVE META GRAPH API VERIFICATION SUCCESSFUL!\n\nPlatform: ${r.platform.toUpperCase()}\nConnected Page: ${r.page_name}\nCategory: ${r.category}\nPage ID: ${r.page_id}\nPermissions: ${(r.permissions || []).join(', ')}\nStatus: LIVE & ACTIVE`);
+                    } else {
+                        alert(`VERIFICATION SUCCESSFUL!\n\n${r.message}`);
+                    }
+                } else {
+                    showToast(r.error || `Verification failed for ${platform}`, 'error');
+                    alert(`VERIFICATION FAILED:\n${r.error || 'Invalid credentials'}`);
+                }
+            },
+            error: function (xhr) {
+                showToast('API verification failed: ' + (xhr.responseJSON?.error || 'Error'), 'error');
+                alert(`API VERIFICATION ERROR:\n${xhr.responseJSON?.error || 'Could not verify credentials.'}`);
+            }
+        });
+    };
 });

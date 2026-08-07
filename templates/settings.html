@@ -123,7 +123,7 @@
                                         <div class="platform-icon-circle bg-fb"><i class="fab fa-facebook-f"></i></div>
                                         <div>
                                             <h6 class="mb-0 font-bold text-navy">Facebook Page</h6>
-                                            <small class="text-slate-500">Meta Graph API</small>
+                                            <small class="text-slate-500">Meta Graph API v19.0</small>
                                         </div>
                                     </div>
                                     <span class="status-badge badge-disconnected" id="fbStatusBadge"><i class="fas fa-circle-xmark me-1"></i>Not Connected</span>
@@ -132,9 +132,14 @@
                                     <div class="small text-slate-500 mb-1">Connected Page: <strong class="text-navy" id="fbAccountName">—</strong></div>
                                     <div class="small text-slate-500">Page ID: <span class="font-monospace text-slate-600" id="fbAccountId">—</span></div>
                                 </div>
-                                <button type="button" class="btn-connect-platform btn-fb w-100" onclick="openConnectModal('facebook')">
-                                    <i class="fas fa-key me-1"></i>Connect / Configure Facebook
-                                </button>
+                                <div class="d-flex gap-2">
+                                    <button type="button" class="btn-connect-platform btn-fb flex-fill" onclick="openConnectModal('facebook')">
+                                        <i class="fas fa-key me-1"></i>Configure
+                                    </button>
+                                    <button type="button" class="btn btn-outline-primary btn-sm px-3 font-semibold rounded-3" onclick="testLiveAccountConnection('facebook')">
+                                        <i class="fas fa-network-wired me-1"></i>Verify API
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
@@ -155,9 +160,14 @@
                                     <div class="small text-slate-500 mb-1">Connected Handle: <strong class="text-navy" id="igAccountName">—</strong></div>
                                     <div class="small text-slate-500">Business ID: <span class="font-monospace text-slate-600" id="igAccountId">—</span></div>
                                 </div>
-                                <button type="button" class="btn-connect-platform btn-ig w-100" onclick="openConnectModal('instagram')">
-                                    <i class="fas fa-key me-1"></i>Connect / Configure Instagram
-                                </button>
+                                <div class="d-flex gap-2">
+                                    <button type="button" class="btn-connect-platform btn-ig flex-fill" onclick="openConnectModal('instagram')">
+                                        <i class="fas fa-key me-1"></i>Configure
+                                    </button>
+                                    <button type="button" class="btn btn-outline-danger btn-sm px-3 font-semibold rounded-3" onclick="testLiveAccountConnection('instagram')">
+                                        <i class="fas fa-network-wired me-1"></i>Verify API
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
@@ -169,7 +179,7 @@
                                         <div class="platform-icon-circle bg-li"><i class="fab fa-linkedin-in"></i></div>
                                         <div>
                                             <h6 class="mb-0 font-bold text-navy">LinkedIn Account</h6>
-                                            <small class="text-slate-500">Community API v2</small>
+                                            <small class="text-slate-500">Community API / MCP</small>
                                         </div>
                                     </div>
                                     <span class="status-badge badge-disconnected" id="liStatusBadge"><i class="fas fa-circle-xmark me-1"></i>Not Connected</span>
@@ -178,9 +188,14 @@
                                     <div class="small text-slate-500 mb-1">Member / Org: <strong class="text-navy" id="liAccountName">—</strong></div>
                                     <div class="small text-slate-500">Author URN: <span class="font-monospace text-slate-600" id="liAccountId">—</span></div>
                                 </div>
-                                <button type="button" class="btn-connect-platform btn-li w-100" onclick="openConnectModal('linkedin')">
-                                    <i class="fas fa-key me-1"></i>Connect / Configure LinkedIn
-                                </button>
+                                <div class="d-flex gap-2">
+                                    <button type="button" class="btn-connect-platform btn-li flex-fill" onclick="openConnectModal('linkedin')">
+                                        <i class="fas fa-key me-1"></i>Configure
+                                    </button>
+                                    <button type="button" class="btn btn-outline-info btn-sm px-3 font-semibold rounded-3" onclick="testLiveAccountConnection('linkedin')">
+                                        <i class="fas fa-network-wired me-1"></i>Verify API
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>

@@ -785,12 +785,47 @@ class MediaGenerationService:
             "cost": 0.08,
         }
 
+    def _generate_mock_media(self, platform: str, media_type: str, caption: str) -> dict:
+        """Generate a local visual mock asset for offline testing."""
+        from PIL import Image, ImageDraw
+        import uuid
+
+        filename = f"mock_{media_type}_{uuid.uuid4().hex[:8]}.png"
+        filepath = os.path.join(self.upload_folder, filename)
+
+        w, h = (1024, 1024) if media_type == 'image' else (1280, 720)
+        img = Image.new('RGB', (w, h), color=(30, 41, 59))
+        draw = ImageDraw.Draw(img)
+
+        # Draw stylish mock border and graphic elements
+        draw.rectangle([30, 30, w - 30, h - 30], outline=(16, 185, 129), width=5)
+        draw.ellipse([w // 4, h // 4, 3 * w // 4, 3 * h // 4], outline=(37, 99, 235), width=4)
+
+        img.save(filepath, format="PNG")
+
+        return {
+            "success": True,
+            "type": media_type,
+            "platform": platform,
+            "url": f"/static/uploads/{filename}",
+            "original_url": None,
+            "prompt": caption or "Mock visual asset placeholder",
+            "size": f"{w}x{h}",
+            "provider": "mock",
+            "cost": 0.0,
+            "model": "mock-media-v1",
+        }
+
     # ── Image Generation ───────────────────────────────────────────────────
     def generate_image(self, caption: str, platform: str, tone: str = None, image_path: str = None) -> dict:
         """
         Generate a social media image.
         Returns: { url, local_path, prompt, size, platform }
         """
+        if getattr(Config, 'USE_MOCK_LLM', False):
+            print("[Media Service] USE_MOCK_LLM is enabled. Generating mock image asset...")
+            return self._generate_mock_media(platform, "image", caption)
+
         size_map = {
             "instagram": "1024x1024",
             "facebook":  "1792x1024",
@@ -923,6 +958,10 @@ class MediaGenerationService:
     # ── Video Generation ───────────────────────────────────────────────────
     def generate_video(self, caption: str, platform: str, tone: str = None, image_path: str = None) -> dict:
         """Generate an actual MP4 video from caption/story text and optional reference image."""
+        if getattr(Config, 'USE_MOCK_LLM', False):
+            print("[Media Service] USE_MOCK_LLM is enabled. Generating mock video asset...")
+            return self._generate_mock_media(platform, "video", caption)
+
         resolved_image = self._resolve_image_path(image_path)
         
         # Auto-generate a visual keyframe image if no reference image was provided

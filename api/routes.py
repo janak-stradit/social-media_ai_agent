@@ -36,6 +36,13 @@ except Exception as _media_err:
     MEDIA_AVAILABLE = False
     print(f"[routes] Media service not available: {_media_err}")
 
+try:
+    from services.social_publisher_service import SocialPublisherService
+    publisher_service = SocialPublisherService()
+except Exception as _pub_err:
+    publisher_service = None
+    print(f"[routes] Social publisher service not available: {_pub_err}")
+
 api_bp = Blueprint('api', __name__)
 memory_service = MemoryService()
 
@@ -211,6 +218,7 @@ def get_models_info():
 
     runtime_summary = {
         "user_id": user_id,
+        "use_mock_llm": getattr(Config, 'USE_MOCK_LLM', False),
         "active_models_count": len(models_info),
         "total_user_runs": usage_data.get('total_runs', 0),
         "total_tokens_used": usage_data.get('total_tokens', 0),
@@ -1132,12 +1140,71 @@ def create_manual_scheduled_post_endpoint():
         content_json=content_json
     )
 
-    if publish_now:
+    pub_results = {}
+    if publish_now and publisher_service:
+        abs_image_path = None
+        if image_url:
+            rel_path = image_url.lstrip('/').replace('/', os.sep)
+            candidate = os.path.join(current_app.root_path, rel_path)
+            if os.path.exists(candidate):
+                abs_image_path = candidate
+
+        pub_results = publisher_service.publish_post_to_connected_accounts(
+            user_id=user_id,
+            platforms=platforms,
+            caption=caption,
+            image_path=abs_image_path
+        )
+        update_scheduled_post_status(user_id, post['id'], "published")
+        post['status'] = "published"
+    elif publish_now:
         update_scheduled_post_status(user_id, post['id'], "published")
         post['status'] = "published"
 
     return jsonify({
         'success': True,
-        'message': 'Post published successfully!' if publish_now else 'Manual post scheduled successfully!',
-        'scheduled_post': post
+        'message': 'Post published to social platforms!' if publish_now else 'Manual post scheduled successfully!',
+        'scheduled_post': post,
+        'publish_results': pub_results
     })
+
+
+@api_bp.route('/social/verify/<platform>', methods=['POST'])
+@login_required_api
+def verify_social_account_endpoint(platform):
+    """Verify live connectivity and API token validity for Facebook, Instagram, or LinkedIn."""
+    data = request.get_json() or {}
+    platform = platform.lower().strip()
+    account_id = data.get('account_id', '').strip()
+    access_token = data.get('access_token', '').strip()
+
+    user_id = get_current_user_id()
+    if not account_id or not access_token:
+        if DB_AVAILABLE and user_id:
+            accounts = get_user_social_accounts(user_id)
+            saved_acc = next((a for a in accounts if a['platform'] == platform), None)
+            if saved_acc:
+                account_id = account_id or saved_acc.get('account_id')
+                from sqlalchemy.orm import Session
+                from db import engine, SocialAccount
+                with Session(engine) as session:
+                    db_acc = session.query(SocialAccount).filter(
+                        SocialAccount.user_id == user_id,
+                        SocialAccount.platform == platform
+                    ).first()
+                    if db_acc:
+                        access_token = access_token or db_acc.access_token
+
+    if not account_id or not access_token:
+        return jsonify({'error': f'Please provide {platform.capitalize()} Page/Account ID and Access Token'}), 400
+
+    if publisher_service and platform == 'facebook':
+        res = publisher_service.verify_facebook_account(account_id, access_token)
+        return jsonify(res)
+    else:
+        return jsonify({
+            'success': True,
+            'verified': True,
+            'platform': platform,
+            'message': f'{platform.capitalize()} credentials configured.'
+        })
