@@ -1679,6 +1679,7 @@ body {
 .bg-fb { background: #1877f2; }
 .bg-ig { background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%); }
 .bg-li { background: #0a66c2; }
+.bg-tiktok { background: #010101; box-shadow: 2px 2px 0 #25f4ee, -2px -2px 0 #fe2c55; }
 
 .status-badge {
   font-size: 11px;
@@ -1714,6 +1715,8 @@ body {
 .btn-ig:hover { background: linear-gradient(135deg, #c13584 0%, #833ab4 100%); }
 .btn-li { background: #0a66c2; box-shadow: 0 2px 8px rgba(10, 102, 194, 0.25); }
 .btn-li:hover { background: #08529c; }
+.btn-tiktok { background: #010101; box-shadow: 0 2px 8px rgba(1, 1, 1, 0.25); }
+.btn-tiktok:hover { background: #242424; }
 
 .guide-item {
   border: 1px solid #e2e8f0 !important;

@@ -1,5 +1,22 @@
 $(document).ready(function () {
     let currentSocialAccounts = [];
+    const TIKTOK_STORAGE_KEY = 'vortexsocial_tiktok_account';
+
+    function getLocalTikTokAccount() {
+        try {
+            return JSON.parse(localStorage.getItem(TIKTOK_STORAGE_KEY) || 'null');
+        } catch (_) {
+            return null;
+        }
+    }
+
+    function renderLocalTikTokAccount() {
+        const account = getLocalTikTokAccount();
+        if (!account) return;
+        $('#tiktokStatusBadge').removeClass('badge-disconnected').addClass('badge-connected').html('<i class="fas fa-circle-check me-1"></i>Configured Locally');
+        $('#tiktokAccountName').text(account.account_name || 'TikTok Account');
+        $('#tiktokAccountId').text(account.account_id || 'N/A');
+    }
 
     function escapeHtml(str) {
         if (!str) return '';
@@ -45,10 +62,12 @@ $(document).ready(function () {
                 $('#fbStatusBadge').removeClass('badge-connected').addClass('badge-disconnected').html('<i class="fas fa-circle-xmark me-1"></i>Not Connected');
                 $('#igStatusBadge').removeClass('badge-connected').addClass('badge-disconnected').html('<i class="fas fa-circle-xmark me-1"></i>Not Connected');
                 $('#liStatusBadge').removeClass('badge-connected').addClass('badge-disconnected').html('<i class="fas fa-circle-xmark me-1"></i>Not Connected');
+                $('#tiktokStatusBadge').removeClass('badge-connected').addClass('badge-disconnected').html('<i class="fas fa-circle-xmark me-1"></i>Not Connected');
 
                 $('#fbAccountName').text('—'); $('#fbAccountId').text('—');
                 $('#igAccountName').text('—'); $('#igAccountId').text('—');
                 $('#liAccountName').text('—'); $('#liAccountId').text('—');
+                $('#tiktokAccountName').text('—'); $('#tiktokAccountId').text('—');
 
                 currentSocialAccounts.forEach(acc => {
                     if (acc.status === 'connected') {
@@ -73,6 +92,7 @@ $(document).ready(function () {
                         }
                     }
                 });
+                renderLocalTikTokAccount();
             }
         });
     }
@@ -92,25 +112,41 @@ $(document).ready(function () {
         const titles = {
             facebook: 'Connect Facebook Page',
             instagram: 'Connect Instagram Business',
-            linkedin: 'Connect LinkedIn Account'
+            linkedin: 'Connect LinkedIn Account',
+            tiktok: 'Connect TikTok Account'
         };
         const icons = {
             facebook: '<i class="fab fa-facebook color-fb"></i>',
             instagram: '<i class="fab fa-instagram color-ig"></i>',
-            linkedin: '<i class="fab fa-linkedin color-li"></i>'
+            linkedin: '<i class="fab fa-linkedin color-li"></i>',
+            tiktok: '<i class="fab fa-tiktok"></i>'
         };
 
         $('#connectPlatformInput').val(platform);
         $('#connectModalTitle').text(titles[platform] || 'Connect Account');
         $('#connectModalIcon').html(icons[platform] || '<i class="fas fa-plug"></i>');
 
-        const existing = currentSocialAccounts.find(a => a.platform === platform) || {};
+        const existing = platform === 'tiktok'
+            ? (getLocalTikTokAccount() || {})
+            : (currentSocialAccounts.find(a => a.platform === platform) || {});
         $('#connectAccountNameInput').val(existing.account_name || '');
         $('#connectAccountIdInput').val(existing.account_id || '');
         $('#connectAccessTokenInput').val(existing.access_token || '');
         $('#mcpEndpointInput').val(existing.mcp_endpoint || '');
         $('#mcpTokenInput').val('');
         $('#mcpToolNameInput').val(existing.mcp_tool_name || 'linkedin_publish_post');
+
+        const directLabels = {
+            facebook: ['Facebook Page Name:', 'Facebook Page ID:', 'e.g. My Business Page', 'e.g. 109283746592817'],
+            instagram: ['Instagram Handle:', 'Instagram Business ID:', 'e.g. @mybrand', 'e.g. 17841400000000000'],
+            linkedin: ['Member / Organization Name:', 'Author URN:', 'e.g. My Company', 'e.g. urn:li:organization:123456'],
+            tiktok: ['TikTok Username:', 'TikTok Open ID:', 'e.g. @mybrand', 'e.g. 7f0a1b2c3d4e5f6g']
+        };
+        const labels = directLabels[platform];
+        $('#accountNameLabel').text(labels[0]);
+        $('#accountIdLabel').text(labels[1]);
+        $('#connectAccountNameInput').attr('placeholder', labels[2]);
+        $('#connectAccountIdInput').attr('placeholder', labels[3]);
 
         if (platform === 'linkedin') {
             $('#connectionTypeSelector').removeClass('d-none');
@@ -182,6 +218,17 @@ $(document).ready(function () {
 
         if (platform === 'linkedin' && connectionType === 'mcp' && !mcpEndpoint) {
             showToast('Please enter an MCP Server Endpoint URL', 'error');
+            return;
+        }
+
+        if (platform === 'tiktok') {
+            localStorage.setItem(TIKTOK_STORAGE_KEY, JSON.stringify({
+                account_name: accountName,
+                account_id: accountId
+            }));
+            bootstrap.Modal.getInstance(document.getElementById('connectAccountModal')).hide();
+            renderLocalTikTokAccount();
+            showToast('TikTok details saved in this browser only.', 'success');
             return;
         }
 
@@ -544,6 +591,15 @@ $(document).ready(function () {
     }
 
     window.testLiveAccountConnection = function (platform) {
+        if (platform === 'tiktok') {
+            const account = getLocalTikTokAccount();
+            if (account) {
+                showToast('TikTok panel is configured locally. No backend API verification was performed.', 'info');
+            } else {
+                showToast('Configure the TikTok panel first. Details stay in this browser only.', 'warning');
+            }
+            return;
+        }
         showToast(`Testing live ${platform.toUpperCase()} API credentials...`, 'info');
         $.ajax({
             url: `/api/social/verify/${platform}`,

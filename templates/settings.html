@@ -76,7 +76,7 @@
         <div class="d-flex align-items-center justify-content-between mb-4 pb-3 border-bottom">
             <div>
                 <h2 class="font-bold text-navy mb-1"><i class="fas fa-plug text-primary me-2"></i>Social Accounts &amp; Post Scheduling Studio</h2>
-                <p class="text-slate-500 mb-0 font-medium">Connect your Facebook, Instagram, and LinkedIn accounts, follow setup guides, and manage upcoming scheduled posts.</p>
+                <p class="text-slate-500 mb-0 font-medium">Connect your Facebook, Instagram, LinkedIn, and TikTok accounts, follow setup guides, and manage upcoming scheduled posts.</p>
             </div>
             <div class="d-flex gap-2.5 align-items-center">
                 <button type="button" class="btn-header-emerald text-decoration-none" onclick="openManualPostModal()">
@@ -198,9 +198,35 @@
                                 </div>
                             </div>
                         </div>
+                        <!-- TikTok Account Card -->
+                        <div class="col-md-4">
+                            <div class="social-account-card card-tiktok">
+                                <div class="d-flex align-items-center justify-content-between mb-3">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <div class="platform-icon-circle bg-tiktok"><i class="fab fa-tiktok"></i></div>
+                                        <div>
+                                            <h6 class="mb-0 font-bold text-navy">TikTok Account</h6>
+                                            <small class="text-slate-500">TikTok Content Posting API</small>
+                                        </div>
+                                    </div>
+                                    <span class="status-badge badge-disconnected" id="tiktokStatusBadge"><i class="fas fa-circle-xmark me-1"></i>Not Connected</span>
+                                </div>
+                                <div class="account-details-box mb-3">
+                                    <div class="small text-slate-500 mb-1">Username: <strong class="text-navy" id="tiktokAccountName">—</strong></div>
+                                    <div class="small text-slate-500">Open ID: <span class="font-monospace text-slate-600" id="tiktokAccountId">—</span></div>
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <button type="button" class="btn-connect-platform btn-tiktok flex-fill" onclick="openConnectModal('tiktok')">
+                                        <i class="fas fa-key me-1"></i>Configure
+                                    </button>
+                                    <button type="button" class="btn btn-outline-dark btn-sm px-3 font-semibold rounded-3" onclick="testLiveAccountConnection('tiktok')">
+                                        <i class="fas fa-network-wired me-1"></i>Verify API
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
-
                 <!-- ── TAB 2: STEP-BY-STEP GUIDES ── -->
                 <div class="tab-pane fade" id="setup-guides-pane" role="tabpanel">
                     <div class="accordion guide-accordion" id="platformGuidesAccordion">
@@ -301,6 +327,8 @@
                                     </ol>
                                 </div>
                             </div>
+                        </div>
+
                         <!-- LinkedIn MCP Guide -->
                         <div class="accordion-item guide-item mb-3">
                             <h2 class="accordion-header">
@@ -328,6 +356,67 @@
                                             <p class="mb-1 text-slate-600">Click <strong>Test MCP Server Connection</strong> to verify JSON-RPC tool availability, then click <strong>Save &amp; Connect Account</strong>.</p>
                                         </li>
                                     </ol>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- TikTok Guide -->
+                        <div class="accordion-item guide-item mb-3">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed font-bold text-navy" type="button" data-bs-toggle="collapse" data-bs-target="#guideTikTok" aria-expanded="false" aria-controls="guideTikTok">
+                                    <i class="fab fa-tiktok me-2 fa-lg"></i>How to Connect a TikTok Account
+                                </button>
+                            </h2>
+                            <div id="guideTikTok" class="accordion-collapse collapse" data-bs-parent="#platformGuidesAccordion">
+                                <div class="accordion-body guide-body">
+                                    <div class="alert alert-warning d-flex align-items-start gap-2 mb-4" role="alert">
+                                        <i class="fas fa-triangle-exclamation mt-1"></i>
+                                        <div>
+                                            <strong>Current VortexSocial support:</strong> TikTok account details are saved only in this browser. OAuth authorization, live API verification, token refresh, and direct publishing are not yet enabled.
+                                        </div>
+                                    </div>
+                                    <ol class="guide-steps-list">
+                                        <li>
+                                            <strong>Step 1: Create a TikTok for Developers Account</strong>
+                                            <p class="mb-1 text-slate-600">Go to <a href="https://developers.tiktok.com/" target="_blank" rel="noopener noreferrer" class="text-primary font-semibold">developers.tiktok.com</a>, sign in, and register as a developer.</p>
+                                        </li>
+                                        <li>
+                                            <strong>Step 2: Register Your Application</strong>
+                                            <p class="mb-1 text-slate-600">Open <strong>Manage apps</strong>, create an app, and complete its website, terms of service, and privacy policy information. TikTok will issue a Client Key and Client Secret. Keep the Client Secret on the server only.</p>
+                                        </li>
+                                        <li>
+                                            <strong>Step 3: Add Login Kit for Web</strong>
+                                            <p class="mb-1 text-slate-600">Add <strong>Login Kit</strong>, register an exact HTTPS redirect URI, and request the <code>user.info.basic</code> scope. The OAuth callback must validate the <code>state</code> value before exchanging the authorization code.</p>
+                                            <a href="https://developers.tiktok.com/doc/login-kit-web" target="_blank" rel="noopener noreferrer" class="small text-primary font-semibold">Read the official Login Kit guide <i class="fas fa-arrow-up-right-from-square ms-1"></i></a>
+                                        </li>
+                                        <li>
+                                            <strong>Step 4: Add the Content Posting API</strong>
+                                            <p class="mb-1 text-slate-600">Request <code>video.upload</code> when users will finish editing and posting inside TikTok, or <code>video.publish</code> for an approved direct-posting workflow.</p>
+                                            <a href="https://developers.tiktok.com/doc/content-posting-api-get-started" target="_blank" rel="noopener noreferrer" class="small text-primary font-semibold">Read the official Content Posting API guide <i class="fas fa-arrow-up-right-from-square ms-1"></i></a>
+                                        </li>
+                                        <li>
+                                            <strong>Step 5: Submit the App for Review and Audit</strong>
+                                            <p class="mb-1 text-slate-600">Submit the app and requested products for TikTok review. Direct posts from an unaudited client are restricted to <code>SELF_ONLY</code> visibility, so public publishing must not be treated as production-ready before approval.</p>
+                                        </li>
+                                        <li>
+                                            <strong>Step 6: Authorize the TikTok Account</strong>
+                                            <p class="mb-1 text-slate-600">In the completed integration, the user clicks <strong>Connect TikTok</strong>, grants the requested permissions on TikTok, and returns to the registered callback. The backend exchanges the code and stores access and refresh tokens securely.</p>
+                                        </li>
+                                        <li>
+                                            <strong>Step 7: Configure the Current Local Preview</strong>
+                                            <p class="mb-1 text-slate-600">For now, return to <strong>Connected Social Accounts</strong>, choose <strong>TikTok &rarr; Configure</strong>, and save the username and Open ID locally. This identifies the account in this browser but does not authorize TikTok publishing.</p>
+                                        </li>
+                                    </ol>
+                                    <div class="account-details-box mt-4">
+                                        <div class="small font-semibold text-navy mb-2"><i class="fas fa-list-check me-1 text-primary"></i>Production integration requirements</div>
+                                        <div class="d-flex flex-wrap gap-2 badge-list">
+                                            <code>Approved TikTok app</code>
+                                            <code>Login Kit</code>
+                                            <code>Content Posting API</code>
+                                            <code>HTTPS callback</code>
+                                            <code>Server-side token storage</code>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
