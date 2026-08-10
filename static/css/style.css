@@ -1679,6 +1679,8 @@ body {
 .bg-fb { background: #1877f2; }
 .bg-ig { background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%); }
 .bg-li { background: #0a66c2; }
+.bg-yt { background: #ff0000; }
+.color-yt { color: #ff0000; }
 
 .status-badge {
   font-size: 11px;
@@ -1714,6 +1716,8 @@ body {
 .btn-ig:hover { background: linear-gradient(135deg, #c13584 0%, #833ab4 100%); }
 .btn-li { background: #0a66c2; box-shadow: 0 2px 8px rgba(10, 102, 194, 0.25); }
 .btn-li:hover { background: #08529c; }
+.btn-yt { background: #ff0000; box-shadow: 0 2px 8px rgba(255, 0, 0, 0.25); }
+.btn-yt:hover { background: #cc0000; }
 
 .guide-item {
   border: 1px solid #e2e8f0 !important;

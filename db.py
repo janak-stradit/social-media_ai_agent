@@ -86,10 +86,11 @@ class SocialAccount(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True)
-    platform = Column(String(32), nullable=False)  # facebook, instagram, linkedin
+    platform = Column(String(32), nullable=False)  # facebook, instagram, linkedin, youtube
     account_name = Column(String(120), nullable=False)
-    account_id = Column(String(120), nullable=True)  # Page ID, IG ID, or Author URN
+    account_id = Column(String(120), nullable=True)  # Page ID, IG ID, Author URN, or Channel ID
     access_token = Column(Text, nullable=True)
+    refresh_token = Column(Text, nullable=True)  # Required for YouTube offline access
     connection_type = Column(String(32), default="direct", nullable=False)  # direct, mcp
     mcp_endpoint = Column(Text, nullable=True)
     mcp_token = Column(Text, nullable=True)
@@ -593,7 +594,7 @@ def get_user_social_accounts(user_id: int) -> list[dict]:
         return result
 
 
-def save_social_account(user_id: int, platform: str, account_name: str, account_id: str = None, access_token: str = None, connection_type: str = "direct", mcp_endpoint: str = None, mcp_token: str = None, mcp_tool_name: str = None) -> dict:
+def save_social_account(user_id: int, platform: str, account_name: str, account_id: str = None, access_token: str = None, refresh_token: str = None, connection_type: str = "direct", mcp_endpoint: str = None, mcp_token: str = None, mcp_tool_name: str = None) -> dict:
     """Create or update a connected social media account with optional MCP support."""
     with Session(engine) as session:
         acc = session.query(SocialAccount).filter(
@@ -608,6 +609,7 @@ def save_social_account(user_id: int, platform: str, account_name: str, account_
                 account_name=account_name,
                 account_id=account_id,
                 access_token=access_token,
+                refresh_token=refresh_token,
                 connection_type=connection_type or "direct",
                 mcp_endpoint=mcp_endpoint,
                 mcp_token=mcp_token,
@@ -621,6 +623,8 @@ def save_social_account(user_id: int, platform: str, account_name: str, account_
                 acc.account_id = account_id
             if access_token:
                 acc.access_token = access_token
+            if refresh_token:
+                acc.refresh_token = refresh_token
             if connection_type:
                 acc.connection_type = connection_type
             if mcp_endpoint is not None:

@@ -21,6 +21,10 @@ def create_app(config_name='development'):
         from db import init_db
         init_db()
         print("[DB] Schema 'social_media_agent' initialised.")
+        
+        # Start background scheduler thread
+        from scheduler_thread import start_background_scheduler
+        start_background_scheduler(app.root_path)
     except Exception as e:
         print(f"[DB] Warning – could not initialise DB: {e}")
     
@@ -56,7 +60,7 @@ def create_app(config_name='development'):
     
     @app.errorhandler(413)
     def too_large(e):
-        return jsonify({'error': 'File too large. Max 16MB.'}), 413
+        return jsonify({'error': 'File too large. Max 50MB.'}), 413
     
     @app.errorhandler(500)
     def server_error(e):
