@@ -45,10 +45,12 @@ $(document).ready(function () {
                 $('#fbStatusBadge').removeClass('badge-connected').addClass('badge-disconnected').html('<i class="fas fa-circle-xmark me-1"></i>Not Connected');
                 $('#igStatusBadge').removeClass('badge-connected').addClass('badge-disconnected').html('<i class="fas fa-circle-xmark me-1"></i>Not Connected');
                 $('#liStatusBadge').removeClass('badge-connected').addClass('badge-disconnected').html('<i class="fas fa-circle-xmark me-1"></i>Not Connected');
+                $('#ytStatusBadge').removeClass('badge-connected').addClass('badge-disconnected').html('<i class="fas fa-circle-xmark me-1"></i>Not Connected');
 
                 $('#fbAccountName').text('—'); $('#fbAccountId').text('—');
                 $('#igAccountName').text('—'); $('#igAccountId').text('—');
                 $('#liAccountName').text('—'); $('#liAccountId').text('—');
+                $('#ytAccountName').text('—'); $('#ytAccountId').text('—');
 
                 currentSocialAccounts.forEach(acc => {
                     if (acc.status === 'connected') {
@@ -70,6 +72,10 @@ $(document).ready(function () {
                                 $('#liAccountName').text(acc.account_name || 'LinkedIn Account');
                                 $('#liAccountId').text(acc.account_id || 'N/A');
                             }
+                        } else if (acc.platform === 'youtube') {
+                            $('#ytStatusBadge').removeClass('badge-disconnected').addClass('badge-connected').html('<i class="fas fa-circle-check me-1"></i>Connected');
+                            $('#ytAccountName').text(acc.account_name || 'YouTube Account');
+                            $('#ytAccountId').text(acc.account_id || 'N/A');
                         }
                     }
                 });
@@ -92,12 +98,14 @@ $(document).ready(function () {
         const titles = {
             facebook: 'Connect Facebook Page',
             instagram: 'Connect Instagram Business',
-            linkedin: 'Connect LinkedIn Account'
+            linkedin: 'Connect LinkedIn Account',
+            youtube: 'Connect YouTube Account'
         };
         const icons = {
             facebook: '<i class="fab fa-facebook color-fb"></i>',
             instagram: '<i class="fab fa-instagram color-ig"></i>',
-            linkedin: '<i class="fab fa-linkedin color-li"></i>'
+            linkedin: '<i class="fab fa-linkedin color-li"></i>',
+            youtube: '<i class="fab fa-youtube color-yt"></i>'
         };
 
         $('#connectPlatformInput').val(platform);
@@ -122,6 +130,14 @@ $(document).ready(function () {
         } else {
             $('#connectionTypeSelector').addClass('d-none');
             $('#connTypeDirect').prop('checked', true).trigger('change');
+        }
+        
+        if (platform === 'youtube') {
+            $('#refreshTokenContainer').show();
+            $('#connectRefreshTokenInput').val(existing.refresh_token || '');
+        } else {
+            $('#refreshTokenContainer').hide();
+            $('#connectRefreshTokenInput').val('');
         }
 
         const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('connectAccountModal'));
@@ -174,6 +190,7 @@ $(document).ready(function () {
         const mcpEndpoint = $('#mcpEndpointInput').val().trim();
         const mcpToken = $('#mcpTokenInput').val().trim();
         const mcpToolName = $('#mcpToolNameInput').val().trim();
+        const refreshToken = $('#connectRefreshTokenInput').val().trim();
 
         if (!accountName) {
             showToast('Please enter an Account Name or Handle', 'error');
@@ -194,6 +211,7 @@ $(document).ready(function () {
                 account_name: accountName,
                 account_id: accountId,
                 access_token: accessToken,
+                refresh_token: refreshToken,
                 connection_type: connectionType,
                 mcp_endpoint: mcpEndpoint,
                 mcp_token: mcpToken,
@@ -306,7 +324,8 @@ $(document).ready(function () {
 
         $('#manualPostCaption').val('');
         $('#manualPostPhotoInput').val('');
-        $('#manualPostPhotoPreview').attr('src', '');
+        $('#manualPostPhotoPreview').attr('src', '').addClass('d-none');
+        $('#manualPostVideoPreview').attr('src', '').addClass('d-none');
         $('#manualPostPreviewContainer').addClass('d-none');
 
         const now = new Date();
@@ -322,18 +341,22 @@ $(document).ready(function () {
     $('#manualPostPhotoInput').on('change', function (e) {
         const file = e.target.files[0];
         if (file) {
-            const reader = new FileReader();
-            reader.onload = function (evt) {
-                $('#manualPostPhotoPreview').attr('src', evt.target.result);
-                $('#manualPostPreviewContainer').removeClass('d-none');
-            };
-            reader.readAsDataURL(file);
+            const fileUrl = URL.createObjectURL(file);
+            if (file.type.startsWith('video/')) {
+                $('#manualPostPhotoPreview').addClass('d-none');
+                $('#manualPostVideoPreview').attr('src', fileUrl).removeClass('d-none');
+            } else {
+                $('#manualPostVideoPreview').addClass('d-none');
+                $('#manualPostPhotoPreview').attr('src', fileUrl).removeClass('d-none');
+            }
+            $('#manualPostPreviewContainer').removeClass('d-none');
         }
     });
 
     $('#removeManualPhotoBtn').on('click', function () {
         $('#manualPostPhotoInput').val('');
-        $('#manualPostPhotoPreview').attr('src', '');
+        $('#manualPostPhotoPreview').attr('src', '').addClass('d-none');
+        $('#manualPostVideoPreview').attr('src', '').addClass('d-none');
         $('#manualPostPreviewContainer').addClass('d-none');
     });
 

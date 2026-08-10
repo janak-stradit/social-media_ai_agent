@@ -5,7 +5,7 @@ set MODE=%1
 if "%MODE%"=="" set MODE=dev
 
 if "%MODE%"=="dev" (
-    python app.py
+    .\env\python.exe app.py
 ) else (
     echo Usage: run.bat [dev]
     exit /b 1

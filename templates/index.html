@@ -826,6 +826,29 @@
                                     </button>
                                 </div>
                             </div>
+
+                            <!-- YouTube Account Card -->
+                            <div class="col-md-4">
+                                <div class="social-account-card card-youtube">
+                                    <div class="d-flex align-items-center justify-content-between mb-3">
+                                        <div class="d-flex align-items-center gap-2">
+                                            <div class="platform-icon-circle bg-yt"><i class="fab fa-youtube"></i></div>
+                                            <div>
+                                                <h6 class="mb-0 font-bold text-navy">YouTube Account</h6>
+                                                <small class="text-slate-500">YouTube Data API v3</small>
+                                            </div>
+                                        </div>
+                                        <span class="status-badge badge-disconnected" id="ytStatusBadge"><i class="fas fa-circle-xmark me-1"></i>Not Connected</span>
+                                    </div>
+                                    <div class="account-details-box mb-3">
+                                        <div class="small text-slate-500 mb-1">Channel Name: <strong class="text-navy" id="ytAccountName">—</strong></div>
+                                        <div class="small text-slate-500">Channel ID: <span class="font-monospace text-slate-600" id="ytAccountId">—</span></div>
+                                    </div>
+                                    <button type="button" class="btn-connect-platform btn-yt w-100" onclick="openConnectModal('youtube')">
+                                        <i class="fas fa-key me-1"></i>Connect / Configure YouTube
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
 

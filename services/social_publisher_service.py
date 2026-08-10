@@ -96,8 +96,27 @@ class SocialPublisherService:
 
     def publish_post_to_connected_accounts(self, user_id: int, platforms: list, caption: str, image_path: str = None) -> dict:
         """Publish post to user's connected social media accounts."""
-        connected_accs = get_user_social_accounts(user_id)
-        acc_map = {acc['platform']: acc for acc in connected_accs if acc.get('status') == 'connected'}
+        from sqlalchemy.orm import Session
+        from db import engine, SocialAccount
+        
+        with Session(engine) as session:
+            connected_accs = session.query(SocialAccount).filter(
+                SocialAccount.user_id == user_id,
+                SocialAccount.status == 'connected'
+            ).all()
+            
+            # Convert objects to dicts so the rest of the logic works without change
+            acc_map = {}
+            for acc_obj in connected_accs:
+                acc_map[acc_obj.platform] = {
+                    'account_id': acc_obj.account_id,
+                    'access_token': acc_obj.access_token,
+                    'refresh_token': acc_obj.refresh_token,
+                    'connection_type': getattr(acc_obj, 'connection_type', 'direct'),
+                    'mcp_endpoint': getattr(acc_obj, 'mcp_endpoint', None),
+                    'mcp_token': getattr(acc_obj, 'mcp_token', None),
+                    'mcp_tool_name': getattr(acc_obj, 'mcp_tool_name', None)
+                }
 
         results = {}
         for plat in platforms:
@@ -115,6 +134,16 @@ class SocialPublisherService:
                     results[plat] = {"success": False, "error": "Facebook Page ID or Access Token is missing on /settings"}
                 else:
                     results[plat] = self.publish_to_facebook(page_id, token, caption, image_path)
+            elif plat == 'youtube':
+                channel_id = acc.get('account_id')
+                token = acc.get('access_token')
+                refresh_token = acc.get('refresh_token')
+                if not channel_id or not token:
+                    results[plat] = {"success": False, "error": "YouTube Channel ID or Access Token is missing on /settings"}
+                else:
+                    # In a real implementation, you would check if token is expired, refresh it if needed, and do a multipart upload.
+                    # For now, we simulate a successful YouTube upload.
+                    results[plat] = self.publish_to_youtube(channel_id, token, caption, image_path)
             elif plat == 'linkedin':
                 if acc.get('connection_type') == 'mcp':
                     results[plat] = self._publish_linkedin_mcp(acc, caption)
@@ -158,3 +187,68 @@ class SocialPublisherService:
             }
         except Exception as e:
             return {"success": True, "platform": "linkedin", "simulated": True, "message": f"LinkedIn MCP post queued for tool [{tool_name}]."}
+
+    def publish_to_youtube(self, channel_id: str, access_token: str, message: str, video_path: str = None) -> dict:
+        """Publish (upload) a video to YouTube using Data API v3 Resumable Upload."""
+        import os
+        import json
+        if not video_path or not os.path.exists(video_path):
+            return {"success": False, "platform": "youtube", "error": "A valid video file is required for YouTube uploads."}
+
+        file_size = os.path.getsize(video_path)
+        
+        # Step 1: Initialize Resumable Upload Session
+        init_url = "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status"
+        init_headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json; charset=UTF-8',
+            'X-Upload-Content-Length': str(file_size),
+            'X-Upload-Content-Type': 'video/mp4'
+        }
+        
+        body = {
+            "snippet": {
+                "title": message[:95] + "..." if message and len(message) > 100 else (message or "Uploaded Video"),
+                "description": message or "",
+                "categoryId": "22" # Default to 'People & Blogs'
+            },
+            "status": {
+                "privacyStatus": "public",
+                "selfDeclaredMadeForKids": False
+            }
+        }
+        
+        try:
+            # 1. Start the session
+            init_resp = requests.post(init_url, headers=init_headers, json=body, timeout=15)
+            if init_resp.status_code == 401:
+                return {"success": False, "platform": "youtube", "error": "YouTube Access Token expired. Please re-authenticate."}
+            init_resp.raise_for_status()
+            
+            upload_url = init_resp.headers.get("Location")
+            if not upload_url:
+                return {"success": False, "platform": "youtube", "error": "Failed to retrieve upload URL from Google API."}
+                
+            # 2. Upload the actual video binary
+            with open(video_path, 'rb') as f:
+                # Chunked upload is supported by requests natively when passing a file object
+                upload_headers = {
+                    'Authorization': f'Bearer {access_token}',
+                    'Content-Type': 'video/mp4'
+                }
+                upload_resp = requests.put(upload_url, headers=upload_headers, data=f, timeout=600)
+                upload_resp.raise_for_status()
+                
+                video_data = upload_resp.json()
+                video_id = video_data.get('id', 'Unknown')
+                
+            return {
+                "success": True,
+                "platform": "youtube",
+                "message": f"YouTube video successfully published! (ID: {video_id})"
+            }
+        except Exception as e:
+            err_msg = str(e)
+            if hasattr(e, 'response') and e.response is not None:
+                err_msg += f" - Response: {e.response.text}"
+            return {"success": False, "platform": "youtube", "error": f"YouTube API error: {err_msg}"}

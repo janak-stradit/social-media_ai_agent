@@ -1748,12 +1748,14 @@ $(document).ready(function () {
         const titles = {
             facebook: 'Connect Facebook Page',
             instagram: 'Connect Instagram Business',
-            linkedin: 'Connect LinkedIn Account'
+            linkedin: 'Connect LinkedIn Account',
+            youtube: 'Connect YouTube Account'
         };
         const icons = {
             facebook: '<i class="fab fa-facebook color-fb"></i>',
             instagram: '<i class="fab fa-instagram color-ig"></i>',
-            linkedin: '<i class="fab fa-linkedin color-li"></i>'
+            linkedin: '<i class="fab fa-linkedin color-li"></i>',
+            youtube: '<i class="fab fa-youtube color-yt"></i>'
         };
 
         $('#connectPlatformInput').val(platform);

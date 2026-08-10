@@ -198,6 +198,34 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- YouTube Account Card -->
+                        <div class="col-md-4">
+                            <div class="social-account-card card-youtube">
+                                <div class="d-flex align-items-center justify-content-between mb-3">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <div class="platform-icon-circle bg-yt"><i class="fab fa-youtube"></i></div>
+                                        <div>
+                                            <h6 class="mb-0 font-bold text-navy">YouTube Account</h6>
+                                            <small class="text-slate-500">YouTube Data API v3</small>
+                                        </div>
+                                    </div>
+                                    <span class="status-badge badge-disconnected" id="ytStatusBadge"><i class="fas fa-circle-xmark me-1"></i>Not Connected</span>
+                                </div>
+                                <div class="account-details-box mb-3">
+                                    <div class="small text-slate-500 mb-1">Channel Name: <strong class="text-navy" id="ytAccountName">—</strong></div>
+                                    <div class="small text-slate-500">Channel ID: <span class="font-monospace text-slate-600" id="ytAccountId">—</span></div>
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <button type="button" class="btn-connect-platform btn-yt flex-fill" onclick="openConnectModal('youtube')">
+                                        <i class="fas fa-key me-1"></i>Configure
+                                    </button>
+                                    <button type="button" class="btn btn-outline-danger btn-sm px-3 font-semibold rounded-3" onclick="testLiveAccountConnection('youtube')">
+                                        <i class="fas fa-network-wired me-1"></i>Verify API
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
@@ -301,6 +329,8 @@
                                     </ol>
                                 </div>
                             </div>
+                        </div>
+
                         <!-- LinkedIn MCP Guide -->
                         <div class="accordion-item guide-item mb-3">
                             <h2 class="accordion-header">
@@ -326,6 +356,37 @@
                                         <li>
                                             <strong>Step 4: Click Test MCP Server Connection</strong>
                                             <p class="mb-1 text-slate-600">Click <strong>Test MCP Server Connection</strong> to verify JSON-RPC tool availability, then click <strong>Save &amp; Connect Account</strong>.</p>
+                                        </li>
+                                    </ol>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- YouTube Guide -->
+                        <div class="accordion-item guide-item mb-3">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed font-bold text-navy" type="button" data-bs-toggle="collapse" data-bs-target="#guideYouTube">
+                                    <i class="fab fa-youtube me-2 fa-lg" style="color: #ff0000;"></i>How to Connect YouTube Channel
+                                </button>
+                            </h2>
+                            <div id="guideYouTube" class="accordion-collapse collapse" data-bs-parent="#platformGuidesAccordion">
+                                <div class="accordion-body guide-body">
+                                    <ol class="guide-steps-list">
+                                        <li>
+                                            <strong>Step 1: Open Google OAuth 2.0 Playground</strong>
+                                            <p class="mb-1 text-slate-600">Go to <a href="https://developers.google.com/oauthplayground/" target="_blank" class="text-primary font-semibold">Google OAuth 2.0 Playground</a>.</p>
+                                        </li>
+                                        <li>
+                                            <strong>Step 2: Select YouTube Data API v3</strong>
+                                            <p class="mb-1 text-slate-600">On the left panel, scroll down and find <strong>YouTube Data API v3</strong>. Click it and check the box for <code>https://www.googleapis.com/auth/youtube.upload</code>. Click <strong>Authorize APIs</strong> and log in with your YouTube Google account.</p>
+                                        </li>
+                                        <li>
+                                            <strong>Step 3: Generate Access Token</strong>
+                                            <p class="mb-1 text-slate-600">Click <strong>Exchange authorization code for tokens</strong>. Copy the long <code>access_token</code> string that appears.</p>
+                                        </li>
+                                        <li>
+                                            <strong>Step 4: Save YouTube Credentials</strong>
+                                            <p class="mb-1 text-slate-600">Paste your Channel ID (e.g. <code>UC...</code>) and the generated Access Token into the YouTube Connection form above and click Verify.</p>
                                         </li>
                                     </ol>
                                 </div>
@@ -416,7 +477,15 @@
                                 <input type="checkbox" name="manualPlatforms" value="linkedin" checked>
                                 <div class="platform-check-content">
                                     <i class="fab fa-linkedin color-li fa-lg me-2"></i>
-                                    <span class="font-bold text-slate-800">LinkedIn Account</span>
+                                    <span class="font-bold text-slate-800">LinkedIn</span>
+                                </div>
+                            </label>
+
+                            <label class="platform-check-card flex-fill">
+                                <input type="checkbox" name="manualPlatforms" value="youtube" checked>
+                                <div class="platform-check-content">
+                                    <i class="fab fa-youtube color-yt fa-lg me-2"></i>
+                                    <span class="font-bold text-slate-800">YouTube</span>
                                 </div>
                             </label>
                         </div>
@@ -430,13 +499,14 @@
 
                     <!-- Photo / Media Upload -->
                     <div class="mb-3">
-                        <label class="form-label text-slate-700 font-semibold">Upload Photo / Image Attachment (Optional):</label>
+                        <label class="form-label text-slate-700 font-semibold">Upload Photo / Video (Required for YouTube):</label>
                         <input type="file" class="form-control credit-input-light" id="manualPostPhotoInput" accept="image/*,video/*">
                         
-                        <!-- Image Preview Box -->
+                        <!-- Media Preview Box -->
                         <div class="mt-2 d-none" id="manualPostPreviewContainer">
                             <div class="position-relative d-inline-block border rounded-3 p-1 bg-light">
-                                <img id="manualPostPhotoPreview" src="" alt="Photo Preview" style="max-height: 180px; max-width: 100%; border-radius: 6px; object-fit: contain;">
+                                <img id="manualPostPhotoPreview" src="" alt="Photo Preview" class="d-none" style="max-height: 180px; max-width: 100%; border-radius: 6px; object-fit: contain;">
+                                <video id="manualPostVideoPreview" src="" controls class="d-none" style="max-height: 180px; max-width: 100%; border-radius: 6px;"></video>
                                 <button type="button" class="btn btn-danger btn-sm position-absolute top-0 end-0 m-1 rounded-circle p-0" style="width:24px; height:24px; line-height:22px;" id="removeManualPhotoBtn">&times;</button>
                             </div>
                         </div>
@@ -515,6 +585,10 @@
                         <div class="mb-3">
                             <label class="form-label text-slate-700 font-semibold">Access Token / OAuth Token:</label>
                             <textarea class="form-control credit-input-light" id="connectAccessTokenInput" rows="3" placeholder="EAABwz... or OAuth Bearer Token"></textarea>
+                        </div>
+                        <div class="mb-3" id="refreshTokenContainer" style="display: none;">
+                            <label class="form-label text-slate-700 font-semibold">Refresh Token (Optional - For Auto Refresh):</label>
+                            <input type="text" class="form-control credit-input-light" id="connectRefreshTokenInput" placeholder="1//04zNl... (Required for YouTube auto-refresh)">
                         </div>
                     </div>
 
