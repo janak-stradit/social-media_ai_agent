@@ -131,6 +131,14 @@ $(document).ready(function () {
             $('#connectionTypeSelector').addClass('d-none');
             $('#connTypeDirect').prop('checked', true).trigger('change');
         }
+        
+        if (platform === 'youtube') {
+            $('#refreshTokenContainer').show();
+            $('#connectRefreshTokenInput').val(existing.refresh_token || '');
+        } else {
+            $('#refreshTokenContainer').hide();
+            $('#connectRefreshTokenInput').val('');
+        }
 
         const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('connectAccountModal'));
         modal.show();
@@ -182,6 +190,7 @@ $(document).ready(function () {
         const mcpEndpoint = $('#mcpEndpointInput').val().trim();
         const mcpToken = $('#mcpTokenInput').val().trim();
         const mcpToolName = $('#mcpToolNameInput').val().trim();
+        const refreshToken = $('#connectRefreshTokenInput').val().trim();
 
         if (!accountName) {
             showToast('Please enter an Account Name or Handle', 'error');
@@ -202,6 +211,7 @@ $(document).ready(function () {
                 account_name: accountName,
                 account_id: accountId,
                 access_token: accessToken,
+                refresh_token: refreshToken,
                 connection_type: connectionType,
                 mcp_endpoint: mcpEndpoint,
                 mcp_token: mcpToken,

@@ -12,8 +12,9 @@ class Config:
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = 'Lax'
     PERMANENT_SESSION_LIFETIME = 60 * 60 * 24 * 7  # 7 days
-    
     # API Keys
+    YOUTUBE_CLIENT_ID = os.getenv('YOUTUBE_CLIENT_ID')
+    YOUTUBE_CLIENT_SECRET = os.getenv('YOUTUBE_CLIENT_SECRET')
     HF_API_TOKEN = os.getenv('HF_API_TOKEN')
     OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
     Z_AI_API_KEY = os.getenv('Z_AI_API_KEY')

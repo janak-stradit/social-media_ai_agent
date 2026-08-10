@@ -62,13 +62,51 @@ def process_due_posts(app_root_path):
             post.status = new_status
             session.commit()
 
+def refresh_youtube_tokens():
+    """Refresh YouTube tokens for accounts that have a refresh token."""
+    from db import SocialAccount
+    from services.social_publisher_service import SocialPublisherService
+    
+    with Session(engine) as session:
+        yt_accounts = session.query(SocialAccount).filter(
+            SocialAccount.platform == 'youtube',
+            SocialAccount.status == 'connected',
+            SocialAccount.refresh_token != None,
+            SocialAccount.refresh_token != ''
+        ).all()
+        
+        if not yt_accounts:
+            return
+            
+        publisher = SocialPublisherService()
+        for acc in yt_accounts:
+            try:
+                print(f"[Scheduler] Refreshing YouTube access token for account ID {acc.id}...")
+                new_token = publisher.refresh_youtube_token(acc.refresh_token)
+                acc.access_token = new_token
+                session.commit()
+                print(f"[Scheduler] Successfully refreshed YouTube token for account ID {acc.id}")
+            except Exception as e:
+                print(f"[Scheduler] Failed to refresh YouTube token for account ID {acc.id}: {e}")
+
 def run_scheduler(app_root_path):
     print("[Scheduler] Background scheduling thread started...")
+    last_refresh_time = 0
+    
     while True:
         try:
             process_due_posts(app_root_path)
         except Exception as e:
             print(f"[Scheduler] Error processing posts: {e}")
+            
+        # Refresh tokens every 45 minutes (2700 seconds)
+        current_time = time.time()
+        if current_time - last_refresh_time >= 2700:
+            try:
+                refresh_youtube_tokens()
+                last_refresh_time = current_time
+            except Exception as e:
+                print(f"[Scheduler] Error running token refresh: {e}")
         
         # Check every 20 seconds
         time.sleep(20)
