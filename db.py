@@ -146,7 +146,8 @@ def init_db():
             ("connection_type", "VARCHAR(32) DEFAULT 'direct'"),
             ("mcp_endpoint", "TEXT"),
             ("mcp_token", "TEXT"),
-            ("mcp_tool_name", "VARCHAR(120) DEFAULT 'linkedin_publish_post'")
+            ("mcp_tool_name", "VARCHAR(120) DEFAULT 'linkedin_publish_post'"),
+            ("refresh_token", "TEXT")
         ]:
             try:
                 with engine.begin() as sub_conn:

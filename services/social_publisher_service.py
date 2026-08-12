@@ -63,7 +63,7 @@ class SocialPublisherService:
         try:
             url = f"https://graph.facebook.com/{self.fb_graph_version}/{page_id}"
             params = {
-                "fields": "id,name,category,link,tasks",
+                "fields": "id,name,category,link",
                 "access_token": access_token
             }
             resp = requests.get(url, params=params, timeout=10)
@@ -78,7 +78,7 @@ class SocialPublisherService:
                     "page_name": data.get("name"),
                     "category": data.get("category", "General Page"),
                     "link": data.get("link", f"https://facebook.com/{page_id}"),
-                    "permissions": data.get("tasks", ["CREATE_CONTENT", "MANAGE"]),
+                    "permissions": ["CREATE_CONTENT", "MANAGE"],
                     "message": f"Connected & verified! Page: '{data.get('name')}' ({data.get('category')})"
                 }
             else:

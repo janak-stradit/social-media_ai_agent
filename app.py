@@ -22,9 +22,11 @@ def create_app(config_name='development'):
         init_db()
         print("[DB] Schema 'social_media_agent' initialised.")
         
-        # Start background scheduler thread
-        from scheduler_thread import start_background_scheduler
-        start_background_scheduler(app.root_path)
+        # Start background scheduler thread (skip the reloader's monitor process,
+        # otherwise app.py runs twice under debug=True and posts get published twice)
+        if not app.debug or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+            from scheduler_thread import start_background_scheduler
+            start_background_scheduler(app.root_path)
     except Exception as e:
         print(f"[DB] Warning – could not initialise DB: {e}")
     
