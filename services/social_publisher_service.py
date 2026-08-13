@@ -148,7 +148,22 @@ class SocialPublisherService:
                 if acc.get('connection_type') == 'mcp':
                     results[plat] = self._publish_linkedin_mcp(acc, caption)
                 else:
-                    results[plat] = {"success": True, "platform": "linkedin", "message": "LinkedIn direct post simulated."}
+                    access_token = acc.get('access_token')
+                    author_urn = acc.get('account_id')
+                    
+                    # Auto-fetch Member ID if user typed 'me' or left it simple
+                    if author_urn in ["me", "urn:li:person:me", "urn:li:member:me"]:
+                        import requests
+                        try:
+                            me_resp = requests.get("https://api.linkedin.com/v2/userinfo", headers={"Authorization": f"Bearer {access_token}"})
+                            if me_resp.status_code == 200:
+                                sub = me_resp.json().get("sub")
+                                if sub:
+                                    author_urn = f"urn:li:person:{sub}"
+                        except Exception:
+                            pass
+                            
+                    results[plat] = self.publish_to_linkedin(author_urn, access_token, caption, image_path)
             else:
                 results[plat] = {"success": True, "platform": plat, "message": f"{plat.capitalize()} post processed."}
 
@@ -187,6 +202,97 @@ class SocialPublisherService:
             }
         except Exception as e:
             return {"success": True, "platform": "linkedin", "simulated": True, "message": f"LinkedIn MCP post queued for tool [{tool_name}]."}
+
+    def publish_to_linkedin(self, author_urn: str, access_token: str, message: str, image_path: str = None) -> dict:
+        """Publish a real post to a LinkedIn Member or Organization using the ugcPosts API."""
+        if not author_urn or not access_token:
+            return {"success": False, "error": "Missing LinkedIn Author URN or Access Token"}
+
+        url = "https://api.linkedin.com/v2/ugcPosts"
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "X-Restli-Protocol-Version": "2.0.0",
+            "Content-Type": "application/json"
+        }
+        
+        asset_urn = None
+        if image_path and os.path.exists(image_path):
+            try:
+                # 1. Register Upload
+                reg_url = "https://api.linkedin.com/v2/assets?action=registerUpload"
+                reg_payload = {
+                    "registerUploadRequest": {
+                        "recipes": ["urn:li:digitalmediaRecipe:feedshare-image"],
+                        "owner": author_urn,
+                        "serviceRelationships": [{"relationshipType": "OWNER", "identifier": "urn:li:userGeneratedContent"}]
+                    }
+                }
+                reg_resp = requests.post(reg_url, headers=headers, json=reg_payload, timeout=15)
+                if reg_resp.status_code in [200, 201]:
+                    reg_data = reg_resp.json()
+                    upload_url = reg_data.get("value", {}).get("uploadMechanism", {}).get("com.linkedin.digitalmedia.uploading.MediaUploadHttpRequest", {}).get("uploadUrl")
+                    asset_urn = reg_data.get("value", {}).get("asset")
+
+                    # 2. Upload Binary Image
+                    if upload_url and asset_urn:
+                        with open(image_path, 'rb') as f:
+                            image_data = f.read()
+                        up_headers = {"Authorization": f"Bearer {access_token}"}
+                        up_resp = requests.put(upload_url, headers=up_headers, data=image_data, timeout=30)
+                        if up_resp.status_code not in [200, 201]:
+                            return {"success": False, "platform": "linkedin", "error": f"Image upload failed ({up_resp.status_code}): {up_resp.text}"}
+                else:
+                    return {"success": False, "platform": "linkedin", "error": f"Failed to register upload: {reg_resp.text}"}
+            except Exception as e:
+                return {"success": False, "platform": "linkedin", "error": f"Exception during image upload: {str(e)}"}
+
+        # 3. Create Post
+        if asset_urn:
+            specific_content = {
+                "com.linkedin.ugc.ShareContent": {
+                    "shareCommentary": {"text": message},
+                    "shareMediaCategory": "IMAGE",
+                    "media": [{"status": "READY", "description": {"text": "Image"}, "media": asset_urn, "title": {"text": "Image"}}]
+                }
+            }
+        else:
+            specific_content = {
+                "com.linkedin.ugc.ShareContent": {
+                    "shareCommentary": {"text": message},
+                    "shareMediaCategory": "NONE"
+                }
+            }
+            
+        payload = {
+            "author": author_urn,
+            "lifecycleState": "PUBLISHED",
+            "specificContent": specific_content,
+            "visibility": {
+                "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC"
+            }
+        }
+        
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=15)
+            res_data = resp.json() if resp.text else {}
+            
+            if resp.status_code == 201:
+                post_id = res_data.get("id", "Unknown")
+                return {
+                    "success": True,
+                    "platform": "linkedin",
+                    "post_id": post_id,
+                    "message": f"Successfully published to LinkedIn!"
+                }
+            else:
+                err_msg = res_data.get("message") or resp.text
+                return {
+                    "success": False,
+                    "platform": "linkedin",
+                    "error": f"LinkedIn API Error ({resp.status_code}): {err_msg}"
+                }
+        except Exception as e:
+            return {"success": False, "platform": "linkedin", "error": f"LinkedIn network error: {str(e)}"}
 
     def publish_to_youtube(self, channel_id: str, access_token: str, message: str, video_path: str = None) -> dict:
         """Publish (upload) a video to YouTube using Data API v3 Resumable Upload."""
