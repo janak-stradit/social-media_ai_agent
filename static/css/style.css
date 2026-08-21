@@ -758,9 +758,11 @@ body {
 .color-fb { color: #1877f2; }
 .color-ig { color: #e4405f; }
 .color-li { color: #0a66c2; }
+.color-yt { color: #ff0000; }
 .platform-chip-sm input:checked + .chip-content .color-fb,
 .platform-chip-sm input:checked + .chip-content .color-ig,
-.platform-chip-sm input:checked + .chip-content .color-li { color: #fff; }
+.platform-chip-sm input:checked + .chip-content .color-li,
+.platform-chip-sm input:checked + .chip-content .color-yt { color: #fff; }
 
 /* Tone Select Dropdown Inline */
 .chat-select-sm {
@@ -1452,6 +1454,41 @@ body {
 .btn-memory-graph-trigger:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 12px rgba(79, 70, 229, 0.35);
+}
+
+.trend-card {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.trend-card:hover {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+  transform: translateY(-1px);
+}
+
+.trend-headline {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+
+.trend-desc {
+  font-size: 0.75rem;
+  color: #64748b;
+  margin-bottom: 0;
+  display: none;
+}
+
+.trend-card:hover .trend-desc {
+  display: block;
+  margin-top: 6px;
 }
 
 .mem-stat-card {

@@ -168,6 +168,45 @@
                 <button type="button" class="btn-memory-graph-trigger" id="openMemoryGraphBtn" title="View Interactive RAG Memory Knowledge Graph">
                     <i class="fas fa-project-diagram me-1"></i>Memory Graph
                 </button>
+                <div class="dropdown">
+                    <button class="btn btn-sm btn-outline-info rounded-pill fw-bold" type="button" id="trendAnalysisBtn" data-bs-toggle="dropdown" aria-expanded="false" style="font-size: 0.75rem; padding: 4px 10px; border-color: #3b82f6; color: #3b82f6; background-color: rgba(59,130,246,0.1);">
+                        <i class="fas fa-fire me-1"></i>Trend Analysis
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end shadow-lg border-0 rounded-3 p-3" aria-labelledby="trendAnalysisBtn" id="trendDropdownMenu" style="width: 350px; max-height: 400px; overflow-y: auto;">
+                        <div class="px-3 py-2 border-bottom mb-2 bg-light rounded-top">
+                            <label class="form-label fs-8 fw-bold text-secondary mb-1">Platform</label>
+                            <select id="trendPlatformSelect" class="form-select form-select-sm mb-2 shadow-sm border-0">
+                                <option value="linkedin">LinkedIn</option>
+                                <option value="instagram">Instagram</option>
+                                <option value="facebook">Facebook</option>
+                                <option value="youtube">YouTube</option>
+                            </select>
+                            
+                            <label class="form-label fs-8 fw-bold text-secondary mb-1">Domain / Industry</label>
+                            <select id="trendDomainSelect" class="form-select form-select-sm mb-2 shadow-sm border-0">
+                                <option value="AI and Technology">AI & Technology</option>
+                                <option value="Healthcare">Healthcare</option>
+                                <option value="Finance">Finance</option>
+                                <option value="E-commerce">E-commerce</option>
+                                <option value="Education">Education</option>
+                                <option value="Marketing">Marketing</option>
+                                <option value="Real Estate">Real Estate</option>
+                            </select>
+                            
+                            <button id="fetchTrendsBtn" class="btn btn-sm btn-primary w-100 fw-bold shadow-sm">
+                                <i class="fas fa-sync-alt me-1"></i> Fetch Trends
+                            </button>
+                        </div>
+                        
+                        <li class="text-center text-slate-500 py-3" id="trendLoadingState" style="display: none;">
+                            <div class="spinner-border spinner-border-sm text-info mb-2" role="status"></div>
+                            <div class="fs-8">Fetching latest trends...</div>
+                        </li>
+                        <div id="trendContentContainer">
+                            <li class="px-2 py-1 fs-8 text-slate-400 text-center">Click 'Fetch Trends' to begin</li>
+                        </div>
+                    </ul>
+                </div>
                 <span class="badge-enterprise"><i class="fas fa-shield-halved me-1"></i>Enterprise AI</span>
                 <span class="badge-version">v2.5 Critic</span>
             </div>
@@ -250,6 +289,10 @@
                                 <input type="checkbox" value="linkedin" id="liCheck" checked>
                                 <span class="chip-content"><i class="fab fa-linkedin me-1 color-li"></i>LinkedIn</span>
                             </label>
+                            <label class="platform-chip-sm" for="ytCheck">
+                                <input type="checkbox" value="youtube" id="ytCheck" checked>
+                                <span class="chip-content"><i class="fab fa-youtube me-1 color-yt"></i>YouTube</span>
+                            </label>
                         </div>
                     </div>
 
@@ -288,16 +331,16 @@
                     <div class="config-group">
                         <span class="config-label"><i class="fas fa-photo-film me-1"></i>Output:</span>
                         <div class="media-chips-inline">
-                            <label class="media-chip-sm" for="mediaNone">
-                                <input type="radio" name="mediaType" value="none" id="mediaNone" checked>
-                                <span class="chip-content">Text Only</span>
+                            <label class="media-chip-sm" for="mediaText">
+                                <input type="checkbox" name="outputOptions" value="text" id="mediaText" checked>
+                                <span class="chip-content">Text (Caption)</span>
                             </label>
                             <label class="media-chip-sm" for="mediaImage">
-                                <input type="radio" name="mediaType" value="image" id="mediaImage">
+                                <input type="checkbox" name="outputOptions" value="image" id="mediaImage">
                                 <span class="chip-content"><i class="fas fa-image me-1 text-primary"></i>Image</span>
                             </label>
                             <label class="media-chip-sm" for="mediaVideo">
-                                <input type="radio" name="mediaType" value="video" id="mediaVideo">
+                                <input type="checkbox" name="outputOptions" value="video" id="mediaVideo">
                                 <span class="chip-content"><i class="fas fa-video me-1 text-purple"></i>Video</span>
                             </label>
                         </div>

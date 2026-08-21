@@ -303,7 +303,8 @@ $(document).ready(function () {
 
         const tone = $('#toneSelect').val();
         const brandVoice = $('#brandVoiceSelect').val() || 'Standard Enterprise';
-        const mediaType = $('input[name="mediaType"]:checked').val() || 'none';
+        const selectedOutputs = Array.from(document.querySelectorAll('input[name="outputOptions"]:checked')).map(el => el.value);
+        const mediaType = selectedOutputs.join(', ') || 'none';
         const hasImage = !!(uploadedImagePath || threadActiveImagePath);
 
         // Hide welcome hero on first message
@@ -361,7 +362,8 @@ $(document).ready(function () {
             tone: tone,
             brand_voice: brandVoice,
             include_strategy: true,
-            previous_context: lastAssistantContext
+            previous_context: lastAssistantContext,
+            selected_outputs: selectedOutputs
         };
 
         $.ajax({
@@ -383,7 +385,7 @@ $(document).ready(function () {
                 lastAssistantContext = contextSummary;
 
                 // Render finished Assistant Response inside Assistant Card
-                renderAssistantResponse(assistantElem, r.content, platforms, msgId, story, activeImgPath, mediaType, tone, lastRunId, r.usage, r.agents_executed, r.quality_summary);
+                renderAssistantResponse(assistantElem, r.content, platforms, msgId, story, activeImgPath, mediaType, tone, lastRunId, r.usage, r.agents_executed, r.quality_summary, selectedOutputs);
                 renderHistory();
                 loadUserUsageMetrics();
                 scrollToBottom();
@@ -425,7 +427,7 @@ $(document).ready(function () {
 
     function appendUserMessage(text, imagePath, platforms, tone, mediaType, brandVoice) {
         const platformBadges = platforms.map(p => {
-            const icons = { facebook: 'fab fa-facebook color-fb', instagram: 'fab fa-instagram color-ig', linkedin: 'fab fa-linkedin color-li' };
+            const icons = { facebook: 'fab fa-facebook color-fb', instagram: 'fab fa-instagram color-ig', linkedin: 'fab fa-linkedin color-li', youtube: 'fab fa-youtube color-yt' };
             return `<span class="chat-badge"><i class="${icons[p] || 'fas fa-share'} me-1"></i>${p.toUpperCase()}</span>`;
         }).join(' ');
 
@@ -522,7 +524,7 @@ $(document).ready(function () {
         return elem;
     }
 
-    function renderAssistantResponse(elem, content, platforms, msgId, story, imagePath, mediaType, tone, runId, usage, agentsExecuted, qualitySummary) {
+    function renderAssistantResponse(elem, content, platforms, msgId, story, imagePath, mediaType, tone, runId, usage, agentsExecuted, qualitySummary, selectedOutputs = []) {
         // Badges for Token Usage & Memory Context
         const totalTokens = usage?.total_tokens ? Number(usage.total_tokens).toLocaleString() : '1,560';
         const costUsd = usage?.cost_usd ? '$' + Number(usage.cost_usd).toFixed(4) : '$0.0003';
@@ -555,7 +557,7 @@ $(document).ready(function () {
         let tabsHtml = `<div class="platform-tabs-chat">`;
         platforms.forEach((p, idx) => {
             const active = idx === 0 ? 'active' : '';
-            const icons = { facebook: 'fab fa-facebook color-fb', instagram: 'fab fa-instagram color-ig', linkedin: 'fab fa-linkedin color-li' };
+            const icons = { facebook: 'fab fa-facebook color-fb', instagram: 'fab fa-instagram color-ig', linkedin: 'fab fa-linkedin color-li', youtube: 'fab fa-youtube color-yt' };
             tabsHtml += `
                 <button class="platform-tab-chat ${active}" data-target="${msgId}_tab_${p}">
                     <i class="${icons[p] || 'fas fa-share'} me-1"></i>${capitalize(p)}
@@ -661,14 +663,25 @@ $(document).ready(function () {
 
                     <!-- Media Output Placeholder/Card -->
                     <div id="${msgId}_media_${p}" class="media-container-slot">
-                        ${mediaType !== 'none' ? `
-                        <div class="media-output-card">
+                        ${(selectedOutputs || []).includes('image') ? `
+                        <div class="media-output-card mb-2" id="${msgId}_media_image_${p}">
                             <div class="media-output-header">
-                                <span><i class="fas fa-spinner fa-spin me-2 text-primary"></i>Generating AI ${mediaType.toUpperCase()}...</span>
+                                <span><i class="fas fa-spinner fa-spin me-2 text-primary"></i>Generating AI IMAGE...</span>
                             </div>
                             <div class="media-output-body text-center p-4">
                                 <div class="spinner-border text-primary mb-2" role="status"></div>
-                                <p class="text-muted small mb-0">Multi-agent media pipeline is processing visual generation</p>
+                                <p class="text-muted small mb-0">Multi-agent media pipeline is processing image generation</p>
+                            </div>
+                        </div>
+                        ` : ''}
+                        ${(selectedOutputs || []).includes('video') ? `
+                        <div class="media-output-card" id="${msgId}_media_video_${p}">
+                            <div class="media-output-header">
+                                <span><i class="fas fa-spinner fa-spin me-2 text-purple"></i>Generating AI VIDEO...</span>
+                            </div>
+                            <div class="media-output-body text-center p-4">
+                                <div class="spinner-border text-purple mb-2" role="status"></div>
+                                <p class="text-muted small mb-0">Multi-agent media pipeline is processing video generation</p>
                             </div>
                         </div>
                         ` : ''}
@@ -727,10 +740,15 @@ $(document).ready(function () {
         });
 
         // Trigger Media Generation asynchronously if mediaType requested
-        if (mediaType !== 'none') {
+        if (selectedOutputs && selectedOutputs.length > 0) {
             platforms.forEach(p => {
                 const pCaption = content[p]?.caption?.primary_caption || story;
-                triggerMediaGenInChat(p, pCaption, mediaType, tone, runId, imagePath, `${msgId}_media_${p}`);
+                if (selectedOutputs.includes('image')) {
+                    triggerMediaGenInChat(p, pCaption, 'image', tone, runId, imagePath, `${msgId}_media_image_${p}`);
+                }
+                if (selectedOutputs.includes('video')) {
+                    triggerMediaGenInChat(p, pCaption, 'video', tone, runId, imagePath, `${msgId}_media_video_${p}`);
+                }
             });
         }
     }
@@ -2032,4 +2050,125 @@ $(document).ready(function () {
             }
         });
     }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // TREND ANALYSIS LOGIC
+    // ─────────────────────────────────────────────────────────────────────────────
+    const trendAnalysisBtn = document.getElementById('trendAnalysisBtn');
+    const trendContentContainer = document.getElementById('trendContentContainer');
+    const trendLoadingState = document.getElementById('trendLoadingState');
+    let trendsFetched = false;
+
+    const fetchTrendsBtn = document.getElementById('fetchTrendsBtn');
+    if (fetchTrendsBtn) {
+        fetchTrendsBtn.addEventListener('click', function (e) {
+            e.preventDefault(); // Stop dropdown from closing if it's a form submit
+            e.stopPropagation();
+
+            const platform = document.getElementById('trendPlatformSelect').value;
+            const domain = document.getElementById('trendDomainSelect').value;
+            
+            trendContentContainer.innerHTML = '';
+            trendLoadingState.style.display = 'block';
+
+            // Pass the parameters to the backend
+            fetch(`/api/get_ai_trends?platform=${encodeURIComponent(platform)}&domain=${encodeURIComponent(domain)}`)
+                .then(response => response.json())
+                .then(data => {
+                    trendLoadingState.style.display = 'none';
+                    if (data.success && data.data && data.data.trends) {
+                        data.data.trends.forEach((trend, index) => {
+                            const card = document.createElement('div');
+                            card.className = 'trend-card';
+                            if (index >= 5) {
+                                card.style.display = 'none';
+                                card.classList.add('hidden-trend');
+                            }
+                            card.innerHTML = `
+                                <div class="trend-headline">${trend.headline}</div>
+                                <p class="trend-desc">${trend.description}</p>
+                                <div class="trend-metrics mt-2 d-flex gap-2">
+                                    <span class="badge bg-light text-dark border"><i class="fas fa-arrow-trend-up text-success me-1"></i>${trend.trending_score || 'Trending'}</span>
+                                    <span class="badge bg-light text-dark border"><i class="fas fa-users text-primary me-1"></i>${trend.engagement_volume || 'High Engagement'}</span>
+                                </div>
+                            `;
+                            card.addEventListener('click', () => {
+                                const mainInput = document.getElementById('storyInput');
+                                if (mainInput) {
+                                    mainInput.value = `🤖 Generating ${domain} post for ${platform} based on this trend...`;
+                                }
+                                
+                                const bsDropdown = bootstrap.Dropdown.getInstance(document.getElementById('trendAnalysisBtn'));
+                                if (bsDropdown) bsDropdown.hide();
+
+                                const toneSelect = document.getElementById('toneSelect');
+                                const tone = toneSelect ? toneSelect.value : 'Auto-Detect';
+                                const selectedOutputs = Array.from(document.querySelectorAll('input[name="outputOptions"]:checked')).map(el => el.value);
+
+                                // Auto-select the platform in the main UI
+                                document.querySelectorAll('.platform-chip-sm input').forEach(input => {
+                                    if (input.value === platform) {
+                                        input.checked = true;
+                                    } else {
+                                        input.checked = false;
+                                    }
+                                });
+
+                                fetch('/api/generate_trend_prompt', {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        headline: trend.headline,
+                                        description: trend.description,
+                                        platform: platform,
+                                        domain: domain,
+                                        tone: tone,
+                                        outputs: selectedOutputs
+                                    })
+                                })
+                                .then(res => res.json())
+                                .then(data => {
+                                    if (data.success && data.prompt) {
+                                        if (mainInput) {
+                                            mainInput.value = data.prompt;
+                                            mainInput.focus();
+                                        }
+                                    } else {
+                                        if (mainInput) mainInput.value = "Error generating prompt: " + (data.error || "Unknown error");
+                                    }
+                                })
+                                .catch(err => {
+                                    console.error("Prompt Gen Error", err);
+                                    if (mainInput) mainInput.value = "Network error generating prompt.";
+                                });
+                            });
+                            trendContentContainer.appendChild(card);
+                        });
+                        
+                        if (data.data.trends.length > 5) {
+                            const seeMoreBtn = document.createElement('button');
+                            seeMoreBtn.className = 'btn btn-sm btn-outline-secondary w-100 mt-2 fw-bold';
+                            seeMoreBtn.innerHTML = '<i class="fas fa-chevron-down me-1"></i> See More Trends';
+                            seeMoreBtn.onclick = (e) => {
+                                e.stopPropagation();
+                                document.querySelectorAll('.hidden-trend').forEach(el => {
+                                    el.style.display = 'block';
+                                    el.classList.remove('hidden-trend');
+                                });
+                                seeMoreBtn.style.display = 'none';
+                            };
+                            trendContentContainer.appendChild(seeMoreBtn);
+                        }
+                    } else {
+                        trendContentContainer.innerHTML = `<li class="px-3 py-2 text-danger fs-8 text-center">${data.error || 'Failed to fetch trends.'}</li>`;
+                    }
+                })
+                .catch(err => {
+                    trendLoadingState.style.display = 'none';
+                    trendContentContainer.innerHTML = `<li class="px-3 py-2 text-danger fs-8 text-center">Network error. Check console.</li>`;
+                    console.error(err);
+                });
+        });
+    }
+
 });

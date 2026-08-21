@@ -816,6 +816,38 @@ class MediaGenerationService:
             "model": "mock-media-v1",
         }
 
+    def _generate_image_openai(self, prompt: str, platform: str, size: str) -> dict:
+        """Generate an image using OpenAI DALL-E 3."""
+        if not self.api_key:
+            raise RuntimeError("OPENAI_API_KEY is not configured.")
+        
+        # DALL-E 3 only supports 1024x1024, 1024x1792, or 1792x1024
+        w, h = self._parse_size(size)
+        if w > h:
+            oai_size = "1792x1024"
+        elif h > w:
+            oai_size = "1024x1792"
+        else:
+            oai_size = "1024x1024"
+            
+        response = self.client.images.generate(
+            model="dall-e-3",
+            prompt=prompt[:4000],
+            size=oai_size,
+            quality="standard",
+            n=1,
+        )
+        image_url = response.data[0].url
+        img_data = requests.get(image_url, timeout=30).content
+        local_filename, _ = self._save_image_bytes(img_data, platform)
+        return {
+            "url": f"/static/uploads/{local_filename}",
+            "original_url": image_url,
+            "prompt": prompt,
+            "cost": 0.040,
+            "model": "dall-e-3"
+        }
+
     # ── Image Generation ───────────────────────────────────────────────────
     def generate_image(self, caption: str, platform: str, tone: str = None, image_path: str = None) -> dict:
         """
@@ -850,21 +882,38 @@ class MediaGenerationService:
                 f"No text overlays, premium quality, highly detailed."
             )
         else:
-            prompt = self._enhance_image_prompt(caption, platform, tone)
+            # If the user provides a detailed prompt (like a Midjourney prompt), use it directly
+            if len(caption) > 150 or "midjourney" in caption.lower() or "prompt" in caption.lower():
+                prompt = caption
+            else:
+                prompt = self._enhance_image_prompt(caption, platform, tone)
 
         try:
+            if not self.bedrock_client:
+                raise RuntimeError("AWS Bedrock client is not initialized")
+            result = self._generate_image_bedrock(prompt, platform, size, image_path=image_path)
+        except Exception as bedrock_err:
+            print(f"[Media Service] Bedrock image generation failed: {bedrock_err}. Falling back to OpenAI DALL-E 3...")
             try:
-                result = self._generate_image_bedrock(prompt, platform, size, image_path=image_path)
-            except Exception as bedrock_err:
-                err_msg = str(bedrock_err)
-                print(f"[Media Service] Bedrock image generation failed: {err_msg}")
-                if "Access denied" in err_msg or "ResourceNotFoundException" in err_msg or "legacy" in err_msg.lower():
-                    raise RuntimeError(
-                        "AWS Bedrock model access denied or model is legacy. "
-                        "Please open your AWS Bedrock Console, navigate to 'Model access' in the left menu, "
-                        "and request access for Amazon Nova Canvas (for images)."
-                    ) from bedrock_err
-                raise bedrock_err
+                result = self._generate_image_openai(prompt, platform, size)
+            except Exception as openai_err:
+                print(f"[Media Service] OpenAI image generation failed: {openai_err}. Falling back to Pollinations.ai...")
+                import urllib.parse
+                encoded_prompt = urllib.parse.quote(prompt[:800])
+                width, height = size.split('x')
+                url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&nologo=true"
+                response = requests.get(url, timeout=60)
+                if response.status_code != 200:
+                    raise Exception(f"Pollinations API returned status {response.status_code}: {response.text[:100]}")
+                img_data = response.content
+                local_filename, _ = self._save_image_bytes(img_data, platform)
+                result = {
+                    "url": f"/static/uploads/{local_filename}",
+                    "original_url": url,
+                    "prompt": prompt,
+                    "cost": 0.0,
+                    "model": "pollinations",
+                }
 
             return {
                 "success": True,
@@ -874,9 +923,9 @@ class MediaGenerationService:
                 "original_url": result.get("original_url"),
                 "prompt": result["prompt"],
                 "size": size,
-                "provider": "bedrock",
+                "provider": result.get("model", "bedrock"),
                 "cost": result.get("cost", 0.03),
-                "model": result.get("model", Config.BEDROCK_IMAGE_MODEL),
+                "model": result.get("model", "bedrock"),
             }
 
         except Exception as e:

@@ -1,3 +1,4 @@
+import os
 import openai
 import json
 from config import Config
@@ -70,6 +71,15 @@ class LLMService:
                 "name": "openai",
                 "client": openai.OpenAI(api_key=api_key),
                 "model": Config.AGENTSCOPE_MODEL
+            })
+
+        google_key = getattr(Config, 'GOOGLE_API_KEY', None) or os.getenv('GOOGLE_API_KEY')
+        if google_key:
+            print("[LLM Service] Initialized Gemini Provider via OpenAI compat.")
+            self.providers.append({
+                "name": "gemini",
+                "client": openai.OpenAI(api_key=google_key, base_url="https://generativelanguage.googleapis.com/v1beta/openai/"),
+                "model": "gemini-3.1-flash-lite"
             })
 
         use_mock = getattr(Config, 'USE_MOCK_LLM', False)
@@ -216,6 +226,12 @@ class LLMService:
                     if return_usage:
                         return text_out, usage_metrics
                     return text_out
+                elif provider["name"] == "mock":
+                    text_out = self._generate_mock_response(system_prompt, user_prompt)
+                    usage_metrics = self._calculate_cost("mock", "mock-llm-v1", 0, 0)
+                    if return_usage:
+                        return text_out, usage_metrics
+                    return text_out
                 else:
                     response = provider["client"].chat.completions.create(
                         model=provider["model"],
@@ -314,6 +330,9 @@ class LLMService:
                     in_t = usage_raw.get('inputTokens', len(json_system_prompt + user_prompt) // 4)
                     out_t = usage_raw.get('outputTokens', len(content) // 4)
                     usage_metrics = self._calculate_cost("bedrock", provider["model"], in_t, out_t)
+                elif provider["name"] == "mock":
+                    content = self._generate_mock_response(system_prompt, user_prompt)
+                    usage_metrics = self._calculate_cost("mock", "mock-llm-v1", 0, 0)
                 else:
                     kwargs = {
                         "model": provider["model"],

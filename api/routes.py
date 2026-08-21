@@ -4,6 +4,7 @@ import os
 import uuid
 import requests
 import urllib.parse
+import json
 from config import Config
 from auth.utils import get_current_user_id, login_required_api, admin_required_api
 from agents.story_agent import StoryAgent
@@ -327,6 +328,8 @@ def generate_content():
     brand_voice = data.get('brand_voice', 'Standard Enterprise')
     include_strategy = data.get('include_strategy', True)
     previous_context = data.get('previous_context')
+    selected_outputs = data.get('selected_outputs', ['text', 'image', 'video'])
+    generate_text = 'text' in selected_outputs or 'Text (Caption)' in selected_outputs
     user_id = get_current_user_id()
 
     # Credit Limit Check
@@ -386,38 +389,42 @@ def generate_content():
             })
         
         # Step 3: Generate captions with A/B Hook Variations
-        captions = caption_agent.generate_all_platforms(
-            story_analysis, vision_analysis, tone, memory_context=mem_prompt, brand_voice=brand_voice
-        )
-        cap_usage = captions.pop('_usage', {})
-        total_tokens += cap_usage.get("total_tokens", 0)
-        total_cost_usd += cap_usage.get("cost_usd", 0.0)
+        captions = {}
+        if generate_text:
+            captions = caption_agent.generate_all_platforms(
+                story_analysis, vision_analysis, tone, memory_context=mem_prompt, brand_voice=brand_voice
+            )
+            cap_usage = captions.pop('_usage', {})
+            total_tokens += cap_usage.get("total_tokens", 0)
+            total_cost_usd += cap_usage.get("cost_usd", 0.0)
 
-        agents_executed.append({
-            "agent": "CaptionAgent",
-            "name": "Caption Agent",
-            "role": f"Generated 3 psychological hook angles for {', '.join(platforms)} ('{brand_voice}' voice)",
-            "status": "completed"
-        })
+            agents_executed.append({
+                "agent": "CaptionAgent",
+                "name": "Caption Agent",
+                "role": f"Generated 3 psychological hook angles for {', '.join(platforms)} ('{brand_voice}' voice)",
+                "status": "completed"
+            })
         
         # Step 4: Generate hashtags
-        hashtags = hashtag_agent.generate_all_platforms(
-            story_analysis, vision_analysis, memory_context=mem_prompt
-        )
-        hash_usage = hashtags.pop('_usage', {})
-        total_tokens += hash_usage.get("total_tokens", 0)
-        total_cost_usd += hash_usage.get("cost_usd", 0.0)
+        hashtags = {}
+        if generate_text:
+            hashtags = hashtag_agent.generate_all_platforms(
+                story_analysis, vision_analysis, memory_context=mem_prompt
+            )
+            hash_usage = hashtags.pop('_usage', {})
+            total_tokens += hash_usage.get("total_tokens", 0)
+            total_cost_usd += hash_usage.get("cost_usd", 0.0)
 
-        agents_executed.append({
-            "agent": "HashtagAgent",
-            "name": "Hashtag Agent",
-            "role": "Curated broad, niche & trending hashtag sets",
-            "status": "completed"
-        })
+            agents_executed.append({
+                "agent": "HashtagAgent",
+                "name": "Hashtag Agent",
+                "role": "Curated broad, niche & trending hashtag sets",
+                "status": "completed"
+            })
         
         # Step 5: Generate strategy
         strategies = {}
-        if include_strategy:
+        if include_strategy and generate_text:
             strategies = strategy_agent.generate_all_strategies(story_analysis, memory_context=mem_prompt)
             strat_usage = strategies.pop('_usage', {})
             total_tokens += strat_usage.get("total_tokens", 0)
@@ -434,49 +441,50 @@ def generate_content():
         quality_evaluations = {}
         refinements_count = 0
 
-        for platform in platforms:
-            primary_cap = captions.get(platform, {}).get('primary_caption', '')
-            p_hashtags = (hashtags.get(platform, {}) or {}).get('hashtags', [])
-            
-            # Reviewer evaluates post quality
-            eval_res = reviewer_agent.evaluate(
-                platform=platform,
-                caption=primary_cap,
-                hashtags=p_hashtags,
-                story_analysis=story_analysis,
-                brand_voice=brand_voice
-            )
-            
-            rev_usage = eval_res.pop('_usage', {})
-            total_tokens += rev_usage.get("total_tokens", 0)
-            total_cost_usd += rev_usage.get("cost_usd", 0.0)
-
-            # Trigger self-correction if score < 8.0
-            if eval_res.get('needs_refinement'):
-                refinements_count += 1
-                refined_cap, ref_usage = caption_agent.refine_caption(
+        if generate_text:
+            for platform in platforms:
+                primary_cap = captions.get(platform, {}).get('primary_caption', '')
+                p_hashtags = (hashtags.get(platform, {}) or {}).get('hashtags', [])
+                
+                # Reviewer evaluates post quality
+                eval_res = reviewer_agent.evaluate(
                     platform=platform,
-                    original_caption=primary_cap,
-                    reviewer_feedback=eval_res.get('reviewer_feedback'),
+                    caption=primary_cap,
+                    hashtags=p_hashtags,
+                    story_analysis=story_analysis,
                     brand_voice=brand_voice
                 )
-                captions[platform]['primary_caption'] = refined_cap
-                captions[platform]['refined_by_critic'] = True
-                eval_res['self_corrected'] = True
-                eval_res['overall_score'] = min(9.8, round(eval_res.get('overall_score', 7.5) + 1.5, 1))
                 
-                if ref_usage:
-                    total_tokens += ref_usage.get("total_tokens", 0)
-                    total_cost_usd += ref_usage.get("cost_usd", 0.0)
+                rev_usage = eval_res.pop('_usage', {})
+                total_tokens += rev_usage.get("total_tokens", 0)
+                total_cost_usd += rev_usage.get("cost_usd", 0.0)
 
-            quality_evaluations[platform] = eval_res
+                # Trigger self-correction if score < 8.0
+                if eval_res.get('needs_refinement'):
+                    refinements_count += 1
+                    refined_cap, ref_usage = caption_agent.refine_caption(
+                        platform=platform,
+                        original_caption=primary_cap,
+                        reviewer_feedback=eval_res.get('reviewer_feedback'),
+                        brand_voice=brand_voice
+                    )
+                    captions[platform]['primary_caption'] = refined_cap
+                    captions[platform]['refined_by_critic'] = True
+                    eval_res['self_corrected'] = True
+                    eval_res['overall_score'] = min(9.8, round(eval_res.get('overall_score', 7.5) + 1.5, 1))
+                    
+                    if ref_usage:
+                        total_tokens += ref_usage.get("total_tokens", 0)
+                        total_cost_usd += ref_usage.get("cost_usd", 0.0)
 
-        agents_executed.append({
-            "agent": "ReviewerAgent",
-            "name": "Critic & Self-Correction Agent",
-            "role": f"Evaluated quality, hook strength & applied {refinements_count} self-corrections",
-            "status": "completed"
-        })
+                quality_evaluations[platform] = eval_res
+
+            agents_executed.append({
+                "agent": "ReviewerAgent",
+                "name": "Critic & Self-Correction Agent",
+                "role": f"Evaluated quality, hook strength & applied {refinements_count} self-corrections",
+                "status": "completed"
+            })
 
         # Calculate average overall quality score
         avg_score = round(sum(q.get('overall_score', 8.5) for q in quality_evaluations.values()) / max(1, len(quality_evaluations)), 1)
@@ -1336,3 +1344,113 @@ def verify_social_account_endpoint(platform):
             'platform': platform,
             'message': f'{platform.capitalize()} credentials configured.'
         })
+
+@api_bp.route('/get_ai_trends', methods=['GET'])
+def get_ai_trends():
+    """Fetch recent AI trends using LLMService."""
+    platform = request.args.get('platform', 'General Social Media')
+    domain = request.args.get('domain', 'AI and Technology')
+    
+    try:
+        from duckduckgo_search import DDGS
+        import datetime
+        
+        # 1. Fetch live context
+        current_year = datetime.datetime.now().year
+        query = f"latest {domain} trends {current_year}"
+        live_context = ""
+        
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=15))
+            if results:
+                for r in results:
+                    live_context += f"- Title: {r.get('title', '')}\n  Snippet: {r.get('body', '')}\n\n"
+        
+        if not live_context:
+            live_context = "No live data found. Rely on your base knowledge."
+
+        # 2. Build RAG prompt
+        sys_prompt = "You are an expert AI trend analyzer grounded in real-time data."
+        prompt = (
+            f"Here is the LIVE web search context for recent trends in the '{domain}' industry:\n"
+            f"---\n{live_context}\n---\n\n"
+            f"Using ONLY the live context provided above, extract 12 highly recent and cutting-edge trends "
+            f"specifically tailored for audiences on {platform.capitalize()}. "
+            "If the live context mentions real metrics (like views, engagement, or percentages), you MUST use them. "
+            "If no metrics are mentioned, infer realistic metrics based on the context. "
+            "Return the output ONLY as a valid JSON object with a single key 'trends' containing a list of objects with 'headline', 'description', 'trending_score' (e.g., '+95%', 'Hot'), and 'engagement_volume' (e.g., '1.2M', 'High')."
+        )
+        
+        from services.llm_service import LLMService
+        llm = LLMService()
+        trends_data = llm.generate_json(sys_prompt, prompt)
+        
+        # Ensure it has the correct wrapper
+        if "trends" not in trends_data:
+            if isinstance(trends_data, list):
+                trends_data = {"trends": trends_data}
+            else:
+                trends_data = {"trends": [trends_data]}
+                
+        return jsonify({"success": True, "data": trends_data})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+@api_bp.route('/generate_trend_prompt', methods=['POST'])
+def generate_trend_prompt():
+    """Generates a detailed image/video prompt based on a trend using LLMService."""
+    data = request.json or {}
+    headline = data.get('headline')
+    description = data.get('description')
+    platform = data.get('platform', 'Social Media')
+    domain = data.get('domain', 'General')
+    tone = data.get('tone', 'Auto-Detect')
+    outputs = data.get('outputs', ['text'])
+    
+    tone_instruction = f" and a {tone} tone" if tone and tone != "Auto-Detect" else ""
+    
+    if not headline or not description:
+        return jsonify({"success": False, "error": "Missing headline or description"}), 400
+
+    tasks = []
+    forbidden = []
+    
+    if 'text' in outputs:
+        tasks.append("A highly engaging social media post (caption) to make the audience aware of the trend.")
+    else:
+        forbidden.append("DO NOT write a social media post (caption).")
+        
+    if 'image' in outputs:
+        tasks.append("A highly detailed visual prompt designed to be fed into Midjourney or Sora to generate an accompanying image.")
+    else:
+        forbidden.append("DO NOT write a visual prompt.")
+        
+    if 'video' in outputs:
+        tasks.append("A detailed storyboard or motion prompt for AI video generation based on the trend.")
+    else:
+        forbidden.append("DO NOT write a video prompt.")
+        
+    if not tasks:
+        tasks.append("A highly engaging social media post (caption) to make the audience aware of the trend.")
+
+    tasks_str = "\n".join([f"{i+1}. {t}" for i, t in enumerate(tasks)])
+    forbidden_str = " ".join(forbidden)
+
+    sys_prompt = (
+        f"You are an expert social media manager and prompt engineer. The user will provide a trend in the {domain} industry. "
+        f"Your task is to write ONLY the following specifically tailored for {platform.capitalize()}{tone_instruction}:\n"
+        f"{tasks_str}\n\n"
+        f"CRITICAL RULES:\n"
+        f"1. {forbidden_str}\n"
+        f"2. Format your output clearly with bold section headers like [Social Media Post], [Visual Prompt], or [Video Prompt] depending on what was requested."
+    )
+    
+    user_prompt = f"Trend Headline: {headline}\nTrend Context: {description}\n\nGenerate the requested content now:"
+
+    try:
+        from services.llm_service import LLMService
+        llm = LLMService()
+        text_output = llm.generate(sys_prompt, user_prompt)
+        return jsonify({"success": True, "prompt": text_output})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
