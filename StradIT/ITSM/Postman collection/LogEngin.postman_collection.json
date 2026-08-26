@@ -1,0 +1,6315 @@
+{
+  "info": {
+    "name": "LogEngin \u2014 ITSM Multi-Agent Platform",
+    "description": "Full API surface for the ITSM multi-agent support platform (FastAPI + LangGraph). Generated from the actual route decorators and Pydantic request models in src/api/routes/*.py and src/api/main.py by scripts/generate_postman_collection.py \u2014 every request body here matches a real schema, not a guess.\n\n**Setup**\n1. Import this collection AND the companion environment file.\n2. Select \"LogEngin Local\" in Postman\u2019s environment picker (top-right).\n3. Run **Auth > POST /login** once if you need a real user session (most endpoints work unauthenticated in dev mode via X-Tenant-ID alone \u2014 see src/api/deps.py get_auth_context).\n4. Run **Tickets, Approvals & MCP > POST /api/v1/tickets** to populate {{thread_id}}/{{ticket_id}} for the requests that depend on them.\n\nSee docs/deployment.md and docs/live-environment-readiness.md for what's real vs. mocked in this environment.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth",
+      "item": [
+        {
+          "name": "POST /login",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "login"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"change-me-on-first-boot\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.session_token) { pm.collectionVariables.set('sessionToken', jsonData.session_token); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /logout",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "logout"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /me",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/auth/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "auth",
+                "me"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Tickets, Approvals & MCP",
+      "item": [
+        {
+          "name": "POST /api/v1/tts",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tts"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Your production database connection pool is exhausted.\",\n  \"agent_id\": \"l1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /health",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/demo/reseed",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/demo/reseed",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "demo",
+                "reseed"
+              ]
+            },
+            "description": "Reload demo tickets, metrics, and logs for the current tenant."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/tickets",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tickets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tickets"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Connection pool exhaustion on api-service\",\n  \"description\": \"SQLException: connection pool exhausted, active=50 max=50 waiting=12\",\n  \"severity\": \"P2\",\n  \"category\": \"application\",\n  \"source_system\": \"postman\",\n  \"reporter\": \"postman@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.thread_id) { pm.collectionVariables.set('thread_id', jsonData.thread_id); }",
+                  "if (jsonData.ticket_id) { pm.collectionVariables.set('ticket_id', jsonData.ticket_id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /api/v1/tickets",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tickets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tickets"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/tickets/{thread_id}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tickets/:thread_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tickets",
+                ":thread_id"
+              ],
+              "variable": [
+                {
+                  "key": "thread_id",
+                  "value": "{{thread_id}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/tickets/by-ref/{ticket_id}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/tickets/by-ref/:ticket_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "tickets",
+                "by-ref",
+                ":ticket_id"
+              ],
+              "variable": [
+                {
+                  "key": "ticket_id",
+                  "value": "{{ticket_id}}"
+                }
+              ]
+            },
+            "description": "Read a ticket by the ``sr-tkt-\u2026`` reference shown next to a session.\n\nProducers record that reference, not the internal ``thread_id``, so without\nthis the console had to download a page of tickets and search it in the\nbrowser \u2014 capped at 50, which made every older reference look missing.\n\nPrefers the full thread serialisation so a ticket renders identically\nhowever it was reached. That view needs live workflow state (or a stored\ndemo detail) though, and neither survives a restart \u2014 so a ticket still\nlisted in the console would answer 404 here, which is the same \"it's right\nthere but I can't open it\" problem in a new place. When the richer view\nisn't available, the registry's own record is returned instead: fewer\nfields, but true ones."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/approvals/{thread_id}",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/approvals/:thread_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "approvals",
+                ":thread_id"
+              ],
+              "variable": [
+                {
+                  "key": "thread_id",
+                  "value": "{{thread_id}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"approved\": true,\n  \"approver\": \"operator\",\n  \"comment\": \"Approved via Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1/mcp/discover",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/mcp/discover",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "mcp",
+                "discover"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/mcp/{server_name}/{tool_name}",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/mcp/:server_name/:tool_name",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "mcp",
+                ":server_name",
+                ":tool_name"
+              ],
+              "variable": [
+                {
+                  "key": "server_name",
+                  "value": "ec2"
+                },
+                {
+                  "key": "tool_name",
+                  "value": "describe_instance"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"instance_id\": \"i-09f685a7f52281f14\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Agents",
+      "item": [
+        {
+          "name": "Profiles & Architecture",
+          "item": [
+            {
+              "name": "GET /profiles",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/profiles",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "profiles"
+                  ]
+                },
+                "description": "Return the ordered, client-readable profiles for all agent tiers."
+              },
+              "response": []
+            },
+            {
+              "name": "GET /architecture",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/architecture",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "architecture"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "GET /profiles/{tier}",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/profiles/:tier",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "profiles",
+                    ":tier"
+                  ],
+                  "variable": [
+                    {
+                      "key": "tier",
+                      "value": "l1"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /{tier}/validate-capability",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/:tier/validate-capability",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    ":tier",
+                    "validate-capability"
+                  ],
+                  "variable": [
+                    {
+                      "key": "tier",
+                      "value": "l1"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"restart_service\",\n  \"description\": \"Restart a hung service process\",\n  \"inputs\": [\n    \"service_name\"\n  ],\n  \"outputs\": [\n    \"restart_status\"\n  ]\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Check whether a proposed skill is compatible with the target agent tier.\n\nReports, from both perspectives:\n  * input gap  \u2014 required inputs the agent cannot currently supply\n  * output gap \u2014 platform-required outputs the skill does not declare\nplus a tier-fit recommendation and duplicate detection."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Autonomy",
+          "item": [
+            {
+              "name": "GET /{tier}/autonomy/readiness",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/:tier/autonomy/readiness",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    ":tier",
+                    "autonomy",
+                    "readiness"
+                  ],
+                  "variable": [
+                    {
+                      "key": "tier",
+                      "value": "l1"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /{tier}/autonomy/promote",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/:tier/autonomy/promote",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    ":tier",
+                    "autonomy",
+                    "promote"
+                  ],
+                  "variable": [
+                    {
+                      "key": "tier",
+                      "value": "l1"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /{tier}/autonomy/demote",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/:tier/autonomy/demote",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    ":tier",
+                    "autonomy",
+                    "demote"
+                  ],
+                  "variable": [
+                    {
+                      "key": "tier",
+                      "value": "l1"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Custom Guard Drills",
+          "item": [
+            {
+              "name": "GET /custom-guard-drills",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/custom-guard-drills",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "custom-guard-drills"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /custom-guard-drills",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/custom-guard-drills",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "custom-guard-drills"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"name\": \"L1 never handles P1 security\",\n  \"description\": \"L1 must escalate any P1 security-category ticket\",\n  \"agent_key\": \"l1\",\n  \"rule_type\": \"tier_minimum\",\n  \"params\": {\n    \"severity\": \"P1\",\n    \"category\": \"security\",\n    \"min_tier\": \"L3\"\n  },\n  \"enabled\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "var jsonData = pm.response.json();",
+                      "if (jsonData.drill_id || jsonData.id) { pm.collectionVariables.set('drill_id', jsonData.drill_id || jsonData.id); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "DELETE /custom-guard-drills/{drill_id}",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/custom-guard-drills/:drill_id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "custom-guard-drills",
+                    ":drill_id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "drill_id",
+                      "value": "{{drill_id}}"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Guard Drills (Tier)",
+          "item": [
+            {
+              "name": "GET /guard-drills/summary",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/guard-drills/summary",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "guard-drills",
+                    "summary"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /guard-drills/run-all",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/guard-drills/run-all",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "guard-drills",
+                    "run-all"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "GET /{tier}/guard-drills",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/:tier/guard-drills",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    ":tier",
+                    "guard-drills"
+                  ],
+                  "variable": [
+                    {
+                      "key": "tier",
+                      "value": "l1"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /{tier}/guard-drills/run",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/:tier/guard-drills/run",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    ":tier",
+                    "guard-drills",
+                    "run"
+                  ],
+                  "variable": [
+                    {
+                      "key": "tier",
+                      "value": "l1"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Incidents",
+          "item": [
+            {
+              "name": "GET /incidents/clusters",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/incidents/clusters",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "incidents",
+                    "clusters"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Maintenance",
+          "item": [
+            {
+              "name": "GET /maintenance/schedule",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/maintenance/schedule",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "maintenance",
+                    "schedule"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "PUT /maintenance/schedule",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/maintenance/schedule",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "maintenance",
+                    "schedule"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"enabled\": true,\n  \"cron_hint\": \"0 * * * *\",\n  \"import_routing_feedback\": true,\n  \"run_guard_drills\": true,\n  \"snapshot_scorecard\": true,\n  \"sync_feedback_training\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /maintenance/run",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/maintenance/run",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "maintenance",
+                    "run"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Master Agent",
+          "item": [
+            {
+              "name": "GET /master/routing-feedback/scan",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/master/routing-feedback/scan",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "master",
+                    "routing-feedback",
+                    "scan"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /master/routing-feedback/import",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/master/routing-feedback/import",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "master",
+                    "routing-feedback",
+                    "import"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /master/reclassify",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/master/reclassify",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "master",
+                    "reclassify"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"entry_id\": \"demo-entry-001\",\n  \"category\": \"application\",\n  \"severity\": \"P2\",\n  \"complexity\": \"moderate\",\n  \"target_tier\": \"L2\",\n  \"confidence\": 0.85,\n  \"reason\": \"Manual operator correction\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "GET /master/runbooks",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/master/runbooks",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "master",
+                    "runbooks"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /master/runbooks/promote",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/master/runbooks/promote",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "master",
+                    "runbooks",
+                    "promote"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"entry_id\": \"demo-entry-001\",\n  \"key\": \"connection_pool_exhaustion\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Performance",
+          "item": [
+            {
+              "name": "GET /performance/summary",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/performance/summary",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "performance",
+                    "summary"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "GET /performance/policy",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/performance/policy",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "performance",
+                    "policy"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "PUT /performance/policy",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/performance/policy",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "performance",
+                    "policy"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"classification_cache_enabled\": true,\n  \"predictive_routing_enabled\": true,\n  \"parallel_l1_triage\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /performance/cache/clear",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/performance/cache/clear",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "performance",
+                    "cache",
+                    "clear"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /performance/stats/reset",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/performance/stats/reset",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "performance",
+                    "stats",
+                    "reset"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "GET /performance/routing-patterns",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/performance/routing-patterns",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "performance",
+                    "routing-patterns"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Policy",
+          "item": [
+            {
+              "name": "GET /policy",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/policy",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "policy"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "PUT /policy",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/policy",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "policy"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"master_escalate_below\": 0.6,\n  \"l1_escalate_below\": 0.5,\n  \"l2_escalate_below\": 0.55,\n  \"l3_escalate_below\": 0.5,\n  \"quality_flag_below\": 3.0,\n  \"auto_import_feedback\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Process Logs",
+          "item": [
+            {
+              "name": "POST /process-logs/{entry_id}/guard-drills",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/process-logs/:entry_id/guard-drills",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "process-logs",
+                    ":entry_id",
+                    "guard-drills"
+                  ],
+                  "variable": [
+                    {
+                      "key": "entry_id",
+                      "value": "demo-entry-001"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "GET /process-logs/{entry_id}/coaching",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/process-logs/:entry_id/coaching",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "process-logs",
+                    ":entry_id",
+                    "coaching"
+                  ],
+                  "variable": [
+                    {
+                      "key": "entry_id",
+                      "value": "demo-entry-001"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "GET /process-logs/{entry_id}/runbook",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/process-logs/:entry_id/runbook",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "process-logs",
+                    ":entry_id",
+                    "runbook"
+                  ],
+                  "variable": [
+                    {
+                      "key": "entry_id",
+                      "value": "demo-entry-001"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "GET /process-logs/{entry_id}/metrics",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/process-logs/:entry_id/metrics",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "process-logs",
+                    ":entry_id",
+                    "metrics"
+                  ],
+                  "variable": [
+                    {
+                      "key": "entry_id",
+                      "value": "demo-entry-001"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "GET /process-logs/{entry_id}/approval-suggestions",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/process-logs/:entry_id/approval-suggestions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "process-logs",
+                    ":entry_id",
+                    "approval-suggestions"
+                  ],
+                  "variable": [
+                    {
+                      "key": "entry_id",
+                      "value": "demo-entry-001"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Quality & Scorecard",
+          "item": [
+            {
+              "name": "GET /quality/scorecard",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/quality/scorecard",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "quality",
+                    "scorecard"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "GET /quality/trends",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/quality/trends",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "quality",
+                    "trends"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /quality/snapshot",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/quality/snapshot",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "quality",
+                    "snapshot"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "SR01 Health",
+          "item": [
+            {
+              "name": "GET /l1/sr01/health",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr01/health",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr01",
+                    "health"
+                  ]
+                },
+                "description": "Latest SR01 business-health snapshot + trend summary (no ticket needed)."
+              },
+              "response": []
+            },
+            {
+              "name": "GET /l1/sr01/health/history",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr01/health/history",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr01",
+                    "health",
+                    "history"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /l1/sr01/health/run",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr01/health/run",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr01",
+                    "health",
+                    "run"
+                  ]
+                },
+                "description": "Manually trigger an SR01 continuous health sweep (operator-forced)."
+              },
+              "response": []
+            },
+            {
+              "name": "GET /l1/sr01/candidates",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr01/candidates",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr01",
+                    "candidates"
+                  ]
+                },
+                "description": "Pending/decided SR01 ticket candidates for the operator approval queue."
+              },
+              "response": []
+            },
+            {
+              "name": "POST /l1/sr01/candidates/{incident_id}/approve",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr01/candidates/:incident_id/approve",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr01",
+                    "candidates",
+                    ":incident_id",
+                    "approve"
+                  ],
+                  "variable": [
+                    {
+                      "key": "incident_id",
+                      "value": "demo-incident-001"
+                    }
+                  ]
+                },
+                "description": "Approve a pending candidate \u2014 creates the real ticket via the normal\nMaster \u2192 L1 pipeline and records the ticket reference."
+              },
+              "response": []
+            },
+            {
+              "name": "POST /l1/sr01/candidates/{incident_id}/reject",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr01/candidates/:incident_id/reject",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr01",
+                    "candidates",
+                    ":incident_id",
+                    "reject"
+                  ],
+                  "variable": [
+                    {
+                      "key": "incident_id",
+                      "value": "demo-incident-001"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reason\": \"False positive \\u2014 known maintenance window\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Reject a pending candidate; its fingerprint keeps deduping in-window."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "SR02 Detection",
+          "item": [
+            {
+              "name": "GET /l1/sr02/detection",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr02/detection",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr02",
+                    "detection"
+                  ]
+                },
+                "description": "Latest SR02 detection snapshot + trend summary (no ticket needed)."
+              },
+              "response": []
+            },
+            {
+              "name": "GET /l1/sr02/detection/history",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr02/detection/history",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr02",
+                    "detection",
+                    "history"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /l1/sr02/detection/run",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr02/detection/run",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr02",
+                    "detection",
+                    "run"
+                  ]
+                },
+                "description": "Manually trigger an SR02 detection sweep (operator-forced)."
+              },
+              "response": []
+            },
+            {
+              "name": "GET /l1/sr02/candidates",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr02/candidates",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr02",
+                    "candidates"
+                  ]
+                },
+                "description": "Pending/decided SR02 ticket candidates for the operator approval queue."
+              },
+              "response": []
+            },
+            {
+              "name": "POST /l1/sr02/candidates/{incident_id}/approve",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr02/candidates/:incident_id/approve",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr02",
+                    "candidates",
+                    ":incident_id",
+                    "approve"
+                  ],
+                  "variable": [
+                    {
+                      "key": "incident_id",
+                      "value": "demo-incident-001"
+                    }
+                  ]
+                },
+                "description": "Approve a pending candidate \u2014 creates the real ticket via the normal\nMaster \u2192 L1 pipeline and records the ticket reference."
+              },
+              "response": []
+            },
+            {
+              "name": "POST /l1/sr02/candidates/{incident_id}/reject",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr02/candidates/:incident_id/reject",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr02",
+                    "candidates",
+                    ":incident_id",
+                    "reject"
+                  ],
+                  "variable": [
+                    {
+                      "key": "incident_id",
+                      "value": "demo-incident-001"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"reason\": \"False positive \\u2014 known maintenance window\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Reject a pending candidate; its fingerprint keeps deduping in-window."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "SR03 Chatbot",
+          "item": [
+            {
+              "name": "POST /l1/sr03/chat/sessions",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr03/chat/sessions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr03",
+                    "chat",
+                    "sessions"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"user_identity\": \"jdoe@company.com\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Start a new SR03 interactive chat session."
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "var jsonData = pm.response.json();",
+                      "if (jsonData.session_id) { pm.collectionVariables.set('session_id', jsonData.session_id); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "POST /l1/sr03/chat/sessions/{session_id}/messages",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr03/chat/sessions/:session_id/messages",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr03",
+                    "chat",
+                    "sessions",
+                    ":session_id",
+                    "messages"
+                  ],
+                  "variable": [
+                    {
+                      "key": "session_id",
+                      "value": "{{session_id}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"text\": \"unlock my account, jdoe@company.com\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Send a user message to SR03 and return the bot's TurnResult."
+              },
+              "response": []
+            },
+            {
+              "name": "POST /l1/sr03/chat/sessions/{session_id}/verify",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr03/chat/sessions/:session_id/verify",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr03",
+                    "chat",
+                    "sessions",
+                    ":session_id",
+                    "verify"
+                  ],
+                  "variable": [
+                    {
+                      "key": "session_id",
+                      "value": "{{session_id}}"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"code\": \"482913\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Submit the one-time code on a separate route so it never sits in chat\nhistory (the engine redacts any code-looking input before persisting)."
+              },
+              "response": []
+            },
+            {
+              "name": "GET /l1/sr03/chat/sessions/{session_id}/dev-code",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr03/chat/sessions/:session_id/dev-code",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr03",
+                    "chat",
+                    "sessions",
+                    ":session_id",
+                    "dev-code"
+                  ],
+                  "variable": [
+                    {
+                      "key": "session_id",
+                      "value": "{{session_id}}"
+                    }
+                  ]
+                },
+                "description": "DEV/DEMO ONLY \u2014 reveal the one-time code the MockNotifier \"sent\" so an\noperator can complete the verify step during a live demo.\n\nThe real code is deliberately NEVER logged and NEVER written to the\ntranscript (Phase-2 security; the ``sr03_no_secret_in_transcript`` and\n``test_otp_code_never_appears_in_logs`` guards enforce that).\n\n**The gate is the notifier, not the LLM.** This only ever reads the\nin-process ``MockNotifier`` outbox \u2014 i.e. a code that a *fake* sender\nproduced and delivered nowhere. The moment a real notifier (SES/SMS) is\nwired in, this returns 404, so a genuinely-delivered code can never be\nrevealed. (Gating on ``mock_llm`` would be wrong: the notifier is mock in\nthis POC regardless of whether the LLM is real.) The chat UI shows its hint\nonly when this endpoint answers."
+              },
+              "response": []
+            },
+            {
+              "name": "GET /l1/sr03/chat/sessions/{session_id}",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr03/chat/sessions/:session_id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr03",
+                    "chat",
+                    "sessions",
+                    ":session_id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "session_id",
+                      "value": "{{session_id}}"
+                    }
+                  ]
+                },
+                "description": "One session plus its (secret-free) transcript."
+              },
+              "response": []
+            },
+            {
+              "name": "DELETE /l1/sr03/chat/sessions/{session_id}",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr03/chat/sessions/:session_id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr03",
+                    "chat",
+                    "sessions",
+                    ":session_id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "session_id",
+                      "value": "{{session_id}}"
+                    }
+                  ]
+                },
+                "description": "Remove one session and its transcript.\n\nDeliberately a stronger permission than reading the results table beside it:\nthis destroys a record, and ``metrics:read`` is granted for looking.\n\nAny ticket the session raised is **left alone**. A ticket is a commitment to\na person that outlives the conversation that created it, and deleting a\ntidy-up row in a demo list must never quietly close real work. The session's\nidentity-audit rows survive for the same reason."
+              },
+              "response": []
+            },
+            {
+              "name": "GET /l1/sr03/chat/sessions",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr03/chat/sessions",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr03",
+                    "chat",
+                    "sessions"
+                  ]
+                },
+                "description": "Recent chat sessions for the tenant, optionally filtered by status."
+              },
+              "response": []
+            },
+            {
+              "name": "GET /l1/sr03/summary",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr03/summary",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr03",
+                    "summary"
+                  ]
+                },
+                "description": "Settings + honest self-service metrics for the SR03 card (Phase 6)."
+              },
+              "response": []
+            },
+            {
+              "name": "PUT /l1/sr03/config",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr03/config",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr03",
+                    "config"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"config\": {\n    \"rate_limit_per_hour\": 4,\n    \"mfa_required_for_reset\": true\n  }\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Update app_config[\"sr03\"] (shallow merge onto existing overrides)."
+              },
+              "response": []
+            },
+            {
+              "name": "POST /l1/sr03/mfa/enroll",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr03/mfa/enroll",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr03",
+                    "mfa",
+                    "enroll"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"jdoe\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Start enrolling an authenticator app. Returns the seed **once**.\n\nThe response is secret-bearing, so it is never logged and never audited; the\naudit row is written at *confirmation*, which is the moment the factor\nactually becomes usable."
+              },
+              "response": []
+            },
+            {
+              "name": "POST /l1/sr03/mfa/enroll/confirm",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr03/mfa/enroll/confirm",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr03",
+                    "mfa",
+                    "enroll",
+                    "confirm"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"username\": \"jdoe\",\n  \"code\": \"482913\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Prove the authenticator really holds the seed. Until this succeeds the\nenrolment authorises nothing."
+              },
+              "response": []
+            },
+            {
+              "name": "GET /l1/sr03/demo/accounts",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr03/demo/accounts",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr03",
+                    "demo",
+                    "accounts"
+                  ]
+                },
+                "description": "Who is in the demo directory and which of them are locked.\n\nWithout this you have to guess: an unlock walkthrough against an account\nthat happens to be unlocked reports \"not locked\" and the story dies, and\nthere was no way to see that ahead of time."
+              },
+              "response": []
+            },
+            {
+              "name": "POST /l1/sr03/demo/lock-account",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr03/demo/lock-account",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr03",
+                    "demo",
+                    "lock-account"
+                  ]
+                },
+                "description": "Set a demo account's lock state, so a walkthrough can be run again.\n\nAn unlock demo needs something locked, and the first successful run removes\nexactly that. Without a way back you get one rehearsal and then a flow that\nreports \"was not locked\" forever. ``locked=false`` puts an account the other\nway, for rehearsing the \"nothing to unlock, shall I reset instead?\" branch.\n\nThe account is created if it is not there, so a name can be introduced and\nused immediately \u2014 the same freedom ``SR03_DEMO_ACCOUNTS`` gives at startup."
+              },
+              "response": []
+            },
+            {
+              "name": "DELETE /l1/sr03/mfa/enroll",
+              "request": {
+                "method": "DELETE",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr03/mfa/enroll",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr03",
+                    "mfa",
+                    "enroll"
+                  ]
+                },
+                "description": "Remove an enrolled factor. Idempotent and non-enumerating: revoking one\nthat never existed reports the same success, revealing nothing."
+              },
+              "response": []
+            },
+            {
+              "name": "GET /l1/sr03/mfa/status",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/l1/sr03/mfa/status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "l1",
+                    "sr03",
+                    "mfa",
+                    "status"
+                  ]
+                },
+                "description": "Whether this user has a *confirmed*, unrevoked factor.\n\nCarries no secret material of any kind \u2014 no seed, no otpauth URI, no counter.\n``confirmed_at`` is included because the enrolment panel displays it; it is a\ntimestamp, not a credential."
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Sub-Agents (SR01-SR15)",
+          "item": [
+            {
+              "name": "GET /sub-agents",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/sub-agents",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "sub-agents"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "GET /sub-agents/{sr_key}",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/sub-agents/:sr_key",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "sub-agents",
+                    ":sr_key"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sr_key",
+                      "value": "SR02"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "GET /sub-agents/{sr_key}/guard-drills",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/sub-agents/:sr_key/guard-drills",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "sub-agents",
+                    ":sr_key",
+                    "guard-drills"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sr_key",
+                      "value": "SR02"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /sub-agents/{sr_key}/guard-drills/run",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/sub-agents/:sr_key/guard-drills/run",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "sub-agents",
+                    ":sr_key",
+                    "guard-drills",
+                    "run"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sr_key",
+                      "value": "SR02"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /sub-agents/{sr_key}/test-dispatch",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/sub-agents/:sr_key/test-dispatch",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "sub-agents",
+                    ":sr_key",
+                    "test-dispatch"
+                  ],
+                  "variable": [
+                    {
+                      "key": "sr_key",
+                      "value": "SR02"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"log_text\": \"Checkout service returning elevated error rate, 503 spike on payment gateway\",\n  \"title\": \"SR test dispatch\",\n  \"severity\": \"P2\",\n  \"category\": \"application\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Chatbox \"test this agent\" action on the sub-agent profile page: build a\nreal ticket from pasted log/incident text and dispatch it straight to this\nsub-agent's owning tier (bypassing Master's routing so the target agent is\nguaranteed to run), then return that agent's result for display."
+              },
+              "response": [],
+              "event": [
+                {
+                  "listen": "test",
+                  "script": {
+                    "type": "text/javascript",
+                    "exec": [
+                      "var jsonData = pm.response.json();",
+                      "if (jsonData.thread_id) { pm.collectionVariables.set('thread_id', jsonData.thread_id); }",
+                      "if (jsonData.ticket_id) { pm.collectionVariables.set('ticket_id', jsonData.ticket_id); }"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "name": "POST /sub-agents/guard-drills/run-all",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/sub-agents/guard-drills/run-all",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "sub-agents",
+                    "guard-drills",
+                    "run-all"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Toolkit & Experiments",
+          "item": [
+            {
+              "name": "GET /toolkit/metrics",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/toolkit/metrics",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "toolkit",
+                    "metrics"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "GET /experiments/master",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/experiments/master",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "experiments",
+                    "master"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /experiments/master/evaluate",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/experiments/master/evaluate",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "experiments",
+                    "master",
+                    "evaluate"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /experiments/master/reset",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/experiments/master/reset",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    "experiments",
+                    "master",
+                    "reset"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Training",
+          "item": [
+            {
+              "name": "GET /{tier}/training",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/:tier/training",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    ":tier",
+                    "training"
+                  ],
+                  "variable": [
+                    {
+                      "key": "tier",
+                      "value": "l1"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /{tier}/training/import",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/:tier/training/import",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    ":tier",
+                    "training",
+                    "import"
+                  ],
+                  "variable": [
+                    {
+                      "key": "tier",
+                      "value": "l1"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "PUT /{tier}/training/config",
+              "request": {
+                "method": "PUT",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/:tier/training/config",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    ":tier",
+                    "training",
+                    "config"
+                  ],
+                  "variable": [
+                    {
+                      "key": "tier",
+                      "value": "l1"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"fine_tune_enabled\": true,\n  \"max_few_shot_examples\": 5\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "GET /{tier}/training/export",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/:tier/training/export",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    ":tier",
+                    "training",
+                    "export"
+                  ],
+                  "variable": [
+                    {
+                      "key": "tier",
+                      "value": "l1"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /{tier}/training/import-jsonl",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/:tier/training/import-jsonl",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    ":tier",
+                    "training",
+                    "import-jsonl"
+                  ],
+                  "variable": [
+                    {
+                      "key": "tier",
+                      "value": "l1"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"content\": \"{\\\"messages\\\":[{\\\"role\\\":\\\"user\\\",\\\"content\\\":\\\"Password reset help\\\"},{\\\"role\\\":\\\"assistant\\\",\\\"content\\\":\\\"{\\\\\\\"category\\\\\\\":\\\\\\\"application\\\\\\\",\\\\\\\"severity\\\\\\\":\\\\\\\"P3\\\\\\\"}\\\"}],\\\"metadata\\\":{\\\"agent_key\\\":\\\"master\\\"}}\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /{tier}/training/feedback",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/:tier/training/feedback",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    ":tier",
+                    "training",
+                    "feedback"
+                  ],
+                  "variable": [
+                    {
+                      "key": "tier",
+                      "value": "l1"
+                    }
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"entry_id\": \"demo-entry-001\",\n  \"helpful\": true,\n  \"comment\": \"Correct classification\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /{tier}/golden-set/run",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/agents/:tier/golden-set/run",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "agents",
+                    ":tier",
+                    "golden-set",
+                    "run"
+                  ],
+                  "variable": [
+                    {
+                      "key": "tier",
+                      "value": "l1"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Analytics",
+      "item": [
+        {
+          "name": "POST /feedback/csat",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/feedback/csat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "feedback",
+                "csat"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"thread_id\": \"{{thread_id}}\",\n  \"ticket_id\": \"{{ticket_id}}\",\n  \"rating\": 5,\n  \"comment\": \"Resolved quickly\",\n  \"agent_level\": \"L1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /feedback/thumbs",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/feedback/thumbs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "feedback",
+                "thumbs"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"thread_id\": \"{{thread_id}}\",\n  \"ticket_id\": \"{{ticket_id}}\",\n  \"helpful\": true,\n  \"agent_level\": \"L1\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /feedback/escalation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/feedback/escalation",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "feedback",
+                "escalation"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"thread_id\": \"{{thread_id}}\",\n  \"ticket_id\": \"{{ticket_id}}\",\n  \"reason\": \"Required L3 remediation access\",\n  \"agent_level\": \"L2\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /feedback/accuracy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/feedback/accuracy",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "feedback",
+                "accuracy"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"thread_id\": \"{{thread_id}}\",\n  \"ticket_id\": \"{{ticket_id}}\",\n  \"false_positive\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /feedback/summary",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/feedback/summary",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "feedback",
+                "summary"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /learning/run",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/learning/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "learning",
+                "run"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /experiments",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/experiments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "experiments"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"haiku_vs_sonnet_l1\",\n  \"variant_a\": \"haiku\",\n  \"variant_b\": \"sonnet\",\n  \"traffic_split\": 0.5\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /experiments",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/experiments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "experiments"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /models/recommendations",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/models/recommendations",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "models",
+                "recommendations"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /quality/score",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/quality/score",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "quality",
+                "score"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"response\": \"Restarted the connection pool and verified recovery via health check.\",\n  \"ticket_context\": \"Connection pool exhaustion on api-service\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /executive",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/executive",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "executive"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /operational",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/operational",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "operational"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /roi",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/roi",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "roi"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /autonomy",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/autonomy",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "autonomy"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /incidents",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/incidents",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "incidents"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Enterprise & Tenants",
+      "item": [
+        {
+          "name": "GET /tenants",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/tenants",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "tenants"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /tenants/me",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/tenants/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "tenants",
+                "me"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /tenants/me/config",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/tenants/me/config",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "tenants",
+                "me",
+                "config"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /tenants/me/test-connection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/tenants/me/test-connection",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "tenants",
+                "me",
+                "test-connection"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /tenants/test-connection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/tenants/test-connection",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "tenants",
+                "test-connection"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenant_id\": \"preview\",\n  \"region\": \"us-east-1\",\n  \"aws\": {\n    \"account_id\": \"123456789012\",\n    \"role_arn\": \"arn:aws:iam::123456789012:role/logengin-tenant-monitoring\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /tenants",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/tenants",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "tenants"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenant_id\": \"acme-corp\",\n  \"client_name\": \"Acme Corp\",\n  \"region\": \"us-east-1\",\n  \"aws\": {\n    \"account_id\": \"123456789012\",\n    \"role_arn\": \"arn:aws:iam::123456789012:role/logengin-tenant-monitoring\",\n    \"cloudwatch_log_groups\": [\n      \"/aws/ec2/kyro-app-server\"\n    ]\n  },\n  \"white_label\": false,\n  \"notes\": \"Created via Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /tenants/{tenant_id}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/tenants/:tenant_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "tenants",
+                ":tenant_id"
+              ],
+              "variable": [
+                {
+                  "key": "tenant_id",
+                  "value": "{{tenantId}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /tenants/{tenant_id}/test-connection",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/tenants/:tenant_id/test-connection",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "tenants",
+                ":tenant_id",
+                "test-connection"
+              ],
+              "variable": [
+                {
+                  "key": "tenant_id",
+                  "value": "{{tenantId}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /tenants/{tenant_id}/discover-infrastructure",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/tenants/:tenant_id/discover-infrastructure",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "tenants",
+                ":tenant_id",
+                "discover-infrastructure"
+              ],
+              "variable": [
+                {
+                  "key": "tenant_id",
+                  "value": "{{tenantId}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PUT /tenants/{tenant_id}",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/tenants/:tenant_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "tenants",
+                ":tenant_id"
+              ],
+              "variable": [
+                {
+                  "key": "tenant_id",
+                  "value": "{{tenantId}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"app_config\": {\n    \"sr02\": {\n      \"enabled\": true\n    },\n    \"sr01\": {\n      \"enabled\": true,\n      \"business_services\": {\n        \"checkout\": {\n          \"enabled\": true\n        }\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /tenants/{tenant_id}/jira",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/tenants/:tenant_id/jira",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "tenants",
+                ":tenant_id",
+                "jira"
+              ],
+              "variable": [
+                {
+                  "key": "tenant_id",
+                  "value": "{{tenantId}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PUT /tenants/{tenant_id}/jira",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/tenants/:tenant_id/jira",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "tenants",
+                ":tenant_id",
+                "jira"
+              ],
+              "variable": [
+                {
+                  "key": "tenant_id",
+                  "value": "{{tenantId}}"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": true,\n  \"site\": \"https://yourcompany.atlassian.net\",\n  \"email\": \"you@company.com\",\n  \"api_token\": \"your_atlassian_api_token\",\n  \"project_key\": \"KAN\",\n  \"issue_type\": \"Task\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /tenants/{tenant_id}/jira/test",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/tenants/:tenant_id/jira/test",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "tenants",
+                ":tenant_id",
+                "jira",
+                "test"
+              ],
+              "variable": [
+                {
+                  "key": "tenant_id",
+                  "value": "{{tenantId}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE /tenants/{tenant_id}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/tenants/:tenant_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "tenants",
+                ":tenant_id"
+              ],
+              "variable": [
+                {
+                  "key": "tenant_id",
+                  "value": "{{tenantId}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /metrics/dashboard",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/metrics/dashboard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "metrics",
+                "dashboard"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /metrics/tokens",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/metrics/tokens",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "metrics",
+                "tokens"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /compliance/soc2",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/compliance/soc2",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "compliance",
+                "soc2"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /audit",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/audit",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "audit"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /webhooks",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/webhooks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "webhooks"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"url\": \"https://example.com/webhooks/logengin\",\n  \"events\": [\n    \"ticket.escalated\",\n    \"ticket.resolved\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /webhooks",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/webhooks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "webhooks"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api-keys",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/enterprise/api-keys",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "enterprise",
+                "api-keys"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"role\": \"Agent\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Log Engine",
+      "item": [
+        {
+          "name": "Ingestion & Analysis",
+          "item": [
+            {
+              "name": "GET /infrastructure",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/logs/infrastructure",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs",
+                    "infrastructure"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /infrastructure/impact",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/logs/infrastructure/impact",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs",
+                    "infrastructure",
+                    "impact"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"lines\": [\n    \"ERROR [kyro-app-server] SQLException: connection pool exhausted, active=50 max=50 waiting=12\"\n  ],\n  \"ticket_context\": \"DB pool exhaustion investigation\",\n  \"service\": \"kyro-app-server\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "GET /types",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/logs/types",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs",
+                    "types"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /ingest",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/logs/ingest",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs",
+                    "ingest"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"lines\": [\n    \"ERROR api-service: SQLException: connection pool exhausted, active=50 max=50 waiting=12\"\n  ],\n  \"service\": \"kyro-app-server\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /analyze",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/logs/analyze",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs",
+                    "analyze"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"lines\": [\n    \"ERROR [kyro-app-server] SQLException: connection pool exhausted, active=50 max=50 waiting=12\"\n  ],\n  \"ticket_context\": \"DB pool exhaustion investigation\",\n  \"service\": \"kyro-app-server\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /process",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/logs/process",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs",
+                    "process"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"title\": \"DB pool exhausted on kyro-app-server\",\n  \"description\": \"Investigate and route connection pool exhaustion\",\n  \"lines\": [\n    \"ERROR api-service: SQLException: connection pool exhausted, active=50 max=50 waiting=12\"\n  ],\n  \"service\": \"kyro-app-server\",\n  \"reporter\": \"postman@example.com\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Analyze infrastructure logs and continue workflow (create ticket + route by log signals)."
+              },
+              "response": []
+            },
+            {
+              "name": "POST /emit",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/logs/emit",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs",
+                    "emit"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"log_type\": \"INFRASTRUCTURE\",\n  \"message\": \"Manual test log entry from Postman\",\n  \"level\": \"WARN\",\n  \"service\": \"kyro-app-server\"\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /generate",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/logs/generate",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs",
+                    "generate"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Live Stream",
+          "item": [
+            {
+              "name": "GET /stream",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/logs/stream",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs",
+                    "stream"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "GET /raw-stream",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/logs/raw-stream",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs",
+                    "raw-stream"
+                  ]
+                },
+                "description": "Poll raw log stream entries (unclassified until error/alert detected)."
+              },
+              "response": []
+            },
+            {
+              "name": "GET /stream/status",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/logs/stream/status",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs",
+                    "stream",
+                    "status"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /stream/start",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  },
+                  {
+                    "key": "Content-Type",
+                    "value": "application/json",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/logs/stream/start",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs",
+                    "stream",
+                    "start"
+                  ]
+                },
+                "body": {
+                  "mode": "raw",
+                  "raw": "{\n  \"scenario\": \"db_pool_exhaustion\",\n  \"service\": \"kyro-app-server\",\n  \"interval_ms\": 1200,\n  \"unified\": true\n}",
+                  "options": {
+                    "raw": {
+                      "language": "json"
+                    }
+                  }
+                },
+                "description": "Start unified raw log stream; each line is typed, alerts are queued and processed sequentially."
+              },
+              "response": []
+            },
+            {
+              "name": "POST /stream/stop",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/logs/stream/stop",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs",
+                    "stream",
+                    "stop"
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        },
+        {
+          "name": "Queue",
+          "item": [
+            {
+              "name": "GET /queue/tasks",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/logs/queue/tasks",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs",
+                    "queue",
+                    "tasks"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /queue/clear",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/logs/queue/clear",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs",
+                    "queue",
+                    "clear"
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "GET /queue/{entry_id}",
+              "request": {
+                "method": "GET",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/logs/queue/:entry_id",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs",
+                    "queue",
+                    ":entry_id"
+                  ],
+                  "variable": [
+                    {
+                      "key": "entry_id",
+                      "value": "demo-entry-001"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /queue/{entry_id}/rerun",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/logs/queue/:entry_id/rerun",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs",
+                    "queue",
+                    ":entry_id",
+                    "rerun"
+                  ],
+                  "variable": [
+                    {
+                      "key": "entry_id",
+                      "value": "demo-entry-001"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            },
+            {
+              "name": "POST /queue/{entry_id}/cancel",
+              "request": {
+                "method": "POST",
+                "header": [
+                  {
+                    "key": "X-Tenant-ID",
+                    "value": "{{tenantId}}",
+                    "type": "text"
+                  }
+                ],
+                "url": {
+                  "raw": "{{baseUrl}}/api/v1/logs/queue/:entry_id/cancel",
+                  "host": [
+                    "{{baseUrl}}"
+                  ],
+                  "path": [
+                    "api",
+                    "v1",
+                    "logs",
+                    "queue",
+                    ":entry_id",
+                    "cancel"
+                  ],
+                  "variable": [
+                    {
+                      "key": "entry_id",
+                      "value": "demo-entry-001"
+                    }
+                  ]
+                }
+              },
+              "response": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Operations (Runbooks & SLA)",
+      "item": [
+        {
+          "name": "GET /runbooks",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/operations/runbooks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "operations",
+                "runbooks"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /runbooks/{runbook_id}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/operations/runbooks/:runbook_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "operations",
+                "runbooks",
+                ":runbook_id"
+              ],
+              "variable": [
+                {
+                  "key": "runbook_id",
+                  "value": "custom_test_runbook"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /runbooks",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/operations/runbooks",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "operations",
+                "runbooks"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"custom_test_runbook\",\n  \"content\": \"name: Custom Test Runbook\\nversion: \\\"1.0.0\\\"\\ntriggers:\\n  - log_pattern: db_error\\nsteps:\\n  - name: Describe Instance\\n    action: ec2.describe_instance\\n    params:\\n      instance_id: ${instance_id}\\n\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PUT /runbooks/{runbook_id}",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/operations/runbooks/:runbook_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "operations",
+                "runbooks",
+                ":runbook_id"
+              ],
+              "variable": [
+                {
+                  "key": "runbook_id",
+                  "value": "custom_test_runbook"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"name: Custom Test Runbook (updated)\\nversion: \\\"1.1.0\\\"\\ntriggers:\\n  - log_pattern: db_error\\nsteps:\\n  - name: Describe Instance\\n    action: ec2.describe_instance\\n    params:\\n      instance_id: ${instance_id}\\n\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE /runbooks/{runbook_id}",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/operations/runbooks/:runbook_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "operations",
+                "runbooks",
+                ":runbook_id"
+              ],
+              "variable": [
+                {
+                  "key": "runbook_id",
+                  "value": "custom_test_runbook"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /runbooks/{runbook_id}/export",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/operations/runbooks/:runbook_id/export",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "operations",
+                "runbooks",
+                ":runbook_id",
+                "export"
+              ],
+              "variable": [
+                {
+                  "key": "runbook_id",
+                  "value": "custom_test_runbook"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /runbooks/match",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/operations/runbooks/match",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "operations",
+                "runbooks",
+                "match"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"log_patterns\": [\n    \"connection_timeout\",\n    \"db_error\"\n  ],\n  \"metrics\": {\n    \"CPUUtilization\": 85,\n    \"DatabaseConnections\": 94\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /export",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/operations/export",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "operations",
+                "export"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /export/preview",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/operations/export/preview",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "operations",
+                "export",
+                "preview"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /import",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/operations/import",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "operations",
+                "import"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"format\": \"yaml\",\n  \"content\": \"runbooks:\\n  - id: imported_runbook\\n    name: Imported Runbook\\n\",\n  \"merge\": true,\n  \"replace_sla\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /sla/policy",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/operations/sla/policy",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "operations",
+                "sla",
+                "policy"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "PUT /sla/policy",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/operations/sla/policy",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "operations",
+                "sla",
+                "policy"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"P1_minutes\": 15,\n  \"P2_minutes\": 60,\n  \"P3_minutes\": 240,\n  \"P4_minutes\": 1440,\n  \"at_risk_threshold_pct\": 80\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /sla/tickets",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/operations/sla/tickets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "operations",
+                "sla",
+                "tickets"
+              ]
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Workflow Runs",
+      "item": [
+        {
+          "name": "GET /runs",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/workflow/runs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workflow",
+                "runs"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /runs",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/workflow/runs",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workflow",
+                "runs"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"Disk space warning on altro\",\n  \"description\": \"Investigate disk usage trend\",\n  \"lines\": [\n    \"WARN  [altro] Disk usage at 91% on /data \\u2014 ENOSPC imminent, 2.1GB free of 250GB\"\n  ],\n  \"service\": \"altro\",\n  \"reporter\": \"postman@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "var jsonData = pm.response.json();",
+                  "if (jsonData.run.run_id || jsonData.run_id) { pm.collectionVariables.set('run_id', jsonData.run.run_id || jsonData.run_id); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /runs/{run_id}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/workflow/runs/:run_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workflow",
+                "runs",
+                ":run_id"
+              ],
+              "variable": [
+                {
+                  "key": "run_id",
+                  "value": "{{run_id}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /runs/{run_id}/analyze",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/workflow/runs/:run_id/analyze",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workflow",
+                "runs",
+                ":run_id",
+                "analyze"
+              ],
+              "variable": [
+                {
+                  "key": "run_id",
+                  "value": "{{run_id}}"
+                }
+              ]
+            },
+            "description": "Run log analysis + infrastructure impact and persist to DB."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /runs/{run_id}/create-ticket",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/workflow/runs/:run_id/create-ticket",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "workflow",
+                "runs",
+                ":run_id",
+                "create-ticket"
+              ],
+              "variable": [
+                {
+                  "key": "run_id",
+                  "value": "{{run_id}}"
+                }
+              ]
+            },
+            "description": "Create ticket and run master agent only; persist results to DB."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Jira Integration",
+      "item": [
+        {
+          "name": "GET /status",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/integrations/jira/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "jira",
+                "status"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /test",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/integrations/jira/test",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "jira",
+                "test"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /links",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/integrations/jira/links",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "jira",
+                "links"
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /links/ticket/{ticket_id}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/integrations/jira/links/ticket/:ticket_id",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "jira",
+                "links",
+                "ticket",
+                ":ticket_id"
+              ],
+              "variable": [
+                {
+                  "key": "ticket_id",
+                  "value": "{{ticket_id}}"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET /issues/{issue_key}",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/integrations/jira/issues/:issue_key",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "jira",
+                "issues",
+                ":issue_key"
+              ],
+              "variable": [
+                {
+                  "key": "issue_key",
+                  "value": "KAN-1"
+                }
+              ]
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST /issues/{issue_key}/comment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/integrations/jira/issues/:issue_key/comment",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "integrations",
+                "jira",
+                "issues",
+                ":issue_key",
+                "comment"
+              ],
+              "variable": [
+                {
+                  "key": "issue_key",
+                  "value": "KAN-1"
+                }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"comment\": \"Investigating \\u2014 will update within 30 minutes.\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Public (SR03 self-service)",
+      "item": [
+        {
+          "name": "GET /sr03/reset-password",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/public/sr03/reset-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "public",
+                "sr03",
+                "reset-password"
+              ]
+            },
+            "description": "Serve the reset form.\n\nAlways 200 with the same page, valid token or not: deciding validity here\nwould tell an attacker which tokens are live before they ever post one."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /sr03/unlock-account",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/public/sr03/unlock-account",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "public",
+                "sr03",
+                "unlock-account"
+              ]
+            },
+            "description": "Serve the unlock page.\n\nAlways the same 200 whatever the token, for the reason the reset page does\nit: deciding validity here would tell an attacker which links are live\nbefore they ever post one."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /sr03/unlock-account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/public/sr03/unlock-account",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "public",
+                "sr03",
+                "unlock-account"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{unlock_token}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Redeem an unlock link and end the lockout.\n\nReached only after the same CAPTCHA the reset page uses, which is why the\ncheck for it comes first: holding the link lets you *ask*, passing the check\nis what acts.\n\nTwo properties worth stating, because they are what make \"check your email\"\nhonest. The account is untouched until this call, so an unopened link leaves\nthe lockout exactly as it was. And the link is spent only once the directory\nhas actually unlocked \u2014 a provider error leaves it usable rather than\nburning the requester's one chance."
+          },
+          "response": []
+        },
+        {
+          "name": "GET /sr03/reset-password/captcha",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/public/sr03/reset-password/captcha",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "public",
+                "sr03",
+                "reset-password",
+                "captcha"
+              ]
+            },
+            "description": "Issue a fresh CAPTCHA for the reset page.\n\nDeliberately takes no token and reveals nothing: it is drawn before we know\nwhether the link is any good, so requesting one cannot be used to find out.\n\nThe answer is signed into ``challenge`` rather than stored, so this endpoint\nholds no state, needs no cleanup, and works across workers and restarts."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /sr03/reset-password/verify-captcha",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/public/sr03/reset-password/verify-captcha",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "public",
+                "sr03",
+                "reset-password",
+                "verify-captcha"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{captcha_token}}\",\n  \"challenge\": \"7 + 5\",\n  \"answer\": \"12\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Check the CAPTCHA and, if it passes, open the password step for this link.\n\n**Be clear about what this establishes.** It establishes that a human is on\nthe page. It does *not* establish which human \u2014 so from here, whoever holds\nthe emailed link can set the password. That is a deliberate product choice\nreplacing the authenticator challenge that used to sit here; the security\nconsequence is written down in ``docs/SR03-MFA-DEMO-GUIDE.md`` rather than\nleft for someone to discover.\n\nWhat still protects the link: it is 32 random bytes, single-use, expires in\n30 minutes, and every attempt here is rate-limited per IP and audited."
+          },
+          "response": []
+        },
+        {
+          "name": "POST /sr03/reset-password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Tenant-ID",
+                "value": "{{tenantId}}",
+                "type": "text"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json",
+                "type": "text"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/public/sr03/reset-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "public",
+                "sr03",
+                "reset-password"
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{reset_token}}\",\n  \"new_password\": \"NewP@ssw0rd123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "description": "Redeem a token and apply a password the user chose themselves."
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8001",
+      "type": "string"
+    },
+    {
+      "key": "tenantId",
+      "value": "local",
+      "type": "string"
+    },
+    {
+      "key": "sessionToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "thread_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "ticket_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "run_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "session_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "drill_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "reset_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "unlock_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "captcha_token",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

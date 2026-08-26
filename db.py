@@ -100,6 +100,18 @@ class SocialAccount(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
+class ApprovedAsset(Base):
+    __tablename__ = "approved_assets"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=True, index=True)
+    platform = Column(String(32), nullable=False)
+    content_type = Column(String(32), nullable=False) # 'text', 'image', 'video'
+    content_data = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class ScheduledPost(Base):
     __tablename__ = "scheduled_posts"
     __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
@@ -230,6 +242,20 @@ def save_run(story: str, tone: str, platforms: list, content: dict, user_id: int
             tokens_used=tokens_used,
             cost_usd=cost_usd,
             is_archived=False
+        )
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return row.id
+
+
+def save_approved_asset(user_id: int, platform: str, content_type: str, content_data: str) -> int:
+    with Session(engine) as session:
+        row = ApprovedAsset(
+            user_id=user_id,
+            platform=platform,
+            content_type=content_type,
+            content_data=content_data
         )
         session.add(row)
         session.commit()

@@ -34,3 +34,28 @@ class StoryAgent:
         user = f"Story:\n{story_text}\n\nExtract {max_points} key points."
         response = self.llm.generate(system, user)
         return [p.strip() for p in response.split('\n') if p.strip()]
+
+    def generate_channel_storyline(self, posts_text, project_context, return_usage=False):
+        """Generate a structured channel storyline based on competitor posts and our project context"""
+        system = """You are an expert strategic analyst. 
+For each competitor's recent post of all platforms, identify the core industry problem/topic they discuss. 
+Create a storyline with a 45:55 balance: 45% industry/competitor-topic context and 55% how StradIT projects addresses or solves that problem. 
+Do not simply summarize the competitor post. Use it as the problem/context and transition naturally into our solution. 
+
+CRITICAL WRITING RULES:
+1. NO SELLING: Do not include ANY Call-To-Action (CTA). Do not say "Ready to modernize?", "Visit our website", or "Book a demo". Do not include ANY links.
+2. NO MARKDOWN OR BULLET POINTS: The prompt MUST be plain text. Do not use **bold**, *italics*, or bullet points. Write in flowing paragraphs.
+3. HUMAN TONE: Keep the tone analytical, institutional, credible, and purely informational. Sound like a human industry professional.
+4. ONLY show the industry problem and the objective qualities/capabilities of the StradIT project.
+
+Return ONLY a valid JSON object with the following schema:
+{
+    "observed_facts": ["fact 1", "fact 2", "fact 3"],
+    "prompt": "A detailed storyline and prompt to be used for generating media/captions based on the instructions above."
+}"""
+        user = f"<COMPETITOR_POSTS>\n{posts_text}\n</COMPETITOR_POSTS>\n\n<OUR_PROJECT_CONTEXT>\n{project_context}\n</OUR_PROJECT_CONTEXT>"
+        
+        result, usage = self.llm.generate_json(system, user, return_usage=True)
+        if return_usage:
+            return result, usage
+        return result

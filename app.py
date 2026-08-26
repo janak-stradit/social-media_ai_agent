@@ -10,6 +10,10 @@ def create_app(config_name='development'):
     app = Flask(__name__, 
                 template_folder='templates',
                 static_folder='static')
+    
+    # Disable static file caching entirely to avoid client-side update issues
+    app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+    app.config['TEMPLATES_AUTO_RELOAD'] = True
     app.config.from_object(config_map[config_name])
     CORS(app, supports_credentials=True)
     
@@ -43,6 +47,11 @@ def create_app(config_name='development'):
     @login_required_page
     def settings_route():
         return render_template('settings.html')
+
+    @app.route('/competitor-dashboard')
+    @login_required_page
+    def competitor_dashboard():
+        return render_template('competitor_dashboard.html')
 
     @app.route('/login')
     def login_route():

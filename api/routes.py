@@ -14,6 +14,7 @@ from agents.hashtag_agent import HashtagAgent
 from agents.strategy_agent import StrategyAgent
 from agents.reviewer_agent import ReviewerAgent
 from services.memory_service import MemoryService
+from services.scraper_service import ScraperService
 
 try:
     from db import (
@@ -23,7 +24,7 @@ try:
         update_user_credit_limit, get_all_users_credit_summary, get_global_cost_history,
         get_user_social_accounts, save_social_account, disconnect_social_account,
         create_scheduled_post, get_user_scheduled_posts, cancel_scheduled_post,
-        update_scheduled_post_status
+        update_scheduled_post_status, save_approved_asset
     )
     DB_AVAILABLE = True
 except Exception as _db_err:
@@ -291,22 +292,43 @@ def upload_image():
 def analyze_story():
     """Analyze story text"""
     data = request.get_json()
-    if not data or 'story' not in data:
-        return jsonify({'error': 'Story text is required'}), 400
+    if not data:
+        return jsonify({'error': 'Request body required'}), 400
     
+    story = data.get('story', '')
+    target_company = data.get('target_company')
+    
+    if not story and (not target_company or target_company == "None"):
+        return jsonify({'error': 'Story text or target company is required'}), 400
+        
     try:
+        # Inject Scraper Explorer Intelligence if available
+        suggested_brief = None
+        if target_company and target_company != "None":
+            from services.scraper_service import ScraperService
+            scraper = ScraperService()
+            intelligence = scraper.get_company_talking_points(target_company)
+            if intelligence:
+                if not story:
+                    story = intelligence
+                    suggested_brief = intelligence
+                else:
+                    story = f"Focus Company: {target_company}\n\n{story}\n\n{intelligence}".strip()
+                    suggested_brief = story
+
         user_id = get_current_user_id()
-        retrieved_memories = memory_service.retrieve_context(data['story'], user_id=user_id, n_results=2)
+        retrieved_memories = memory_service.retrieve_context(story, user_id=user_id, n_results=2)
         mem_prompt = memory_service.format_memory_prompt(retrieved_memories)
 
-        analysis = story_agent.analyze(data['story'], memory_context=mem_prompt)
-        key_points = story_agent.extract_key_points(data['story'])
+        analysis = story_agent.analyze(story, memory_context=mem_prompt)
+        key_points = story_agent.extract_key_points(story)
         
         return jsonify({
             'success': True,
             'analysis': analysis,
             'key_points': key_points,
-            'memories_referenced': len(retrieved_memories)
+            'memories_referenced': len(retrieved_memories),
+            'suggested_brief': suggested_brief
         })
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -328,6 +350,7 @@ def generate_content():
     brand_voice = data.get('brand_voice', 'Standard Enterprise')
     include_strategy = data.get('include_strategy', True)
     previous_context = data.get('previous_context')
+    target_company = data.get('target_company')
     selected_outputs = data.get('selected_outputs', ['text', 'image', 'video'])
     generate_text = 'text' in selected_outputs or 'Text (Caption)' in selected_outputs
     user_id = get_current_user_id()
@@ -354,6 +377,13 @@ def generate_content():
         story_prompt = f"Follow-up Refinement Request: {story}\n\n[PREVIOUS TURN CONTEXT & OUTPUTS]:\n{previous_context}"
     else:
         story_prompt = story
+
+    # Inject Scraper Explorer Intelligence
+    if target_company and target_company != "None":
+        scraper = ScraperService()
+        intelligence = scraper.get_company_talking_points(target_company)
+        if intelligence:
+            story_prompt += f"\n\n{intelligence}"
 
     total_tokens = 0
     total_cost_usd = 0.0
@@ -651,6 +681,34 @@ def generate_for_platform(platform):
             'strategy': strategy
         })
         
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/approve-asset', methods=['POST'])
+@login_required_api
+def approve_asset():
+    """Save an approved asset to the database"""
+    if not DB_AVAILABLE:
+        return jsonify({'error': 'Database not available'}), 503
+    
+    data = request.get_json()
+    if not data or 'platform' not in data or 'content' not in data:
+        return jsonify({'error': 'Platform and content are required'}), 400
+        
+    try:
+        user_id = get_current_user_id()
+        content_type = data.get('type', 'text')
+        content_data = json.dumps(data['content']) if isinstance(data['content'], dict) else data['content']
+        
+        asset_id = save_approved_asset(
+            user_id=user_id,
+            platform=data['platform'],
+            content_type=content_type,
+            content_data=content_data
+        )
+        
+        return jsonify({'success': True, 'asset_id': asset_id})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1345,112 +1403,80 @@ def verify_social_account_endpoint(platform):
             'message': f'{platform.capitalize()} credentials configured.'
         })
 
-@api_bp.route('/get_ai_trends', methods=['GET'])
-def get_ai_trends():
-    """Fetch recent AI trends using LLMService."""
-    platform = request.args.get('platform', 'General Social Media')
-    domain = request.args.get('domain', 'AI and Technology')
-    
+@api_bp.route('/competitor-posts', methods=['GET'])
+def competitor_posts():
+    target = request.args.get('target')
+    if not target:
+        return jsonify({"error": "No target competitor provided"}), 400
+        
     try:
-        from duckduckgo_search import DDGS
-        import datetime
-        
-        # 1. Fetch live context
-        current_year = datetime.datetime.now().year
-        query = f"latest {domain} trends {current_year}"
-        live_context = ""
-        
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=15))
-            if results:
-                for r in results:
-                    live_context += f"- Title: {r.get('title', '')}\n  Snippet: {r.get('body', '')}\n\n"
-        
-        if not live_context:
-            live_context = "No live data found. Rely on your base knowledge."
-
-        # 2. Build RAG prompt
-        sys_prompt = "You are an expert AI trend analyzer grounded in real-time data."
-        prompt = (
-            f"Here is the LIVE web search context for recent trends in the '{domain}' industry:\n"
-            f"---\n{live_context}\n---\n\n"
-            f"Using ONLY the live context provided above, extract 12 highly recent and cutting-edge trends "
-            f"specifically tailored for audiences on {platform.capitalize()}. "
-            "If the live context mentions real metrics (like views, engagement, or percentages), you MUST use them. "
-            "If no metrics are mentioned, infer realistic metrics based on the context. "
-            "Return the output ONLY as a valid JSON object with a single key 'trends' containing a list of objects with 'headline', 'description', 'trending_score' (e.g., '+95%', 'Hot'), and 'engagement_volume' (e.g., '1.2M', 'High')."
-        )
-        
-        from services.llm_service import LLMService
-        llm = LLMService()
-        trends_data = llm.generate_json(sys_prompt, prompt)
-        
-        # Ensure it has the correct wrapper
-        if "trends" not in trends_data:
-            if isinstance(trends_data, list):
-                trends_data = {"trends": trends_data}
-            else:
-                trends_data = {"trends": [trends_data]}
-                
-        return jsonify({"success": True, "data": trends_data})
+        from services.scraper_service import ScraperService
+        scraper = ScraperService()
+        posts = scraper.get_company_store(target)
+        return jsonify({
+            "success": True,
+            "posts": posts
+        })
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
-@api_bp.route('/generate_trend_prompt', methods=['POST'])
-def generate_trend_prompt():
-    """Generates a detailed image/video prompt based on a trend using LLMService."""
-    data = request.json or {}
-    headline = data.get('headline')
-    description = data.get('description')
-    platform = data.get('platform', 'Social Media')
-    domain = data.get('domain', 'General')
-    tone = data.get('tone', 'Auto-Detect')
-    outputs = data.get('outputs', ['text'])
-    
-    tone_instruction = f" and a {tone} tone" if tone and tone != "Auto-Detect" else ""
-    
-    if not headline or not description:
-        return jsonify({"success": False, "error": "Missing headline or description"}), 400
-
-    tasks = []
-    forbidden = []
-    
-    if 'text' in outputs:
-        tasks.append("A highly engaging social media post (caption) to make the audience aware of the trend.")
-    else:
-        forbidden.append("DO NOT write a social media post (caption).")
+@api_bp.route('/platform-posts', methods=['GET'])
+def platform_posts():
+    platform = request.args.get('platform')
+    if not platform:
+        return jsonify({"error": "No platform provided"}), 400
         
-    if 'image' in outputs:
-        tasks.append("A highly detailed visual prompt designed to be fed into Midjourney or Sora to generate an accompanying image.")
-    else:
-        forbidden.append("DO NOT write a visual prompt.")
-        
-    if 'video' in outputs:
-        tasks.append("A detailed storyboard or motion prompt for AI video generation based on the trend.")
-    else:
-        forbidden.append("DO NOT write a video prompt.")
-        
-    if not tasks:
-        tasks.append("A highly engaging social media post (caption) to make the audience aware of the trend.")
-
-    tasks_str = "\n".join([f"{i+1}. {t}" for i, t in enumerate(tasks)])
-    forbidden_str = " ".join(forbidden)
-
-    sys_prompt = (
-        f"You are an expert social media manager and prompt engineer. The user will provide a trend in the {domain} industry. "
-        f"Your task is to write ONLY the following specifically tailored for {platform.capitalize()}{tone_instruction}:\n"
-        f"{tasks_str}\n\n"
-        f"CRITICAL RULES:\n"
-        f"1. {forbidden_str}\n"
-        f"2. Format your output clearly with bold section headers like [Social Media Post], [Visual Prompt], or [Video Prompt] depending on what was requested."
-    )
-    
-    user_prompt = f"Trend Headline: {headline}\nTrend Context: {description}\n\nGenerate the requested content now:"
-
     try:
-        from services.llm_service import LLMService
-        llm = LLMService()
-        text_output = llm.generate(sys_prompt, user_prompt)
-        return jsonify({"success": True, "prompt": text_output})
+        from services.scraper_service import ScraperService
+        scraper = ScraperService()
+        posts = scraper.get_platform_posts(platform)
+        return jsonify({
+            "success": True,
+            "posts": posts
+        })
     except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/stradit-projects', methods=['GET'])
+def get_stradit_projects():
+    try:
+        from services.stradit_service import StradITService
+        svc = StradITService()
+        projects = svc.get_projects()
+        return jsonify({
+            "success": True,
+            "projects": projects
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/generate-channel-storyline', methods=['POST'])
+@login_required_api
+def generate_channel_storyline():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body required'}), 400
+        
+    story = data.get('story', '')
+    
+    if not story:
+        return jsonify({'error': 'Story text is required'}), 400
+        
+    try:
+        from services.stradit_service import StradITService
+        from agents.story_agent import StoryAgent
+        
+        stradit = StradITService()
+        project_context = stradit.get_all_projects_context()
+            
+        story_agent_local = StoryAgent()
+        result = story_agent_local.generate_channel_storyline(story, project_context)
+        
+        return jsonify({
+            'success': True,
+            'storyline': result
+        })
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500

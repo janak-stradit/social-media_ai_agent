@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Competitor Platform Dashboard - VortexSocial AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #4f46e5;
+            --primary-hover: #4338ca;
+            --bg-gradient: linear-gradient(135deg, #f3f4f6 0%, #ffffff 100%);
+            --glass-bg: rgba(255, 255, 255, 0.85);
+            --glass-border: rgba(255, 255, 255, 0.5);
+            --card-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01);
+            --hover-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        body {
+            background: var(--bg-gradient);
+            font-family: 'Inter', sans-serif;
+            color: #1f2937;
+            min-height: 100vh;
+        }
+
+        .dashboard-header {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(229, 231, 235, 0.8);
+            position: sticky;
+            top: 0;
+            z-index: 1020;
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
+        }
+
+        .premium-card {
+            background: #ffffff;
+            border-radius: 16px;
+            border: 1px solid rgba(229, 231, 235, 0.6);
+            box-shadow: var(--card-shadow);
+            transition: var(--transition);
+            overflow: hidden;
+        }
+
+        .premium-card:hover {
+            box-shadow: var(--hover-shadow);
+        }
+
+        .premium-btn {
+            background: linear-gradient(135deg, var(--primary) 0%, #6366f1 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 0.5rem 1.25rem;
+            font-weight: 600;
+            transition: var(--transition);
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+        }
+
+        .premium-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(79, 70, 229, 0.4);
+            color: white;
+        }
+
+        .premium-btn:disabled {
+            background: #9ca3af;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .custom-select-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .custom-select {
+            appearance: none;
+            background: rgba(243, 244, 246, 0.8);
+            border: 2px solid transparent;
+            border-radius: 8px;
+            padding: 0.6rem 2.5rem 0.6rem 1rem;
+            font-weight: 600;
+            color: #374151;
+            transition: var(--transition);
+            cursor: pointer;
+        }
+
+        .custom-select:focus {
+            border-color: var(--primary);
+            outline: none;
+            background: white;
+            box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.1);
+        }
+
+        .select-icon {
+            position: absolute;
+            right: 1rem;
+            color: #6b7280;
+            pointer-events: none;
+        }
+
+        /* Post Cards */
+        .competitor-post-card {
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 1.25rem;
+            transition: var(--transition);
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+            height: 100%;
+        }
+
+        .competitor-post-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background: var(--primary);
+            opacity: 0;
+            transition: var(--transition);
+        }
+
+        .competitor-post-card:hover {
+            border-color: #c7d2fe;
+            transform: translateY(-4px);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+        }
+
+        .competitor-post-card:hover::before {
+            opacity: 1;
+        }
+
+        .post-checkbox {
+            width: 1.25rem;
+            height: 1.25rem;
+            border-radius: 4px;
+            border: 2px solid #d1d5db;
+            cursor: pointer;
+            transition: var(--transition);
+            margin-right: 0.75rem;
+        }
+
+        .post-checkbox:checked {
+            background-color: var(--primary);
+            border-color: var(--primary);
+        }
+
+        .textarea-premium {
+            background: #f9fafb;
+            border: 2px solid #e5e7eb;
+            border-radius: 12px;
+            padding: 1rem;
+            font-size: 0.875rem;
+            color: #4b5563;
+            transition: var(--transition);
+            resize: none;
+        }
+
+        .textarea-premium:focus {
+            background: #ffffff;
+            border-color: var(--primary);
+            outline: none;
+            box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.1);
+        }
+
+        .badge-premium {
+            background: rgba(79, 70, 229, 0.1);
+            color: var(--primary);
+            font-weight: 700;
+            padding: 0.4rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+        }
+        
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 4rem 2rem;
+            color: #9ca3af;
+            text-align: center;
+        }
+
+        .empty-state i {
+            font-size: 4rem;
+            margin-bottom: 1.5rem;
+            opacity: 0.5;
+            background: linear-gradient(135deg, #9ca3af, #d1d5db);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+    </style>
+</head>
+<body>
+
+<!-- History Offcanvas -->
+<div class="offcanvas offcanvas-start" tabindex="-1" id="historyOffcanvas" aria-labelledby="historyOffcanvasLabel">
+  <div class="offcanvas-header bg-light border-bottom">
+    <h5 class="offcanvas-title fw-bold" id="historyOffcanvasLabel"><i class="fas fa-history me-2 text-primary"></i>Pipeline History</h5>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+  </div>
+  <div class="offcanvas-body p-0 bg-white" id="pipelineHistoryList">
+    <!-- History items injected here -->
+    <div class="empty-state p-4 text-center">
+        <i class="fas fa-clipboard-list mb-3" style="font-size: 2rem; color: #cbd5e1;"></i>
+        <p class="text-muted small">No generated content yet.</p>
+    </div>
+  </div>
+</div>
+
+<header class="dashboard-header">
+    <div class="d-flex align-items-center gap-3">
+        <div class="rounded-circle d-flex align-items-center justify-content-center" style="width: 40px; height: 40px; background: linear-gradient(135deg, var(--primary) 0%, #818cf8 100%); color: white;">
+            <i class="fas fa-radar fs-5"></i>
+        </div>
+        <div>
+            <h1 class="m-0 fs-5 fw-bold text-dark lh-1">Intelligence Radar</h1>
+            <span class="text-muted small fw-medium">Cross-Competitor Platform Analysis</span>
+        </div>
+    </div>
+    <div class="d-flex align-items-center gap-2">
+        <button class="btn btn-light fw-bold rounded-pill px-3 border shadow-sm text-primary hover-primary transition me-2" type="button" data-bs-toggle="offcanvas" data-bs-target="#historyOffcanvas">
+            <i class="fas fa-clock-rotate-left me-2"></i>History
+        </button>
+        <a href="/" class="btn btn-light fw-bold rounded-pill px-4 border shadow-sm text-secondary hover-primary transition">
+            <i class="fas fa-arrow-left me-2"></i>Back to Studio
+        </a>
+    </div>
+</header>
+
+<main class="container-fluid py-4 px-lg-5">
+    <div class="row g-4">
+        <!-- Left Panel: Filter & Feed -->
+        <div class="col-xl-8 col-lg-7">
+            <div class="premium-card h-100 d-flex flex-column">
+                <div class="p-4 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-3 bg-white">
+                    <div class="d-flex align-items-center gap-3 flex-grow-1">
+                        <label class="fw-bold text-gray-700 m-0"><i class="fas fa-filter me-2 text-primary"></i>Platform:</label>
+                        <div class="custom-select-wrapper">
+                            <select id="dashboardPlatformSelect" class="custom-select">
+                                <option value="linkedin">LinkedIn</option>
+                                <option value="blog">Blog / Website</option>
+                                <option value="twitter">Twitter</option>
+                                <option value="youtube">YouTube</option>
+                                <option value="facebook">Facebook</option>
+                            </select>
+                            <i class="fas fa-chevron-down select-icon"></i>
+                        </div>
+                    </div>
+                    <button id="fetchPostsBtn" class="premium-btn d-flex align-items-center gap-2" onclick="fetchPlatformPosts()">
+                        <i class="fas fa-satellite-dish"></i> <span>Scan Competitors</span>
+                    </button>
+                </div>
+                
+                <div class="p-4 bg-gray-50 flex-grow-1 overflow-auto" style="min-height: 600px; max-height: calc(100vh - 200px);">
+                    
+                    <!-- Loader -->
+                    <div id="postsLoader" class="d-none empty-state">
+                        <div class="spinner-border text-primary mb-4" style="width: 3rem; height: 3rem;" role="status"></div>
+                        <h4 class="fw-bold text-dark">Sweeping the Network...</h4>
+                        <p class="text-muted">Aggregating live intel from BlackRock, BNY Mellon, Northern Trust, and Vanguard.</p>
+                    </div>
+
+                    <!-- Posts Container -->
+                    <div id="postsContainer" class="row g-4">
+                        <div class="col-12 empty-state">
+                            <i class="fas fa-satellite"></i>
+                            <h4 class="fw-bold text-dark mb-2">Awaiting Parameters</h4>
+                            <p class="fw-medium">Select a platform above and initialize a scan to aggregate competitor activity.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel: Synthesis -->
+        <div class="col-xl-4 col-lg-5">
+            <div class="premium-card h-100 d-flex flex-column position-sticky" style="top: 100px;">
+                <div class="p-4 border-bottom bg-white text-center">
+                    <div class="rounded-circle mx-auto d-flex align-items-center justify-content-center mb-3 shadow-sm" style="width: 50px; height: 50px; background: rgba(79, 70, 229, 0.1); color: var(--primary);">
+                        <i class="fas fa-brain fs-4"></i>
+                    </div>
+                    <h5 class="fw-bold text-dark mb-1">Strategic Synthesis</h5>
+                    <p class="text-muted small fw-medium mb-0">Select posts from the feed to serve as context for the AI analysis.</p>
+                </div>
+                
+                <!-- Horizontal Wizard Container -->
+                <div style="overflow: hidden; flex-grow: 1;">
+                    <div id="workflowSlider" class="d-flex h-100" style="width: 300%; transition: transform 0.4s ease-in-out; transform: translateX(0%);">
+                        
+                        <!-- SLIDE 1: Context -->
+                        <div class="p-4 d-flex flex-column gap-4 bg-white" style="width: 33.3333%;">
+                            <div class="d-flex justify-content-between align-items-center p-3 rounded-3" style="background: rgba(243, 244, 246, 0.8);">
+                                <span class="fw-bold text-gray-700"><i class="fas fa-layer-group me-2 text-primary"></i>Selected Intel:</span>
+                                <div class="d-flex align-items-center gap-2">
+                                    <span class="badge rounded-pill" id="selectedPostCount" style="background: var(--primary); font-size: 0.9rem; padding: 0.35rem 0.75rem;">0</span>
+                                    <button class="btn btn-sm btn-light border d-none fw-bold text-muted px-3 rounded-pill" id="slide1NextBtn" onclick="slideWorkflow(1)">Next <i class="fas fa-chevron-right ms-1"></i></button>
+                                </div>
+                            </div>
+                            <div class="flex-grow-1 d-flex flex-column gap-2">
+                                <label class="form-label fw-bold text-gray-700 m-0">Context Buffer</label>
+                                <textarea id="storyContextInput" class="form-control textarea-premium flex-grow-1" placeholder="Select posts to fill the context buffer..." readonly style="min-height: 200px;"></textarea>
+                            </div>
+                            <button class="premium-btn w-100 py-3 fs-6 mt-2" onclick="generateStoryFromSelection()" id="generateStoryBtn" disabled>
+                                <i class="fas fa-bolt me-2"></i>Generate Counter-Strategy
+                            </button>
+                            <div id="generationLoader" class="d-none text-center text-primary mt-2 fw-bold small"><i class="fas fa-spinner fa-spin me-2"></i>Analyzing market data...</div>
+                        </div>
+
+                        <!-- SLIDE 2: Synthesis Output -->
+                        <div class="p-4 d-flex flex-column gap-3 bg-white border-start" style="width: 33.3333%;">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <button class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border" onclick="slideWorkflow(0)"><i class="fas fa-chevron-left me-1"></i>Back</button>
+                                <label class="form-label fw-bold text-success m-0"><i class="fas fa-check-circle me-1"></i>Synthesis Output</label>
+                                <button class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border d-none" id="slide2NextBtn" onclick="slideWorkflow(2)">Next <i class="fas fa-chevron-right ms-1"></i></button>
+                            </div>
+                            <div id="structuredOutput" class="p-4 rounded-3 border border-success overflow-auto flex-grow-1" style="background: #f0fdf4;">
+                                <!-- Populated by JS -->
+                            </div>
+                            <button class="btn btn-success fw-bold rounded-pill w-100 py-3 shadow-sm mt-2" id="approveStrategyBtn" onclick="approveStrategy()">
+                                <i class="fas fa-thumbs-up me-2"></i>Approve Strategy &amp; Proceed
+                            </button>
+                        </div>
+
+                        <!-- SLIDE 3: Generation & Publishing -->
+                        <div class="p-4 d-flex flex-column gap-3 bg-white border-start" style="width: 33.3333%;">
+                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                <button class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border" onclick="slideWorkflow(1)"><i class="fas fa-chevron-left me-1"></i>Strategy</button>
+                                <label class="form-label fw-bold text-primary m-0"><i class="fas fa-magic me-1"></i>Content Generator</label>
+                            </div>
+                            
+                            <div id="generationPipelineBlock" class="d-flex flex-column gap-3 p-3 border rounded-3 bg-light">
+                                <div class="d-flex align-items-center gap-2">
+                                    <label class="fw-bold m-0"><i class="fas fa-photo-video me-1 text-primary"></i> Output Type:</label>
+                                    <div class="btn-group" role="group" id="mediaTypeGroup">
+                                        <input type="radio" class="btn-check" name="mediaType" id="typeText" value="Text (Caption)" autocomplete="off" checked>
+                                        <label class="btn btn-outline-primary btn-sm rounded-start-pill" for="typeText"><i class="fas fa-align-left me-1"></i>Text</label>
+                                        <input type="radio" class="btn-check" name="mediaType" id="typeImage" value="image" autocomplete="off">
+                                        <label class="btn btn-outline-primary btn-sm" for="typeImage"><i class="fas fa-image me-1"></i>Image</label>
+                                        <input type="radio" class="btn-check" name="mediaType" id="typeVideo" value="video" autocomplete="off">
+                                        <label class="btn btn-outline-primary btn-sm rounded-end-pill" for="typeVideo"><i class="fas fa-video me-1"></i>Video</label>
+                                    </div>
+                                </div>
+                                <div class="position-relative">
+                                    <i class="fas fa-paperclip position-absolute" style="top: 15px; left: 15px; color: #9ca3af;"></i>
+                                    <textarea id="pipelinePrompt" class="form-control" rows="2" style="padding-left: 2.5rem; border-radius: 12px; resize: none;" placeholder="Attach a prompt (e.g. 'Use characters from the brand video')"></textarea>
+                                </div>
+                                <button class="btn btn-primary fw-bold rounded-pill w-100 py-2 shadow-sm" onclick="startPipelineGeneration()" id="startPipelineBtn">
+                                    <i class="fas fa-magic me-2"></i>Generate Assets
+                                </button>
+                            </div>
+                            
+                            <!-- Result & Approval block -->
+                            <div id="pipelineResultBlock" class="d-none flex-column gap-3 p-3 border border-primary rounded-3 flex-grow-1" style="background: #e0e7ff;">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h6 class="fw-bold m-0 text-primary"><i class="fas fa-sparkles me-1"></i>Generated Asset</h6>
+                                    <span id="pipelineLoader" class="d-none text-primary small fw-bold"><i class="fas fa-spinner fa-spin me-1"></i>Generating...</span>
+                                </div>
+                                <div id="pipelineOutputContent" class="bg-white p-3 rounded border text-dark" style="min-height: 100px;"></div>
+                                
+                                <div class="d-flex gap-2" id="approvalButtons">
+                                    <button class="btn btn-outline-danger flex-grow-1 fw-bold" onclick="rejectPipelineContent()"><i class="fas fa-times me-1"></i>Reject</button>
+                                    <button class="btn btn-success flex-grow-1 fw-bold" onclick="approvePipelineContent()"><i class="fas fa-check me-1"></i>Approve</button>
+                                </div>
+                                <button class="btn btn-dark fw-bold w-100 d-none" id="publishPipelineBtn" onclick="publishPipelineContent()">
+                                    <i class="fas fa-paper-plane me-2"></i>Publish to Platforms
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>
