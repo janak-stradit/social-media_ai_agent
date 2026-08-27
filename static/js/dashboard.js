@@ -166,7 +166,7 @@ $(document).ready(function() {
         // Show every post, sorted by most recent first
         const sortedPosts = [...posts].sort((a, b) => getPostTimestamp(b) - getPostTimestamp(a));
 
-        let html = '<div class="row g-4">';
+        let html = '<div class="row g-4 pt-3">';
         let cIdx = 0;
 
         sortedPosts.forEach(p => {
@@ -175,24 +175,36 @@ $(document).ready(function() {
             const textSnippet = p.text ? p.text.substring(0, 300) + (p.text.length > 300 ? '...' : '') : 'No text content available.';
             const platformIcon = getPlatformIcon(p.platform);
             const postDate = formatPostDate(p);
-            const isNew = window.newlyInsertedPostUrls && p.post_url && window.newlyInsertedPostUrls.has(p.post_url);
+            let isNew = window.newlyInsertedPostUrls && p.post_url && window.newlyInsertedPostUrls.has(p.post_url);
+            
+            if (!isNew) {
+                const rawDate = p.scraped_at || p.published_at || p.post_date || p.date || p.created_at || null;
+                if (rawDate) {
+                    const d = new Date(rawDate);
+                    const today = new Date();
+                    if (!isNaN(d.getTime()) && 
+                        d.getDate() === today.getDate() && 
+                        d.getMonth() === today.getMonth() && 
+                        d.getFullYear() === today.getFullYear()) {
+                        isNew = true;
+                    }
+                }
+            }
 
             // Full payload for generation
             const encodedPayload = encodeURIComponent(`[${comp} - ${title}]\n${p.text || title}\n\n---\n\n`);
 
             html += `
-            <div class="col-md-6">
-                <div class="premium-card h-100 d-flex flex-column competitor-post-card position-relative p-4" style="background: white; border: 1px solid #e2e8f0; border-radius: 16px;">
+            <div class="col-md-6 mt-2">
+                <div class="premium-card h-100 d-flex flex-column competitor-post-card position-relative p-4" style="background: white; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden;">
+                    ${isNew ? '<span class="badge bg-success position-absolute" style="top: 0; left: 0; font-size: 0.7rem; padding: 0.35rem 0.8rem; box-shadow: 2px 2px 6px rgba(0,0,0,0.1); z-index: 10; border-bottom-right-radius: 12px;"><i class="fas fa-sparkles me-1"></i>New</span>' : ''}
                     <div class="d-flex justify-content-between align-items-start mb-3">
                         <div class="d-flex align-items-center gap-2">
                             <div class="rounded-circle d-flex align-items-center justify-content-center shadow-sm" style="width: 36px; height: 36px; background: rgba(79, 70, 229, 0.1); color: var(--primary);">
                                 <i class="fas fa-building-columns"></i>
                             </div>
                             <div>
-                                <h6 class="mb-0 fw-bold text-dark d-flex align-items-center gap-2">
-                                    ${comp}
-                                    ${isNew ? '<span class="badge rounded-pill bg-success" style="font-size: 0.62rem; font-weight: 700; padding: 0.25rem 0.55rem;"><i class="fas fa-sparkles me-1"></i>New</span>' : ''}
-                                </h6>
+                                <h6 class="mb-0 fw-bold text-dark">${comp}</h6>
                                 <small class="text-muted fw-medium">${postDate || 'Recent Post'}</small>
                             </div>
                         </div>
