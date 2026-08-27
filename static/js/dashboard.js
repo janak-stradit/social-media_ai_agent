@@ -183,14 +183,16 @@ $(document).ready(function() {
             html += `
             <div class="col-md-6">
                 <div class="premium-card h-100 d-flex flex-column competitor-post-card position-relative p-4" style="background: white; border: 1px solid #e2e8f0; border-radius: 16px;">
-                    ${isNew ? '<span class="badge rounded-pill bg-success position-absolute" style="top: -8px; left: 16px; font-size: 0.68rem; padding: 0.35rem 0.7rem; box-shadow: 0 2px 6px rgba(0,0,0,0.15);"><i class="fas fa-sparkles me-1"></i>New</span>' : ''}
                     <div class="d-flex justify-content-between align-items-start mb-3">
                         <div class="d-flex align-items-center gap-2">
                             <div class="rounded-circle d-flex align-items-center justify-content-center shadow-sm" style="width: 36px; height: 36px; background: rgba(79, 70, 229, 0.1); color: var(--primary);">
                                 <i class="fas fa-building-columns"></i>
                             </div>
                             <div>
-                                <h6 class="mb-0 fw-bold text-dark">${comp}</h6>
+                                <h6 class="mb-0 fw-bold text-dark d-flex align-items-center gap-2">
+                                    ${comp}
+                                    ${isNew ? '<span class="badge rounded-pill bg-success" style="font-size: 0.62rem; font-weight: 700; padding: 0.25rem 0.55rem;"><i class="fas fa-sparkles me-1"></i>New</span>' : ''}
+                                </h6>
                                 <small class="text-muted fw-medium">${postDate || 'Recent Post'}</small>
                             </div>
                         </div>
