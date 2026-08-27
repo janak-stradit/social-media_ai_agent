@@ -1,12 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Competitor Platform Dashboard - VortexSocial AI</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
         :root {
@@ -19,7 +21,7 @@
             --hover-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
             --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
-        
+
         body {
             background: var(--bg-gradient);
             font-family: 'Inter', sans-serif;
@@ -189,7 +191,7 @@
             border-radius: 20px;
             font-size: 0.75rem;
         }
-        
+
         .empty-state {
             display: flex;
             flex-direction: column;
@@ -208,201 +210,320 @@
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
+
+        .pipeline-timeline {
+            cursor: pointer;
+            border-radius: 10px;
+            transition: var(--transition);
+        }
+
+        .pipeline-timeline:hover {
+            background: rgba(79, 70, 229, 0.05);
+        }
+
+        .pipeline-stage-row:hover .rounded-circle {
+            transform: scale(1.1);
+        }
     </style>
 </head>
+
 <body>
 
 
-<header class="dashboard-header">
-    <div class="d-flex align-items-center gap-3">
-        <div class="rounded-circle d-flex align-items-center justify-content-center" style="width: 40px; height: 40px; background: linear-gradient(135deg, var(--primary) 0%, #818cf8 100%); color: white;">
-            <i class="fas fa-radar fs-5"></i>
-        </div>
-        <div>
-            <h1 class="m-0 fs-5 fw-bold text-dark lh-1">Intelligence Radar</h1>
-            <span class="text-muted small fw-medium">Cross-Competitor Platform Analysis</span>
-        </div>
-    </div>
-    <div class="d-flex align-items-center gap-2">
-        <a href="/" class="btn btn-light fw-bold rounded-pill px-4 border shadow-sm text-secondary hover-primary transition">
-            <i class="fas fa-arrow-left me-2"></i>Back to Studio
-        </a>
-    </div>
-</header>
-
-<main class="container-fluid py-4 px-lg-4">
-    <div class="row g-4">
-        <!-- New Left Panel: History -->
-        <div class="col-xl-2 col-lg-3">
-            <div class="premium-card d-flex flex-column position-sticky" style="top: 100px; max-height: calc(100vh - 120px);">
-                <div class="p-3 border-bottom bg-white text-center">
-                    <h6 class="fw-bold m-0 text-gray-700 text-uppercase tracking-wider" style="font-size: 0.85rem;"><i class="fas fa-history me-2 text-primary"></i>History</h6>
-                </div>
-                <div class="flex-grow-1 p-0 bg-white" id="pipelineHistoryList" style="overflow-y: auto;">
-                    <div class="empty-state p-4 text-center">
-                        <i class="fas fa-clipboard-list mb-3" style="font-size: 2rem; color: #cbd5e1;"></i>
-                        <p class="text-muted small">No active pipelines yet.</p>
-                    </div>
-                </div>
+    <header class="dashboard-header">
+        <div class="d-flex align-items-center gap-3">
+            <div class="rounded-circle d-flex align-items-center justify-content-center"
+                style="width: 40px; height: 40px; background: linear-gradient(135deg, var(--primary) 0%, #818cf8 100%); color: white;">
+                <i class="fas fa-radar fs-5"></i>
+            </div>
+            <div>
+                <h1 class="m-0 fs-5 fw-bold text-dark lh-1">Social Post Anaystor</h1>
+                <span class="text-muted small fw-medium">Cross-Competitor Platform Analysis</span>
             </div>
         </div>
+        <div class="d-flex align-items-center gap-2">
+            <a href="/"
+                class="btn btn-light fw-bold rounded-pill px-4 border shadow-sm text-secondary hover-primary transition">
+                <i class="fas fa-arrow-left me-2"></i>Back to Studio
+            </a>
+        </div>
+    </header>
 
-        <!-- Center Panel: Filter & Feed -->
-        <div class="col-xl-6 col-lg-5">
-            <div class="premium-card d-flex flex-column">
-                <div class="p-4 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-3 bg-white">
-                    <div class="d-flex align-items-center gap-3 flex-grow-1">
-                        <label class="fw-bold text-gray-700 m-0"><i class="fas fa-filter me-2 text-primary"></i>Platform:</label>
-                        <div class="custom-select-wrapper">
-                            <select id="dashboardPlatformSelect" class="custom-select">
-                                <option value="linkedin">LinkedIn</option>
-                                <option value="blog">Blog / Website</option>
-                                <option value="twitter">Twitter</option>
-                                <option value="youtube">YouTube</option>
-                                <option value="facebook">Facebook</option>
-                            </select>
-                            <i class="fas fa-chevron-down select-icon"></i>
-                        </div>
+    <main class="container-fluid py-4 px-lg-4">
+        <div class="row g-4">
+            <!-- New Left Panel: History -->
+            <div class="col-xl-3 col-lg-3">
+                <div class="premium-card h-100 d-flex flex-column position-sticky" style="top: 100px;">
+                    <div class="p-3 border-bottom bg-white text-center">
+                        <h6 class="fw-bold m-0 text-gray-700 text-uppercase tracking-wider" style="font-size: 0.85rem;">
+                            <i class="fas fa-history me-2 text-primary"></i>History</h6>
                     </div>
-                    <button id="fetchPostsBtn" class="premium-btn d-flex align-items-center gap-2" onclick="fetchPlatformPosts()">
-                        <i class="fas fa-satellite-dish"></i> <span>Scan Competitors</span>
-                    </button>
-                </div>
-                
-                <div class="p-4 bg-gray-50 flex-grow-1 overflow-auto" style="min-height: 400px; max-height: calc(100vh - 150px);">
-                    
-                    <!-- Loader -->
-                    <div id="postsLoader" class="d-none empty-state">
-                        <div class="spinner-border text-primary mb-4" style="width: 3rem; height: 3rem;" role="status"></div>
-                        <h4 class="fw-bold text-dark">Sweeping the Network...</h4>
-                        <p class="text-muted">Aggregating live intel from BlackRock, BNY Mellon, Northern Trust, and Vanguard.</p>
-                    </div>
-
-                    <!-- Posts Container -->
-                    <div id="postsContainer" class="row g-4">
-                        <div class="col-12 empty-state">
-                            <i class="fas fa-satellite"></i>
-                            <h4 class="fw-bold text-dark mb-2">Awaiting Parameters</h4>
-                            <p class="fw-medium">Select a platform above and initialize a scan to aggregate competitor activity.</p>
+                    <div class="flex-grow-1 p-0 bg-white" id="pipelineHistoryList" style="overflow-y: auto;">
+                        <div class="empty-state p-4 text-center">
+                            <i class="fas fa-clipboard-list mb-3" style="font-size: 2rem; color: #cbd5e1;"></i>
+                            <p class="text-muted small">No active pipelines yet.</p>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
 
-        <!-- Right Panel: Synthesis -->
-        <div class="col-xl-4 col-lg-4">
-            <div class="premium-card d-flex flex-column position-sticky" style="top: 100px;">
-                <div class="p-4 border-bottom bg-white text-center">
-                    <div class="rounded-circle mx-auto d-flex align-items-center justify-content-center mb-3 shadow-sm" style="width: 50px; height: 50px; background: rgba(79, 70, 229, 0.1); color: var(--primary);">
-                        <i class="fas fa-brain fs-4"></i>
+            <!-- Center Panel: Filter & Feed -->
+            <div class="col-xl-9 col-lg-9" id="centerFeedPanel" style="transition: var(--transition);">
+                <div class="premium-card h-100 d-flex flex-column">
+                    <div
+                        class="p-4 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-3 bg-white">
+                        <div class="d-flex align-items-center gap-3 flex-grow-1 flex-wrap">
+                            <label class="fw-bold text-gray-700 m-0"><i
+                                    class="fas fa-filter me-2 text-primary"></i>Platform:</label>
+                            <div class="custom-select-wrapper">
+                                <select id="dashboardPlatformSelect" class="custom-select">
+                                    <option value="linkedin">LinkedIn</option>
+                                    <option value="blog">Blog / Website</option>
+                                    <option value="twitter">Twitter</option>
+                                    <option value="youtube">YouTube</option>
+                                    <option value="facebook">Facebook</option>
+                                </select>
+                                <i class="fas fa-chevron-down select-icon"></i>
+                            </div>
+                            <label class="fw-bold text-gray-700 m-0"><i
+                                    class="fas fa-building-columns me-2 text-primary"></i>Accounts:</label>
+                            <div class="custom-select-wrapper">
+                                <select id="dashboardCompetitorSelect" class="custom-select">
+                                    <option value="all">All Accounts</option>
+                                    <option value="BlackRock">BlackRock</option>
+                                    <option value="BNY Mellon">BNY Mellon</option>
+                                    <option value="Northern Trust">Northern Trust</option>
+                                    <option value="The Vanguard Group">The Vanguard Group</option>
+                                </select>
+                                <i class="fas fa-chevron-down select-icon"></i>
+                            </div>
+                        </div>
+                        <button id="fetchPostsBtn" class="premium-btn d-flex align-items-center gap-2"
+                            onclick="fetchPlatformPosts()">
+                            <i class="fas fa-satellite-dish"></i> <span>Start Scan</span>
+                        </button>
                     </div>
-                    <h5 class="fw-bold text-dark mb-1">Strategic Synthesis</h5>
-                    <p class="text-muted small fw-medium mb-0">Select posts from the feed to serve as context for the AI analysis.</p>
+
+                    <div class="p-4 bg-gray-50 flex-grow-1 overflow-auto"
+                        style="min-height: 400px; max-height: calc(100vh - 150px);">
+
+                        <!-- Loader -->
+                        <div id="postsLoader" class="d-none empty-state">
+                            <div class="spinner-border text-primary mb-4" style="width: 3rem; height: 3rem;"
+                                role="status"></div>
+                            <h4 class="fw-bold text-dark">Sweeping the Network...</h4>
+                            <p class="text-muted">Aggregating live intel from BlackRock, BNY Mellon, Northern Trust, and
+                                Vanguard.</p>
+                        </div>
+
+                        <!-- Posts Container -->
+                        <div id="postsContainer" class="row g-4">
+                            <div class="col-12 empty-state">
+                                <i class="fas fa-satellite"></i>
+                                <h4 class="fw-bold text-dark mb-2">Awaiting Parameters</h4>
+                                <p class="fw-medium">Select a platform above and initialize a scan to aggregate
+                                    competitor activity.</p>
+                            </div>
+                        </div>
+                    </div>
                 </div>
-                
-                <!-- Horizontal Wizard Container -->
-                <div style="overflow: hidden; flex-grow: 1;">
-                    <div id="workflowSlider" class="d-flex h-100" style="width: 400%; transition: transform 0.4s ease-in-out; transform: translateX(0%);">
-                        
-                        <!-- SLIDE 1: Context -->
-                        <div class="p-4 d-flex flex-column gap-4 bg-white" style="width: 25%;">
-                            <div class="d-flex justify-content-between align-items-center p-3 rounded-3" style="background: rgba(243, 244, 246, 0.8);">
-                                <span class="fw-bold text-gray-700"><i class="fas fa-layer-group me-2 text-primary"></i>Selected Intel:</span>
-                                <div class="d-flex align-items-center gap-2">
-                                    <span class="badge rounded-pill" id="selectedPostCount" style="background: var(--primary); font-size: 0.9rem; padding: 0.35rem 0.75rem;">0</span>
-                                    <button class="btn btn-sm btn-light border d-none fw-bold text-muted px-3 rounded-pill" id="slide1NextBtn" onclick="slideWorkflow(1)">Next <i class="fas fa-chevron-right ms-1"></i></button>
-                                </div>
-                            </div>
-                            <div class="flex-grow-1 d-flex flex-column gap-2">
-                                <label class="form-label fw-bold text-gray-700 m-0">Context Buffer</label>
-                                <textarea id="storyContextInput" class="form-control textarea-premium flex-grow-1" placeholder="Select posts to fill the context buffer..." readonly style="min-height: 200px;"></textarea>
-                            </div>
-                            <button class="premium-btn w-100 py-3 fs-6 mt-2" onclick="generateStoryFromSelection()" id="generateStoryBtn" disabled>
-                                <i class="fas fa-bolt me-2"></i>Generate Counter-Strategy
-                            </button>
-                            <div id="generationLoader" class="d-none text-center text-primary mt-2 fw-bold small"><i class="fas fa-spinner fa-spin me-2"></i>Analyzing market data...</div>
-                        </div>
+            </div>
 
-                        <!-- SLIDE 2: Synthesis Output -->
-                        <div class="p-4 d-flex flex-column gap-3 bg-white border-start" style="width: 25%;">
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <button class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border" onclick="slideWorkflow(0)"><i class="fas fa-chevron-left me-1"></i>Back</button>
-                                <label class="form-label fw-bold text-success m-0"><i class="fas fa-check-circle me-1"></i>Synthesis Output</label>
-                                <button class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border d-none" id="slide2NextBtn" onclick="slideWorkflow(2)">Next <i class="fas fa-chevron-right ms-1"></i></button>
-                            </div>
-                            <div id="structuredOutput" class="p-4 rounded-3 border border-success overflow-auto flex-grow-1" style="background: #f0fdf4;">
-                                <!-- Populated by JS -->
-                            </div>
-                            <button class="btn btn-success fw-bold rounded-pill w-100 py-3 shadow-sm mt-2" id="approveStrategyBtn" onclick="approveStrategy()">
-                                <i class="fas fa-thumbs-up me-2"></i>Approve Strategy &amp; Proceed
-                            </button>
+            <!-- Right Panel: Synthesis (opens only once a post is selected) -->
+            <div class="col-xl-3 col-lg-3 d-none" id="rightSynthesisPanel" style="transition: var(--transition);">
+                <div class="premium-card h-100 d-flex flex-column position-sticky" style="top: 100px;">
+                    <div class="p-4 border-bottom bg-white text-center">
+                        <div class="rounded-circle mx-auto d-flex align-items-center justify-content-center mb-3 shadow-sm"
+                            style="width: 50px; height: 50px; background: rgba(79, 70, 229, 0.1); color: var(--primary);">
+                            <i class="fas fa-brain fs-4"></i>
                         </div>
+                        <h5 class="fw-bold text-dark mb-1">Strategic Synthesis</h5>
+                        <p class="text-muted small fw-medium mb-0">Select posts from the feed to serve as context for
+                            the AI analysis.</p>
+                    </div>
 
-                        <!-- SLIDE 3: Generation Settings -->
-                        <div class="p-4 d-flex flex-column gap-3 bg-white border-start" style="width: 25%;">
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <button class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border" onclick="slideWorkflow(1)"><i class="fas fa-chevron-left me-1"></i>Strategy</button>
-                                <label class="form-label fw-bold text-primary m-0"><i class="fas fa-magic me-1"></i>Content Generator</label>
-                                <button class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border d-none" id="slide3NextBtn" onclick="slideWorkflow(3)">Next <i class="fas fa-chevron-right ms-1"></i></button>
-                            </div>
-                            
-                            <div id="generationPipelineBlock" class="d-flex flex-column gap-3 p-4 border rounded-3 bg-light mt-2">
-                                <div class="d-flex align-items-center gap-2">
-                                    <label class="fw-bold m-0" style="font-size: 0.9rem;"><i class="fas fa-photo-video me-2 text-primary"></i> Select Output Type:</label>
-                                    <div class="btn-group" role="group" id="mediaTypeGroup">
-                                        <input type="radio" class="btn-check" name="mediaType" id="typeText" value="Text (Caption)" autocomplete="off" checked>
-                                        <label class="btn btn-outline-primary btn-sm fw-bold px-3" for="typeText"><i class="fas fa-align-left me-2"></i>Caption</label>
-                                        <input type="radio" class="btn-check" name="mediaType" id="typeImage" value="image" autocomplete="off">
-                                        <label class="btn btn-outline-primary btn-sm fw-bold px-3" for="typeImage"><i class="fas fa-image me-2"></i>Image</label>
-                                        <input type="radio" class="btn-check" name="mediaType" id="typeVideo" value="video" autocomplete="off">
-                                        <label class="btn btn-outline-primary btn-sm fw-bold px-3" for="typeVideo"><i class="fas fa-video me-2"></i>Video</label>
+                    <!-- Horizontal Wizard Container -->
+                    <div style="overflow: hidden; flex-grow: 1;">
+                        <div id="workflowSlider" class="d-flex h-100"
+                            style="width: 400%; transition: transform 0.4s ease-in-out; transform: translateX(0%);">
+
+                            <!-- SLIDE 1: Context -->
+                            <div class="p-4 d-flex flex-column gap-4 bg-white" style="width: 25%;">
+                                <div class="d-flex justify-content-between align-items-center p-3 rounded-3"
+                                    style="background: rgba(243, 244, 246, 0.8);">
+                                    <span class="fw-bold text-gray-700"><i
+                                            class="fas fa-layer-group me-2 text-primary"></i>Selected Intel:</span>
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="badge rounded-pill" id="selectedPostCount"
+                                            style="background: var(--primary); font-size: 0.9rem; padding: 0.35rem 0.75rem;">0</span>
+                                        <button
+                                            class="btn btn-sm btn-light border d-none fw-bold text-muted px-3 rounded-pill"
+                                            id="slide1NextBtn" onclick="slideWorkflow(1)">Next <i
+                                                class="fas fa-chevron-right ms-1"></i></button>
                                     </div>
                                 </div>
-                                <div class="position-relative mt-2">
-                                    <i class="fas fa-paperclip position-absolute" style="top: 15px; left: 15px; color: #9ca3af;"></i>
-                                    <textarea id="pipelinePrompt" class="form-control" rows="3" style="padding-left: 2.5rem; border-radius: 12px; resize: none;" placeholder="Attach an optional creative prompt (e.g. 'Use an energetic tone', 'Include branding colors')"></textarea>
+                                <div class="flex-grow-1 d-flex flex-column gap-2">
+                                    <label class="form-label fw-bold text-gray-700 m-0">Context Buffer</label>
+                                    <textarea id="storyContextInput" class="form-control textarea-premium flex-grow-1"
+                                        placeholder="Select posts to fill the context buffer..." readonly
+                                        style="min-height: 200px;"></textarea>
                                 </div>
-                                <button class="btn btn-primary fw-bold rounded-pill w-100 py-3 shadow-sm mt-3" onclick="startPipelineGeneration()" id="startPipelineBtn">
-                                    <i class="fas fa-magic me-2"></i>Generate Assets
+                                <button class="premium-btn w-100 py-3 fs-6 mt-2" onclick="generateStoryFromSelection()"
+                                    id="generateStoryBtn" disabled>
+                                    <i class="fas fa-bolt me-2"></i>Generate Counter-Strategy
                                 </button>
+                                <div id="generationLoader" class="d-none text-center text-primary mt-2 fw-bold small"><i
+                                        class="fas fa-spinner fa-spin me-2"></i>Analyzing market data...</div>
                             </div>
-                        </div>
 
-                        <!-- SLIDE 4: Asset Review & Approval -->
-                        <div class="p-4 d-flex flex-column gap-3 bg-white border-start" style="width: 25%;">
-                            <div class="d-flex justify-content-between align-items-center mb-2">
-                                <button class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border" onclick="slideWorkflow(2)"><i class="fas fa-chevron-left me-1"></i>Generator</button>
-                                <label class="form-label fw-bold text-primary m-0"><i class="fas fa-sparkles me-1"></i>Asset Review</label>
-                            </div>
-                            
-                            <div id="pipelineResultBlock" class="d-flex flex-column gap-3 p-3 border border-primary rounded-3 flex-grow-1" style="background: #e0e7ff;">
-                                <div class="d-flex justify-content-between align-items-center">
-                                    <h6 class="fw-bold m-0 text-primary"><i class="fas fa-eye me-1"></i>Generated Asset</h6>
-                                    <span id="pipelineLoader" class="d-none text-primary small fw-bold"><i class="fas fa-spinner fa-spin me-1"></i>Generating...</span>
+                            <!-- SLIDE 2: Synthesis Output -->
+                            <div class="p-4 d-flex flex-column gap-3 bg-white border-start" style="width: 25%;">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <button
+                                        class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border"
+                                        onclick="slideWorkflow(0)"><i class="fas fa-chevron-left me-1"></i>Back</button>
+                                    <label class="form-label fw-bold text-success m-0"><i
+                                            class="fas fa-check-circle me-1"></i>Synthesis Output</label>
+                                    <button
+                                        class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border d-none"
+                                        id="slide2NextBtn" onclick="slideWorkflow(2)">Next <i
+                                            class="fas fa-chevron-right ms-1"></i></button>
                                 </div>
-                                <div id="pipelineOutputContent" class="bg-white p-3 rounded border text-dark overflow-auto" style="min-height: 150px;">
-                                    <div class="text-center text-muted py-5"><i class="fas fa-ghost fs-3 mb-2 opacity-50"></i><br>Awaiting generation...</div>
+                                <div id="structuredOutput"
+                                    class="p-4 rounded-3 border border-success overflow-auto flex-grow-1"
+                                    style="background: #f0fdf4;">
+                                    <!-- Populated by JS -->
                                 </div>
-                                
-                                <div class="d-flex gap-2 mt-auto" id="approvalButtons">
-                                    <button class="btn btn-outline-danger flex-grow-1 fw-bold py-2" onclick="rejectPipelineContent()"><i class="fas fa-times me-1"></i>Reject</button>
-                                    <button class="btn btn-success flex-grow-1 fw-bold py-2" onclick="approvePipelineContent()"><i class="fas fa-check me-1"></i>Approve</button>
-                                </div>
-                                <button class="btn btn-dark fw-bold w-100 d-none py-2 mt-auto" id="publishPipelineBtn" onclick="publishPipelineContent()">
-                                    <i class="fas fa-paper-plane me-2"></i>Publish to Platforms
+                                <button class="btn btn-success fw-bold rounded-pill w-100 py-3 shadow-sm mt-2"
+                                    id="approveStrategyBtn" onclick="approveStrategy()">
+                                    <i class="fas fa-thumbs-up me-2"></i>Approve Strategy &amp; Proceed
                                 </button>
+                            </div>
+
+                            <!-- SLIDE 3: Generation Settings -->
+                            <div class="p-4 d-flex flex-column gap-3 bg-white border-start" style="width: 25%;">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <button
+                                        class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border"
+                                        onclick="slideWorkflow(1)"><i
+                                            class="fas fa-chevron-left me-1"></i>Strategy</button>
+                                    <label class="form-label fw-bold text-primary m-0"><i
+                                            class="fas fa-magic me-1"></i>Content Generator</label>
+                                    <button
+                                        class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border d-none"
+                                        id="slide3NextBtn" onclick="slideWorkflow(3)">Next <i
+                                            class="fas fa-chevron-right ms-1"></i></button>
+                                </div>
+
+                                <div id="generationPipelineBlock"
+                                    class="d-flex flex-column gap-3 p-4 border rounded-3 bg-light mt-2">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <label class="fw-bold m-0" style="font-size: 0.9rem;"><i
+                                                class="fas fa-photo-video me-2 text-primary"></i> Select Output
+                                            Type:</label>
+                                        <div class="btn-group" role="group" id="mediaTypeGroup">
+                                            <input type="radio" class="btn-check" name="mediaType" id="typeText"
+                                                value="Text (Caption)" autocomplete="off" checked>
+                                            <label class="btn btn-outline-primary btn-sm fw-bold px-3" for="typeText"><i
+                                                    class="fas fa-align-left me-2"></i>Caption</label>
+                                            <input type="radio" class="btn-check" name="mediaType" id="typeImage"
+                                                value="image" autocomplete="off">
+                                            <label class="btn btn-outline-primary btn-sm fw-bold px-3"
+                                                for="typeImage"><i class="fas fa-image me-2"></i>Image</label>
+                                            <input type="radio" class="btn-check" name="mediaType" id="typeVideo"
+                                                value="video" autocomplete="off">
+                                            <label class="btn btn-outline-primary btn-sm fw-bold px-3"
+                                                for="typeVideo"><i class="fas fa-video me-2"></i>Video</label>
+                                        </div>
+                                    </div>
+                                    <div class="position-relative mt-2">
+                                        <i class="fas fa-paperclip position-absolute"
+                                            style="top: 15px; left: 15px; color: #9ca3af;"></i>
+                                        <textarea id="pipelinePrompt" class="form-control" rows="3"
+                                            style="padding-left: 2.5rem; border-radius: 12px; resize: none;"
+                                            placeholder="Attach an optional creative prompt (e.g. 'Use an energetic tone', 'Include branding colors')"></textarea>
+                                    </div>
+                                    <button class="btn btn-primary fw-bold rounded-pill w-100 py-3 shadow-sm mt-3"
+                                        onclick="startPipelineGeneration()" id="startPipelineBtn">
+                                        <i class="fas fa-magic me-2"></i>Generate Assets
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- SLIDE 4: Asset Review & Approval -->
+                            <div class="p-4 d-flex flex-column gap-3 bg-white border-start" style="width: 25%;">
+                                <div class="d-flex justify-content-between align-items-center mb-2">
+                                    <button
+                                        class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border"
+                                        onclick="slideWorkflow(2)"><i
+                                            class="fas fa-chevron-left me-1"></i>Generator</button>
+                                    <label class="form-label fw-bold text-primary m-0"><i
+                                            class="fas fa-sparkles me-1"></i>Asset Review</label>
+                                </div>
+
+                                <div id="pipelineResultBlock"
+                                    class="d-flex flex-column gap-3 p-3 border border-primary rounded-3 flex-grow-1"
+                                    style="background: #e0e7ff;">
+                                    <div class="d-flex justify-content-between align-items-center">
+                                        <h6 class="fw-bold m-0 text-primary"><i class="fas fa-eye me-1"></i>Generated
+                                            Asset</h6>
+                                        <span id="pipelineLoader" class="d-none text-primary small fw-bold"><i
+                                                class="fas fa-spinner fa-spin me-1"></i>Generating...</span>
+                                    </div>
+                                    <div id="pipelineOutputContent"
+                                        class="bg-white p-3 rounded border text-dark overflow-auto"
+                                        style="min-height: 150px;">
+                                        <div class="text-center text-muted py-5"><i
+                                                class="fas fa-ghost fs-3 mb-2 opacity-50"></i><br>Awaiting generation...
+                                        </div>
+                                    </div>
+
+                                    <div class="d-flex gap-2 mt-auto" id="approvalButtons">
+                                        <button class="btn btn-outline-danger flex-grow-1 fw-bold py-2"
+                                            onclick="rejectPipelineContent()"><i
+                                                class="fas fa-times me-1"></i>Reject</button>
+                                        <button class="btn btn-success flex-grow-1 fw-bold py-2"
+                                            onclick="approvePipelineContent()"><i
+                                                class="fas fa-check me-1"></i>Approve</button>
+                                    </div>
+                                    <button class="btn btn-dark fw-bold w-100 d-none py-2 mt-auto"
+                                        id="publishPipelineBtn" onclick="publishPipelineContent()">
+                                        <i class="fas fa-paper-plane me-2"></i>Publish to Platforms
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
-</main>
+    </main>
 
-<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+    <!-- Pipeline Stage Detail Modal -->
+    <div class="modal fade" id="pipelineStageModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content" style="border-radius: 16px; overflow: hidden;">
+                <div class="modal-header border-0 pb-0">
+                    <div>
+                        <h5 class="modal-title fw-bold text-dark mb-0" id="pipelineModalTitle">Pipeline Details</h5>
+                        <small class="text-muted" id="pipelineModalSubtitle"></small>
+                    </div>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body pt-3">
+                    <div class="row g-4">
+                        <div class="col-md-5" id="pipelineModalStepper"></div>
+                        <div class="col-md-7 border-start ps-md-4" id="pipelineModalDetail" style="min-height: 320px;">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 </body>
+
 </html>

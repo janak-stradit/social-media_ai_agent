@@ -1423,13 +1423,40 @@ def competitor_posts():
 @api_bp.route('/platform-posts', methods=['GET'])
 def platform_posts():
     platform = request.args.get('platform')
+    competitor = request.args.get('competitor')
     if not platform:
         return jsonify({"error": "No platform provided"}), 400
-        
+
     try:
         from services.scraper_service import ScraperService
         scraper = ScraperService()
-        posts = scraper.get_platform_posts(platform)
+        posts = scraper.get_platform_posts(platform, competitor)
+
+        db_stats = {"inserted": 0, "skipped": 0}
+        try:
+            from db import save_competitor_posts
+            db_stats = save_competitor_posts(posts)
+        except Exception as db_err:
+            print(f"[platform-posts] Warning - could not persist posts: {db_err}")
+
+        return jsonify({
+            "success": True,
+            "posts": posts,
+            "db": db_stats
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@api_bp.route('/competitor-posts-db', methods=['GET'])
+def competitor_posts_db():
+    platform = request.args.get('platform')
+    competitor = request.args.get('competitor')
+    if not platform:
+        return jsonify({"error": "No platform provided"}), 400
+
+    try:
+        from db import get_competitor_posts
+        posts = get_competitor_posts(platform=platform, competitor=competitor)
         return jsonify({
             "success": True,
             "posts": posts

@@ -10,7 +10,7 @@ from datetime import datetime
 
 from sqlalchemy import (
     create_engine, text,
-    Column, Integer, String, Text, DateTime, ForeignKey, Float, Boolean
+    Column, Integer, String, Text, DateTime, ForeignKey, Float, Boolean, UniqueConstraint
 )
 from sqlalchemy.orm import DeclarativeBase, Session
 from sqlalchemy.sql import func
@@ -109,6 +109,29 @@ class ApprovedAsset(Base):
     platform = Column(String(32), nullable=False)
     content_type = Column(String(32), nullable=False) # 'text', 'image', 'video'
     content_data = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class CompetitorPost(Base):
+    __tablename__ = "competitor_posts"
+    __table_args__ = (
+        UniqueConstraint("competitor", "platform", "post_url", name="uq_competitor_post"),
+        {"schema": SCHEMA} if not IS_SQLITE else {}
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    competitor = Column(String(120), nullable=False, index=True)
+    platform = Column(String(32), nullable=False, index=True)
+    post_url = Column(String(500), nullable=False)
+    title = Column(Text, nullable=True)
+    text = Column(Text, nullable=True)
+    author = Column(String(120), nullable=True)
+    post_type = Column(String(32), nullable=True)
+    engagement_json = Column(Text, nullable=True)
+    media_json = Column(Text, nullable=True)
+    published_at = Column(DateTime, nullable=True)
+    scraped_at = Column(DateTime, nullable=True)
+    raw_json = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
@@ -757,6 +780,104 @@ def cancel_scheduled_post(user_id: int, post_id: int) -> bool:
             session.commit()
             return True
         return False
+
+
+def _parse_dt(value) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        return None
+
+
+def save_competitor_posts(posts: list[dict]) -> dict:
+    """
+    Persist scraped competitor posts, inserting only records not already
+    stored (matched by competitor + platform + post_url). Existing posts
+    are left untouched. Returns {"inserted": n, "skipped": n}.
+    """
+    if not posts:
+        return {"inserted": 0, "skipped": 0}
+
+    with Session(engine) as session:
+        keys = {
+            (p.get("_source_competitor") or "Unknown", (p.get("platform") or "").lower(), p.get("post_url"))
+            for p in posts if p.get("post_url")
+        }
+        existing = set()
+        if keys:
+            competitors = {k[0] for k in keys}
+            platforms = {k[1] for k in keys}
+            rows = session.query(
+                CompetitorPost.competitor, CompetitorPost.platform, CompetitorPost.post_url
+            ).filter(
+                CompetitorPost.competitor.in_(competitors),
+                CompetitorPost.platform.in_(platforms)
+            ).all()
+            existing = {(r[0], (r[1] or "").lower(), r[2]) for r in rows}
+
+        inserted = 0
+        skipped = 0
+        new_post_urls = []
+        for p in posts:
+            competitor = p.get("_source_competitor") or "Unknown"
+            platform = (p.get("platform") or "").lower()
+            post_url = p.get("post_url")
+            if not post_url:
+                skipped += 1
+                continue
+
+            key = (competitor, platform, post_url)
+            if key in existing:
+                skipped += 1
+                continue
+
+            session.add(CompetitorPost(
+                competitor=competitor,
+                platform=platform,
+                post_url=post_url,
+                title=p.get("title"),
+                text=p.get("text"),
+                author=p.get("author"),
+                post_type=p.get("post_type"),
+                engagement_json=json.dumps(p.get("engagement")) if p.get("engagement") is not None else None,
+                media_json=json.dumps(p.get("media")) if p.get("media") is not None else None,
+                published_at=_parse_dt(p.get("published_at")),
+                scraped_at=_parse_dt(p.get("scraped_at")),
+                raw_json=json.dumps(p, default=str)
+            ))
+            existing.add(key)
+            new_post_urls.append(post_url)
+            inserted += 1
+
+        session.commit()
+        return {"inserted": inserted, "skipped": skipped, "new_post_urls": new_post_urls}
+
+
+def get_competitor_posts(platform: str = None, competitor: str = None, limit: int = 300) -> list[dict]:
+    """Return previously-scraped competitor posts stored in the DB, newest first."""
+    with Session(engine) as session:
+        query = session.query(CompetitorPost)
+        if platform:
+            query = query.filter(CompetitorPost.platform == platform.lower())
+        if competitor and competitor.lower() != "all":
+            query = query.filter(CompetitorPost.competitor == competitor)
+
+        order_col = func.coalesce(CompetitorPost.published_at, CompetitorPost.scraped_at, CompetitorPost.created_at)
+        rows = query.order_by(order_col.desc()).limit(limit).all()
+
+        return [{
+            "title": r.title,
+            "text": r.text,
+            "platform": r.platform,
+            "post_url": r.post_url,
+            "author": r.author,
+            "post_type": r.post_type,
+            "published_at": r.published_at.isoformat() if r.published_at else None,
+            "scraped_at": r.scraped_at.isoformat() if r.scraped_at else None,
+            "_source_competitor": r.competitor,
+        } for r in rows]
 
 
 def update_scheduled_post_status(user_id: int, post_id: int, status: str) -> bool:

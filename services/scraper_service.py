@@ -139,12 +139,15 @@ class ScraperService:
                 }
             ]
 
-    def get_platform_posts(self, platform_name: str) -> list:
+    def get_platform_posts(self, platform_name: str, competitor: str = None) -> list:
         """
         Iterates over the core competitors and fetches their posts
         filtered specifically for the given platform (e.g. 'linkedin').
+        If `competitor` is provided, only that competitor's posts are returned.
         """
         competitors = ['BlackRock', 'BNY Mellon', 'Northern Trust', 'The Vanguard Group']
+        if competitor and competitor.lower() != 'all':
+            competitors = [c for c in competitors if c.lower() == competitor.lower()]
         combined_posts = []
         
         for comp in competitors:
