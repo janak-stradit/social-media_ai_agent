@@ -62,7 +62,6 @@ class CaptionAgent:
         caption = caption.replace("__", "")
         caption = caption.replace("*", "")
         caption = caption.replace("`", "")
-        caption = caption.replace("#", "")
 
         # ---------------------------------------------------------
         # 2. Process line by line
@@ -113,6 +112,10 @@ class CaptionAgent:
                 "reach out to me directly",
                 "brief demonstration",
                 "integrates into your existing processes",
+                "integrate with your current",
+                "schedule a brief walkthrough",
+                "direct message",
+                "send me a message"
             ]
 
             if any(phrase in lower for phrase in unwanted_phrases):
@@ -213,6 +216,8 @@ CRITICAL PLAIN-TEXT FORMATTING RULES:
 8. Do NOT use formatted headings or special Markdown symbols.
 
 9. Do NOT ask the reader to "visit our website", "read our whitepaper", "reach out to me", "see a demonstration", or "download the document".
+
+10. You SHOULD include hashtags at the very end of the post. You MUST ensure every hashtag starts with a '#' symbol (e.g. #Technology #Innovation). Do NOT just list words without the '#' symbol.
 
 FINAL VALIDATION:
 Before returning the answer, scan the complete caption.
@@ -335,6 +340,8 @@ Do not add CTAs, sales pitches, demo requests, links, or promotional
 language. Do NOT ask the reader to "visit our website", "read our whitepaper", "reach out to me", "see a demonstration", or "download the document".
 
 Write like a real human industry professional.
+
+If you include hashtags at the end, you MUST ensure every hashtag starts with a '#' symbol (e.g. #Technology #Innovation). Do NOT just list words without the '#' symbol.
 
 Before returning the caption, verify that the characters "**"
 and "*" do not appear anywhere in the final response.

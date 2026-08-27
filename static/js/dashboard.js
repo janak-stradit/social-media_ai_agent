@@ -548,28 +548,52 @@ $(document).ready(function() {
             const competitorsList = pipeline.competitors
                 ? [...new Set(pipeline.competitors.split(',').map(c => c.trim()).filter(Boolean))].join(', ')
                 : 'None';
+            const safeContext = (pipeline.context || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
             return `
                 <h6 class="fw-bold text-primary mb-3"><i class="fas fa-layer-group me-2"></i>Post Pipeline</h6>
                 <p class="small text-muted mb-2"><strong class="text-dark">Competitors:</strong> ${competitorsList}</p>
-                <div class="bg-light rounded-3 p-3 small" style="white-space: pre-wrap; max-height: 320px; overflow-y: auto;">${pipeline.context || 'No context captured for this pipeline.'}</div>
+                
+                <div id="intelSelectedReadMode">
+                    <div class="bg-light rounded-3 p-3 small" style="white-space: pre-wrap; max-height: 320px; overflow-y: auto;">${pipeline.context || 'No context captured for this pipeline.'}</div>
+                    <div class="mt-3 d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-primary fw-bold" onclick="$('#intelSelectedReadMode').addClass('d-none'); $('#intelSelectedEditMode').removeClass('d-none');"><i class="fas fa-edit me-1"></i>Edit Context</button>
+                    </div>
+                </div>
+                
+                <div id="intelSelectedEditMode" class="d-none">
+                    <textarea class="form-control textarea-premium small mb-2" id="editPipelineContextArea" style="min-height: 320px;">${safeContext}</textarea>
+                    <div class="d-flex gap-2 justify-content-end">
+                        <button class="btn btn-sm btn-light fw-bold" onclick="$('#intelSelectedEditMode').addClass('d-none'); $('#intelSelectedReadMode').removeClass('d-none');">Cancel</button>
+                        <button class="btn btn-sm btn-success fw-bold" onclick="saveAndRerunPipelineStrategy(${pipeline.id})"><i class="fas fa-save me-1"></i>Save & Rerun</button>
+                    </div>
+                </div>
             `;
         }
         if (stageId === 'strategy_generated') {
             if (!pipeline.strategy) return emptyStageState('Counter strategy has not been generated yet.');
             const facts = (pipeline.strategy.observed_facts || [])
-                .map(f => `<span class="badge rounded-pill bg-white text-primary border border-primary px-3 py-2 me-2 mb-2" style="font-size: 0.8rem; font-weight: 600;">${f}</span>`)
+                .map(f => `<span class="badge rounded-pill bg-white text-primary border border-primary px-3 py-2 me-2 mb-2 text-wrap text-start" style="font-size: 0.8rem; font-weight: 600; line-height: 1.4;">${f}</span>`)
                 .join('');
+            
             return `
                 <h6 class="fw-bold text-primary mb-3"><i class="fas fa-brain me-2"></i>Counter Strategy Generated</h6>
                 <div class="mb-3 d-flex flex-wrap">${facts || '<span class="text-muted small">No observed facts recorded.</span>'}</div>
-                <div class="small text-muted bg-light rounded-3 p-3" style="white-space: pre-wrap; max-height: 260px; overflow-y: auto;">${pipeline.strategy.prompt || ''}</div>
+                <div class="small text-muted bg-light rounded-3 p-3 mb-3" style="white-space: pre-wrap; max-height: 400px; overflow-y: auto;">${pipeline.strategy.prompt || ''}</div>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-danger fw-bold" onclick="rejectPipelineStrategy(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject</button>
+                    <button class="btn btn-sm btn-success fw-bold" onclick="approvePipelineStrategy(${pipeline.id})"><i class="fas fa-check me-1"></i>Approve & Continue</button>
+                </div>
             `;
         }
         if (stageId === 'asset_generated') {
             if (!pipeline.assetContent) return emptyStageState('Content has not been generated yet.');
             return `
                 <h6 class="fw-bold text-primary mb-3"><i class="fas fa-magic me-2"></i>Content Generated ${pipeline.assetType ? `<span class="badge bg-light text-dark border ms-1">${pipeline.assetType}</span>` : ''}</h6>
-                <div style="max-height: 400px; overflow-y: auto;">${renderAssetItems(pipeline.assetContent)}</div>
+                <div style="max-height: 55vh; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent)}</div>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-outline-danger fw-bold flex-grow-1" onclick="rejectPipelineAsset(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject Asset</button>
+                    <button class="btn btn-sm btn-success fw-bold flex-grow-1" onclick="approvePipelineAsset(${pipeline.id})"><i class="fas fa-check me-1"></i>Approve Asset</button>
+                </div>
             `;
         }
         if (stageId === 'approved') {
@@ -577,7 +601,12 @@ $(document).ready(function() {
             return `
                 <h6 class="fw-bold text-success mb-3"><i class="fas fa-thumbs-up me-2"></i>Asset Approved</h6>
                 <p class="small text-muted">This asset was reviewed and approved for publishing.</p>
-                ${pipeline.assetContent ? `<div style="max-height: 320px; overflow-y: auto;">${renderAssetItems(pipeline.assetContent)}</div>` : ''}
+                ${pipeline.assetContent ? `<div style="max-height: 320px; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent)}</div>` : ''}
+                ${pipeline.status === 'approved' ? `
+                    <button class="btn btn-dark fw-bold w-100 py-2 mt-2" onclick="publishModalPipelineContent(${pipeline.id})" id="modalPublishBtn">
+                        <i class="fas fa-paper-plane me-2"></i>Publish to Platforms
+                    </button>
+                ` : ''}
             `;
         }
         if (stageId === 'published') {
@@ -983,6 +1012,286 @@ $(document).ready(function() {
                 btn.prop('disabled', false);
                 btn.removeClass('btn-success').addClass('btn-dark');
             }, 3000);
+        }, 1500);
+    };
+
+    window.saveAndRerunPipelineStrategy = function(pipelineId) {
+        const newContext = $('#editPipelineContextArea').val();
+        if (!newContext) return;
+        
+        const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
+        if (pipeline) {
+            pipeline.context = newContext;
+            localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+        }
+        rerunPipelineStrategy(pipelineId);
+    };
+
+    window.rerunPipelineStrategy = function(pipelineId) {
+        const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
+        if (!pipeline) return;
+
+        const btn = $('#rerunStrategyBtn');
+        const origText = btn.html();
+        btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Regenerating...');
+
+        $.ajax({
+            url: '/api/generate-channel-storyline',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ 
+                story: pipeline.context
+            }),
+            success: function(r) {
+                if (r.success && r.storyline) {
+                    pipeline.strategy = r.storyline;
+                    pipeline.status = 'strategy_generated';
+                    localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+                    renderPipelineHistory();
+                    
+                    showToast('Counter-strategy regenerated successfully!', 'success');
+                    
+                    // Refresh modal view directly to the strategy step
+                    renderPipelineModalStepper(window.pipelineHistory.indexOf(pipeline), 'strategy_generated');
+                    showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'strategy_generated');
+                } else {
+                    btn.prop('disabled', false).html(origText);
+                    showToast('Failed to regenerate strategy.', 'error');
+                }
+            },
+            error: function() {
+                btn.prop('disabled', false).html(origText);
+                showToast('Network error while regenerating strategy.', 'error');
+            }
+        });
+    };
+
+    window.rejectPipelineStrategy = function(pipelineId) {
+        const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
+        if (!pipeline) return;
+
+        pipeline.status = 'rejected';
+        localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+        renderPipelineHistory();
+        
+        showToast('Strategy Rejected.', 'warning');
+        
+        const modalEl = document.getElementById('pipelineStageModal');
+        const modal = bootstrap.Modal.getInstance(modalEl);
+        if (modal) modal.hide();
+    };
+
+    window.approvePipelineStrategy = function(pipelineId) {
+        const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
+        if (!pipeline) return;
+
+        window.activePipeline = pipeline;
+
+        // Render the Generator UI inside the modal
+        const generatorHtml = `
+            <h6 class="fw-bold text-primary mb-3"><i class="fas fa-magic me-2"></i>Content Generator</h6>
+            <div id="modalGenerationPipelineBlock" class="d-flex flex-column gap-3 p-4 border rounded-3 bg-light mt-2">
+                <div class="d-flex flex-column gap-2">
+                    <label class="fw-bold m-0" style="font-size: 0.9rem;"><i class="fas fa-photo-video me-2 text-primary"></i> Select Output Type:</label>
+                    <div class="btn-group w-100" role="group" id="modalMediaTypeGroup">
+                        <input type="radio" class="btn-check" name="modalMediaType" id="modalTypeText" value="Text (Caption)" autocomplete="off" checked>
+                        <label class="btn btn-outline-primary btn-sm fw-bold" for="modalTypeText"><i class="fas fa-align-left me-2"></i>Caption</label>
+                        <input type="radio" class="btn-check" name="modalMediaType" id="modalTypeImage" value="image" autocomplete="off">
+                        <label class="btn btn-outline-primary btn-sm fw-bold" for="modalTypeImage"><i class="fas fa-image me-2"></i>Image</label>
+                        <input type="radio" class="btn-check" name="modalMediaType" id="modalTypeVideo" value="video" autocomplete="off">
+                        <label class="btn btn-outline-primary btn-sm fw-bold" for="modalTypeVideo"><i class="fas fa-video me-2"></i>Video</label>
+                    </div>
+                </div>
+                <div class="position-relative mt-2">
+                    <i class="fas fa-paperclip position-absolute" style="top: 15px; left: 15px; color: #9ca3af;"></i>
+                    <textarea id="modalPipelinePrompt" class="form-control" rows="3" style="padding-left: 2.5rem; border-radius: 12px; resize: none;" placeholder="Attach an optional creative prompt (e.g. 'Use an energetic tone', 'Include branding colors')"></textarea>
+                </div>
+                <button class="btn btn-primary fw-bold rounded-pill w-100 py-3 shadow-sm mt-3" onclick="startModalPipelineGeneration(${pipeline.id})" id="startModalPipelineBtn">
+                    <i class="fas fa-magic me-2"></i>Generate Assets
+                </button>
+            </div>
+            <div id="modalPipelineLoader" class="d-none mt-3 text-center text-primary fw-bold small">
+                <i class="fas fa-spinner fa-spin me-2"></i>Generating assets...
+            </div>
+            <div id="modalPipelineOutputContent" class="mt-3"></div>
+        `;
+        
+        $('#pipelineModalDetail').html(generatorHtml);
+    };
+
+    window.startModalPipelineGeneration = function(pipelineId) {
+        const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
+        if (!pipeline) return;
+
+        const mediaType = $('input[name="modalMediaType"]:checked').val();
+        const prompt = $('#modalPipelinePrompt').val();
+        const platform = $('#dashboardPlatformSelect').val() || 'linkedin'; 
+
+        $('#startModalPipelineBtn').prop('disabled', true);
+        $('#modalPipelineLoader').removeClass('d-none');
+        $('#modalPipelineOutputContent').html('');
+
+        const combinedStory = `STRATEGY SYNTHESIS:\n${JSON.stringify(pipeline.strategy, null, 2)}\n\nUSER INSTRUCTIONS / CHARACTERS / HOOK:\n${prompt}`;
+
+        $.ajax({
+            url: '/api/generate',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                story: combinedStory,
+                platforms: [platform],
+                selected_outputs: ['text'],
+                include_strategy: false
+            }),
+            success: function(res) {
+                if (res.success && res.content && res.content[platform]) {
+                    const captions = res.content[platform].caption;
+                    window.currentCarouselAssets = [];
+                    
+                    if (mediaType === 'Text (Caption)') {
+                        $('#startModalPipelineBtn').prop('disabled', false);
+                        $('#modalPipelineLoader').addClass('d-none');
+                        
+                        pipeline.status = 'asset_generated';
+                        pipeline.assetType = mediaType;
+                        pipeline.assetContent = [
+                            { type: 'Text (Caption)', content: captions.primary_caption }
+                        ];
+                        localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+                        renderPipelineHistory();
+                        
+                        showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'asset_generated');
+                    } else {
+                        // For image/video, just simulate or trigger generation like in main workflow
+                        $('#modalPipelineLoader').html('<i class="fas fa-spinner fa-spin me-2"></i>Rendering media variation 1 of 3...');
+                        let generatedCount = 0;
+                        const totalToGenerate = 3;
+                        
+                        function generateNextMedia() {
+                            if (generatedCount >= totalToGenerate) {
+                                $('#startModalPipelineBtn').prop('disabled', false);
+                                $('#modalPipelineLoader').addClass('d-none');
+                                
+                                pipeline.status = 'asset_generated';
+                                pipeline.assetType = mediaType;
+                                pipeline.assetContent = window.currentCarouselAssets;
+                                localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+                                renderPipelineHistory();
+                                showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'asset_generated');
+                                return;
+                            }
+                            
+                            $.ajax({
+                                url: '/api/generate-media',
+                                type: 'POST',
+                                contentType: 'application/json',
+                                data: JSON.stringify({
+                                    platform: platform,
+                                    caption: captions.primary_caption,
+                                    media_type: mediaType,
+                                    tone: generatedCount
+                                }),
+                                success: function(mediaRes) {
+                                    if (mediaRes.success && mediaRes.url) {
+                                        window.currentCarouselAssets.push({
+                                            type: mediaType,
+                                            content: mediaRes.url,
+                                            caption: captions.primary_caption,
+                                            platform: platform,
+                                            prompt: prompt
+                                        });
+                                        generatedCount++;
+                                        if (generatedCount < totalToGenerate) {
+                                            $('#modalPipelineLoader').html(`<i class="fas fa-spinner fa-spin me-2"></i>Rendering media variation ${generatedCount + 1} of 3...`);
+                                            generateNextMedia();
+                                        } else {
+                                            $('#startModalPipelineBtn').prop('disabled', false);
+                                            $('#modalPipelineLoader').addClass('d-none');
+                                            
+                                            pipeline.status = 'asset_generated';
+                                            pipeline.assetType = mediaType;
+                                            pipeline.assetContent = window.currentCarouselAssets;
+                                            localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+                                            renderPipelineHistory();
+                                            showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'asset_generated');
+                                        }
+                                    } else {
+                                        showToast('Media API failed on variation ' + (generatedCount+1), 'error');
+                                        $('#startModalPipelineBtn').prop('disabled', false);
+                                        $('#modalPipelineLoader').addClass('d-none');
+                                    }
+                                },
+                                error: function() {
+                                    showToast('Network error on variation ' + (generatedCount+1), 'error');
+                                    $('#startModalPipelineBtn').prop('disabled', false);
+                                    $('#modalPipelineLoader').addClass('d-none');
+                                }
+                            });
+                        }
+                        
+                        generateNextMedia();
+                    }
+                } else {
+                    $('#startModalPipelineBtn').prop('disabled', false);
+                    $('#modalPipelineLoader').addClass('d-none');
+                    showToast('Caption generation failed.', 'error');
+                }
+            },
+            error: function() {
+                $('#startModalPipelineBtn').prop('disabled', false);
+                $('#modalPipelineLoader').addClass('d-none');
+                showToast('Error generating assets.', 'error');
+            }
+        });
+    };
+
+    window.rejectPipelineAsset = function(pipelineId) {
+        const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
+        if (!pipeline) return;
+
+        pipeline.status = 'rejected';
+        localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+        renderPipelineHistory();
+        
+        showToast('Asset Rejected.', 'warning');
+        showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'asset_generated');
+    };
+
+    window.approvePipelineAsset = function(pipelineId) {
+        const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
+        if (!pipeline) return;
+
+        pipeline.status = 'approved';
+        localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+        renderPipelineHistory();
+        
+        showToast('Asset Approved! Ready for publishing.', 'success');
+        
+        renderPipelineModalStepper(window.pipelineHistory.indexOf(pipeline), 'approved');
+        showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'approved');
+    };
+
+    window.publishModalPipelineContent = function(pipelineId) {
+        const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
+        if (!pipeline) return;
+
+        const btn = $('#modalPublishBtn');
+        const origText = btn.html();
+        btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-2"></i>Publishing...');
+        
+        setTimeout(() => {
+            btn.html('<i class="fas fa-check-circle me-2"></i>Published Successfully');
+            btn.removeClass('btn-dark').addClass('btn-success');
+            showToast('Asset published to platform!', 'success');
+            
+            pipeline.status = 'published';
+            localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+            renderPipelineHistory();
+            
+            setTimeout(() => {
+                renderPipelineModalStepper(window.pipelineHistory.indexOf(pipeline), 'published');
+                showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'published');
+            }, 1500);
         }, 1500);
     };
 });
