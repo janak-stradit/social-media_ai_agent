@@ -27,21 +27,6 @@
             min-height: 100vh;
         }
 
-        .dashboard-header {
-            background: var(--glass-bg);
-            backdrop-filter: blur(12px);
-            -webkit-backdrop-filter: blur(12px);
-            border-bottom: 1px solid rgba(229, 231, 235, 0.8);
-            position: sticky;
-            top: 0;
-            z-index: 1020;
-            padding: 1rem 2rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02);
-        }
-
         .premium-card {
             background: #ffffff;
             border-radius: 16px;
@@ -227,28 +212,67 @@
 <body>
 
 
-<header class="dashboard-header">
-    <div class="d-flex align-items-center gap-3">
-        <div class="rounded-circle d-flex align-items-center justify-content-center" style="width: 40px; height: 40px; background: linear-gradient(135deg, var(--primary) 0%, #818cf8 100%); color: white;">
-            <i class="fas fa-radar fs-5"></i>
-        </div>
-        <div>
-            <h1 class="m-0 fs-5 fw-bold text-dark lh-1">Social Post Anaystor</h1>
-            <span class="text-muted small fw-medium">Cross-Competitor Platform Analysis</span>
+<header class="app-header">
+    <div class="header-brand">
+        <div class="brand-logo"><i class="fas fa-robot"></i></div>
+        <div class="brand-text">
+            <span class="brand-name">VortexSocial AI</span>
+            <span class="brand-tagline">Social Post Anaystor</span>
         </div>
     </div>
-    <div class="d-flex align-items-center gap-2">
-        <a href="/" class="btn btn-light fw-bold rounded-pill px-4 border shadow-sm text-secondary hover-primary transition">
-            <i class="fas fa-arrow-left me-2"></i>Back to Studio
+    <nav class="header-nav">
+        <a href="/" class="header-nav-item"><i class="fas fa-comments me-2"></i>Studio Chat</a>
+        <a href="/competitor-dashboard" class="header-nav-item active"><i class="fas fa-chart-line me-1"></i>Competitor Dashboard</a>
+    </nav>
+    <div class="header-actions">
+        <a href="/" class="btn-secondary-ent text-decoration-none me-2">
+            <i class="fas fa-arrow-left me-1"></i>Back to Studio Chat
         </a>
+
+        <!-- User Profile & System Settings Dropdown -->
+        <div class="dropdown">
+            <button class="header-user-btn border-0 bg-transparent dropdown-toggle d-flex align-items-center gap-2 p-1 rounded-3" type="button" id="userMenuDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                <div class="header-avatar" id="headerUserAvatar">U</div>
+                <div class="header-user-meta text-start me-1">
+                    <span class="header-user-name d-block font-bold" id="headerUserLabel">User</span>
+                    <span class="header-user-email d-block text-slate-500 fs-8" id="headerUserEmail">user@vortexsocial.ai</span>
+                </div>
+            </button>
+
+            <ul class="dropdown-menu dropdown-menu-end user-dropdown-menu shadow-lg rounded-4 p-3 border mt-2" aria-labelledby="userMenuDropdown" style="min-width: 320px;">
+
+                <!-- Section 1: Quick Studio Links -->
+                <li class="dropdown-header text-uppercase text-slate-400 font-bold fs-8 tracking-wider mb-1 px-1">Studio Tools</li>
+                <li>
+                    <a class="dropdown-item py-2 px-3 rounded-2 font-medium" href="/">
+                        <i class="fas fa-comments text-primary me-2"></i>Studio Chat
+                    </a>
+                </li>
+                <li>
+                    <a class="dropdown-item py-2 px-3 rounded-2 font-medium" href="/settings">
+                        <i class="fas fa-plug text-primary me-2"></i>Social Accounts &amp; Scheduling
+                    </a>
+                </li>
+
+                <li><hr class="dropdown-divider my-2"></li>
+
+                <!-- Section 2: Logout -->
+                <li>
+                    <a class="dropdown-item text-danger py-2 px-3 rounded-2 font-semibold" href="/logout">
+                        <i class="fas fa-right-from-bracket me-2"></i>Sign Out
+                    </a>
+                </li>
+
+            </ul>
+        </div>
     </div>
 </header>
 
-<main class="container-fluid py-4 px-lg-4">
+<main class="container-fluid py-4 px-lg-4" style="margin-top: var(--header-h);">
     <div class="row g-4">
         <!-- New Left Panel: History -->
         <div class="col-xl-3 col-lg-3">
-            <div class="premium-card h-100 d-flex flex-column position-sticky" style="top: 100px;">
+            <div class="premium-card h-100 d-flex flex-column position-sticky" style="top: calc(var(--header-h) + 24px);">
                 <div class="p-3 border-bottom bg-white text-center">
                     <h6 class="fw-bold m-0 text-gray-700 text-uppercase tracking-wider" style="font-size: 0.85rem;"><i class="fas fa-history me-2 text-primary"></i>History</h6>
                 </div>
@@ -317,7 +341,7 @@
 
         <!-- Right Panel: Synthesis (opens only once a post is selected) -->
         <div class="col-xl-3 col-lg-3 d-none" id="rightSynthesisPanel" style="transition: var(--transition);">
-            <div class="premium-card h-100 d-flex flex-column position-sticky" style="top: 100px;">
+            <div class="premium-card h-100 d-flex flex-column position-sticky" style="top: calc(var(--header-h) + 24px);">
                 <div class="p-4 border-bottom bg-white text-center">
                     <div class="rounded-circle mx-auto d-flex align-items-center justify-content-center mb-3 shadow-sm" style="width: 50px; height: 50px; background: rgba(79, 70, 229, 0.1); color: var(--primary);">
                         <i class="fas fa-brain fs-4"></i>

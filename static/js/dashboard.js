@@ -1,5 +1,18 @@
 $(document).ready(function() {
-    
+
+    // Load current user info into the shared app header
+    $.ajax({
+        url: '/api/auth/me',
+        type: 'GET',
+        success: function (r) {
+            if (r.user) {
+                $('#headerUserLabel').text(r.user.name);
+                $('#headerUserEmail').text(r.user.email);
+                $('#headerUserAvatar').text(r.user.name.charAt(0).toUpperCase());
+            }
+        }
+    });
+
     // Toast notification helper
     function showToast(message, type = 'info') {
         const bgClass = type === 'success' ? 'bg-success' : type === 'danger' ? 'bg-danger' : type === 'warning' ? 'bg-warning' : 'bg-primary';
