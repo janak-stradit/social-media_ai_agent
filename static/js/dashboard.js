@@ -197,7 +197,7 @@ $(document).ready(function() {
                             </div>
                         </div>
                         <div class="form-check m-0" style="transform: scale(1.3);">
-                            <input class="form-check-input comp-master-checkbox cursor-pointer shadow-sm border-primary" type="checkbox" value="${cIdx}" id="masterCheck${cIdx}" data-payload="${encodedPayload}">
+                            <input class="form-check-input comp-master-checkbox cursor-pointer shadow-sm border-primary" type="checkbox" value="${cIdx}" id="masterCheck${cIdx}" data-payload="${encodedPayload}" data-competitor="${comp}">
                         </div>
                     </div>
 
@@ -274,7 +274,7 @@ $(document).ready(function() {
 
         // Initialize active pipeline
         const checkedLabels = $('.comp-master-checkbox:checked').map(function() {
-            return $(this).closest('.col-md-6').find('h6.text-dark').text();
+            return $(this).data('competitor');
         }).get().join(', ');
         
         window.activePipeline = {
@@ -362,6 +362,109 @@ $(document).ready(function() {
             }
         });
     };
+
+    // ==========================================
+    // GROWTH & EXPANSION OPPORTUNITIES
+    // ==========================================
+    window.opportunitySuggestions = { unserved_themes: [], domain_expansion: [] };
+    window.newOpportunityTitles = new Set();
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+
+    function renderOpportunityCard(item) {
+        const isNew = window.newOpportunityTitles.has((item.title || '').toLowerCase());
+        return `
+            <div class="p-3 mb-2 rounded-3 border" style="background: #f9fafb;">
+                <div class="d-flex align-items-start justify-content-between gap-2 mb-1">
+                    <h6 class="fw-bold text-dark mb-0" style="font-size: 0.9rem;">${escapeHtml(item.title)}</h6>
+                    ${isNew ? '<span class="badge rounded-pill bg-success flex-shrink-0" style="font-size: 0.6rem;">New</span>' : ''}
+                </div>
+                <p class="text-muted small mb-1" style="line-height: 1.5;">${escapeHtml(item.description)}</p>
+                ${item.source_accounts ? `<small class="text-muted"><i class="fas fa-building-columns me-1"></i>${escapeHtml(item.source_accounts)}</small>` : ''}
+            </div>
+        `;
+    }
+
+    function renderOpportunityLists() {
+        const themes = window.opportunitySuggestions.unserved_themes || [];
+        const domains = window.opportunitySuggestions.domain_expansion || [];
+
+        $('#opportunityUnservedList').html(themes.length
+            ? themes.map(renderOpportunityCard).join('')
+            : '<p class="text-muted small">No whitespace opportunities found yet.</p>');
+
+        $('#opportunityDomainList').html(domains.length
+            ? domains.map(renderOpportunityCard).join('')
+            : '<p class="text-muted small">No domain expansion ideas found yet.</p>');
+
+        $('#opportunityCountBadge').text(themes.length + domains.length);
+    }
+
+    window.loadOpportunitySuggestions = function() {
+        $.ajax({
+            url: '/api/opportunity-suggestions',
+            type: 'GET',
+            success: function(r) {
+                if (r.success && r.suggestions) {
+                    window.opportunitySuggestions = r.suggestions;
+                    renderOpportunityLists();
+                }
+            }
+        });
+    };
+
+    window.openOpportunityModal = function() {
+        renderOpportunityLists();
+        const modalEl = document.getElementById('opportunityModal');
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    };
+
+    window.generateOpportunitySuggestions = function() {
+        const context = $('#storyContextInput').val();
+        if (!context) {
+            showToast('Select competitor posts from the feed first.', 'warning');
+            return;
+        }
+        const accounts = $('.comp-master-checkbox:checked').map(function() {
+            return $(this).data('competitor');
+        }).get().join(', ');
+
+        $('#findOpportunitiesBtn').prop('disabled', true);
+        $('#opportunityGenLoader').removeClass('d-none');
+
+        $.ajax({
+            url: '/api/generate-opportunity-suggestions',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ story: context, accounts: accounts }),
+            success: function(r) {
+                $('#findOpportunitiesBtn').prop('disabled', false);
+                $('#opportunityGenLoader').addClass('d-none');
+
+                if (r.success) {
+                    window.newOpportunityTitles = new Set((r.db && r.db.new_titles || []).map(t => t.toLowerCase()));
+                    if (r.db && r.db.inserted > 0) {
+                        showToast(`Found ${r.db.inserted} new opportunit${r.db.inserted === 1 ? 'y' : 'ies'}.`, 'success');
+                    } else {
+                        showToast('No new opportunities found this run.', 'info');
+                    }
+                    loadOpportunitySuggestions();
+                } else {
+                    showToast('Failed to generate opportunities.', 'danger');
+                }
+            },
+            error: function() {
+                $('#findOpportunitiesBtn').prop('disabled', false);
+                $('#opportunityGenLoader').addClass('d-none');
+                showToast('Network error generating opportunities.', 'danger');
+            }
+        });
+    };
+
+    loadOpportunitySuggestions();
 
     window.copyStoryOutput = function() {
         const text = $('#storyOutput').val();

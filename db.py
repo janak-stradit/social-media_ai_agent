@@ -135,6 +135,21 @@ class CompetitorPost(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 
 
+class OpportunitySuggestion(Base):
+    __tablename__ = "opportunity_suggestions"
+    __table_args__ = (
+        UniqueConstraint("category", "title", name="uq_opportunity_suggestion"),
+        {"schema": SCHEMA} if not IS_SQLITE else {}
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    category = Column(String(32), nullable=False, index=True)  # 'unserved_theme' | 'domain_expansion'
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    source_accounts = Column(Text, nullable=True)  # comma-separated competitor/account names
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class ScheduledPost(Base):
     __tablename__ = "scheduled_posts"
     __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
@@ -878,6 +893,71 @@ def get_competitor_posts(platform: str = None, competitor: str = None, limit: in
             "scraped_at": r.scraped_at.isoformat() if r.scraped_at else None,
             "_source_competitor": r.competitor,
         } for r in rows]
+
+
+def save_opportunity_suggestions(unserved_themes: list[dict], domain_expansion: list[dict], source_accounts: str = "") -> dict:
+    """
+    Persist LLM-generated opportunity suggestions, inserting only titles not
+    already stored per category (matched case-insensitively). Returns
+    {"inserted": n, "skipped": n, "new_titles": [...]}.
+    """
+    items = [("unserved_theme", i) for i in (unserved_themes or [])] + \
+            [("domain_expansion", i) for i in (domain_expansion or [])]
+    if not items:
+        return {"inserted": 0, "skipped": 0, "new_titles": []}
+
+    with Session(engine) as session:
+        existing = {
+            (r[0], r[1].strip().lower())
+            for r in session.query(OpportunitySuggestion.category, OpportunitySuggestion.title).all()
+        }
+
+        inserted = 0
+        skipped = 0
+        new_titles = []
+        for category, item in items:
+            title = (item.get("title") or "").strip()
+            if not title:
+                skipped += 1
+                continue
+
+            key = (category, title.lower())
+            if key in existing:
+                skipped += 1
+                continue
+
+            session.add(OpportunitySuggestion(
+                category=category,
+                title=title,
+                description=item.get("description"),
+                source_accounts=source_accounts
+            ))
+            existing.add(key)
+            new_titles.append(title)
+            inserted += 1
+
+        session.commit()
+        return {"inserted": inserted, "skipped": skipped, "new_titles": new_titles}
+
+
+def get_opportunity_suggestions(limit: int = 200) -> dict:
+    """Return all accumulated opportunity suggestions, grouped by category, newest first."""
+    with Session(engine) as session:
+        rows = session.query(OpportunitySuggestion).order_by(OpportunitySuggestion.created_at.desc()).limit(limit).all()
+
+        result = {"unserved_themes": [], "domain_expansion": []}
+        key_map = {"unserved_theme": "unserved_themes", "domain_expansion": "domain_expansion"}
+        for r in rows:
+            bucket = key_map.get(r.category)
+            if not bucket:
+                continue
+            result[bucket].append({
+                "title": r.title,
+                "description": r.description,
+                "source_accounts": r.source_accounts,
+                "created_at": r.created_at.isoformat() if r.created_at else None
+            })
+        return result
 
 
 def update_scheduled_post_status(user_id: int, post_id: int, status: str) -> bool:

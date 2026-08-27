@@ -1507,3 +1507,55 @@ def generate_channel_storyline():
         import traceback
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/opportunity-suggestions', methods=['GET'])
+@login_required_api
+def opportunity_suggestions():
+    try:
+        from db import get_opportunity_suggestions
+        return jsonify({
+            'success': True,
+            'suggestions': get_opportunity_suggestions()
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@api_bp.route('/generate-opportunity-suggestions', methods=['POST'])
+@login_required_api
+def generate_opportunity_suggestions():
+    data = request.get_json()
+    if not data:
+        return jsonify({'error': 'Request body required'}), 400
+
+    story = data.get('story', '')
+    accounts = data.get('accounts', '')
+
+    if not story:
+        return jsonify({'error': 'Story text is required'}), 400
+
+    try:
+        from services.stradit_service import StradITService
+        from agents.opportunity_agent import OpportunityAgent
+        from db import save_opportunity_suggestions
+
+        stradit = StradITService()
+        project_context = stradit.get_all_projects_context()
+
+        opportunity_agent = OpportunityAgent()
+        result = opportunity_agent.generate_opportunities(story, project_context)
+
+        db_stats = save_opportunity_suggestions(
+            result.get('unserved_themes', []),
+            result.get('domain_expansion', []),
+            source_accounts=accounts
+        )
+
+        return jsonify({
+            'success': True,
+            'suggestions': result,
+            'db': db_stats
+        })
+    except Exception as e:
+        import traceback
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
