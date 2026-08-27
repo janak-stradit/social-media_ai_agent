@@ -23,26 +23,39 @@ $(document).ready(function() {
     window.fetchPlatformPosts = function() {
         const platform = $('#dashboardPlatformSelect').val();
         if (!platform) return;
+        const competitor = $('#dashboardCompetitorSelect').val();
 
         $('#postsContainer').addClass('d-none');
         $('#postsLoader').removeClass('d-none');
-        
+
         // Reset selections
         $('#selectedPostCount').text('0');
         $('#storyContextInput').val('');
         $('#generateStoryBtn').prop('disabled', true);
+        closeSynthesisPanel();
+
+        let url = '/api/platform-posts?platform=' + encodeURIComponent(platform);
+        if (competitor && competitor !== 'all') {
+            url += '&competitor=' + encodeURIComponent(competitor);
+        }
 
         $.ajax({
-            url: '/api/platform-posts?platform=' + encodeURIComponent(platform),
+            url: url,
             type: 'GET',
             success: function(r) {
-                $('#postsLoader').addClass('d-none');
-                $('#postsContainer').removeClass('d-none');
-
                 if (r.success && r.posts && r.posts.length > 0) {
-                    renderPlatformPosts(r.posts);
+                    if (r.db && r.db.inserted > 0) {
+                        showToast(`Saved ${r.db.inserted} new post${r.db.inserted === 1 ? '' : 's'} to the database.`, 'success');
+                    } else {
+                        showToast('Scan complete. No new posts found.', 'info');
+                    }
+                    // Mark the posts saved by this scan so the feed can label them "New"
+                    window.newlyInsertedPostUrls = new Set((r.db && r.db.new_post_urls) || []);
+                    // Refresh the feed from the DB so it reflects everything stored (existing + new)
+                    loadStoredPosts();
                 } else {
-                    $('#postsContainer').html(`
+                    $('#postsLoader').addClass('d-none');
+                    $('#postsContainer').removeClass('d-none').html(`
                         <div class="col-12 text-center py-5 my-5 text-muted">
                             <i class="fas fa-exclamation-circle fa-3x mb-3 text-secondary opacity-50"></i>
                             <p class="fw-semibold">No ${platform} posts found for any competitors.</p>
@@ -62,32 +75,102 @@ $(document).ready(function() {
         });
     };
 
-    function renderPlatformPosts(posts) {
-        // Group posts by competitor and pick the latest one (first in the list)
-        const latestPosts = {};
-        posts.forEach(p => {
-            const comp = p._source_competitor || 'Unknown Competitor';
-            if (!latestPosts[comp]) {
-                latestPosts[comp] = p; // Keep only the first one we see
+    // Loads previously-scraped posts already saved in the DB (no external scan)
+    window.loadStoredPosts = function() {
+        const platform = $('#dashboardPlatformSelect').val();
+        if (!platform) return;
+        const competitor = $('#dashboardCompetitorSelect').val();
+
+        $('#postsContainer').addClass('d-none');
+        $('#postsLoader').removeClass('d-none');
+
+        let url = '/api/competitor-posts-db?platform=' + encodeURIComponent(platform);
+        if (competitor && competitor !== 'all') {
+            url += '&competitor=' + encodeURIComponent(competitor);
+        }
+
+        $.ajax({
+            url: url,
+            type: 'GET',
+            success: function(r) {
+                $('#postsLoader').addClass('d-none');
+                $('#postsContainer').removeClass('d-none');
+
+                if (r.success && r.posts && r.posts.length > 0) {
+                    renderPlatformPosts(r.posts);
+                } else {
+                    $('#postsContainer').html(`
+                        <div class="col-12 empty-state">
+                            <i class="fas fa-database"></i>
+                            <h4 class="fw-bold text-dark mb-2">No Saved Data Yet</h4>
+                            <p class="fw-medium">Click "Start Scan" to pull the latest ${platform} posts and save them here.</p>
+                        </div>
+                    `);
+                }
+            },
+            error: function() {
+                $('#postsLoader').addClass('d-none');
+                $('#postsContainer').removeClass('d-none');
             }
         });
+    };
+
+    window.newlyInsertedPostUrls = new Set();
+
+    // Show whatever is already saved as soon as the dashboard loads / filters change
+    loadStoredPosts();
+    $('#dashboardPlatformSelect, #dashboardCompetitorSelect').on('change', function() {
+        window.newlyInsertedPostUrls = new Set();
+        loadStoredPosts();
+    });
+
+    function getPostTimestamp(p) {
+        const raw = p.scraped_at || p.published_at || p.post_date || p.date || p.created_at || null;
+        const t = raw ? new Date(raw).getTime() : NaN;
+        return isNaN(t) ? 0 : t;
+    }
+
+    function getPostTitle(p) {
+        if (p.title && p.title.trim()) return p.title.trim();
+        if (p.text) {
+            const firstLine = (p.text.split('\n').find(l => l.trim().length > 0) || '').trim();
+            if (firstLine) {
+                return firstLine.length > 90 ? firstLine.substring(0, 90).trim() + '...' : firstLine;
+            }
+        }
+        return 'Untitled Post';
+    }
+
+    function formatPostDate(p) {
+        const raw = p.scraped_at || p.published_at || p.post_date || p.date || p.created_at || null;
+        if (!raw) return '';
+        const d = new Date(raw);
+        if (isNaN(d.getTime())) return '';
+        return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    }
+
+    function renderPlatformPosts(posts) {
+        // Show every post, sorted by most recent first
+        const sortedPosts = [...posts].sort((a, b) => getPostTimestamp(b) - getPostTimestamp(a));
 
         let html = '<div class="row g-4">';
         let cIdx = 0;
-        
-        for (const comp in latestPosts) {
-            const p = latestPosts[comp];
-            const title = p.title || 'Untitled Post';
-            // Show more of the text since it's only one post
+
+        sortedPosts.forEach(p => {
+            const comp = p._source_competitor || 'Unknown Competitor';
+            const title = getPostTitle(p);
             const textSnippet = p.text ? p.text.substring(0, 300) + (p.text.length > 300 ? '...' : '') : 'No text content available.';
             const platformIcon = getPlatformIcon(p.platform);
-            
+            const postDate = formatPostDate(p);
+            const isNew = window.newlyInsertedPostUrls && p.post_url && window.newlyInsertedPostUrls.has(p.post_url);
+
             // Full payload for generation
             const encodedPayload = encodeURIComponent(`[${comp} - ${title}]\n${p.text || title}\n\n---\n\n`);
 
             html += `
             <div class="col-md-6">
                 <div class="premium-card h-100 d-flex flex-column competitor-post-card position-relative p-4" style="background: white; border: 1px solid #e2e8f0; border-radius: 16px;">
+                    ${isNew ? '<span class="badge rounded-pill bg-success position-absolute" style="top: -8px; left: 16px; font-size: 0.68rem; padding: 0.35rem 0.7rem; box-shadow: 0 2px 6px rgba(0,0,0,0.15);"><i class="fas fa-sparkles me-1"></i>New</span>' : ''}
                     <div class="d-flex justify-content-between align-items-start mb-3">
                         <div class="d-flex align-items-center gap-2">
                             <div class="rounded-circle d-flex align-items-center justify-content-center shadow-sm" style="width: 36px; height: 36px; background: rgba(79, 70, 229, 0.1); color: var(--primary);">
@@ -95,14 +178,14 @@ $(document).ready(function() {
                             </div>
                             <div>
                                 <h6 class="mb-0 fw-bold text-dark">${comp}</h6>
-                                <small class="text-muted fw-medium">Latest Post</small>
+                                <small class="text-muted fw-medium">${postDate || 'Recent Post'}</small>
                             </div>
                         </div>
                         <div class="form-check m-0" style="transform: scale(1.3);">
                             <input class="form-check-input comp-master-checkbox cursor-pointer shadow-sm border-primary" type="checkbox" value="${cIdx}" id="masterCheck${cIdx}" data-payload="${encodedPayload}">
                         </div>
                     </div>
-                    
+
                     <label class="flex-grow-1 cursor-pointer" for="masterCheck${cIdx}">
                         <h6 class="fw-bold text-gray-800 mb-2 lh-base d-flex align-items-start gap-2" style="font-size: 1.05rem;">
                             <span class="mt-1">${platformIcon}</span> <span>${title}</span>
@@ -112,8 +195,8 @@ $(document).ready(function() {
                 </div>
             </div>`;
             cIdx++;
-        }
-        
+        });
+
         html += '</div>';
         
         $('#postsContainer').html(html);
@@ -123,16 +206,30 @@ $(document).ready(function() {
         });
     }
 
+    function openSynthesisPanel() {
+        $('#rightSynthesisPanel').removeClass('d-none');
+        $('#centerFeedPanel').removeClass('col-xl-9 col-lg-9').addClass('col-xl-6 col-lg-6');
+    }
+
+    function closeSynthesisPanel() {
+        $('#rightSynthesisPanel').addClass('d-none');
+        $('#centerFeedPanel').removeClass('col-xl-6 col-lg-6').addClass('col-xl-9 col-lg-9');
+    }
+
     function updateSelection() {
         const checked = $('.comp-master-checkbox:checked');
         $('#selectedPostCount').text(checked.length);
-        
+
         if (checked.length === 0) {
             $('#storyContextInput').val('');
             $('#generateStoryBtn').prop('disabled', true);
+            closeSynthesisPanel();
             return;
         }
-        
+
+        // Only open the Strategic Synthesis panel once a post is selected
+        openSynthesisPanel();
+
         $('#generateStoryBtn').prop('disabled', false);
 
         let combinedText = "--- SELECTED COMPETITOR POSTS ---\n\n";
@@ -169,6 +266,7 @@ $(document).ready(function() {
             id: Date.now(),
             timestamp: new Date().toISOString(),
             competitors: checkedLabels,
+            context: context,
             status: 'intel_selected',
             strategy: null,
             assetType: null,
@@ -290,7 +388,15 @@ $(document).ready(function() {
     
     // Store history in memory/localStorage
     window.pipelineHistory = JSON.parse(localStorage.getItem('straditPipelineHistory') || '[]');
-    
+
+    const PIPELINE_STAGES = [
+        { id: 'intel_selected', label: 'Post Pipeline', icon: 'fa-check' },
+        { id: 'strategy_generated', label: 'Counter Strategy Generated', icon: 'fa-brain' },
+        { id: 'asset_generated', label: 'Content Generated', icon: 'fa-magic' },
+        { id: 'approved', label: 'Asset Approved', icon: 'fa-thumbs-up' },
+        { id: 'published', label: 'Published', icon: 'fa-paper-plane' }
+    ];
+
     function renderPipelineHistory() {
         const container = $('#pipelineHistoryList');
         if (window.pipelineHistory.length === 0) {
@@ -306,25 +412,17 @@ $(document).ready(function() {
         let html = '<div class="list-group list-group-flush">';
         window.pipelineHistory.forEach((pipeline, index) => {
             const date = new Date(pipeline.timestamp).toLocaleString();
-            
-            // Build vertical timeline HTML
-            const statuses = [
-                { id: 'intel_selected', label: 'Competitor Intel Selected', icon: 'fa-check' },
-                { id: 'strategy_generated', label: 'Counter Strategy Generated', icon: 'fa-brain' },
-                { id: 'asset_generated', label: 'Content Generated', icon: 'fa-magic' },
-                { id: 'approved', label: 'Asset Approved', icon: 'fa-thumbs-up' },
-                { id: 'published', label: 'Published', icon: 'fa-paper-plane' }
-            ];
 
-            let timelineHtml = '<div class="timeline mt-3 px-2 border-start border-2 border-primary ms-2">';
+            let timelineHtml = `<div class="pipeline-timeline mt-3" onclick="openPipelineModal(${index})" title="Click to view stage details">`;
             let reachedStatus = true;
             let pipelineStatus = pipeline.status || 'unknown';
             let hasError = pipelineStatus.startsWith('stopped') || pipelineStatus === 'rejected';
 
-            for (const step of statuses) {
+            PIPELINE_STAGES.forEach((step, stepIdx) => {
                 let badgeClass = 'bg-secondary';
                 let textClass = 'text-muted';
                 let stepIcon = step.icon;
+                const isLast = stepIdx === PIPELINE_STAGES.length - 1;
 
                 if (reachedStatus) {
                     badgeClass = 'bg-primary';
@@ -332,7 +430,7 @@ $(document).ready(function() {
                 }
 
                 if (pipelineStatus === step.id) {
-                    reachedStatus = false; 
+                    reachedStatus = false;
                     if (hasError) {
                         badgeClass = 'bg-danger';
                         textClass = 'text-danger fw-bold';
@@ -346,27 +444,34 @@ $(document).ready(function() {
                 }
 
                 timelineHtml += `
-                    <div class="position-relative mb-3 ms-3">
-                        <div class="position-absolute top-0 start-0 translate-middle-x rounded-circle ${badgeClass} d-flex align-items-center justify-content-center shadow-sm" style="width: 24px; height: 24px; margin-left: -17px; z-index: 10;">
-                            <i class="fas ${stepIcon} text-white" style="font-size: 10px;"></i>
+                    <div class="d-flex align-items-stretch">
+                        <div class="d-flex flex-column align-items-center" style="width: 24px;">
+                            <div class="rounded-circle ${badgeClass} d-flex align-items-center justify-content-center shadow-sm flex-shrink-0" style="width: 20px; height: 20px;">
+                                <i class="fas ${stepIcon} text-white" style="font-size: 9px;"></i>
+                            </div>
+                            ${!isLast ? '<div class="flex-grow-1" style="width: 2px; background: #e5e7eb; min-height: 14px;"></div>' : ''}
                         </div>
-                        <div class="${textClass} small lh-sm" style="transform: translateY(-2px);">${step.label}</div>
+                        <div class="${textClass} small lh-sm ps-2 pb-2" style="font-size: 0.78rem;">${step.label}</div>
                     </div>
                 `;
-            }
+            });
             timelineHtml += '</div>';
+
+            const competitorsList = pipeline.competitors
+                ? [...new Set(pipeline.competitors.split(',').map(c => c.trim()).filter(Boolean))].join(', ')
+                : 'None';
 
             html += `
                 <div class="list-group-item list-group-item-action p-3 border-bottom bg-light bg-opacity-50">
-                    <div class="d-flex w-100 justify-content-between mb-2">
-                        <h6 class="mb-0 fw-bold text-dark"><i class="fas fa-layer-group me-2 text-primary"></i>Pipeline ID: ${pipeline.id}</h6>
+                    <div class="mb-2">
+                        <h6 class="mb-0 fw-bold text-dark text-truncate" style="font-size: 0.85rem;" title="Pipeline ID: ${pipeline.id}"><i class="fas fa-layer-group me-2 text-primary"></i>ID: ${pipeline.id}</h6>
                         <small class="text-muted" style="font-size: 0.7rem;">${date}</small>
                     </div>
-                    <p class="mb-1 text-muted small"><strong>Competitors:</strong> ${pipeline.competitors || 'None'}</p>
+                    <p class="mb-1 text-muted small"><strong>Competitors:</strong> ${competitorsList}</p>
                     <p class="mb-1 text-muted small"><strong>Asset:</strong> ${pipeline.assetType || 'Pending'}</p>
                     ${timelineHtml}
-                    ${pipelineStatus === 'approved' || pipelineStatus === 'published' || pipelineStatus === 'asset_generated' ? 
-                        `<button class="btn btn-sm btn-outline-primary mt-2 py-1 px-3 rounded-pill fw-bold" onclick="viewHistoryItem(${index})" style="font-size: 0.8rem;">View Pipeline Content</button>` : ''}
+                    ${pipelineStatus === 'approved' || pipelineStatus === 'published' || pipelineStatus === 'asset_generated' ?
+                        `<button class="btn btn-sm btn-outline-primary mt-2 py-1 px-3 rounded-pill fw-bold" onclick="event.stopPropagation(); viewHistoryItem(${index})" style="font-size: 0.8rem;">View Pipeline Content</button>` : ''}
                 </div>
             `;
         });
@@ -403,7 +508,148 @@ $(document).ready(function() {
         const offcanvas = bootstrap.Offcanvas.getInstance(document.getElementById('historyOffcanvas'));
         if (offcanvas) offcanvas.hide();
     };
-    
+
+    function emptyStageState(msg) {
+        return `<div class="text-center text-muted py-5"><i class="fas fa-hourglass-half mb-3" style="font-size: 1.75rem; opacity: 0.4;"></i><p class="small m-0">${msg}</p></div>`;
+    }
+
+    function renderAssetItems(assetContent) {
+        const items = Array.isArray(assetContent) ? assetContent : [assetContent];
+        return items.map(a => {
+            const type = (a.type || '').toLowerCase();
+            if (type.includes('video')) {
+                return `<video controls class="w-100 rounded-3 mb-2" src="${a.content}"></video>`;
+            }
+            if (type.includes('image')) {
+                return `<img src="${a.content}" class="w-100 rounded-3 mb-2" alt="Generated asset">`;
+            }
+            return `<div class="bg-light rounded-3 p-3 small mb-2" style="white-space: pre-wrap;">${a.content}</div>`;
+        }).join('');
+    }
+
+    function getStageDetailHtml(pipeline, stageId) {
+        if (stageId === 'intel_selected') {
+            const competitorsList = pipeline.competitors
+                ? [...new Set(pipeline.competitors.split(',').map(c => c.trim()).filter(Boolean))].join(', ')
+                : 'None';
+            return `
+                <h6 class="fw-bold text-primary mb-3"><i class="fas fa-layer-group me-2"></i>Post Pipeline</h6>
+                <p class="small text-muted mb-2"><strong class="text-dark">Competitors:</strong> ${competitorsList}</p>
+                <div class="bg-light rounded-3 p-3 small" style="white-space: pre-wrap; max-height: 320px; overflow-y: auto;">${pipeline.context || 'No context captured for this pipeline.'}</div>
+            `;
+        }
+        if (stageId === 'strategy_generated') {
+            if (!pipeline.strategy) return emptyStageState('Counter strategy has not been generated yet.');
+            const facts = (pipeline.strategy.observed_facts || [])
+                .map(f => `<span class="badge rounded-pill bg-white text-primary border border-primary px-3 py-2 me-2 mb-2" style="font-size: 0.8rem; font-weight: 600;">${f}</span>`)
+                .join('');
+            return `
+                <h6 class="fw-bold text-primary mb-3"><i class="fas fa-brain me-2"></i>Counter Strategy Generated</h6>
+                <div class="mb-3 d-flex flex-wrap">${facts || '<span class="text-muted small">No observed facts recorded.</span>'}</div>
+                <div class="small text-muted bg-light rounded-3 p-3" style="white-space: pre-wrap; max-height: 260px; overflow-y: auto;">${pipeline.strategy.prompt || ''}</div>
+            `;
+        }
+        if (stageId === 'asset_generated') {
+            if (!pipeline.assetContent) return emptyStageState('Content has not been generated yet.');
+            return `
+                <h6 class="fw-bold text-primary mb-3"><i class="fas fa-magic me-2"></i>Content Generated ${pipeline.assetType ? `<span class="badge bg-light text-dark border ms-1">${pipeline.assetType}</span>` : ''}</h6>
+                <div style="max-height: 400px; overflow-y: auto;">${renderAssetItems(pipeline.assetContent)}</div>
+            `;
+        }
+        if (stageId === 'approved') {
+            if (pipeline.status !== 'approved' && pipeline.status !== 'published') return emptyStageState('This asset has not been approved yet.');
+            return `
+                <h6 class="fw-bold text-success mb-3"><i class="fas fa-thumbs-up me-2"></i>Asset Approved</h6>
+                <p class="small text-muted">This asset was reviewed and approved for publishing.</p>
+                ${pipeline.assetContent ? `<div style="max-height: 320px; overflow-y: auto;">${renderAssetItems(pipeline.assetContent)}</div>` : ''}
+            `;
+        }
+        if (stageId === 'published') {
+            if (pipeline.status !== 'published') return emptyStageState('This pipeline has not been published yet.');
+            return `
+                <h6 class="fw-bold text-dark mb-3"><i class="fas fa-paper-plane me-2"></i>Published</h6>
+                <p class="small text-muted">This content has been published live.</p>
+            `;
+        }
+        return emptyStageState('No details available for this stage.');
+    }
+
+    window.openPipelineModal = function(index) {
+        const pipeline = window.pipelineHistory[index];
+        if (!pipeline) return;
+
+        // Default the detail view to the furthest reached stage
+        const pipelineStatus = pipeline.status || 'unknown';
+        const reachedIdx = Math.max(0, PIPELINE_STAGES.findIndex(s => s.id === pipelineStatus));
+
+        $('#pipelineModalTitle').text('Pipeline ID: ' + pipeline.id);
+        $('#pipelineModalSubtitle').text(new Date(pipeline.timestamp).toLocaleString());
+        $('#pipelineModalStepper').data('pipeline-index', index);
+
+        renderPipelineModalStepper(index, PIPELINE_STAGES[reachedIdx].id);
+        showPipelineStageDetail(index, PIPELINE_STAGES[reachedIdx].id);
+
+        const modalEl = document.getElementById('pipelineStageModal');
+        const modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        modal.show();
+    };
+
+    function renderPipelineModalStepper(index, activeStageId) {
+        const pipeline = window.pipelineHistory[index];
+        const pipelineStatus = pipeline.status || 'unknown';
+        const hasError = pipelineStatus.startsWith('stopped') || pipelineStatus === 'rejected';
+
+        let reachedStatus = true;
+        let stepperHtml = '<div class="pipeline-timeline">';
+        PIPELINE_STAGES.forEach((step, stepIdx) => {
+            let badgeClass = 'bg-secondary';
+            let textClass = 'text-muted';
+            let stepIcon = step.icon;
+            const isLast = stepIdx === PIPELINE_STAGES.length - 1;
+
+            if (reachedStatus) {
+                badgeClass = 'bg-primary';
+                textClass = 'text-dark fw-bold';
+            }
+            if (pipelineStatus === step.id) {
+                reachedStatus = false;
+                if (hasError) {
+                    badgeClass = 'bg-danger';
+                    textClass = 'text-danger fw-bold';
+                    stepIcon = 'fa-times';
+                }
+            }
+            if (hasError && !reachedStatus && pipelineStatus !== step.id) {
+                badgeClass = 'bg-light border text-muted';
+            }
+            if (step.id === activeStageId) {
+                textClass += ' text-primary';
+            }
+
+            stepperHtml += `
+                <div class="d-flex align-items-stretch pipeline-stage-row" style="cursor: pointer;" onclick="showPipelineStageDetail(${index}, '${step.id}')">
+                    <div class="d-flex flex-column align-items-center" style="width: 28px;">
+                        <div class="rounded-circle ${badgeClass} d-flex align-items-center justify-content-center shadow-sm flex-shrink-0" style="width: 24px; height: 24px;">
+                            <i class="fas ${stepIcon} text-white" style="font-size: 10px;"></i>
+                        </div>
+                        ${!isLast ? '<div class="flex-grow-1" style="width: 2px; background: #e5e7eb; min-height: 18px;"></div>' : ''}
+                    </div>
+                    <div class="${textClass} small ps-2 pb-3" style="font-size: 0.85rem;">${step.label}</div>
+                </div>
+            `;
+        });
+        stepperHtml += '</div>';
+        $('#pipelineModalStepper').html(stepperHtml);
+    }
+
+    window.showPipelineStageDetail = function(index, stageId) {
+        const pipeline = window.pipelineHistory[index];
+        if (!pipeline) return;
+
+        renderPipelineModalStepper(index, stageId);
+        $('#pipelineModalDetail').html(getStageDetailHtml(pipeline, stageId));
+    };
+
     renderPipelineHistory();
 
     window.currentCarouselAssets = [];
