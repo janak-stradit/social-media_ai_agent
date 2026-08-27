@@ -371,8 +371,8 @@ $(document).ready(function() {
     }
 
     window.slideWorkflow = function(stepIndex) {
-        // stepIndex: 0 = Context, 1 = Strategy, 2 = Generation
-        const translation = -(stepIndex * 33.3333);
+        // stepIndex: 0 = Context, 1 = Strategy, 2 = Generation Settings, 3 = Asset Review
+        const translation = -(stepIndex * 25);
         $('#workflowSlider').css('transform', `translateX(${translation}%)`);
         
         if (stepIndex === 0) {
@@ -386,6 +386,12 @@ $(document).ready(function() {
                 $('#slide2NextBtn').removeClass('d-none');
             } else {
                 $('#slide2NextBtn').addClass('d-none');
+            }
+        } else if (stepIndex === 2) {
+            if (window.activePipeline && window.activePipeline.assetContent) {
+                $('#slide3NextBtn').removeClass('d-none');
+            } else {
+                $('#slide3NextBtn').addClass('d-none');
             }
         }
     };
@@ -516,10 +522,7 @@ $(document).ready(function() {
         window.lastGeneratedPipeline = dispItem; // Load it into state
         window.activePipeline = pipeline; // Set it as active
 
-        
-        // Hide offcanvas
-        const offcanvas = bootstrap.Offcanvas.getInstance(document.getElementById('historyOffcanvas'));
-        if (offcanvas) offcanvas.hide();
+        slideWorkflow(3); // Slide to the Asset Review page
     };
 
     function emptyStageState(msg) {
@@ -758,12 +761,13 @@ $(document).ready(function() {
         }
 
         const mediaType = $('input[name="mediaType"]:checked').val();
-        const prompt = $('#pipelinePrompt').val().trim();
-        const platform = $('#dashboardPlatformSelect').val();
-
-        $('#startPipelineBtn').prop('disabled', true);
-        $('#pipelineResultBlock').removeClass('d-none');
+        let prompt = $('#pipelinePrompt').val();
+        const platform = $('#dashboardPlatformSelect').val() || 'linkedin';
+        
+        slideWorkflow(3); // Slide to Asset Review (Slide 4)
+        
         $('#pipelineLoader').removeClass('d-none');
+        $('#pipelineResultBlock').removeClass('d-none');
         $('#pipelineOutputContent').html('<div class="text-center py-4"><div class="spinner-border text-primary mb-2"></div><p class="text-muted small m-0">Generating assets...</p></div>');
         $('#approvalButtons').addClass('d-none');
         $('#publishPipelineBtn').addClass('d-none');
