@@ -395,7 +395,14 @@ def generate_content():
         mem_prompt = memory_service.format_memory_prompt(retrieved_memories)
 
         # Step 1: Analyze story
-        story_analysis, story_usage = story_agent.analyze(story_prompt, memory_context=mem_prompt, return_usage=True)
+        if "STRATEGY SYNTHESIS:" in story_prompt:
+            caption_input = story_prompt
+            story_analysis = {"themes": ["Strategy", "Industry"], "emotions": ["Professional"]}
+            story_usage = None
+        else:
+            story_analysis, story_usage = story_agent.analyze(story_prompt, memory_context=mem_prompt, return_usage=True)
+            caption_input = story_analysis
+            
         if story_usage:
             total_tokens += story_usage.get("total_tokens", 0)
             total_cost_usd += story_usage.get("cost_usd", 0.0)
@@ -422,7 +429,7 @@ def generate_content():
         captions = {}
         if generate_text:
             captions = caption_agent.generate_all_platforms(
-                story_analysis, vision_analysis, tone, memory_context=mem_prompt, brand_voice=brand_voice
+                caption_input, vision_analysis, tone, memory_context=mem_prompt, brand_voice=brand_voice
             )
             cap_usage = captions.pop('_usage', {})
             total_tokens += cap_usage.get("total_tokens", 0)

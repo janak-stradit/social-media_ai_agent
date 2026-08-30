@@ -275,7 +275,7 @@
         <div class="row g-4">
             <!-- New Left Panel: History -->
             <div class="col-xl-3 col-lg-3">
-                <div class="premium-card h-100 d-flex flex-column position-sticky" style="top: calc(var(--header-h) + 24px);">
+                <div class="premium-card d-flex flex-column position-sticky" style="top: calc(var(--header-h) + 24px); max-height: calc(100vh - 120px);">
                     <div class="p-3 border-bottom bg-white text-center">
                         <h6 class="fw-bold m-0 text-gray-700 text-uppercase tracking-wider" style="font-size: 0.85rem;">
                             <i class="fas fa-history me-2 text-primary"></i>History</h6>
@@ -353,7 +353,7 @@
 
             <!-- Right Panel: Synthesis (opens only once a post is selected) -->
             <div class="col-xl-3 col-lg-3 d-none" id="rightSynthesisPanel" style="transition: var(--transition);">
-                <div class="premium-card h-100 d-flex flex-column position-sticky" style="top: calc(var(--header-h) + 24px);">
+                <div class="premium-card d-flex flex-column position-sticky" style="top: calc(var(--header-h) + 24px); max-height: calc(100vh - 120px);">
                     <div class="p-4 border-bottom bg-white text-center">
                         <div class="rounded-circle mx-auto d-flex align-items-center justify-content-center mb-3 shadow-sm"
                             style="width: 50px; height: 50px; background: rgba(79, 70, 229, 0.1); color: var(--primary);">
@@ -365,12 +365,12 @@
                     </div>
 
                     <!-- Horizontal Wizard Container -->
-                    <div style="overflow: hidden; flex-grow: 1;">
-                        <div id="workflowSlider" class="d-flex h-100"
-                            style="width: 400%; transition: transform 0.4s ease-in-out; transform: translateX(0%);">
+                    <div class="d-flex flex-column" style="overflow: hidden; flex-grow: 1; min-height: 0;">
+                        <div id="workflowSlider" class="d-flex flex-grow-1"
+                            style="width: 400%; transition: transform 0.4s ease-in-out; transform: translateX(0%); min-height: 0;">
 
                             <!-- SLIDE 1: Context -->
-                            <div class="p-4 d-flex flex-column gap-4 bg-white" style="width: 25%;">
+                            <div class="p-4 d-flex flex-column gap-4 bg-white h-100" style="width: 25%;">
                                 <div class="d-flex justify-content-between align-items-center p-3 rounded-3"
                                     style="background: rgba(243, 244, 246, 0.8);">
                                     <span class="fw-bold text-gray-700"><i
@@ -384,22 +384,24 @@
                                                 class="fas fa-chevron-right ms-1"></i></button>
                                     </div>
                                 </div>
-                                <div class="flex-grow-1 d-flex flex-column gap-2">
+                                <div class="d-flex flex-column gap-2 mb-3">
                                     <label class="form-label fw-bold text-gray-700 m-0">Context Buffer</label>
-                                    <textarea id="storyContextInput" class="form-control textarea-premium flex-grow-1"
+                                    <textarea id="storyContextInput" class="form-control textarea-premium"
                                         placeholder="Select posts to fill the context buffer..." readonly
-                                        style="min-height: 200px;"></textarea>
+                                        style="height: 35vh; resize: none;"></textarea>
                                 </div>
-                                <button class="premium-btn w-100 py-3 fs-6 mt-2" onclick="generateStoryFromSelection()"
-                                    id="generateStoryBtn" disabled>
-                                    <i class="fas fa-bolt me-2"></i>Generate Counter-Strategy
-                                </button>
+                                <div class="mt-auto position-sticky" style="bottom: 1rem; z-index: 10;">
+                                    <button class="premium-btn w-100 py-3 fs-6 shadow-sm" onclick="generateStoryFromSelection()"
+                                        id="generateStoryBtn" disabled>
+                                        <i class="fas fa-bolt me-2"></i>Generate Counter-Strategy
+                                    </button>
+                                </div>
                                 <div id="generationLoader" class="d-none text-center text-primary mt-2 fw-bold small"><i
                                         class="fas fa-spinner fa-spin me-2"></i>Analyzing market data...</div>
                             </div>
 
                             <!-- SLIDE 2: Synthesis Output -->
-                            <div class="p-4 d-flex flex-column gap-3 bg-white border-start" style="width: 25%;">
+                            <div class="p-4 d-flex flex-column gap-3 bg-white border-start h-100" style="width: 25%;">
                                 <div class="d-flex justify-content-between align-items-center mb-2">
                                     <button
                                         class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border"
@@ -432,7 +434,7 @@
                             </div>
 
                             <!-- SLIDE 3: Generation Settings -->
-                            <div class="p-4 d-flex flex-column gap-3 bg-white border-start" style="width: 25%;">
+                            <div class="p-4 d-flex flex-column gap-3 bg-white border-start h-100" style="width: 25%;">
                                 <div class="d-flex justify-content-between align-items-center mb-2">
                                     <button
                                         class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border"
@@ -447,7 +449,7 @@
                                 </div>
 
                                 <div id="generationPipelineBlock"
-                                    class="d-flex flex-column gap-3 p-4 border rounded-3 bg-light mt-2">
+                                    class="d-flex flex-column gap-3 p-4 border rounded-3 bg-light mt-2 overflow-auto flex-grow-1">
                                     <div class="d-flex flex-column gap-2">
                                         <label class="fw-bold m-0" style="font-size: 0.9rem;"><i
                                                 class="fas fa-photo-video me-2 text-primary"></i> Select Output
@@ -474,7 +476,7 @@
                                             style="padding-left: 2.5rem; border-radius: 12px; resize: none;"
                                             placeholder="Attach an optional creative prompt (e.g. 'Use an energetic tone', 'Include branding colors')"></textarea>
                                     </div>
-                                    <button class="btn btn-primary fw-bold rounded-pill w-100 py-3 shadow-sm mt-3"
+                                    <button class="btn btn-primary fw-bold rounded-pill w-100 py-3 shadow-sm mt-auto"
                                         onclick="startPipelineGeneration()" id="startPipelineBtn">
                                         <i class="fas fa-magic me-2"></i>Generate Assets
                                     </button>
@@ -482,7 +484,7 @@
                             </div>
 
                             <!-- SLIDE 4: Asset Review & Approval -->
-                            <div class="p-4 d-flex flex-column gap-3 bg-white border-start" style="width: 25%;">
+                            <div class="p-4 d-flex flex-column gap-3 bg-white border-start h-100" style="width: 25%;">
                                 <div class="d-flex justify-content-between align-items-center mb-2">
                                     <button
                                         class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border"

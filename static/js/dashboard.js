@@ -706,7 +706,7 @@ $(document).ready(function() {
             if (!pipeline.assetContent) return emptyStageState('Content has not been generated yet.');
             return `
                 <h6 class="fw-bold text-primary mb-3"><i class="fas fa-magic me-2"></i>Content Generated ${pipeline.assetType ? `<span class="badge bg-light text-dark border ms-1">${pipeline.assetType}</span>` : ''}</h6>
-                <div style="max-height: 55vh; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent)}</div>
+                <div style="max-height: 75vh; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent)}</div>
                 <div class="d-flex gap-2">
                     <button class="btn btn-sm btn-outline-danger fw-bold flex-grow-1" onclick="rejectPipelineAsset(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject Asset</button>
                     <button class="btn btn-sm btn-success fw-bold flex-grow-1" onclick="approvePipelineAsset(${pipeline.id})"><i class="fas fa-check me-1"></i>Approve Asset</button>
