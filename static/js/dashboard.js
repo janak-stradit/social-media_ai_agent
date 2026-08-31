@@ -1107,29 +1107,63 @@ $(document).ready(function() {
         }
     };
 
+    // Publishes one generated asset {platform, type, content, caption} to the
+    // user's connected social accounts via SocialPublisherService (real, not simulated).
+    function publishAssetToBackend(item) {
+        return $.ajax({
+            url: '/api/publish-pipeline-asset',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                platform: item.platform,
+                type: item.type,
+                content: item.content,
+                caption: item.caption
+            })
+        });
+    }
+
     window.publishPipelineContent = function() {
-        // Simulate publishing
+        if (!window.lastGeneratedPipeline) {
+            showToast('No approved asset to publish.', 'warning');
+            return;
+        }
+        if (!window.lastGeneratedPipeline.platform) {
+            window.lastGeneratedPipeline.platform = $('#dashboardPlatformSelect').val() || 'linkedin';
+        }
+
         const btn = $('#publishPipelineBtn');
         const origText = btn.html();
         btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-2"></i>Publishing...');
-        
-        setTimeout(() => {
-            btn.html('<i class="fas fa-check-circle me-2"></i>Published Successfully');
-            btn.removeClass('btn-dark').addClass('btn-success');
-            showToast('Asset published to ' + (window.lastGeneratedPipeline ? window.lastGeneratedPipeline.platform : 'platform') + '!', 'success');
-            
-            if (window.activePipeline) {
-                window.activePipeline.status = 'published';
-                localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
-                renderPipelineHistory();
-            }
-            
-            setTimeout(() => {
-                btn.html(origText);
-                btn.prop('disabled', false);
-                btn.removeClass('btn-success').addClass('btn-dark');
-            }, 3000);
-        }, 1500);
+
+        publishAssetToBackend(window.lastGeneratedPipeline)
+            .done(function(res) {
+                const result = res.result || {};
+                if (res.success) {
+                    btn.html('<i class="fas fa-check-circle me-2"></i>Published Successfully');
+                    btn.removeClass('btn-dark').addClass('btn-success');
+                    showToast(result.message || `Asset published to ${window.lastGeneratedPipeline.platform}!`, 'success');
+
+                    if (window.activePipeline) {
+                        window.activePipeline.status = 'published';
+                        localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+                        renderPipelineHistory();
+                    }
+
+                    setTimeout(() => {
+                        btn.html(origText);
+                        btn.prop('disabled', false);
+                        btn.removeClass('btn-success').addClass('btn-dark');
+                    }, 3000);
+                } else {
+                    btn.prop('disabled', false).html(origText);
+                    showToast(result.error || res.error || 'Publish failed.', 'danger');
+                }
+            })
+            .fail(function(xhr) {
+                btn.prop('disabled', false).html(origText);
+                showToast(xhr.responseJSON?.error || 'Network error while publishing.', 'danger');
+            });
     };
 
     window.saveAndRerunPipelineStrategy = function(pipelineId) {
@@ -1390,25 +1424,40 @@ $(document).ready(function() {
 
     window.publishModalPipelineContent = function(pipelineId) {
         const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
-        if (!pipeline) return;
+        if (!pipeline || !pipeline.assetContent) return;
+
+        const assets = Array.isArray(pipeline.assetContent) ? pipeline.assetContent : [pipeline.assetContent];
+        const item = assets[assets.length - 1];
+        if (!item.platform) item.platform = $('#dashboardPlatformSelect').val() || 'linkedin';
 
         const btn = $('#modalPublishBtn');
         const origText = btn.html();
         btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-2"></i>Publishing...');
-        
-        setTimeout(() => {
-            btn.html('<i class="fas fa-check-circle me-2"></i>Published Successfully');
-            btn.removeClass('btn-dark').addClass('btn-success');
-            showToast('Asset published to platform!', 'success');
-            
-            pipeline.status = 'published';
-            localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
-            renderPipelineHistory();
-            
-            setTimeout(() => {
-                renderPipelineModalStepper(window.pipelineHistory.indexOf(pipeline), 'published');
-                showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'published');
-            }, 1500);
-        }, 1500);
+
+        publishAssetToBackend(item)
+            .done(function(res) {
+                const result = res.result || {};
+                if (res.success) {
+                    btn.html('<i class="fas fa-check-circle me-2"></i>Published Successfully');
+                    btn.removeClass('btn-dark').addClass('btn-success');
+                    showToast(result.message || 'Asset published to platform!', 'success');
+
+                    pipeline.status = 'published';
+                    localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+                    renderPipelineHistory();
+
+                    setTimeout(() => {
+                        renderPipelineModalStepper(window.pipelineHistory.indexOf(pipeline), 'published');
+                        showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'published');
+                    }, 1500);
+                } else {
+                    btn.prop('disabled', false).html(origText);
+                    showToast(result.error || res.error || 'Publish failed.', 'danger');
+                }
+            })
+            .fail(function(xhr) {
+                btn.prop('disabled', false).html(origText);
+                showToast(xhr.responseJSON?.error || 'Network error while publishing.', 'danger');
+            });
     };
 });

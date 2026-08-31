@@ -712,6 +712,52 @@ def approve_asset():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+@api_bp.route('/publish-pipeline-asset', methods=['POST'])
+@login_required_api
+def publish_pipeline_asset():
+    """Publish an approved competitor-dashboard pipeline asset (text/image/video)
+    to the current user's connected social media accounts, reusing the same
+    SocialPublisherService the scheduler and manual-post flows already use."""
+    if not publisher_service:
+        return jsonify({'error': 'Social publisher service not available'}), 503
+
+    data = request.get_json() or {}
+    platform = (data.get('platform') or '').lower().strip()
+    asset_type = (data.get('type') or '').lower()
+    content = data.get('content')
+    caption = data.get('caption')
+
+    if not platform:
+        return jsonify({'error': 'platform is required'}), 400
+    if not content:
+        return jsonify({'error': 'content is required'}), 400
+
+    user_id = get_current_user_id()
+    is_media = 'image' in asset_type or 'video' in asset_type
+    message = (caption or content) if is_media else content
+
+    abs_media_path = None
+    if is_media:
+        rel_path = str(content).lstrip('/').replace('/', os.sep)
+        candidate = os.path.join(current_app.root_path, rel_path)
+        if not os.path.exists(candidate):
+            return jsonify({'error': 'Generated media file could not be located on the server'}), 404
+        abs_media_path = candidate
+
+    try:
+        results = publisher_service.publish_post_to_connected_accounts(
+            user_id=user_id,
+            platforms=[platform],
+            caption=message,
+            image_path=abs_media_path
+        )
+        plat_result = results.get(platform, {"success": False, "error": "No result returned"})
+        return jsonify({'success': bool(plat_result.get('success')), 'result': plat_result})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @api_bp.route('/schedule', methods=['POST'])
 @login_required_api
 def schedule_campaign():
