@@ -109,7 +109,7 @@ class HuggingFaceService:
 
                 api_url = self.caption_models.get(model, self.caption_models["blip"])
 
-                response = requests.post(api_url, headers=self.headers, data=data)
+                response = requests.post(api_url, headers=self.headers, data=data, timeout=30)
 
                 if response.status_code == 200:
                     result = response.json()
@@ -117,9 +117,11 @@ class HuggingFaceService:
                         return result[0].get("generated_text", "")
                     return str(result)
                 else:
-                    raise Exception(f"HF API Error: {response.status_code} - {response.text}")
+                    raise Exception(f"HF API Error: {response.status_code} - {response.text}") from local_err
             except Exception as api_err:
-                raise Exception(f"Failed to generate caption. Local error: {str(local_err)}. API error: {str(api_err)}")
+                raise Exception(
+                    f"Failed to generate caption. Local error: {str(local_err)}. API error: {str(api_err)}"
+                ) from api_err
 
     def get_image_features(self, image_path):
         """Extract visual features for content analysis"""

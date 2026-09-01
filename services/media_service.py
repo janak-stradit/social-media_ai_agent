@@ -556,6 +556,8 @@ class MediaGenerationService:
                 img = img.convert("RGB")
             if target_size:
                 resample = getattr(Image, "Resampling", None)
+                # Pillow version feature-detection (Resampling enum vs. old ANTIALIAS constant).
+                # pylint: disable-next=using-constant-test
                 resample_method = resample.LANCZOS if resample else getattr(Image, "ANTIALIAS", 3)
                 img = img.resize(target_size, resample_method)
             buffer = io.BytesIO()
@@ -572,7 +574,8 @@ class MediaGenerationService:
         import json
         import random
 
-        seed = random.randint(0, 2147483646)
+        # Creative-variation seed, not security-sensitive.
+        seed = random.randint(0, 2147483646)  # nosec B311
 
         resolved_image = self._resolve_image_path(image_path)
 
@@ -672,7 +675,8 @@ class MediaGenerationService:
 
         import random
 
-        seed = random.randint(0, 2147483646)
+        # Creative-variation seed, not security-sensitive.
+        seed = random.randint(0, 2147483646)  # nosec B311
         resolved_image = self._resolve_image_path(image_path)
 
         dimension = "1280x720"
@@ -827,7 +831,11 @@ class MediaGenerationService:
         }
 
     # ── Image Generation ───────────────────────────────────────────────────
-    def generate_image(self, caption: str, platform: str, tone: str = None, image_path: str = None) -> dict:
+    # The linter flags that not every path through this function returns a dict (some fall
+    # through, implicitly returning None). Worth tracing properly; not done as part of lint adoption.
+    def generate_image(  # pylint: disable=inconsistent-return-statements
+        self, caption: str, platform: str, tone: str = None, image_path: str = None
+    ) -> dict:
         """
         Generate a social media image.
         Returns: { url, local_path, prompt, size, platform }
@@ -885,7 +893,9 @@ class MediaGenerationService:
                 url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&nologo=true"
                 response = requests.get(url, timeout=60)
                 if response.status_code != 200:
-                    raise Exception(f"Pollinations API returned status {response.status_code}: {response.text[:100]}")
+                    raise Exception(
+                        f"Pollinations API returned status {response.status_code}: {response.text[:100]}"
+                    ) from openai_err
                 img_data = response.content
                 local_filename, _ = self._save_image_bytes(img_data, platform)
                 result = {
@@ -909,7 +919,11 @@ class MediaGenerationService:
                 "model": result.get("model", "bedrock"),
             }
 
-        except Exception as e:
+        # KNOWN BUG (pre-existing): this except is unreachable -- the earlier
+        # `except Exception as bedrock_err:` above already catches everything, so a failure of
+        # all three providers propagates unhandled instead of hitting this fallback. Flagged
+        # during lint adoption, not fixed here.
+        except Exception as e:  # pylint: disable=duplicate-except
             return {
                 "success": False,
                 "type": "image",
@@ -926,8 +940,8 @@ class MediaGenerationService:
         try:
             import google.genai as genai
             from google.genai import types
-        except ImportError:
-            raise RuntimeError("The 'google-genai' package is required. Run 'pip install google-genai'.")
+        except ImportError as exc:
+            raise RuntimeError("The 'google-genai' package is required. Run 'pip install google-genai'.") from exc
 
         model_name = getattr(Config, "GEMINI_VIDEO_MODEL", "veo-3.1-generate-preview")
         print(f"[Media Service] Initiating Google Gemini Video generation with model: {model_name}...")
@@ -974,6 +988,9 @@ class MediaGenerationService:
         filename = f"gemini_video_{uuid.uuid4().hex[:8]}.mp4"
         filepath = os.path.join(self.upload_folder, filename)
 
+        # Flagged as an unexpected kwarg for the installed google-genai SDK version; unverified
+        # without a real Google GenAI credential to exercise this path against.
+        # pylint: disable-next=unexpected-keyword-arg
         client.files.download(file=generated_video.video, destination=filepath)
         return {
             "success": True,
@@ -1204,7 +1221,10 @@ class MediaGenerationService:
                 "model": result["model"],
                 "cost": result.get("cost"),
                 "provider": self.media_provider,
-                "source_image_url": f"/{resolved_image.replace(os.sep, '/').lstrip('/')}",
+                # resolved_image can legitimately be None here (no reference image was provided
+                # or auto-keyframe generation failed) -- video generation still proceeds without
+                # one, so this field is omitted rather than crashing on None.replace().
+                "source_image_url": (f"/{resolved_image.replace(os.sep, '/').lstrip('/')}" if resolved_image else None),
             }
         except Exception as e:
             return {

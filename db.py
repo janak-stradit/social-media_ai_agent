@@ -4,6 +4,11 @@ Schema: social_media_agent
 Tables: users, run_history
 """
 
+# pylint: disable=not-callable,assignment-from-no-return
+# SQLAlchemy's `func` proxy (func.count/func.coalesce/func.sum/...) is dynamic;
+# pylint's static analysis can't see through it and misreports these two checks
+# throughout this file. Known false positive, not scoped per-line for readability.
+
 import json
 import os
 from datetime import datetime
@@ -27,7 +32,8 @@ from sqlalchemy.sql import func
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     try:
-        import psycopg2  # noqa: F401 -- only used to test driver availability
+        # Only used to test driver availability.
+        import psycopg2  # noqa: F401  pylint: disable=unused-import
 
         DATABASE_URL = "postgresql+psycopg2://postgres:root@localhost:5432/postgres"
     except ImportError:
@@ -38,7 +44,7 @@ SCHEMA = "social_media_agent"
 
 engine = create_engine(
     DATABASE_URL,
-    pool_pre_ping=True if not IS_SQLITE else False,
+    pool_pre_ping=not IS_SQLITE,
     connect_args={"check_same_thread": False} if IS_SQLITE else {},
     echo=False,
 )
@@ -445,14 +451,16 @@ def get_user_usage_stats(user_id: int) -> dict:
             "remaining_credits": round(remaining, 4),
             "is_admin": is_admin,
             "has_pending_request": pending_req is not None,
-            "pending_request": {
-                "id": pending_req.id,
-                "requested_amount": pending_req.requested_amount,
-                "reason": pending_req.reason,
-                "created_at": pending_req.created_at.strftime("%Y-%m-%d %H:%M"),
-            }
-            if pending_req
-            else None,
+            "pending_request": (
+                {
+                    "id": pending_req.id,
+                    "requested_amount": pending_req.requested_amount,
+                    "reason": pending_req.reason,
+                    "created_at": pending_req.created_at.strftime("%Y-%m-%d %H:%M"),
+                }
+                if pending_req
+                else None
+            ),
         }
 
 
@@ -463,8 +471,9 @@ def assign_orphan_runs_to_user(email: str) -> dict:
         raise ValueError(f"No user found for email: {email}")
 
     with engine.begin() as conn:
+        # SCHEMA is a fixed module-level constant, not user input; :uid is bound separately.
         result = conn.execute(
-            text(f'UPDATE "{SCHEMA}".run_history SET user_id = :uid WHERE user_id IS NULL'),
+            text(f'UPDATE "{SCHEMA}".run_history SET user_id = :uid WHERE user_id IS NULL'),  # nosec B608
             {"uid": user.id},
         )
         updated = result.rowcount or 0
@@ -1031,7 +1040,7 @@ def get_opportunity_suggestions(limit: int = 200) -> dict:
     with Session(engine) as session:
         rows = session.query(OpportunitySuggestion).order_by(OpportunitySuggestion.created_at.desc()).limit(limit).all()
 
-        result = {"unserved_themes": [], "domain_expansion": []}
+        result: dict[str, list] = {"unserved_themes": [], "domain_expansion": []}
         key_map = {"unserved_theme": "unserved_themes", "domain_expansion": "domain_expansion"}
         for r in rows:
             bucket = key_map.get(r.category)

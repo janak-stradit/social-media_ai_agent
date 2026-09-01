@@ -162,6 +162,7 @@ class SocialPublisherService:
                             me_resp = requests.get(
                                 "https://api.linkedin.com/v2/userinfo",
                                 headers={"Authorization": f"Bearer {access_token}"},
+                                timeout=10,
                             )
                             if me_resp.status_code == 200:
                                 sub = me_resp.json().get("sub")
@@ -384,6 +385,7 @@ class SocialPublisherService:
             }
         except Exception as e:
             err_msg = str(e)
-            if hasattr(e, "response") and e.response is not None:
-                err_msg += f" - Response: {e.response.text}"
+            # Guarded by hasattr() below; the linter can't see that it narrows the type.
+            if hasattr(e, "response") and e.response is not None:  # pylint: disable=no-member
+                err_msg += f" - Response: {e.response.text}"  # pylint: disable=no-member
             return {"success": False, "platform": "youtube", "error": f"YouTube API error: {err_msg}"}

@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  quality:
-    name: Lint, format & test
+  python:
+    name: Python Lint & Security
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
@@ -27,11 +27,23 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: Ruff lint
-        run: ruff check .
+      - name: Black (format check)
+        run: black --check .
 
-      - name: Ruff format check
-        run: ruff format --check .
+      - name: Flake8 (style lint)
+        run: flake8 .
+
+      - name: Pylint (deep lint)
+        run: pylint agents/ auth/ services/ api/ app.py config.py db.py scheduler_thread.py scripts/
+
+      - name: Mypy (type check)
+        run: mypy .
+        continue-on-error: true # ~52 pre-existing errors, mostly SQLAlchemy Column[T] vs. T on
+        # untyped legacy `Column(...)` models -- needs a real Mapped[] typing migration, not a
+        # lint fix. See CONTRIBUTING.md before promoting this to blocking.
+
+      - name: Bandit (security scan)
+        run: bandit -c pyproject.toml -r .
 
       - name: Run tests with coverage
         env:
@@ -45,3 +57,25 @@ jobs:
           name: coverage-xml
           path: coverage.xml
           retention-days: 14
+
+  frontend:
+    name: Frontend Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint (static/js)
+        run: npm run lint:js
+
+      - name: HTMLHint (templates)
+        run: npm run lint:html

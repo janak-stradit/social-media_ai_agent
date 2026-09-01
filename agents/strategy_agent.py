@@ -39,7 +39,7 @@ class StrategyAgent:
         4. Follow-up post suggestions
         5. Cross-posting recommendations
         6. Expected engagement metrics
-        
+
         Return as JSON with keys: optimal_time, format, engagement_tactics, follow_up, cross_post, metrics_forecast"""
 
         user_prompt = f"""Content Analysis: {story_analysis}

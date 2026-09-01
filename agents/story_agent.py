@@ -11,7 +11,7 @@ class StoryAgent:
     4. Target audience segments
     5. Visual imagery descriptions
     6. Call-to-action opportunities
-    
+
     Return ONLY a JSON object with these keys: themes, emotions, hooks, audience, imagery, cta_opportunities"""
 
     def __init__(self):
@@ -38,10 +38,10 @@ class StoryAgent:
 
     def generate_channel_storyline(self, posts_text, project_context, return_usage=False):
         """Generate a structured channel storyline based on competitor posts and our project context"""
-        system = """You are an expert strategic analyst. 
-For each competitor's recent post of all platforms, identify the core industry problem/topic they discuss. 
-Create a storyline with a 45:55 balance: 45% industry/competitor-topic context and 55% how StradIT projects addresses or solves that problem. 
-Do not simply summarize the competitor post. Use it as the problem/context and transition naturally into our solution. 
+        system = """You are an expert strategic analyst.
+For each competitor's recent post of all platforms, identify the core industry problem/topic they discuss.
+Create a storyline with a 45:55 balance: 45% industry/competitor-topic context and 55% how StradIT projects addresses or solves that problem.
+Do not simply summarize the competitor post. Use it as the problem/context and transition naturally into our solution.
 
 CRITICAL WRITING RULES:
 1. NO SELLING: Do not include ANY Call-To-Action (CTA). Do not say "Ready to modernize?", "Visit our website", or "Book a demo". Do not include ANY links.
