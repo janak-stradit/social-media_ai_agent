@@ -1,0 +1,116 @@
+name: Code Quality Checks
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  python-lint:
+    name: Python Lint & Security
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Black (format check)
+        run: black --check .
+
+      - name: Flake8 (style lint)
+        run: flake8 .
+
+      - name: Pylint (deep lint)
+        run: pylint agents/ auth/ services/ api/ app.py config.py db.py scheduler_thread.py scripts/
+
+      - name: Bandit (security scan)
+        run: bandit -c pyproject.toml -r .
+
+  frontend-lint:
+    name: Frontend Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint (static/js)
+        run: npm run lint:js
+
+      - name: HTMLHint (templates)
+        run: npm run lint:html
+
+  type-check:
+    name: "Static type check (mypy, report-only)"
+    runs-on: ubuntu-latest
+    continue-on-error: true # ~52 pre-existing errors, mostly SQLAlchemy Column[T] vs. T on
+    # untyped legacy `Column(...)` models -- needs a real Mapped[] typing migration, not a lint
+    # fix. Kept as its own non-blocking job (not a required check) so it stays visible without
+    # gating merges. See CONTRIBUTING.md before promoting this to blocking.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Mypy
+        run: mypy .
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests with coverage
+        env:
+          SECRET_KEY: ci-test-secret
+        run: pytest --cov --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 14

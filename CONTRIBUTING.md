@@ -21,9 +21,16 @@ npm run lint:js          # ESLint on static/js
 npm run lint:html        # HTMLHint on templates/*.html
 ```
 
-All of the above run in CI (`.github/workflows/ci.yml`, two jobs: **Python Lint & Security** and
-**Frontend Lint**) on every push and pull request against `main`. A PR won't be mergeable until
-they pass, once branch protection is turned on (see below).
+All of the above run in CI (`.github/workflows/code-quality.yml`) on every push and pull request
+against `main`, as four independent jobs so each shows up as its own check on a PR:
+- **Python Lint & Security** — Black, Flake8, Pylint, Bandit
+- **Frontend Lint** — ESLint, HTMLHint
+- **Static type check (mypy, report-only)** — Mypy, non-blocking (see below)
+- **Test** — pytest + coverage
+
+A PR won't be mergeable until the first, second, and fourth pass, once branch protection is
+turned on (see below) — the mypy job is intentionally left out of the required-checks list since
+it's report-only.
 
 ## Tooling choices
 
@@ -41,13 +48,14 @@ different concern:
   hierarchy, `too-many-*` complexity metrics) are disabled repo-wide with reasons in the disable
   list's comments. Everything else pylint found was either fixed or flagged inline with
   `# pylint: disable=<code>` plus a `KNOWN BUG` comment at the exact call site — see below.
-- **Mypy** type-checks. Config: `[tool.mypy]` in `pyproject.toml`. **Currently advisory only**
-  (`continue-on-error: true` in CI) — this codebase's SQLAlchemy models use plain `Column(...)`
-  declarations with no `Mapped[...]` typing, which mypy can't reconcile with how instance
-  attributes actually behave at runtime, so `db.py` alone accounts for the large majority of the
-  ~52 outstanding errors. Fixing that properly means migrating the ORM models to
-  `Mapped[...]`/`mapped_column(...)` — a real, separate migration, not a lint fix. Promote the
-  mypy CI step to blocking once that migration happens (or once you've reviewed the remaining
+- **Mypy** type-checks, in its own **`Static type check (mypy, report-only)`** CI job. Config:
+  `[tool.mypy]` in `pyproject.toml`. **Currently advisory only** (`continue-on-error: true` and
+  left out of the required-status-checks list) — this codebase's SQLAlchemy models use plain
+  `Column(...)` declarations with no `Mapped[...]` typing, which mypy can't reconcile with how
+  instance attributes actually behave at runtime, so `db.py` alone accounts for the large majority
+  of the ~52 outstanding errors. Fixing that properly means migrating the ORM models to
+  `Mapped[...]`/`mapped_column(...)` — a real, separate migration, not a lint fix. Promote this
+  job to a required check once that migration happens (or once you've reviewed the remaining
   errors and are comfortable with them).
 - **Bandit** scans for security issues. Config: `[tool.bandit]` in `pyproject.toml`. `B110`
   (try/except/pass) is skipped repo-wide as a deliberate best-effort-fallback pattern used
@@ -114,10 +122,11 @@ in the GitHub UI or via `gh api`. On GitHub.com:
    (or use **Rulesets** — GitHub's newer equivalent — under **Settings → Rules → Rulesets**).
 2. Enable **Require a pull request before merging**.
    - Optionally: **Require approvals** (e.g. 1) and **Dismiss stale approvals on new commits**.
-3. Enable **Require status checks to pass before merging**, then search for and select both
-   **`Python Lint & Security`** and **`Frontend Lint`** (the two job names from `ci.yml`) once
-   each has run at least once on a PR or push — GitHub only lists checks that have reported at
-   least one result.
+3. Enable **Require status checks to pass before merging**, then search for and select
+   **`Python Lint & Security`**, **`Frontend Lint`**, and **`Test`** (three of the four job names
+   from `code-quality.yml` — leave `Static type check (mypy, report-only)` out, it's advisory)
+   once each has run at least once on a PR or push — GitHub only lists checks that have reported
+   at least one result.
 4. Optionally enable **Require branches to be up to date before merging**.
 5. Optionally enable **Require conversation resolution before merging**.
 6. Optionally enable **Do not allow bypassing the above settings** (applies the rule to admins
@@ -129,6 +138,7 @@ Equivalent via the `gh` CLI (repo admin token required), for example:
 gh api repos/:owner/:repo/branches/main/protection -X PUT -f required_status_checks[strict]=true \
   -f required_status_checks[contexts][]="Python Lint & Security" \
   -f required_status_checks[contexts][]="Frontend Lint" \
+  -f required_status_checks[contexts][]="Test" \
   -f required_pull_request_reviews[required_approving_review_count]=1 \
   -f enforce_admins=true
 ```
