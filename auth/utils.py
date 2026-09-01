@@ -1,5 +1,7 @@
 from functools import wraps
+
 from flask import jsonify, redirect, session, url_for
+
 from db import get_user_by_id
 
 
@@ -40,4 +42,3 @@ def login_required_page(view):
         return view(*args, **kwargs)
 
     return wrapped
-

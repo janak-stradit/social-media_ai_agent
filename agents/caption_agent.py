@@ -1,5 +1,6 @@
-from services.llm_service import LLMService
 import re
+
+from services.llm_service import LLMService
 
 
 class CaptionAgent:
@@ -71,7 +72,6 @@ class CaptionAgent:
         clean_lines = []
 
         for line in lines:
-
             line = line.strip()
 
             # Preserve paragraph spacing
@@ -115,7 +115,7 @@ class CaptionAgent:
                 "integrate with your current",
                 "schedule a brief walkthrough",
                 "direct message",
-                "send me a message"
+                "send me a message",
             ]
 
             if any(phrase in lower for phrase in unwanted_phrases):
@@ -180,10 +180,7 @@ class CaptionAgent:
     ):
         """Generate a platform-specific caption."""
 
-        config = self.PLATFORM_CONFIGS.get(
-            platform,
-            self.PLATFORM_CONFIGS["instagram"]
-        )
+        config = self.PLATFORM_CONFIGS.get(platform, self.PLATFORM_CONFIGS["instagram"])
 
         system_prompt = f"""
 You are a {platform.capitalize()} Content Specialist.
@@ -267,7 +264,6 @@ primary_caption
             primary = parsed.get("primary_caption", "")
 
         except Exception as e:
-
             print(f"[CaptionAgent] JSON generation fallback: {e}")
 
             primary, usage = self.llm.generate(
@@ -306,10 +302,7 @@ primary_caption
     ):
         """Refine caption based on ReviewerAgent feedback."""
 
-        config = self.PLATFORM_CONFIGS.get(
-            platform,
-            self.PLATFORM_CONFIGS["instagram"]
-        )
+        config = self.PLATFORM_CONFIGS.get(platform, self.PLATFORM_CONFIGS["instagram"])
 
         system_prompt = f"""
 You are a Master Copy Editor for {platform.capitalize()}.
@@ -392,24 +385,16 @@ Rewrite and return ONLY the improved plain-text caption.
         memory_context,
         brand_voice,
     ):
-        parts = [
-            f"Story Analysis: {story_analysis}"
-        ]
+        parts = [f"Story Analysis: {story_analysis}"]
 
         if brand_voice:
-            parts.append(
-                f"Brand Voice Persona: {brand_voice}"
-            )
+            parts.append(f"Brand Voice Persona: {brand_voice}")
 
         if vision_analysis:
-            parts.append(
-                f"Image Analysis: {vision_analysis}"
-            )
+            parts.append(f"Image Analysis: {vision_analysis}")
 
         if tone:
-            parts.append(
-                f"Desired Tone: {tone}"
-            )
+            parts.append(f"Desired Tone: {tone}")
 
         if memory_context:
             parts.append(memory_context)
@@ -440,7 +425,6 @@ Rewrite and return ONLY the improved plain-text caption.
             "instagram",
             "linkedin",
         ]:
-
             res = self.generate_caption(
                 platform,
                 story_analysis,
@@ -452,25 +436,13 @@ Rewrite and return ONLY the improved plain-text caption.
 
             usage = res.pop("usage", {})
 
-            total_usage["input_tokens"] += usage.get(
-                "input_tokens",
-                0
-            )
+            total_usage["input_tokens"] += usage.get("input_tokens", 0)
 
-            total_usage["output_tokens"] += usage.get(
-                "output_tokens",
-                0
-            )
+            total_usage["output_tokens"] += usage.get("output_tokens", 0)
 
-            total_usage["total_tokens"] += usage.get(
-                "total_tokens",
-                0
-            )
+            total_usage["total_tokens"] += usage.get("total_tokens", 0)
 
-            total_usage["cost_usd"] += usage.get(
-                "cost_usd",
-                0.0
-            )
+            total_usage["cost_usd"] += usage.get("cost_usd", 0.0)
 
             results[platform] = res
 

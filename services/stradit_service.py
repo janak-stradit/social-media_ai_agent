@@ -1,8 +1,9 @@
 import os
 
+
 class StradITService:
     def __init__(self):
-        self.base_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'StradIT')
+        self.base_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "StradIT")
 
     def get_projects(self):
         """Returns a list of available StradIT projects."""
@@ -15,17 +16,17 @@ class StradITService:
         project_dir = os.path.join(self.base_dir, project_name)
         if not os.path.exists(project_dir):
             return f"Project {project_name} not found."
-            
+
         context = []
         for filename in os.listdir(project_dir):
-            if filename.endswith('.md') or filename.endswith('.txt'):
+            if filename.endswith(".md") or filename.endswith(".txt"):
                 filepath = os.path.join(project_dir, filename)
                 try:
-                    with open(filepath, 'r', encoding='utf-8') as f:
+                    with open(filepath, encoding="utf-8") as f:
                         context.append(f"--- Document: {filename} ---\n{f.read()}")
                 except Exception as e:
                     print(f"Error reading {filename}: {e}")
-                    
+
         return "\n\n".join(context)
 
     def get_all_projects_context(self):

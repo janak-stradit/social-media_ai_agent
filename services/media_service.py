@@ -4,13 +4,15 @@ Media generation service.
 - Video: Z.AI CogVideoX (image-to-video), OpenRouter Video API
 """
 
+import base64
+import mimetypes
+import os
+import time
+import uuid
+
 import openai
 import requests
-import os
-import uuid
-import base64
-import time
-import mimetypes
+
 from config import Config
 from services.llm_service import LLMService
 
@@ -25,9 +27,9 @@ class MediaGenerationService:
         api_key = Config.OPENAI_API_KEY
         self.api_key = api_key
         self.zai_api_key = Config.Z_AI_API_KEY
-        
+
         # Force Bedrock provider strictly as requested by the user
-        self.media_provider = 'bedrock'
+        self.media_provider = "bedrock"
         self.uses_bedrock = True
         self.uses_zai = False
         self.uses_openrouter = False
@@ -40,10 +42,7 @@ class MediaGenerationService:
             )
 
         if self.uses_openrouter:
-            self.client = openai.OpenAI(
-                api_key=api_key,
-                base_url="https://openrouter.ai/api/v1"
-            )
+            self.client = openai.OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
         elif self.uses_zai:
             self.client = self.zai_client
         else:
@@ -56,37 +55,28 @@ class MediaGenerationService:
             try:
                 import boto3
                 from botocore.config import Config as BotoConfig
-                
-                aws_access_key = getattr(Config, 'AWS_ACCESS_KEY_ID', None)
-                aws_secret_key = getattr(Config, 'AWS_SECRET_ACCESS_KEY', None)
-                aws_profile = getattr(Config, 'AWS_PROFILE', None)
-                aws_region = getattr(Config, 'AWS_REGION', 'us-east-1')
-                
+
+                aws_access_key = getattr(Config, "AWS_ACCESS_KEY_ID", None)
+                aws_secret_key = getattr(Config, "AWS_SECRET_ACCESS_KEY", None)
+                aws_profile = getattr(Config, "AWS_PROFILE", None)
+                aws_region = getattr(Config, "AWS_REGION", "us-east-1")
+
                 session_kwargs = {}
                 if aws_profile:
-                    session_kwargs['profile_name'] = aws_profile
+                    session_kwargs["profile_name"] = aws_profile
                 elif aws_access_key and aws_secret_key:
-                    session_kwargs['aws_access_key_id'] = aws_access_key
-                    session_kwargs['aws_secret_access_key'] = aws_secret_key
-                
+                    session_kwargs["aws_access_key_id"] = aws_access_key
+                    session_kwargs["aws_secret_access_key"] = aws_secret_key
+
                 if aws_region:
-                    session_kwargs['region_name'] = aws_region
-                
+                    session_kwargs["region_name"] = aws_region
+
                 session = boto3.Session(**session_kwargs)
-                
-                boto_config = BotoConfig(
-                    read_timeout=300,
-                    connect_timeout=60,
-                    retries={"max_attempts": 3}
-                )
-                
-                self.bedrock_client = session.client(
-                    "bedrock-runtime",
-                    config=boto_config
-                )
-                self.s3_client = session.client(
-                    "s3"
-                )
+
+                boto_config = BotoConfig(read_timeout=300, connect_timeout=60, retries={"max_attempts": 3})
+
+                self.bedrock_client = session.client("bedrock-runtime", config=boto_config)
+                self.s3_client = session.client("s3")
             except Exception as e:
                 print(f"[MediaGenerationService] Bedrock client initialization failed: {e}")
 
@@ -320,18 +310,23 @@ class MediaGenerationService:
     def _clean_motion_text(self, text: str) -> str:
         """Strip non-visual meta instructions, quotes, dialogue scripts, and hashtags from video prompts."""
         import re
+
         if not text:
             return ""
         # Remove dialogue instruction quotes and negative directives
-        cleaned = re.sub(r'Speak\s+exactly\s+this\s+dialogue\s+only[:\s]*["“].*?["”]', '', text, flags=re.IGNORECASE | re.DOTALL)
-        cleaned = re.sub(r'Do\s+not\s+(?:say|repeat).*?["“].*?["”]', '', cleaned, flags=re.IGNORECASE | re.DOTALL)
-        cleaned = re.sub(r'["“].*?["”]', '', cleaned)  # remove quoted text
-        cleaned = re.sub(r'#\w+', '', cleaned)        # remove hashtags
-        cleaned = re.sub(r'https?://\S+', '', cleaned) # remove URLs
-        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+        cleaned = re.sub(
+            r'Speak\s+exactly\s+this\s+dialogue\s+only[:\s]*["“].*?["”]', "", text, flags=re.IGNORECASE | re.DOTALL
+        )
+        cleaned = re.sub(r'Do\s+not\s+(?:say|repeat).*?["“].*?["”]', "", cleaned, flags=re.IGNORECASE | re.DOTALL)
+        cleaned = re.sub(r'["“].*?["”]', "", cleaned)  # remove quoted text
+        cleaned = re.sub(r"#\w+", "", cleaned)  # remove hashtags
+        cleaned = re.sub(r"https?://\S+", "", cleaned)  # remove URLs
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
         return cleaned
 
-    def _build_video_prompt(self, caption: str, platform: str, tone: str = None, has_reference_image: bool = False) -> str:
+    def _build_video_prompt(
+        self, caption: str, platform: str, tone: str = None, has_reference_image: bool = False
+    ) -> str:
         platform_style = {
             "instagram": "vibrant portrait vertical video, cinematic lighting, modern style",
             "facebook": "professional, warm corporate, polished corporate video",
@@ -339,9 +334,10 @@ class MediaGenerationService:
         }.get(platform, "highly professional and cinematic")
 
         lower_caption = caption.lower()
-        is_character_continuation = any(k in lower_caption for k in [
-            'character', 'preserve', 'attached', 'aidan', 'continuation', 'part 1', 'part 2', 'same face'
-        ])
+        is_character_continuation = any(
+            k in lower_caption
+            for k in ["character", "preserve", "attached", "aidan", "continuation", "part 1", "part 2", "same face"]
+        )
 
         if has_reference_image or is_character_continuation:
             prompt = (
@@ -385,11 +381,13 @@ class MediaGenerationService:
 
         resolved_image = self._resolve_image_path(image_path)
         if resolved_image:
-            payload["frame_images"] = [{
-                "type": "image_url",
-                "image_url": {"url": self._image_to_data_uri(resolved_image)},
-                "frame_type": "first_frame",
-            }]
+            payload["frame_images"] = [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": self._image_to_data_uri(resolved_image)},
+                    "frame_type": "first_frame",
+                }
+            ]
 
         submit = requests.post(
             f"{self.OPENROUTER_BASE}/videos",
@@ -480,10 +478,12 @@ class MediaGenerationService:
 
         resolved_image = self._resolve_image_path(image_path)
         if resolved_image:
-            payload["input_references"] = [{
-                "type": "image_url",
-                "image_url": {"url": self._image_to_data_uri(resolved_image)},
-            }]
+            payload["input_references"] = [
+                {
+                    "type": "image_url",
+                    "image_url": {"url": self._image_to_data_uri(resolved_image)},
+                }
+            ]
 
         response = requests.post(
             "https://openrouter.ai/api/v1/images",
@@ -530,7 +530,7 @@ class MediaGenerationService:
     # ── Image Generation ───────────────────────────────────────────────────
     def _parse_size(self, size_str: str) -> tuple[int, int]:
         try:
-            w_str, h_str = size_str.split('x')
+            w_str, h_str = size_str.split("x")
             w, h = int(w_str), int(h_str)
             # Map to Amazon Nova Canvas supported dimensions (1024x1024, 1280x720, 720x1280)
             if w > h:
@@ -543,36 +543,39 @@ class MediaGenerationService:
             return 1024, 1024
 
     def _get_image_as_jpeg_base64(self, image_path: str, target_size: tuple[int, int] = None) -> str:
-        from PIL import Image
         import io
+
+        from PIL import Image
+
         resolved = self._resolve_image_path(image_path)
         if not resolved:
             raise RuntimeError(f"Reference image not found: {image_path}")
-            
+
         with Image.open(resolved) as img:
-            if img.mode in ('RGBA', 'LA', 'P'):
-                img = img.convert('RGB')
+            if img.mode in ("RGBA", "LA", "P"):
+                img = img.convert("RGB")
             if target_size:
-                resample = getattr(Image, 'Resampling', None)
-                resample_method = resample.LANCZOS if resample else getattr(Image, 'ANTIALIAS', 3)
+                resample = getattr(Image, "Resampling", None)
+                resample_method = resample.LANCZOS if resample else getattr(Image, "ANTIALIAS", 3)
                 img = img.resize(target_size, resample_method)
             buffer = io.BytesIO()
             img.save(buffer, format="JPEG", quality=90)
-            return base64.b64encode(buffer.getvalue()).decode('utf-8')
+            return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
     def _generate_image_bedrock(self, prompt: str, platform: str, size: str, image_path: str = None) -> dict:
         """Generate an image using AWS Bedrock (low cost model, e.g. Amazon Nova Canvas)."""
         if not self.bedrock_client:
             raise RuntimeError("AWS Bedrock client is not initialized. Check AWS credentials.")
-            
-        model_id = getattr(Config, 'BEDROCK_IMAGE_MODEL', 'amazon.nova-canvas-v1:0')
+
+        model_id = getattr(Config, "BEDROCK_IMAGE_MODEL", "amazon.nova-canvas-v1:0")
         width, height = self._parse_size(size)
-        import random
         import json
+        import random
+
         seed = random.randint(0, 2147483646)
-        
+
         resolved_image = self._resolve_image_path(image_path)
-        
+
         # Truncate prompt to 1000 chars maximum for Nova Canvas
         prompt_text = prompt[:1000]
 
@@ -584,69 +587,64 @@ class MediaGenerationService:
                     "imageVariationParams": {
                         "images": [input_image_b64],
                         "text": prompt_text,
-                        "similarityStrength": 0.7
+                        "similarityStrength": 0.7,
                     },
                     "imageGenerationConfig": {
                         "numberOfImages": 1,
                         "quality": "standard",
                         "height": height,
                         "width": width,
-                        "seed": seed
-                    }
+                        "seed": seed,
+                    },
                 }
                 response = self.bedrock_client.invoke_model(
                     body=json.dumps(payload),
                     modelId=model_id,
                     accept="application/json",
-                    contentType="application/json"
+                    contentType="application/json",
                 )
             except Exception as variation_err:
-                print(f"[Media Service] Bedrock IMAGE_VARIATION payload notice: {variation_err}. Falling back to TEXT_IMAGE taskType...")
+                print(
+                    f"[Media Service] Bedrock IMAGE_VARIATION payload notice: {variation_err}. Falling back to TEXT_IMAGE taskType..."
+                )
                 payload = {
                     "taskType": "TEXT_IMAGE",
-                    "textToImageParams": {
-                        "text": prompt_text
-                    },
+                    "textToImageParams": {"text": prompt_text},
                     "imageGenerationConfig": {
                         "numberOfImages": 1,
                         "quality": "standard",
                         "height": height,
                         "width": width,
-                        "seed": seed
-                    }
+                        "seed": seed,
+                    },
                 }
                 response = self.bedrock_client.invoke_model(
                     body=json.dumps(payload),
                     modelId=model_id,
                     accept="application/json",
-                    contentType="application/json"
+                    contentType="application/json",
                 )
         else:
             payload = {
                 "taskType": "TEXT_IMAGE",
-                "textToImageParams": {
-                    "text": prompt_text
-                },
+                "textToImageParams": {"text": prompt_text},
                 "imageGenerationConfig": {
                     "numberOfImages": 1,
                     "quality": "standard",
                     "height": height,
                     "width": width,
-                    "seed": seed
-                }
+                    "seed": seed,
+                },
             }
             response = self.bedrock_client.invoke_model(
-                body=json.dumps(payload),
-                modelId=model_id,
-                accept="application/json",
-                contentType="application/json"
+                body=json.dumps(payload), modelId=model_id, accept="application/json", contentType="application/json"
             )
-        
+
         response_body = json.loads(response.get("body").read())
         images = response_body.get("images") or []
         if not images:
             raise RuntimeError("AWS Bedrock returned no image data")
-            
+
         img_data = base64.b64decode(images[0])
         local_filename, _ = self._save_image_bytes(img_data, platform)
         return {
@@ -661,19 +659,22 @@ class MediaGenerationService:
         """Generate a video using AWS Bedrock (low cost model, e.g. Amazon Nova Reel)."""
         if not self.bedrock_client or not self.s3_client:
             raise RuntimeError("AWS Bedrock or S3 client is not initialized. Check AWS credentials.")
-            
+
         # Amazon Nova Reel prompts must be strictly <= 512 characters
         prompt = prompt[:512]
-            
-        model_id = getattr(Config, 'BEDROCK_VIDEO_MODEL', 'amazon.nova-reel-v1:0')
-        s3_bucket = getattr(Config, 'AWS_S3_BUCKET', None)
+
+        model_id = getattr(Config, "BEDROCK_VIDEO_MODEL", "amazon.nova-reel-v1:0")
+        s3_bucket = getattr(Config, "AWS_S3_BUCKET", None)
         if not s3_bucket:
-            raise RuntimeError("AWS_S3_BUCKET is not configured in environment variables. Bedrock video generation requires S3.")
-            
+            raise RuntimeError(
+                "AWS_S3_BUCKET is not configured in environment variables. Bedrock video generation requires S3."
+            )
+
         import random
+
         seed = random.randint(0, 2147483646)
         resolved_image = self._resolve_image_path(image_path)
-        
+
         dimension = "1280x720"
         if resolved_image:
             input_image_b64 = self._get_image_as_jpeg_base64(resolved_image, target_size=(1280, 720))
@@ -681,101 +682,77 @@ class MediaGenerationService:
                 "taskType": "TEXT_VIDEO",
                 "textToVideoParams": {
                     "text": prompt,
-                    "images": [
-                        {
-                            "format": "jpeg",
-                            "source": {
-                                                    "bytes": input_image_b64
-                            }
-                        }
-                    ]
+                    "images": [{"format": "jpeg", "source": {"bytes": input_image_b64}}],
                 },
-                "videoGenerationConfig": {
-                    "fps": 24,
-                    "durationSeconds": 6,
-                    "dimension": dimension,
-                    "seed": seed
-                }
+                "videoGenerationConfig": {"fps": 24, "durationSeconds": 6, "dimension": dimension, "seed": seed},
             }
         else:
             model_input = {
                 "taskType": "TEXT_VIDEO",
-                "textToVideoParams": {
-                    "text": prompt
-                },
-                "videoGenerationConfig": {
-                    "fps": 24,
-                    "durationSeconds": 6,
-                    "dimension": dimension,
-                    "seed": seed
-                }
+                "textToVideoParams": {"text": prompt},
+                "videoGenerationConfig": {"fps": 24, "durationSeconds": 6, "dimension": dimension, "seed": seed},
             }
-            
+
         job_id = uuid.uuid4().hex
         s3_uri = f"s3://{s3_bucket.strip('/')}/bedrock-video-outputs/{job_id}/"
-        
-        output_config = {
-            "s3OutputDataConfig": {
-                "s3Uri": s3_uri
-            }
-        }
-        if getattr(Config, 'AWS_BUCKET_OWNER', None):
+
+        output_config = {"s3OutputDataConfig": {"s3Uri": s3_uri}}
+        if getattr(Config, "AWS_BUCKET_OWNER", None):
             output_config["s3OutputDataConfig"]["bucketOwner"] = Config.AWS_BUCKET_OWNER
-            
+
         response = self.bedrock_client.start_async_invoke(
             clientRequestToken=str(uuid.uuid4()),
             modelId=model_id,
             modelInput=model_input,
-            outputDataConfig=output_config
+            outputDataConfig=output_config,
         )
-        
+
         invocation_arn = response["invocationArn"]
-        
+
         # Poll for completion
         deadline = time.time() + Config.VIDEO_POLL_TIMEOUT
-        completed = False
         final_s3_uri = None
-        
+
         while time.time() < deadline:
             poll_resp = self.bedrock_client.get_async_invoke(invocationArn=invocation_arn)
             status = poll_resp.get("status")
             if status == "Completed":
-                completed = True
-                final_s3_uri = poll_resp['outputDataConfig']['s3OutputDataConfig']['s3Uri']
+                final_s3_uri = poll_resp["outputDataConfig"]["s3OutputDataConfig"]["s3Uri"]
                 break
             elif status == "Failed":
                 failure_msg = poll_resp.get("failureMessage", "Unknown Bedrock async failure")
                 raise RuntimeError(f"Bedrock video generation failed: {failure_msg}")
-            
+
             time.sleep(Config.VIDEO_POLL_INTERVAL)
         else:
             raise RuntimeError("Bedrock video generation timed out.")
-            
+
         # Download output from S3
         from urllib.parse import urlparse
+
         parsed = urlparse(final_s3_uri)
         bucket = parsed.netloc
-        prefix = parsed.path.lstrip('/')
-        
+        prefix = parsed.path.lstrip("/")
+
         # List objects under prefix to find the mp4 file
         list_resp = self.s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix)
-        contents = list_resp.get('Contents', [])
-        
+        contents = list_resp.get("Contents", [])
+
         video_key = None
         for item in contents:
-            key = item['Key']
-            if key.endswith('.mp4'):
+            key = item["Key"]
+            if key.endswith(".mp4"):
                 video_key = key
                 break
-                
+
         if not video_key:
             video_key = f"{prefix.rstrip('/')}/output.mp4"
-            
+
         obj_resp = self.s3_client.get_object(Bucket=bucket, Key=video_key)
-        video_data = obj_resp['Body'].read()
-        
+        video_data = obj_resp["Body"].read()
+
         local_filename = self._save_video_bytes(video_data, platform)
-        
+
         return {
             "url": f"/static/uploads/{local_filename}",
             "prompt": prompt,
@@ -787,14 +764,15 @@ class MediaGenerationService:
 
     def _generate_mock_media(self, platform: str, media_type: str, caption: str) -> dict:
         """Generate a local visual mock asset for offline testing."""
-        from PIL import Image, ImageDraw
         import uuid
+
+        from PIL import Image, ImageDraw
 
         filename = f"mock_{media_type}_{uuid.uuid4().hex[:8]}.png"
         filepath = os.path.join(self.upload_folder, filename)
 
-        w, h = (1024, 1024) if media_type == 'image' else (1280, 720)
-        img = Image.new('RGB', (w, h), color=(30, 41, 59))
+        w, h = (1024, 1024) if media_type == "image" else (1280, 720)
+        img = Image.new("RGB", (w, h), color=(30, 41, 59))
         draw = ImageDraw.Draw(img)
 
         # Draw stylish mock border and graphic elements
@@ -820,7 +798,7 @@ class MediaGenerationService:
         """Generate an image using OpenAI DALL-E 3."""
         if not self.api_key:
             raise RuntimeError("OPENAI_API_KEY is not configured.")
-        
+
         # DALL-E 3 only supports 1024x1024, 1024x1792, or 1792x1024
         w, h = self._parse_size(size)
         if w > h:
@@ -829,7 +807,7 @@ class MediaGenerationService:
             oai_size = "1024x1792"
         else:
             oai_size = "1024x1024"
-            
+
         response = self.client.images.generate(
             model="dall-e-3",
             prompt=prompt[:4000],
@@ -845,7 +823,7 @@ class MediaGenerationService:
             "original_url": image_url,
             "prompt": prompt,
             "cost": 0.040,
-            "model": "dall-e-3"
+            "model": "dall-e-3",
         }
 
     # ── Image Generation ───────────────────────────────────────────────────
@@ -854,14 +832,14 @@ class MediaGenerationService:
         Generate a social media image.
         Returns: { url, local_path, prompt, size, platform }
         """
-        if getattr(Config, 'USE_MOCK_LLM', False):
+        if getattr(Config, "USE_MOCK_LLM", False):
             print("[Media Service] USE_MOCK_LLM is enabled. Generating mock image asset...")
             return self._generate_mock_media(platform, "image", caption)
 
         size_map = {
             "instagram": "1024x1024",
-            "facebook":  "1792x1024",
-            "linkedin":  "1792x1024",
+            "facebook": "1792x1024",
+            "linkedin": "1792x1024",
         }
         size = size_map.get(platform, "1024x1024")
 
@@ -870,8 +848,8 @@ class MediaGenerationService:
         if has_reference:
             platform_style = {
                 "instagram": "vibrant, modern style, portrait orientation, highly polished",
-                "facebook":  "warm and inviting, polished and clean look, corporate sharing",
-                "linkedin":  "corporate executive, clean design, high-end business style",
+                "facebook": "warm and inviting, polished and clean look, corporate sharing",
+                "linkedin": "corporate executive, clean design, high-end business style",
             }.get(platform, "professional and engaging")
             tone_hint = f", {tone} tone" if tone else ""
             prompt = (
@@ -897,10 +875,13 @@ class MediaGenerationService:
             try:
                 result = self._generate_image_openai(prompt, platform, size)
             except Exception as openai_err:
-                print(f"[Media Service] OpenAI image generation failed: {openai_err}. Falling back to Pollinations.ai...")
+                print(
+                    f"[Media Service] OpenAI image generation failed: {openai_err}. Falling back to Pollinations.ai..."
+                )
                 import urllib.parse
+
                 encoded_prompt = urllib.parse.quote(prompt[:800])
-                width, height = size.split('x')
+                width, height = size.split("x")
                 url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&nologo=true"
                 response = requests.get(url, timeout=60)
                 if response.status_code != 200:
@@ -938,7 +919,7 @@ class MediaGenerationService:
 
     def _generate_google_gemini_video(self, prompt: str, platform: str, image_path: str = None) -> dict:
         """Generate a video using Google Gemini / Veo Video Generation API via google-genai SDK."""
-        google_key = getattr(Config, 'GOOGLE_API_KEY', None) or os.getenv("GOOGLE_API_KEY")
+        google_key = getattr(Config, "GOOGLE_API_KEY", None) or os.getenv("GOOGLE_API_KEY")
         if not google_key:
             raise RuntimeError("GOOGLE_API_KEY is missing in your environment or config file.")
 
@@ -948,7 +929,7 @@ class MediaGenerationService:
         except ImportError:
             raise RuntimeError("The 'google-genai' package is required. Run 'pip install google-genai'.")
 
-        model_name = getattr(Config, 'GEMINI_VIDEO_MODEL', 'veo-3.1-generate-preview')
+        model_name = getattr(Config, "GEMINI_VIDEO_MODEL", "veo-3.1-generate-preview")
         print(f"[Media Service] Initiating Google Gemini Video generation with model: {model_name}...")
 
         client = genai.Client(api_key=google_key)
@@ -961,8 +942,8 @@ class MediaGenerationService:
                 aspect_ratio=aspect_ratio,
                 duration_seconds=5,
                 number_of_videos=1,
-                generate_audio=getattr(Config, 'GENERATE_NATIVE_AUDIO', True),
-            )
+                generate_audio=getattr(Config, "GENERATE_NATIVE_AUDIO", True),
+            ),
         }
 
         resolved_image = self._resolve_image_path(image_path)
@@ -986,7 +967,7 @@ class MediaGenerationService:
             raise RuntimeError("Google Gemini Video generation operation timed out after 300s.")
 
         result = operation.result
-        if not result or not getattr(result, 'generated_videos', None):
+        if not result or not getattr(result, "generated_videos", None):
             raise RuntimeError("Google Gemini Video generation returned empty result.")
 
         generated_video = result.generated_videos[0]
@@ -1000,19 +981,19 @@ class MediaGenerationService:
             "prompt": prompt,
             "model": model_name,
             "provider": "Google Gemini (Veo)",
-            "has_native_audio": getattr(Config, 'GENERATE_NATIVE_AUDIO', True),
-            "audio_mode": "single_pass_native"
+            "has_native_audio": getattr(Config, "GENERATE_NATIVE_AUDIO", True),
+            "audio_mode": "single_pass_native",
         }
 
     # ── Video Generation ───────────────────────────────────────────────────
     def generate_video(self, caption: str, platform: str, tone: str = None, image_path: str = None) -> dict:
         """Generate an actual MP4 video from caption/story text and optional reference image."""
-        if getattr(Config, 'USE_MOCK_LLM', False):
+        if getattr(Config, "USE_MOCK_LLM", False):
             print("[Media Service] USE_MOCK_LLM is enabled. Generating mock video asset...")
             return self._generate_mock_media(platform, "video", caption)
 
         resolved_image = self._resolve_image_path(image_path)
-        
+
         # Auto-generate a visual keyframe image if no reference image was provided
         if not resolved_image:
             print("[Media Service] No user image uploaded for video. Auto-generating keyframe image...")
@@ -1020,14 +1001,17 @@ class MediaGenerationService:
             if keyframe_res.get("success") and keyframe_res.get("url"):
                 resolved_image = self._resolve_image_path(keyframe_res["url"])
 
-        prompt = self._build_video_prompt(
-            caption, platform, tone, has_reference_image=bool(resolved_image)
-        )
+        prompt = self._build_video_prompt(caption, platform, tone, has_reference_image=bool(resolved_image))
 
         try:
             try:
                 # Check if Gemini / Google API key is set or media provider is gemini
-                if (Config.MEDIA_PROVIDER == 'gemini' or os.getenv('MEDIA_PROVIDER') == 'gemini' or Config.GOOGLE_API_KEY or os.getenv('GOOGLE_API_KEY')):
+                if (
+                    Config.MEDIA_PROVIDER == "gemini"
+                    or os.getenv("MEDIA_PROVIDER") == "gemini"
+                    or Config.GOOGLE_API_KEY
+                    or os.getenv("GOOGLE_API_KEY")
+                ):
                     print("[Media Service] Attempting video generation via Google Gemini / Veo...")
                     result = self._generate_google_gemini_video(prompt, platform, image_path=resolved_image)
                 else:
@@ -1036,7 +1020,7 @@ class MediaGenerationService:
                 err_msg = str(primary_err)
                 print(f"[Media Service] Primary video generation failed: {err_msg}")
                 # Fallback to Bedrock if Gemini failed but Bedrock client is available
-                if (Config.GOOGLE_API_KEY or os.getenv('GOOGLE_API_KEY')) and self.bedrock_client:
+                if (Config.GOOGLE_API_KEY or os.getenv("GOOGLE_API_KEY")) and self.bedrock_client:
                     print("[Media Service] Falling back to AWS Bedrock Nova Reel...")
                     try:
                         result = self._generate_video_bedrock(prompt, platform, image_path=resolved_image)
@@ -1044,7 +1028,9 @@ class MediaGenerationService:
                         fallback_msg = str(fallback_err)
                         print(f"[Media Service] Bedrock video generation fallback failed: {fallback_msg}")
                         raise fallback_err
-                elif "Access denied" in err_msg or "ResourceNotFoundException" in err_msg or "legacy" in err_msg.lower():
+                elif (
+                    "Access denied" in err_msg or "ResourceNotFoundException" in err_msg or "legacy" in err_msg.lower()
+                ):
                     return {
                         "success": False,
                         "type": "video",
@@ -1053,14 +1039,16 @@ class MediaGenerationService:
                             "AWS Bedrock model access denied or model is legacy. "
                             "Please open your AWS Bedrock Console, navigate to 'Model access' in the left menu, "
                             "and request access for Amazon Nova Reel (for videos)."
-                        )
+                        ),
                     }
                 else:
                     raise primary_err
 
             # --- Single-Pass Native Video + Audio Optimization ---
             if result.get("url") and result.get("has_native_audio"):
-                print("[Media Service] Single-pass native video+audio generated successfully. Skipping separate TTS audio merging.")
+                print(
+                    "[Media Service] Single-pass native video+audio generated successfully. Skipping separate TTS audio merging."
+                )
                 return {
                     "success": True,
                     "type": "video",
@@ -1069,7 +1057,7 @@ class MediaGenerationService:
                     "prompt": prompt,
                     "provider": result.get("provider", "Google Gemini (Veo)"),
                     "has_native_audio": True,
-                    "audio_mode": "single_pass_native"
+                    "audio_mode": "single_pass_native",
                 }
 
             # --- Video Post-processing for Silent Video Models (Fallback/AWS Bedrock) ---
@@ -1083,30 +1071,31 @@ class MediaGenerationService:
                         temp_audio_path = None
                         if tts_text:
                             from gtts import gTTS
+
                             tld_map = {
-                                'b2b tech leader': 'co.uk',
-                                'bold viral marketer': 'com',
-                                'friendly lifestyle coach': 'com.au',
-                                'high-growth startup': 'co.in',
-                                'standard enterprise': 'ca',
-                                'professional': 'co.uk',
-                                'casual': 'com.au',
-                                'enthusiastic': 'com',
-                                'urgent': 'com',
+                                "b2b tech leader": "co.uk",
+                                "bold viral marketer": "com",
+                                "friendly lifestyle coach": "com.au",
+                                "high-growth startup": "co.in",
+                                "standard enterprise": "ca",
+                                "professional": "co.uk",
+                                "casual": "com.au",
+                                "enthusiastic": "com",
+                                "urgent": "com",
                             }
-                            tld_accent = tld_map.get((tone or '').lower(), 'com')
+                            tld_accent = tld_map.get((tone or "").lower(), "com")
                             temp_audio_name = f"temp_tts_{uuid.uuid4().hex[:8]}.mp3"
                             temp_audio_path = os.path.join(self.upload_folder, temp_audio_name)
-                            tts = gTTS(text=tts_text, lang='en', tld=tld_accent)
+                            tts = gTTS(text=tts_text, lang="en", tld=tld_accent)
                             tts.save(temp_audio_path)
 
                         # Output path
                         processed_video_name = f"processed_{os.path.basename(silent_video_path)}"
                         processed_video_path = os.path.join(self.upload_folder, processed_video_name)
 
-                        from moviepy.video.io.VideoFileClip import VideoFileClip
                         from moviepy.audio.io.AudioFileClip import AudioFileClip
-                        
+                        from moviepy.video.io.VideoFileClip import VideoFileClip
+
                         try:
                             from moviepy.video.fx.loop import loop
                         except ImportError:
@@ -1142,15 +1131,17 @@ class MediaGenerationService:
                             # Crop video using moviepy v2 with_effects or moviepy v1 crop function
                             try:
                                 from moviepy.video.fx import Crop
+
                                 video_cropped = video_clip.with_effects([Crop(x1=x1, y1=y1, x2=x2, y2=y2)])
                             except ImportError:
                                 try:
                                     from moviepy.video.fx.crop import crop
+
                                     video_cropped = crop(video_clip, x1=x1, y1=y1, x2=x2, y2=y2)
                                 except ImportError:
                                     video_cropped = video_clip
 
-                            if hasattr(video_cropped, 'resized'):
+                            if hasattr(video_cropped, "resized"):
                                 video_resized = video_cropped.resized((target_w, target_h))
                             else:
                                 video_resized = video_cropped.resize((target_w, target_h))
@@ -1160,33 +1151,31 @@ class MediaGenerationService:
                                 with AudioFileClip(temp_audio_path) as audio_clip:
                                     if audio_clip.duration > video_resized.duration and loop is not None:
                                         video_clip_looped = loop(video_resized, duration=audio_clip.duration)
-                                        if hasattr(video_clip_looped, 'with_audio'):
+                                        if hasattr(video_clip_looped, "with_audio"):
                                             final_clip = video_clip_looped.with_audio(audio_clip)
                                         else:
                                             final_clip = video_clip_looped.set_audio(audio_clip)
                                     else:
-                                        if hasattr(video_resized, 'with_audio'):
+                                        if hasattr(video_resized, "with_audio"):
                                             video_trimmed = video_resized.with_duration(audio_clip.duration)
                                             final_clip = video_trimmed.with_audio(audio_clip)
                                         else:
                                             video_trimmed = video_resized.subclip(0, audio_clip.duration)
                                             final_clip = video_trimmed.set_audio(audio_clip)
-                                    
+
                                     final_clip.write_videofile(
                                         processed_video_path,
-                                        codec='libx264',
-                                        audio_codec='aac',
-                                        temp_audiofile=os.path.join(self.upload_folder, f"temp_{uuid.uuid4().hex[:8]}.m4a"),
+                                        codec="libx264",
+                                        audio_codec="aac",
+                                        temp_audiofile=os.path.join(
+                                            self.upload_folder, f"temp_{uuid.uuid4().hex[:8]}.m4a"
+                                        ),
                                         remove_temp=True,
-                                        logger=None
+                                        logger=None,
                                     )
                             else:
                                 # Just output the cropped/resized silent video
-                                video_resized.write_videofile(
-                                    processed_video_path,
-                                    codec='libx264',
-                                    logger=None
-                                )
+                                video_resized.write_videofile(processed_video_path, codec="libx264", logger=None)
 
                         # Clean up temporary audio file
                         if temp_audio_path:
@@ -1194,11 +1183,13 @@ class MediaGenerationService:
                                 os.remove(temp_audio_path)
                             except Exception:
                                 pass
-                                
+
                         # Replace the silent video file with the processed one
                         if os.path.exists(processed_video_path):
                             os.replace(processed_video_path, silent_video_path)
-                            print(f"[Media Service] Video successfully cropped/resized to 1080x1420 px at {silent_video_path}")
+                            print(
+                                f"[Media Service] Video successfully cropped/resized to 1080x1420 px at {silent_video_path}"
+                            )
                 except Exception as merge_err:
                     print(f"[Media Service] Video post-processing failed: {merge_err}")
 
@@ -1231,8 +1222,8 @@ class MediaGenerationService:
         """
         platform_video = {
             "instagram": "Instagram Reel (9:16 vertical, 15–60 seconds)",
-            "facebook":  "Facebook Video (16:9 landscape or 1:1 square, 30–90 seconds)",
-            "linkedin":  "LinkedIn Video (16:9 landscape, 30–90 seconds, professional)",
+            "facebook": "Facebook Video (16:9 landscape or 1:1 square, 30–90 seconds)",
+            "linkedin": "LinkedIn Video (16:9 landscape, 30–90 seconds, professional)",
         }.get(platform, "social media video (16:9, 30–60 seconds)")
 
         tone_hint = f" Tone: {tone}." if tone else ""
@@ -1270,13 +1261,14 @@ Return JSON with keys:
         if not text:
             return ""
         # Remove hashtags
-        words = [w for w in text.split() if not w.startswith('#')]
+        words = [w for w in text.split() if not w.startswith("#")]
         cleaned = " ".join(words)
         import re
-        cleaned = re.sub(r'https?://\S+', '', cleaned) # Remove URLs
-        cleaned = re.sub(r'\[.*?\]', '', cleaned)      # Remove bracketed placeholders
+
+        cleaned = re.sub(r"https?://\S+", "", cleaned)  # Remove URLs
+        cleaned = re.sub(r"\[.*?\]", "", cleaned)  # Remove bracketed placeholders
         # Clean up double spaces
-        cleaned = re.sub(r'\s+', ' ', cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned)
         return cleaned.strip()
 
     def _enhance_image_prompt(self, user_caption: str, platform: str, tone: str = None) -> str:
@@ -1289,9 +1281,9 @@ Return JSON with keys:
             "facebook": "bright, friendly, community-oriented, warm lighting",
             "linkedin": "professional corporate, sleek modern office, clean layout, corporate executive",
         }.get(platform, "modern and professional")
-        
+
         tone_hint = f" with a {tone} tone" if tone else ""
-        
+
         system_prompt = (
             "You are an expert AI image prompt engineer. Your job is to transform a simple social media image request "
             "into a highly detailed, visually rich, and professional prompt for image generation models (like Amazon Nova Canvas). "
@@ -1301,15 +1293,12 @@ Return JSON with keys:
             "Strictly avoid any text overlays, labels, or watermarks. "
             "Output ONLY the final enhanced prompt in a single paragraph, under 500 characters."
         )
-        
+
         user_prompt = f"Request: {user_caption}\nPlatform: {platform} ({platform_style}){tone_hint}"
-        
+
         try:
             enhanced = self.llm_service.generate(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=0.7,
-                max_tokens=200
+                system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.7, max_tokens=200
             )
             return enhanced.strip()[:500]
         except Exception as e:
@@ -1334,10 +1323,7 @@ Return JSON with keys:
         )
         try:
             compressed = self.llm_service.generate(
-                system_prompt=system_prompt,
-                user_prompt=user_caption,
-                temperature=0.3,
-                max_tokens=150
+                system_prompt=system_prompt, user_prompt=user_caption, temperature=0.3, max_tokens=150
             )
             compressed_str = compressed.strip()
             return compressed_str[:400]
@@ -1351,10 +1337,13 @@ Return JSON with keys:
         If no dialogue is specified, return the cleaned caption.
         """
         import re
+
         # Check for explicit 'Speak exactly this dialogue only: "..."' or similar pattern
-        match = re.search(r'Speak\s+exactly\s+this\s+dialogue\s+only[:\s]*["“](.*?)["”]', caption, re.IGNORECASE | re.DOTALL)
+        match = re.search(
+            r'Speak\s+exactly\s+this\s+dialogue\s+only[:\s]*["“](.*?)["”]', caption, re.IGNORECASE | re.DOTALL
+        )
         if match:
-            extracted = match.group(1).strip().lstrip('—').strip()
+            extracted = match.group(1).strip().lstrip("—").strip()
             if extracted:
                 return extracted
 
@@ -1362,20 +1351,16 @@ Return JSON with keys:
             "You are an AI assistant. Extract ONLY the spoken dialogue, voiceover script, or text that should be "
             "spoken aloud from the user's prompt. Do not include any instructions, scene descriptions, metadata, "
             "or negative constraints. Return ONLY the exact dialogue text to be read by a text-to-speech reader. "
-            "If the prompt contains dialogue quotes (e.g. Speak exactly this dialogue only: \"...\"), return "
+            'If the prompt contains dialogue quotes (e.g. Speak exactly this dialogue only: "..."), return '
             "only the content inside those quotes. If there is no specific dialogue, return a cleaned version "
             "of the prompt suitable for speaking."
         )
         try:
             dialogue = self.llm_service.generate(
-                system_prompt=system_prompt,
-                user_prompt=caption,
-                temperature=0.1,
-                max_tokens=300
+                system_prompt=system_prompt, user_prompt=caption, temperature=0.1, max_tokens=300
             )
-            clean_dialogue = dialogue.strip().replace('"', '').lstrip('—').strip()
+            clean_dialogue = dialogue.strip().replace('"', "").lstrip("—").strip()
             return clean_dialogue or self._clean_text_for_tts(caption)
         except Exception as e:
             print(f"[Media Service] Dialogue extraction failed: {e}")
             return self._clean_text_for_tts(caption)
-
