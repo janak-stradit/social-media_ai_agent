@@ -9,8 +9,17 @@ import os
 from datetime import datetime
 
 from sqlalchemy import (
-    create_engine, text,
-    Column, Integer, String, Text, DateTime, ForeignKey, Float, Boolean
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    create_engine,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Session
 from sqlalchemy.sql import func
@@ -18,7 +27,8 @@ from sqlalchemy.sql import func
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     try:
-        import psycopg2
+        import psycopg2  # noqa: F401 -- only used to test driver availability
+
         DATABASE_URL = "postgresql+psycopg2://postgres:root@localhost:5432/postgres"
     except ImportError:
         DATABASE_URL = "sqlite:///social_media_agent.db"
@@ -30,7 +40,7 @@ engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True if not IS_SQLITE else False,
     connect_args={"check_same_thread": False} if IS_SQLITE else {},
-    echo=False
+    echo=False,
 )
 
 
@@ -56,7 +66,9 @@ class CreditRequest(Base):
     __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True)
+    user_id = Column(
+        Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True
+    )
     requested_amount = Column(Float, nullable=False)
     reason = Column(Text, nullable=True)
     status = Column(String(32), default="pending", nullable=False)  # pending, approved, rejected
@@ -69,7 +81,9 @@ class RunHistory(Base):
     __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=True, index=True)
+    user_id = Column(
+        Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=True, index=True
+    )
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     story = Column(Text, nullable=False)
     tone = Column(String(64), nullable=True)
@@ -85,7 +99,9 @@ class SocialAccount(Base):
     __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True)
+    user_id = Column(
+        Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True
+    )
     platform = Column(String(32), nullable=False)  # facebook, instagram, linkedin, youtube
     account_name = Column(String(120), nullable=False)
     account_id = Column(String(120), nullable=True)  # Page ID, IG ID, Author URN, or Channel ID
@@ -100,12 +116,66 @@ class SocialAccount(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
 
 
+class ApprovedAsset(Base):
+    __tablename__ = "approved_assets"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(
+        Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=True, index=True
+    )
+    platform = Column(String(32), nullable=False)
+    content_type = Column(String(32), nullable=False)  # 'text', 'image', 'video'
+    content_data = Column(Text, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class CompetitorPost(Base):
+    __tablename__ = "competitor_posts"
+    __table_args__ = (
+        UniqueConstraint("competitor", "platform", "post_url", name="uq_competitor_post"),
+        {"schema": SCHEMA} if not IS_SQLITE else {},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    competitor = Column(String(120), nullable=False, index=True)
+    platform = Column(String(32), nullable=False, index=True)
+    post_url = Column(String(500), nullable=False)
+    title = Column(Text, nullable=True)
+    text = Column(Text, nullable=True)
+    author = Column(String(120), nullable=True)
+    post_type = Column(String(32), nullable=True)
+    engagement_json = Column(Text, nullable=True)
+    media_json = Column(Text, nullable=True)
+    published_at = Column(DateTime, nullable=True)
+    scraped_at = Column(DateTime, nullable=True)
+    raw_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
+class OpportunitySuggestion(Base):
+    __tablename__ = "opportunity_suggestions"
+    __table_args__ = (
+        UniqueConstraint("category", "title", name="uq_opportunity_suggestion"),
+        {"schema": SCHEMA} if not IS_SQLITE else {},
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    category = Column(String(32), nullable=False, index=True)  # 'unserved_theme' | 'domain_expansion'
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    source_accounts = Column(Text, nullable=True)  # comma-separated competitor/account names
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+
+
 class ScheduledPost(Base):
     __tablename__ = "scheduled_posts"
     __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True)
+    user_id = Column(
+        Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True
+    )
     run_id = Column(Integer, nullable=True)
     platforms = Column(Text, nullable=False)  # JSON or comma-separated string
     scheduled_at = Column(DateTime, nullable=False)
@@ -120,20 +190,20 @@ def init_db():
         with engine.connect() as conn:
             conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))
             conn.commit()
-            
+
     Base.metadata.create_all(engine)
 
     with engine.connect() as conn:
-        run_tbl = f'"{SCHEMA}".run_history' if not IS_SQLITE else 'run_history'
-        usr_tbl = f'"{SCHEMA}".users' if not IS_SQLITE else 'users'
-        
+        run_tbl = f'"{SCHEMA}".run_history' if not IS_SQLITE else "run_history"
+        usr_tbl = f'"{SCHEMA}".users' if not IS_SQLITE else "users"
+
         for alter_cmd in [
-            f'ALTER TABLE {run_tbl} ADD COLUMN user_id INTEGER',
-            f'ALTER TABLE {run_tbl} ADD COLUMN tokens_used INTEGER DEFAULT 0',
-            f'ALTER TABLE {run_tbl} ADD COLUMN cost_usd DOUBLE PRECISION DEFAULT 0.0',
-            f'ALTER TABLE {run_tbl} ADD COLUMN is_archived BOOLEAN DEFAULT FALSE',
-            f'ALTER TABLE {usr_tbl} ADD COLUMN credit_limit DOUBLE PRECISION DEFAULT 10.0',
-            f'ALTER TABLE {usr_tbl} ADD COLUMN is_admin BOOLEAN DEFAULT FALSE'
+            f"ALTER TABLE {run_tbl} ADD COLUMN user_id INTEGER",
+            f"ALTER TABLE {run_tbl} ADD COLUMN tokens_used INTEGER DEFAULT 0",
+            f"ALTER TABLE {run_tbl} ADD COLUMN cost_usd DOUBLE PRECISION DEFAULT 0.0",
+            f"ALTER TABLE {run_tbl} ADD COLUMN is_archived BOOLEAN DEFAULT FALSE",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN credit_limit DOUBLE PRECISION DEFAULT 10.0",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN is_admin BOOLEAN DEFAULT FALSE",
         ]:
             try:
                 with engine.begin() as sub_conn:
@@ -141,17 +211,17 @@ def init_db():
             except Exception:
                 pass
 
-        soc_tbl = f'"{SCHEMA}".social_accounts' if not IS_SQLITE else 'social_accounts'
+        soc_tbl = f'"{SCHEMA}".social_accounts' if not IS_SQLITE else "social_accounts"
         for col_name, col_type in [
             ("connection_type", "VARCHAR(32) DEFAULT 'direct'"),
             ("mcp_endpoint", "TEXT"),
             ("mcp_token", "TEXT"),
             ("mcp_tool_name", "VARCHAR(120) DEFAULT 'linkedin_publish_post'"),
-            ("refresh_token", "TEXT")
+            ("refresh_token", "TEXT"),
         ]:
             try:
                 with engine.begin() as sub_conn:
-                    sub_conn.execute(text(f'ALTER TABLE {soc_tbl} ADD COLUMN {col_name} {col_type}'))
+                    sub_conn.execute(text(f"ALTER TABLE {soc_tbl} ADD COLUMN {col_name} {col_type}"))
             except Exception:
                 pass
 
@@ -160,11 +230,16 @@ def init_db():
     # Seed default admin if no admin user exists
     try:
         from werkzeug.security import generate_password_hash
+
         with Session(engine) as session:
-            admin_user = session.query(User).filter(User.is_admin == True).first()
+            admin_user = session.query(User).filter(User.is_admin.is_(True)).first()
             if not admin_user:
                 # Check if admin email exists
-                existing = session.query(User).filter((User.email == "admin@vortexsocial.ai") | (User.email == "admin@contentai.com")).first()
+                existing = (
+                    session.query(User)
+                    .filter((User.email == "admin@vortexsocial.ai") | (User.email == "admin@contentai.com"))
+                    .first()
+                )
                 if existing:
                     existing.is_admin = True
                     existing.credit_limit = max(existing.credit_limit or 10.0, 1000.0)
@@ -174,7 +249,7 @@ def init_db():
                         email="admin@vortexsocial.ai",
                         password_hash=generate_password_hash("admin123"),
                         credit_limit=1000.0,
-                        is_admin=True
+                        is_admin=True,
                     )
                     session.add(new_admin)
                 session.commit()
@@ -196,17 +271,29 @@ def _serialize_run(row: RunHistory, truncate_story: bool = False) -> dict:
         "content": json.loads(row.content),
         "tokens_used": row.tokens_used or 0,
         "cost_usd": round(row.cost_usd or 0.0, 6),
-        "is_archived": bool(getattr(row, "is_archived", False))
+        "is_archived": bool(getattr(row, "is_archived", False)),
     }
 
 
 def create_user(name: str, email: str, password_hash: str, is_admin: bool = False, credit_limit: float = 10.0) -> dict:
     with Session(engine) as session:
-        row = User(name=name.strip(), email=email.strip().lower(), password_hash=password_hash, is_admin=is_admin, credit_limit=credit_limit)
+        row = User(
+            name=name.strip(),
+            email=email.strip().lower(),
+            password_hash=password_hash,
+            is_admin=is_admin,
+            credit_limit=credit_limit,
+        )
         session.add(row)
         session.commit()
         session.refresh(row)
-        return {"id": row.id, "name": row.name, "email": row.email, "is_admin": row.is_admin, "credit_limit": row.credit_limit}
+        return {
+            "id": row.id,
+            "name": row.name,
+            "email": row.email,
+            "is_admin": row.is_admin,
+            "credit_limit": row.credit_limit,
+        }
 
 
 def get_user_by_email(email: str) -> User | None:
@@ -219,7 +306,9 @@ def get_user_by_id(user_id: int) -> User | None:
         return session.get(User, user_id)
 
 
-def save_run(story: str, tone: str, platforms: list, content: dict, user_id: int, tokens_used: int = 0, cost_usd: float = 0.0) -> int:
+def save_run(
+    story: str, tone: str, platforms: list, content: dict, user_id: int, tokens_used: int = 0, cost_usd: float = 0.0
+) -> int:
     with Session(engine) as session:
         row = RunHistory(
             user_id=user_id,
@@ -229,8 +318,17 @@ def save_run(story: str, tone: str, platforms: list, content: dict, user_id: int
             content=json.dumps(content),
             tokens_used=tokens_used,
             cost_usd=cost_usd,
-            is_archived=False
+            is_archived=False,
         )
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return row.id
+
+
+def save_approved_asset(user_id: int, platform: str, content_type: str, content_data: str) -> int:
+    with Session(engine) as session:
+        row = ApprovedAsset(user_id=user_id, platform=platform, content_type=content_type, content_data=content_data)
         session.add(row)
         session.commit()
         session.refresh(row)
@@ -291,9 +389,9 @@ def get_history(limit: int = 20, user_id: int | None = None, include_archived: b
         if user_id is not None:
             query = query.filter(RunHistory.user_id == user_id)
         if not include_archived:
-            query = query.filter((RunHistory.is_archived == False) | (RunHistory.is_archived.is_(None)))
+            query = query.filter((RunHistory.is_archived.is_(False)) | (RunHistory.is_archived.is_(None)))
         else:
-            query = query.filter(RunHistory.is_archived == True)
+            query = query.filter(RunHistory.is_archived.is_(True))
         rows = query.limit(limit).all()
         return [_serialize_run(r, truncate_story=True) for r in rows]
 
@@ -315,11 +413,15 @@ def get_user_usage_stats(user_id: int) -> dict:
         credit_limit = float(user.credit_limit) if user and user.credit_limit is not None else 10.0
         is_admin = bool(user.is_admin) if user else False
 
-        result = session.query(
-            func.count(RunHistory.id).label("total_runs"),
-            func.coalesce(func.sum(RunHistory.tokens_used), 0).label("total_tokens"),
-            func.coalesce(func.sum(RunHistory.cost_usd), 0.0).label("total_cost")
-        ).filter(RunHistory.user_id == user_id).first()
+        result = (
+            session.query(
+                func.count(RunHistory.id).label("total_runs"),
+                func.coalesce(func.sum(RunHistory.tokens_used), 0).label("total_tokens"),
+                func.coalesce(func.sum(RunHistory.cost_usd), 0.0).label("total_cost"),
+            )
+            .filter(RunHistory.user_id == user_id)
+            .first()
+        )
 
         total_runs = result.total_runs if result else 0
         total_tokens = int(result.total_tokens) if result else 0
@@ -328,10 +430,11 @@ def get_user_usage_stats(user_id: int) -> dict:
         remaining = max(0.0, credit_limit - used_cost)
 
         # Check pending request
-        pending_req = session.query(CreditRequest).filter(
-            CreditRequest.user_id == user_id,
-            CreditRequest.status == "pending"
-        ).first()
+        pending_req = (
+            session.query(CreditRequest)
+            .filter(CreditRequest.user_id == user_id, CreditRequest.status == "pending")
+            .first()
+        )
 
         return {
             "total_runs": total_runs,
@@ -346,8 +449,10 @@ def get_user_usage_stats(user_id: int) -> dict:
                 "id": pending_req.id,
                 "requested_amount": pending_req.requested_amount,
                 "reason": pending_req.reason,
-                "created_at": pending_req.created_at.strftime("%Y-%m-%d %H:%M")
-            } if pending_req else None
+                "created_at": pending_req.created_at.strftime("%Y-%m-%d %H:%M"),
+            }
+            if pending_req
+            else None,
         }
 
 
@@ -374,14 +479,16 @@ def assign_orphan_runs_to_user(email: str) -> dict:
 
 # ── Credit & Admin Database Helper Functions ───────────────────────────────
 
+
 def create_credit_request(user_id: int, requested_amount: float, reason: str = "") -> dict:
     """Create a new credit extension request for a user."""
     with Session(engine) as session:
         # Check if there is already a pending request
-        existing = session.query(CreditRequest).filter(
-            CreditRequest.user_id == user_id,
-            CreditRequest.status == "pending"
-        ).first()
+        existing = (
+            session.query(CreditRequest)
+            .filter(CreditRequest.user_id == user_id, CreditRequest.status == "pending")
+            .first()
+        )
         if existing:
             existing.requested_amount = requested_amount
             existing.reason = reason
@@ -391,15 +498,10 @@ def create_credit_request(user_id: int, requested_amount: float, reason: str = "
                 "requested_amount": existing.requested_amount,
                 "reason": existing.reason,
                 "status": existing.status,
-                "updated": True
+                "updated": True,
             }
 
-        req = CreditRequest(
-            user_id=user_id,
-            requested_amount=requested_amount,
-            reason=reason,
-            status="pending"
-        )
+        req = CreditRequest(user_id=user_id, requested_amount=requested_amount, reason=reason, status="pending")
         session.add(req)
         session.commit()
         session.refresh(req)
@@ -408,22 +510,28 @@ def create_credit_request(user_id: int, requested_amount: float, reason: str = "
             "requested_amount": req.requested_amount,
             "reason": req.reason,
             "status": req.status,
-            "created_at": req.created_at.strftime("%Y-%m-%d %H:%M")
+            "created_at": req.created_at.strftime("%Y-%m-%d %H:%M"),
         }
 
 
 def get_user_credit_requests(user_id: int) -> list[dict]:
     with Session(engine) as session:
-        rows = session.query(CreditRequest).filter(
-            CreditRequest.user_id == user_id
-        ).order_by(CreditRequest.created_at.desc()).all()
-        return [{
-            "id": r.id,
-            "requested_amount": r.requested_amount,
-            "reason": r.reason,
-            "status": r.status,
-            "created_at": r.created_at.strftime("%Y-%m-%d %H:%M")
-        } for r in rows]
+        rows = (
+            session.query(CreditRequest)
+            .filter(CreditRequest.user_id == user_id)
+            .order_by(CreditRequest.created_at.desc())
+            .all()
+        )
+        return [
+            {
+                "id": r.id,
+                "requested_amount": r.requested_amount,
+                "reason": r.reason,
+                "status": r.status,
+                "created_at": r.created_at.strftime("%Y-%m-%d %H:%M"),
+            }
+            for r in rows
+        ]
 
 
 def get_all_credit_requests(status_filter: str | None = None) -> list[dict]:
@@ -436,17 +544,19 @@ def get_all_credit_requests(status_filter: str | None = None) -> list[dict]:
 
         results = []
         for req, user in query.all():
-            results.append({
-                "id": req.id,
-                "user_id": user.id,
-                "user_name": user.name,
-                "user_email": user.email,
-                "current_limit": user.credit_limit,
-                "requested_amount": req.requested_amount,
-                "reason": req.reason,
-                "status": req.status,
-                "created_at": req.created_at.strftime("%Y-%m-%d %H:%M")
-            })
+            results.append(
+                {
+                    "id": req.id,
+                    "user_id": user.id,
+                    "user_name": user.name,
+                    "user_email": user.email,
+                    "current_limit": user.credit_limit,
+                    "requested_amount": req.requested_amount,
+                    "reason": req.reason,
+                    "status": req.status,
+                    "created_at": req.created_at.strftime("%Y-%m-%d %H:%M"),
+                }
+            )
         return results
 
 
@@ -469,7 +579,7 @@ def approve_credit_request(request_id: int) -> dict | None:
             "user_id": user.id,
             "user_email": user.email,
             "new_credit_limit": round(user.credit_limit, 2),
-            "status": "approved"
+            "status": "approved",
         }
 
 
@@ -482,10 +592,7 @@ def reject_credit_request(request_id: int) -> dict | None:
 
         req.status = "rejected"
         session.commit()
-        return {
-            "request_id": req.id,
-            "status": "rejected"
-        }
+        return {"request_id": req.id, "status": "rejected"}
 
 
 def update_user_credit_limit(user_id: int, new_limit: float = None, add_amount: float = None) -> dict | None:
@@ -505,7 +612,7 @@ def update_user_credit_limit(user_id: int, new_limit: float = None, add_amount: 
             "user_id": user.id,
             "user_name": user.name,
             "user_email": user.email,
-            "credit_limit": round(user.credit_limit, 2)
+            "credit_limit": round(user.credit_limit, 2),
         }
 
 
@@ -516,10 +623,14 @@ def get_all_users_credit_summary() -> list[dict]:
         summaries = []
         for u in users:
             # Query usage cost for this user
-            cost_res = session.query(
-                func.coalesce(func.sum(RunHistory.cost_usd), 0.0).label("used_cost"),
-                func.count(RunHistory.id).label("total_runs")
-            ).filter(RunHistory.user_id == u.id).first()
+            cost_res = (
+                session.query(
+                    func.coalesce(func.sum(RunHistory.cost_usd), 0.0).label("used_cost"),
+                    func.count(RunHistory.id).label("total_runs"),
+                )
+                .filter(RunHistory.user_id == u.id)
+                .first()
+            )
 
             used_cost = float(cost_res.used_cost) if cost_res else 0.0
             total_runs = cost_res.total_runs if cost_res else 0
@@ -527,53 +638,63 @@ def get_all_users_credit_summary() -> list[dict]:
             remaining = max(0.0, limit - used_cost)
 
             # Check pending request
-            has_pending = session.query(CreditRequest).filter(
-                CreditRequest.user_id == u.id,
-                CreditRequest.status == "pending"
-            ).first() is not None
+            has_pending = (
+                session.query(CreditRequest)
+                .filter(CreditRequest.user_id == u.id, CreditRequest.status == "pending")
+                .first()
+                is not None
+            )
 
-            summaries.append({
-                "id": u.id,
-                "name": u.name,
-                "email": u.email,
-                "is_admin": bool(u.is_admin),
-                "credit_limit": round(limit, 2),
-                "used_credits": round(used_cost, 4),
-                "remaining_credits": round(remaining, 4),
-                "total_runs": total_runs,
-                "has_pending_request": has_pending,
-                "created_at": u.created_at.strftime("%Y-%m-%d")
-            })
+            summaries.append(
+                {
+                    "id": u.id,
+                    "name": u.name,
+                    "email": u.email,
+                    "is_admin": bool(u.is_admin),
+                    "credit_limit": round(limit, 2),
+                    "used_credits": round(used_cost, 4),
+                    "remaining_credits": round(remaining, 4),
+                    "total_runs": total_runs,
+                    "has_pending_request": has_pending,
+                    "created_at": u.created_at.strftime("%Y-%m-%d"),
+                }
+            )
         return summaries
 
 
 def get_global_cost_history(limit: int = 100) -> list[dict]:
     """Return all cost history runs across all users with user info (for admin)."""
     with Session(engine) as session:
-        rows = session.query(RunHistory, User)\
-            .outerjoin(User, RunHistory.user_id == User.id)\
-            .order_by(RunHistory.created_at.desc())\
-            .limit(limit).all()
+        rows = (
+            session.query(RunHistory, User)
+            .outerjoin(User, RunHistory.user_id == User.id)
+            .order_by(RunHistory.created_at.desc())
+            .limit(limit)
+            .all()
+        )
 
         history = []
         for run, user in rows:
             story_snippet = run.story[:100] + "..." if len(run.story) > 100 else run.story
-            history.append({
-                "id": run.id,
-                "user_id": run.user_id,
-                "user_name": user.name if user else "Unknown",
-                "user_email": user.email if user else "N/A",
-                "timestamp": run.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                "story": story_snippet,
-                "tone": run.tone,
-                "platforms": json.loads(run.platforms) if run.platforms else [],
-                "tokens_used": run.tokens_used or 0,
-                "cost_usd": round(run.cost_usd or 0.0, 6)
-            })
+            history.append(
+                {
+                    "id": run.id,
+                    "user_id": run.user_id,
+                    "user_name": user.name if user else "Unknown",
+                    "user_email": user.email if user else "N/A",
+                    "timestamp": run.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    "story": story_snippet,
+                    "tone": run.tone,
+                    "platforms": json.loads(run.platforms) if run.platforms else [],
+                    "tokens_used": run.tokens_used or 0,
+                    "cost_usd": round(run.cost_usd or 0.0, 6),
+                }
+            )
         return history
 
 
 # ── SOCIAL ACCOUNTS & POST SCHEDULING HELPERS ─────────────────────────
+
 
 def get_user_social_accounts(user_id: int) -> list[dict]:
     """Fetch all connected social media accounts for a user."""
@@ -581,27 +702,41 @@ def get_user_social_accounts(user_id: int) -> list[dict]:
         accounts = session.query(SocialAccount).filter(SocialAccount.user_id == user_id).all()
         result = []
         for acc in accounts:
-            result.append({
-                "id": acc.id,
-                "platform": acc.platform,
-                "account_name": acc.account_name,
-                "account_id": acc.account_id,
-                "connection_type": getattr(acc, "connection_type", "direct") or "direct",
-                "mcp_endpoint": getattr(acc, "mcp_endpoint", None),
-                "mcp_tool_name": getattr(acc, "mcp_tool_name", "linkedin_publish_post") or "linkedin_publish_post",
-                "status": acc.status,
-                "updated_at": acc.updated_at.strftime("%Y-%m-%d %H:%M:%S")
-            })
+            result.append(
+                {
+                    "id": acc.id,
+                    "platform": acc.platform,
+                    "account_name": acc.account_name,
+                    "account_id": acc.account_id,
+                    "connection_type": getattr(acc, "connection_type", "direct") or "direct",
+                    "mcp_endpoint": getattr(acc, "mcp_endpoint", None),
+                    "mcp_tool_name": getattr(acc, "mcp_tool_name", "linkedin_publish_post") or "linkedin_publish_post",
+                    "status": acc.status,
+                    "updated_at": acc.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
+                }
+            )
         return result
 
 
-def save_social_account(user_id: int, platform: str, account_name: str, account_id: str = None, access_token: str = None, refresh_token: str = None, connection_type: str = "direct", mcp_endpoint: str = None, mcp_token: str = None, mcp_tool_name: str = None) -> dict:
+def save_social_account(
+    user_id: int,
+    platform: str,
+    account_name: str,
+    account_id: str = None,
+    access_token: str = None,
+    refresh_token: str = None,
+    connection_type: str = "direct",
+    mcp_endpoint: str = None,
+    mcp_token: str = None,
+    mcp_tool_name: str = None,
+) -> dict:
     """Create or update a connected social media account with optional MCP support."""
     with Session(engine) as session:
-        acc = session.query(SocialAccount).filter(
-            SocialAccount.user_id == user_id,
-            SocialAccount.platform == platform
-        ).first()
+        acc = (
+            session.query(SocialAccount)
+            .filter(SocialAccount.user_id == user_id, SocialAccount.platform == platform)
+            .first()
+        )
 
         if not acc:
             acc = SocialAccount(
@@ -615,7 +750,7 @@ def save_social_account(user_id: int, platform: str, account_name: str, account_
                 mcp_endpoint=mcp_endpoint,
                 mcp_token=mcp_token,
                 mcp_tool_name=mcp_tool_name or "linkedin_publish_post",
-                status="connected"
+                status="connected",
             )
             session.add(acc)
         else:
@@ -646,17 +781,18 @@ def save_social_account(user_id: int, platform: str, account_name: str, account_
             "connection_type": getattr(acc, "connection_type", "direct"),
             "mcp_endpoint": getattr(acc, "mcp_endpoint", None),
             "mcp_tool_name": getattr(acc, "mcp_tool_name", "linkedin_publish_post"),
-            "status": acc.status
+            "status": acc.status,
         }
 
 
 def disconnect_social_account(user_id: int, platform: str) -> bool:
     """Set social account status to disconnected."""
     with Session(engine) as session:
-        acc = session.query(SocialAccount).filter(
-            SocialAccount.user_id == user_id,
-            SocialAccount.platform == platform
-        ).first()
+        acc = (
+            session.query(SocialAccount)
+            .filter(SocialAccount.user_id == user_id, SocialAccount.platform == platform)
+            .first()
+        )
         if acc:
             acc.status = "disconnected"
             acc.updated_at = datetime.utcnow()
@@ -665,7 +801,9 @@ def disconnect_social_account(user_id: int, platform: str) -> bool:
         return False
 
 
-def create_scheduled_post(user_id: int, platforms: list, scheduled_at: datetime, content_json: dict, run_id: int = None) -> dict:
+def create_scheduled_post(
+    user_id: int, platforms: list, scheduled_at: datetime, content_json: dict, run_id: int = None
+) -> dict:
     """Schedule a post for future publishing."""
     with Session(engine) as session:
         post = ScheduledPost(
@@ -674,7 +812,7 @@ def create_scheduled_post(user_id: int, platforms: list, scheduled_at: datetime,
             platforms=json.dumps(platforms) if isinstance(platforms, list) else str(platforms),
             scheduled_at=scheduled_at,
             status="pending",
-            content_json=json.dumps(content_json) if isinstance(content_json, dict) else str(content_json)
+            content_json=json.dumps(content_json) if isinstance(content_json, dict) else str(content_json),
         )
         session.add(post)
         session.commit()
@@ -682,16 +820,19 @@ def create_scheduled_post(user_id: int, platforms: list, scheduled_at: datetime,
             "id": post.id,
             "platforms": platforms,
             "scheduled_at": post.scheduled_at.strftime("%Y-%m-%d %H:%M:%S"),
-            "status": post.status
+            "status": post.status,
         }
 
 
 def get_user_scheduled_posts(user_id: int) -> list[dict]:
     """Retrieve upcoming and past scheduled posts for a user."""
     with Session(engine) as session:
-        posts = session.query(ScheduledPost).filter(
-            ScheduledPost.user_id == user_id
-        ).order_by(ScheduledPost.scheduled_at.asc()).all()
+        posts = (
+            session.query(ScheduledPost)
+            .filter(ScheduledPost.user_id == user_id)
+            .order_by(ScheduledPost.scheduled_at.asc())
+            .all()
+        )
 
         results = []
         for p in posts:
@@ -704,27 +845,29 @@ def get_user_scheduled_posts(user_id: int) -> list[dict]:
             except Exception:
                 content = {}
 
-            results.append({
-                "id": p.id,
-                "run_id": p.run_id,
-                "platforms": platforms,
-                "scheduled_at": p.scheduled_at.strftime("%Y-%m-%d %H:%M:%S"),
-                "status": p.status,
-                "content_json": content,
-                "story": content.get("story") or content.get("caption") or "Campaign Post",
-                "created_at": p.created_at.strftime("%Y-%m-%d %H:%M:%S")
-            })
+            results.append(
+                {
+                    "id": p.id,
+                    "run_id": p.run_id,
+                    "platforms": platforms,
+                    "scheduled_at": p.scheduled_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    "status": p.status,
+                    "content_json": content,
+                    "story": content.get("story") or content.get("caption") or "Campaign Post",
+                    "created_at": p.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                }
+            )
         return results
 
 
 def cancel_scheduled_post(user_id: int, post_id: int) -> bool:
     """Cancel a pending scheduled post."""
     from sqlalchemy.orm import Session
+
     with Session(engine) as session:
-        post = session.query(ScheduledPost).filter(
-            ScheduledPost.id == post_id,
-            ScheduledPost.user_id == user_id
-        ).first()
+        post = (
+            session.query(ScheduledPost).filter(ScheduledPost.id == post_id, ScheduledPost.user_id == user_id).first()
+        )
 
         if post and post.status == "pending":
             post.status = "cancelled"
@@ -733,19 +876,189 @@ def cancel_scheduled_post(user_id: int, post_id: int) -> bool:
         return False
 
 
+def _parse_dt(value) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).replace(tzinfo=None)
+    except Exception:
+        return None
+
+
+def save_competitor_posts(posts: list[dict]) -> dict:
+    """
+    Persist scraped competitor posts, inserting only records not already
+    stored (matched by competitor + platform + post_url). Existing posts
+    are left untouched. Returns {"inserted": n, "skipped": n}.
+    """
+    if not posts:
+        return {"inserted": 0, "skipped": 0}
+
+    with Session(engine) as session:
+        keys = {
+            (p.get("_source_competitor") or "Unknown", (p.get("platform") or "").lower(), p.get("post_url"))
+            for p in posts
+            if p.get("post_url")
+        }
+        existing = set()
+        if keys:
+            competitors = {k[0] for k in keys}
+            platforms = {k[1] for k in keys}
+            rows = (
+                session.query(CompetitorPost.competitor, CompetitorPost.platform, CompetitorPost.post_url)
+                .filter(CompetitorPost.competitor.in_(competitors), CompetitorPost.platform.in_(platforms))
+                .all()
+            )
+            existing = {(r[0], (r[1] or "").lower(), r[2]) for r in rows}
+
+        inserted = 0
+        skipped = 0
+        new_post_urls = []
+        for p in posts:
+            competitor = p.get("_source_competitor") or "Unknown"
+            platform = (p.get("platform") or "").lower()
+            post_url = p.get("post_url")
+            if not post_url:
+                skipped += 1
+                continue
+
+            key = (competitor, platform, post_url)
+            if key in existing:
+                skipped += 1
+                continue
+
+            session.add(
+                CompetitorPost(
+                    competitor=competitor,
+                    platform=platform,
+                    post_url=post_url,
+                    title=p.get("title"),
+                    text=p.get("text"),
+                    author=p.get("author"),
+                    post_type=p.get("post_type"),
+                    engagement_json=json.dumps(p.get("engagement")) if p.get("engagement") is not None else None,
+                    media_json=json.dumps(p.get("media")) if p.get("media") is not None else None,
+                    published_at=_parse_dt(p.get("published_at")),
+                    scraped_at=_parse_dt(p.get("scraped_at")),
+                    raw_json=json.dumps(p, default=str),
+                )
+            )
+            existing.add(key)
+            new_post_urls.append(post_url)
+            inserted += 1
+
+        session.commit()
+        return {"inserted": inserted, "skipped": skipped, "new_post_urls": new_post_urls}
+
+
+def get_competitor_posts(platform: str = None, competitor: str = None, limit: int = 300) -> list[dict]:
+    """Return previously-scraped competitor posts stored in the DB, newest first."""
+    with Session(engine) as session:
+        query = session.query(CompetitorPost)
+        if platform:
+            query = query.filter(CompetitorPost.platform == platform.lower())
+        if competitor and competitor.lower() != "all":
+            query = query.filter(CompetitorPost.competitor == competitor)
+
+        order_col = func.coalesce(CompetitorPost.published_at, CompetitorPost.scraped_at, CompetitorPost.created_at)
+        rows = query.order_by(order_col.desc()).limit(limit).all()
+
+        return [
+            {
+                "title": r.title,
+                "text": r.text,
+                "platform": r.platform,
+                "post_url": r.post_url,
+                "author": r.author,
+                "post_type": r.post_type,
+                "published_at": r.published_at.isoformat() if r.published_at else None,
+                "scraped_at": r.scraped_at.isoformat() if r.scraped_at else None,
+                "_source_competitor": r.competitor,
+            }
+            for r in rows
+        ]
+
+
+def save_opportunity_suggestions(
+    unserved_themes: list[dict], domain_expansion: list[dict], source_accounts: str = ""
+) -> dict:
+    """
+    Persist LLM-generated opportunity suggestions, inserting only titles not
+    already stored per category (matched case-insensitively). Returns
+    {"inserted": n, "skipped": n, "new_titles": [...]}.
+    """
+    items = [("unserved_theme", i) for i in (unserved_themes or [])] + [
+        ("domain_expansion", i) for i in (domain_expansion or [])
+    ]
+    if not items:
+        return {"inserted": 0, "skipped": 0, "new_titles": []}
+
+    with Session(engine) as session:
+        existing = {
+            (r[0], r[1].strip().lower())
+            for r in session.query(OpportunitySuggestion.category, OpportunitySuggestion.title).all()
+        }
+
+        inserted = 0
+        skipped = 0
+        new_titles = []
+        for category, item in items:
+            title = (item.get("title") or "").strip()
+            if not title:
+                skipped += 1
+                continue
+
+            key = (category, title.lower())
+            if key in existing:
+                skipped += 1
+                continue
+
+            session.add(
+                OpportunitySuggestion(
+                    category=category, title=title, description=item.get("description"), source_accounts=source_accounts
+                )
+            )
+            existing.add(key)
+            new_titles.append(title)
+            inserted += 1
+
+        session.commit()
+        return {"inserted": inserted, "skipped": skipped, "new_titles": new_titles}
+
+
+def get_opportunity_suggestions(limit: int = 200) -> dict:
+    """Return all accumulated opportunity suggestions, grouped by category, newest first."""
+    with Session(engine) as session:
+        rows = session.query(OpportunitySuggestion).order_by(OpportunitySuggestion.created_at.desc()).limit(limit).all()
+
+        result = {"unserved_themes": [], "domain_expansion": []}
+        key_map = {"unserved_theme": "unserved_themes", "domain_expansion": "domain_expansion"}
+        for r in rows:
+            bucket = key_map.get(r.category)
+            if not bucket:
+                continue
+            result[bucket].append(
+                {
+                    "title": r.title,
+                    "description": r.description,
+                    "source_accounts": r.source_accounts,
+                    "created_at": r.created_at.isoformat() if r.created_at else None,
+                }
+            )
+        return result
+
+
 def update_scheduled_post_status(user_id: int, post_id: int, status: str) -> bool:
     """Update status of a scheduled post."""
     from sqlalchemy.orm import Session
+
     with Session(engine) as session:
-        post = session.query(ScheduledPost).filter(
-            ScheduledPost.id == post_id,
-            ScheduledPost.user_id == user_id
-        ).first()
+        post = (
+            session.query(ScheduledPost).filter(ScheduledPost.id == post_id, ScheduledPost.user_id == user_id).first()
+        )
 
         if post:
             post.status = status
             session.commit()
             return True
         return False
-
-

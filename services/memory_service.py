@@ -1,12 +1,14 @@
 try:
     import chromadb
     from chromadb.config import Settings
+
     HAS_CHROMA = True
 except ImportError:
     HAS_CHROMA = False
-from config import Config
-import json
 import uuid
+
+from config import Config
+
 
 class MemoryService:
     def __init__(self):
@@ -16,12 +18,10 @@ class MemoryService:
             return
         try:
             self.client = chromadb.PersistentClient(
-                path=Config.CHROMA_PERSIST_DIR,
-                settings=Settings(anonymized_telemetry=False)
+                path=Config.CHROMA_PERSIST_DIR, settings=Settings(anonymized_telemetry=False)
             )
             self.collection = self.client.get_or_create_collection(
-                name="social_media_memory",
-                metadata={"hnsw:space": "cosine"}
+                name="social_media_memory", metadata={"hnsw:space": "cosine"}
             )
             self.enabled = True
         except Exception as e:
@@ -33,11 +33,7 @@ class MemoryService:
         if not self.enabled or not text:
             return
         try:
-            self.collection.add(
-                ids=[str(content_id)],
-                documents=[text],
-                metadatas=[metadata or {}]
-            )
+            self.collection.add(ids=[str(content_id)], documents=[text], metadatas=[metadata or {}])
         except Exception as e:
             print(f"[MemoryService] Error storing content: {e}")
 
@@ -45,33 +41,29 @@ class MemoryService:
         """Vectorize and store a completed campaign run into memory"""
         if not self.enabled or not story:
             return
-        
+
         try:
             # Build representative document combining story + sample captions
             sample_captions = []
             if isinstance(content, dict):
-                for p in ['facebook', 'instagram', 'linkedin']:
-                    if p in content and 'caption' in content[p]:
-                        cap = content[p]['caption'].get('primary_caption')
+                for p in ["facebook", "instagram", "linkedin"]:
+                    if p in content and "caption" in content[p]:
+                        cap = content[p]["caption"].get("primary_caption")
                         if cap:
                             sample_captions.append(f"[{p.upper()}]: {cap}")
-            
+
             doc_text = f"Brief: {story}\n" + "\n".join(sample_captions)
             doc_id = f"run_{run_id or uuid.uuid4()}"
-            
+
             meta = {
                 "type": "campaign_run",
                 "run_id": str(run_id or ""),
                 "user_id": str(user_id or ""),
                 "tone": str(tone or ""),
-                "platforms": ",".join(platforms) if isinstance(platforms, list) else str(platforms or "")
+                "platforms": ",".join(platforms) if isinstance(platforms, list) else str(platforms or ""),
             }
-            
-            self.collection.add(
-                ids=[doc_id],
-                documents=[doc_text],
-                metadatas=[meta]
-            )
+
+            self.collection.add(ids=[doc_id], documents=[doc_text], metadatas=[meta])
             print(f"[MemoryService] Successfully indexed campaign run {doc_id} into ChromaDB memory.")
         except Exception as e:
             print(f"[MemoryService] Failed to index campaign run: {e}")
@@ -80,30 +72,24 @@ class MemoryService:
         """Retrieve relevant past campaign context for prompt injection (RAG)"""
         if not self.enabled or not query_text:
             return []
-        
+
         try:
             where_filter = None
             if user_id:
                 where_filter = {"user_id": str(user_id)}
-            
-            kwargs = {
-                "query_texts": [query_text],
-                "n_results": min(n_results, 5)
-            }
+
+            kwargs = {"query_texts": [query_text], "n_results": min(n_results, 5)}
             if where_filter:
                 kwargs["where"] = where_filter
 
             results = self.collection.query(**kwargs)
-            
-            documents = results.get('documents', [[]])[0]
-            metadatas = results.get('metadatas', [[]])[0]
-            
+
+            documents = results.get("documents", [[]])[0]
+            metadatas = results.get("metadatas", [[]])[0]
+
             retrieved = []
             for doc, meta in zip(documents, metadatas):
-                retrieved.append({
-                    "content": doc,
-                    "metadata": meta
-                })
+                retrieved.append({"content": doc, "metadata": meta})
             return retrieved
         except Exception as e:
             print(f"[MemoryService] Context retrieval failed: {e}")
@@ -115,11 +101,9 @@ class MemoryService:
             return ["#VortexSocial", "#ViralMarketing", "#SocialStrategy"]
         try:
             results = self.collection.query(
-                query_texts=[category or "trending hashtags"],
-                n_results=2,
-                where={"type": "hashtag"}
+                query_texts=[category or "trending hashtags"], n_results=2, where={"type": "hashtag"}
             )
-            docs = results.get('documents', [[]])[0]
+            docs = results.get("documents", [[]])[0]
             if docs:
                 return docs
         except Exception as e:
@@ -130,11 +114,13 @@ class MemoryService:
         """Format retrieved memories into prompt section for agents"""
         if not retrieved_items:
             return ""
-        
+
         lines = ["\n--- RELEVANT BRAND & CAMPAIGN MEMORY (PAST HIGH-PERFORMING CONTEXT) ---"]
         for idx, item in enumerate(retrieved_items, 1):
             lines.append(f"Memory #{idx}: {item['content']}")
-        lines.append("Instructions: Use the brand voice, themes, and winning patterns above for consistency.\n--- END MEMORY CONTEXT ---\n")
+        lines.append(
+            "Instructions: Use the brand voice, themes, and winning patterns above for consistency.\n--- END MEMORY CONTEXT ---\n"
+        )
         return "\n".join(lines)
 
     def get_memory_graph_data(self, user_id=None):
@@ -145,7 +131,7 @@ class MemoryService:
                 "label": "Brand RAG Memory Core",
                 "type": "core",
                 "group": "core",
-                "info": "Central ChromaDB Vector Store holding brand embeddings"
+                "info": "Central ChromaDB Vector Store holding brand embeddings",
             }
         ]
         edges = []
@@ -154,7 +140,7 @@ class MemoryService:
         platforms_map = {
             "facebook": {"id": "plat_facebook", "label": "Facebook", "type": "platform", "group": "platform"},
             "instagram": {"id": "plat_instagram", "label": "Instagram", "type": "platform", "group": "platform"},
-            "linkedin": {"id": "plat_linkedin", "label": "LinkedIn", "type": "platform", "group": "platform"}
+            "linkedin": {"id": "plat_linkedin", "label": "LinkedIn", "type": "platform", "group": "platform"},
         }
         added_nodes = {"core_rag"}
 
@@ -190,16 +176,18 @@ class MemoryService:
 
                     node_id = f"mem_{doc_id}"
                     if node_id not in added_nodes:
-                        nodes.append({
-                            "id": node_id,
-                            "label": story_excerpt or f"Run #{run_id}",
-                            "type": "campaign",
-                            "group": "campaign",
-                            "full_text": doc_text,
-                            "tone": tone,
-                            "platforms": platforms_str,
-                            "run_id": run_id
-                        })
+                        nodes.append(
+                            {
+                                "id": node_id,
+                                "label": story_excerpt or f"Run #{run_id}",
+                                "type": "campaign",
+                                "group": "campaign",
+                                "full_text": doc_text,
+                                "tone": tone,
+                                "platforms": platforms_str,
+                                "run_id": run_id,
+                            }
+                        )
                         added_nodes.add(node_id)
                         edges.append({"from": "core_rag", "to": node_id, "label": "stores", "type": "memory"})
 
@@ -207,12 +195,14 @@ class MemoryService:
                     if tone and tone != "Auto":
                         tone_node_id = f"tone_{tone.lower()}"
                         if tone_node_id not in added_nodes:
-                            nodes.append({
-                                "id": tone_node_id,
-                                "label": f"{tone.capitalize()} Tone",
-                                "type": "tone",
-                                "group": "tone"
-                            })
+                            nodes.append(
+                                {
+                                    "id": tone_node_id,
+                                    "label": f"{tone.capitalize()} Tone",
+                                    "type": "tone",
+                                    "group": "tone",
+                                }
+                            )
                             added_nodes.add(tone_node_id)
                         edges.append({"from": node_id, "to": tone_node_id, "label": "uses_tone", "type": "tone"})
 
@@ -221,7 +211,14 @@ class MemoryService:
                         p_list = [p.strip().lower() for p in platforms_str.split(",") if p.strip()]
                         for p in p_list:
                             if p in platforms_map:
-                                edges.append({"from": node_id, "to": platforms_map[p]["id"], "label": "targets", "type": "platform"})
+                                edges.append(
+                                    {
+                                        "from": node_id,
+                                        "to": platforms_map[p]["id"],
+                                        "label": "targets",
+                                        "type": "platform",
+                                    }
+                                )
 
             except Exception as err:
                 print(f"[MemoryService] get_memory_graph_data warning: {err}")
@@ -230,6 +227,7 @@ class MemoryService:
         if fetched_count == 0:
             try:
                 from db import get_all_history
+
                 db_runs = get_all_history(limit=30, user_id=user_id)
                 fetched_count = len(db_runs)
 
@@ -244,28 +242,32 @@ class MemoryService:
 
                     node_id = f"mem_db_{run_id}"
                     if node_id not in added_nodes:
-                        nodes.append({
-                            "id": node_id,
-                            "label": story_excerpt or f"Run #{run_id}",
-                            "type": "campaign",
-                            "group": "campaign",
-                            "full_text": f"Brief: {story}\nTone: {tone}\nPlatforms: {platforms_str}",
-                            "tone": tone,
-                            "platforms": platforms_str,
-                            "run_id": run_id
-                        })
+                        nodes.append(
+                            {
+                                "id": node_id,
+                                "label": story_excerpt or f"Run #{run_id}",
+                                "type": "campaign",
+                                "group": "campaign",
+                                "full_text": f"Brief: {story}\nTone: {tone}\nPlatforms: {platforms_str}",
+                                "tone": tone,
+                                "platforms": platforms_str,
+                                "run_id": run_id,
+                            }
+                        )
                         added_nodes.add(node_id)
                         edges.append({"from": "core_rag", "to": node_id, "label": "stores", "type": "memory"})
 
                     if tone and tone != "Auto":
                         tone_node_id = f"tone_{tone.lower()}"
                         if tone_node_id not in added_nodes:
-                            nodes.append({
-                                "id": tone_node_id,
-                                "label": f"{tone.capitalize()} Tone",
-                                "type": "tone",
-                                "group": "tone"
-                            })
+                            nodes.append(
+                                {
+                                    "id": tone_node_id,
+                                    "label": f"{tone.capitalize()} Tone",
+                                    "type": "tone",
+                                    "group": "tone",
+                                }
+                            )
                             added_nodes.add(tone_node_id)
                         edges.append({"from": node_id, "to": tone_node_id, "label": "uses_tone", "type": "tone"})
 
@@ -273,7 +275,14 @@ class MemoryService:
                         for p in platforms:
                             p_key = p.strip().lower()
                             if p_key in platforms_map:
-                                edges.append({"from": node_id, "to": platforms_map[p_key]["id"], "label": "targets", "type": "platform"})
+                                edges.append(
+                                    {
+                                        "from": node_id,
+                                        "to": platforms_map[p_key]["id"],
+                                        "label": "targets",
+                                        "type": "platform",
+                                    }
+                                )
 
             except Exception as db_err:
                 print(f"[MemoryService] DB history fallback warning: {db_err}")
@@ -283,12 +292,7 @@ class MemoryService:
             "total_memories": fetched_count,
             "vector_space": "ChromaDB Cosine HNSW" if self.enabled else "RAG DB Memory Store",
             "total_nodes": len(nodes),
-            "total_edges": len(edges)
+            "total_edges": len(edges),
         }
 
-        return {
-            "success": True,
-            "nodes": nodes,
-            "edges": edges,
-            "summary": summary
-        }
+        return {"success": True, "nodes": nodes, "edges": edges, "summary": summary}

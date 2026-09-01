@@ -1,0 +1,40 @@
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [
+    "soical-media-ai",
+    "StradIT",
+    "chroma_db",
+    "__pycache__",
+]
+
+[tool.ruff.lint]
+# E4/E7/E9 = pycodestyle error subset, F = pyflakes, I = import sorting, UP = pyupgrade.
+# E501 (line-too-long) is intentionally left unselected: the formatter governs
+# practical line width, and this codebase has many long prompt/URL/SQL strings
+# that aren't worth force-wrapping.
+select = ["E4", "E7", "E9", "F", "I", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["agents", "api", "auth", "services", "config", "db", "app", "scheduler_thread"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.coverage.run]
+source = ["."]
+omit = [
+    "tests/*",
+    "soical-media-ai/*",
+    "StradIT/*",
+    "chroma_db/*",
+    "scripts/*",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+]

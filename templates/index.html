@@ -168,6 +168,9 @@
                 <button type="button" class="btn-memory-graph-trigger" id="openMemoryGraphBtn" title="View Interactive RAG Memory Knowledge Graph">
                     <i class="fas fa-project-diagram me-1"></i>Memory Graph
                 </button>
+                <a href="/competitor-dashboard" class="btn btn-sm btn-outline-primary rounded-pill fw-bold text-decoration-none" title="Open Competitor Dashboard" style="font-size: 0.75rem; padding: 4px 10px;">
+                    <i class="fas fa-chart-line me-1"></i>Competitor Dashboard
+                </a>
                 <span class="badge-enterprise"><i class="fas fa-shield-halved me-1"></i>Enterprise AI</span>
                 <span class="badge-version">v2.5 Critic</span>
             </div>
@@ -250,6 +253,10 @@
                                 <input type="checkbox" value="linkedin" id="liCheck" checked>
                                 <span class="chip-content"><i class="fab fa-linkedin me-1 color-li"></i>LinkedIn</span>
                             </label>
+                            <label class="platform-chip-sm" for="ytCheck">
+                                <input type="checkbox" value="youtube" id="ytCheck" checked>
+                                <span class="chip-content"><i class="fab fa-youtube me-1 color-yt"></i>YouTube</span>
+                            </label>
                         </div>
                     </div>
 
@@ -267,7 +274,7 @@
                         </select>
                     </div>
 
-                    <div class="config-divider"></div>
+
 
                     <!-- Tone Selection -->
                     <div class="config-group">
@@ -288,16 +295,16 @@
                     <div class="config-group">
                         <span class="config-label"><i class="fas fa-photo-film me-1"></i>Output:</span>
                         <div class="media-chips-inline">
-                            <label class="media-chip-sm" for="mediaNone">
-                                <input type="radio" name="mediaType" value="none" id="mediaNone" checked>
-                                <span class="chip-content">Text Only</span>
+                            <label class="media-chip-sm" for="mediaText">
+                                <input type="checkbox" name="outputOptions" value="text" id="mediaText" checked>
+                                <span class="chip-content">Text (Caption)</span>
                             </label>
                             <label class="media-chip-sm" for="mediaImage">
-                                <input type="radio" name="mediaType" value="image" id="mediaImage">
+                                <input type="checkbox" name="outputOptions" value="image" id="mediaImage">
                                 <span class="chip-content"><i class="fas fa-image me-1 text-primary"></i>Image</span>
                             </label>
                             <label class="media-chip-sm" for="mediaVideo">
-                                <input type="radio" name="mediaType" value="video" id="mediaVideo">
+                                <input type="checkbox" name="outputOptions" value="video" id="mediaVideo">
                                 <span class="chip-content"><i class="fas fa-video me-1 text-purple"></i>Video</span>
                             </label>
                         </div>
@@ -341,7 +348,7 @@
                         
                         <button type="button" id="generateBtn" class="btn-chat-send" onclick="generateContent()" title="Send & Generate Content">
                             <i class="fas fa-paper-plane me-1"></i>
-                            <span>Generate</span>
+                            <span class="d-none d-md-inline ms-1">Generate</span>
                         </button>
                     </div>
                 </div>
@@ -1127,8 +1134,10 @@
     </div>
 </div>
 
+
+
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app_v2.js') }}"></script>
 </body>
 </html>
