@@ -1,7 +1,15 @@
-from flask import Blueprint, jsonify, redirect, render_template, request, session, url_for
+from flask import (
+    Blueprint,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
+)
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from auth.utils import get_current_user_id, login_required_page
+from auth.utils import get_current_user_id
 from db import create_user, get_user_by_email, get_user_by_id
 
 auth_bp = Blueprint("auth", __name__)

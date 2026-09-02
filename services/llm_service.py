@@ -1,6 +1,8 @@
-import os
-import openai
 import json
+import os
+
+import openai
+
 from config import Config
 
 
@@ -9,43 +11,38 @@ class LLMService:
 
     def __init__(self):
         api_key = Config.OPENAI_API_KEY
-        self.openrouter_key = api_key if (api_key and (api_key.startswith("sk-or-") or "openrouter" in api_key.lower())) else None
+        self.openrouter_key = (
+            api_key if (api_key and (api_key.startswith("sk-or-") or "openrouter" in api_key.lower())) else None
+        )
         self.openai_key = api_key if (api_key and not self.openrouter_key) else None
 
         # AWS Bedrock initialization
         self.bedrock_client = None
-        self.bedrock_model = getattr(Config, 'BEDROCK_TEXT_MODEL', 'amazon.nova-lite-v1:0')
-        
-        aws_access_key = getattr(Config, 'AWS_ACCESS_KEY_ID', None)
-        aws_secret_key = getattr(Config, 'AWS_SECRET_ACCESS_KEY', None)
-        aws_profile = getattr(Config, 'AWS_PROFILE', None)
-        aws_region = getattr(Config, 'AWS_REGION', 'us-east-1')
-        
+        self.bedrock_model = getattr(Config, "BEDROCK_TEXT_MODEL", "amazon.nova-lite-v1:0")
+
+        aws_access_key = getattr(Config, "AWS_ACCESS_KEY_ID", None)
+        aws_secret_key = getattr(Config, "AWS_SECRET_ACCESS_KEY", None)
+        aws_profile = getattr(Config, "AWS_PROFILE", None)
+        aws_region = getattr(Config, "AWS_REGION", "us-east-1")
+
         if aws_profile or (aws_access_key and aws_secret_key):
             try:
                 import boto3
                 from botocore.config import Config as BotoConfig
-                
+
                 session_kwargs = {}
                 if aws_profile:
-                    session_kwargs['profile_name'] = aws_profile
+                    session_kwargs["profile_name"] = aws_profile
                 elif aws_access_key and aws_secret_key:
-                    session_kwargs['aws_access_key_id'] = aws_access_key
-                    session_kwargs['aws_secret_access_key'] = aws_secret_key
-                
+                    session_kwargs["aws_access_key_id"] = aws_access_key
+                    session_kwargs["aws_secret_access_key"] = aws_secret_key
+
                 if aws_region:
-                    session_kwargs['region_name'] = aws_region
-                
+                    session_kwargs["region_name"] = aws_region
+
                 session = boto3.Session(**session_kwargs)
-                boto_config = BotoConfig(
-                    read_timeout=120,
-                    connect_timeout=30,
-                    retries={"max_attempts": 3}
-                )
-                self.bedrock_client = session.client(
-                    "bedrock-runtime",
-                    config=boto_config
-                )
+                boto_config = BotoConfig(read_timeout=120, connect_timeout=30, retries={"max_attempts": 3})
+                self.bedrock_client = session.client("bedrock-runtime", config=boto_config)
                 print(f"[LLM Service] AWS Bedrock client initialized successfully using model {self.bedrock_model}.")
             except Exception as e:
                 print(f"[LLM Service] Bedrock initialization failed: {e}")
@@ -53,43 +50,39 @@ class LLMService:
         self.providers = []
 
         if self.bedrock_client:
-            self.providers.append({
-                "name": "bedrock",
-                "client": self.bedrock_client,
-                "model": self.bedrock_model
-            })
+            self.providers.append({"name": "bedrock", "client": self.bedrock_client, "model": self.bedrock_model})
 
         if self.openrouter_key:
-            self.providers.append({
-                "name": "openrouter",
-                "client": openai.OpenAI(api_key=self.openrouter_key, base_url="https://openrouter.ai/api/v1"),
-                "model": Config.AGENTSCOPE_MODEL
-            })
+            self.providers.append(
+                {
+                    "name": "openrouter",
+                    "client": openai.OpenAI(api_key=self.openrouter_key, base_url="https://openrouter.ai/api/v1"),
+                    "model": Config.AGENTSCOPE_MODEL,
+                }
+            )
 
         if self.openai_key or (api_key and not self.openrouter_key):
-            self.providers.append({
-                "name": "openai",
-                "client": openai.OpenAI(api_key=api_key),
-                "model": Config.AGENTSCOPE_MODEL
-            })
+            self.providers.append(
+                {"name": "openai", "client": openai.OpenAI(api_key=api_key), "model": Config.AGENTSCOPE_MODEL}
+            )
 
-        google_key = getattr(Config, 'GOOGLE_API_KEY', None) or os.getenv('GOOGLE_API_KEY')
+        google_key = getattr(Config, "GOOGLE_API_KEY", None) or os.getenv("GOOGLE_API_KEY")
         if google_key:
             print("[LLM Service] Initialized Gemini Provider via OpenAI compat.")
-            self.providers.append({
-                "name": "gemini",
-                "client": openai.OpenAI(api_key=google_key, base_url="https://generativelanguage.googleapis.com/v1beta/openai/"),
-                "model": "gemini-3.1-flash-lite"
-            })
+            self.providers.append(
+                {
+                    "name": "gemini",
+                    "client": openai.OpenAI(
+                        api_key=google_key, base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+                    ),
+                    "model": "gemini-3.1-flash-lite",
+                }
+            )
 
-        use_mock = getattr(Config, 'USE_MOCK_LLM', False)
+        use_mock = getattr(Config, "USE_MOCK_LLM", False)
         if use_mock or not self.providers:
             print("[LLM Service] Initialized Mock LLM Provider (Offline / Zero-Cost Mode).")
-            mock_entry = {
-                "name": "mock",
-                "client": None,
-                "model": "mock-llm-v1"
-            }
+            mock_entry = {"name": "mock", "client": None, "model": "mock-llm-v1"}
             if use_mock:
                 self.providers.insert(0, mock_entry)
             else:
@@ -113,7 +106,7 @@ class LLMService:
                         "content_type": "Announcement Banner",
                         "story": "🚀 Exciting News! We are launching our next-gen Social Media AI Studio today.",
                         "caption": "🚀 Exciting News! We are launching our next-gen Social Media AI Studio today. Effortlessly generate, schedule, and publish posts to Facebook, Instagram, and LinkedIn. #AI #Innovation #ProductLaunch #Marketing",
-                        "image_prompt": "A modern futuristic AI workspace dashboard glowing in purple and emerald colors, crisp digital art style"
+                        "image_prompt": "A modern futuristic AI workspace dashboard glowing in purple and emerald colors, crisp digital art style",
                     },
                     {
                         "day": 2,
@@ -122,7 +115,7 @@ class LLMService:
                         "content_type": "Feature Highlight Video",
                         "story": "Discover how AI-powered auto-scheduling saves creators over 20 hours per week.",
                         "caption": "Save 20+ hours every week with automated multi-channel social scheduling! 🕒 Streamline your brand presence across Facebook, Instagram, and LinkedIn in one click. Try it now! #Automation #SocialMedia #GrowthHacks",
-                        "video_prompt": "Cinematic animation showing digital calendar scheduling posts automatically across mobile screens, 4k ultra realistic"
+                        "video_prompt": "Cinematic animation showing digital calendar scheduling posts automatically across mobile screens, 4k ultra realistic",
                     },
                     {
                         "day": 3,
@@ -131,9 +124,9 @@ class LLMService:
                         "content_type": "Case Study & Testimonial",
                         "story": "How top agencies scaled their client social engagement by 300% using VortexSocial AI.",
                         "caption": "How top agencies scaled client social engagement by 300% using VortexSocial AI 📊 Read the full case study to optimize your strategy today. #CaseStudy #B2B #DigitalGrowth",
-                        "image_prompt": "Professional corporate infographic showing upward growth chart with vibrant green metrics"
-                    }
-                ]
+                        "image_prompt": "Professional corporate infographic showing upward growth chart with vibrant green metrics",
+                    },
+                ],
             }
             return json.dumps(mock_campaign, indent=2)
 
@@ -158,12 +151,12 @@ class LLMService:
                 "total_tokens": 0,
                 "cost_usd": 0.0,
                 "provider": "mock",
-                "model": "mock-llm-v1"
+                "model": "mock-llm-v1",
             }
 
         in_tokens = max(0, int(in_tokens or 0))
         out_tokens = max(0, int(out_tokens or 0))
-        
+
         # Rates per 1,000 tokens
         if "nova-lite" in model_name.lower():
             rate_in, rate_out = 0.00006, 0.00024
@@ -182,7 +175,7 @@ class LLMService:
             "total_tokens": in_tokens + out_tokens,
             "cost_usd": round(cost, 6),
             "provider": provider_name,
-            "model": model_name
+            "model": model_name,
         }
 
     def generate(self, system_prompt, user_prompt, temperature=0.7, max_tokens=1000, return_usage=False):
@@ -202,27 +195,20 @@ class LLMService:
                         inference_config["temperature"] = temperature
                     if max_tokens is not None:
                         inference_config["maxTokens"] = max_tokens
-                    
+
                     response = provider["client"].converse(
                         modelId=provider["model"],
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": [{"text": user_prompt}]
-                            }
-                        ],
-                        system=[
-                            {"text": system_prompt}
-                        ],
-                        inferenceConfig=inference_config
+                        messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+                        system=[{"text": system_prompt}],
+                        inferenceConfig=inference_config,
                     )
-                    text_out = response['output']['message']['content'][0]['text']
-                    
-                    usage_raw = response.get('usage', {})
-                    in_t = usage_raw.get('inputTokens', len(system_prompt + user_prompt) // 4)
-                    out_t = usage_raw.get('outputTokens', len(text_out) // 4)
+                    text_out = response["output"]["message"]["content"][0]["text"]
+
+                    usage_raw = response.get("usage", {})
+                    in_t = usage_raw.get("inputTokens", len(system_prompt + user_prompt) // 4)
+                    out_t = usage_raw.get("outputTokens", len(text_out) // 4)
                     usage_metrics = self._calculate_cost("bedrock", provider["model"], in_t, out_t)
-                    
+
                     if return_usage:
                         return text_out, usage_metrics
                     return text_out
@@ -237,16 +223,22 @@ class LLMService:
                         model=provider["model"],
                         messages=[
                             {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt}
+                            {"role": "user", "content": user_prompt},
                         ],
                         temperature=temperature,
-                        max_tokens=max_tokens
+                        max_tokens=max_tokens,
                     )
                     text_out = response.choices[0].message.content
-                    
-                    usage_raw = getattr(response, 'usage', None)
-                    in_t = getattr(usage_raw, 'prompt_tokens', len(system_prompt + user_prompt) // 4) if usage_raw else len(system_prompt + user_prompt) // 4
-                    out_t = getattr(usage_raw, 'completion_tokens', len(text_out) // 4) if usage_raw else len(text_out) // 4
+
+                    usage_raw = getattr(response, "usage", None)
+                    in_t = (
+                        getattr(usage_raw, "prompt_tokens", len(system_prompt + user_prompt) // 4)
+                        if usage_raw
+                        else len(system_prompt + user_prompt) // 4
+                    )
+                    out_t = (
+                        getattr(usage_raw, "completion_tokens", len(text_out) // 4) if usage_raw else len(text_out) // 4
+                    )
                     usage_metrics = self._calculate_cost(provider["name"], provider["model"], in_t, out_t)
 
                     if return_usage:
@@ -261,7 +253,7 @@ class LLMService:
         """Parse JSON response resiliently using json_repair to handle invalid control characters, unescaped quotes, and formatting glitches."""
         if not content_str:
             return {}
-        
+
         cleaned = content_str.strip()
         if cleaned.startswith("```json"):
             cleaned = cleaned.split("```json")[1].split("```")[0].strip()
@@ -277,6 +269,7 @@ class LLMService:
         # Attempt 2: json_repair (fixes unescaped inner quotes, missing commas & control characters)
         try:
             import json_repair
+
             repaired = json_repair.repair_json(cleaned, return_objects=True)
             if isinstance(repaired, dict):
                 return repaired
@@ -286,6 +279,7 @@ class LLMService:
         # Attempt 3: Demjson3 fallback
         try:
             import demjson3
+
             res = demjson3.decode(cleaned)
             if isinstance(res, dict):
                 return res
@@ -304,31 +298,24 @@ class LLMService:
                     json_system_prompt = system_prompt
                     if "json" not in system_prompt.lower():
                         json_system_prompt += "\n\nYou must return your response ONLY as a valid JSON object. Do not include any explanations or markdown formatting outside the JSON."
-                    
+
                     inference_config = {}
                     if temperature is not None:
                         inference_config["temperature"] = temperature
                     if max_tokens is not None:
                         inference_config["maxTokens"] = max_tokens
-                    
+
                     response = provider["client"].converse(
                         modelId=provider["model"],
-                        messages=[
-                            {
-                                "role": "user",
-                                "content": [{"text": user_prompt}]
-                            }
-                        ],
-                        system=[
-                            {"text": json_system_prompt}
-                        ],
-                        inferenceConfig=inference_config
+                        messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+                        system=[{"text": json_system_prompt}],
+                        inferenceConfig=inference_config,
                     )
-                    content = response['output']['message']['content'][0]['text']
-                    
-                    usage_raw = response.get('usage', {})
-                    in_t = usage_raw.get('inputTokens', len(json_system_prompt + user_prompt) // 4)
-                    out_t = usage_raw.get('outputTokens', len(content) // 4)
+                    content = response["output"]["message"]["content"][0]["text"]
+
+                    usage_raw = response.get("usage", {})
+                    in_t = usage_raw.get("inputTokens", len(json_system_prompt + user_prompt) // 4)
+                    out_t = usage_raw.get("outputTokens", len(content) // 4)
                     usage_metrics = self._calculate_cost("bedrock", provider["model"], in_t, out_t)
                 elif provider["name"] == "mock":
                     content = self._generate_mock_response(system_prompt, user_prompt)
@@ -338,18 +325,24 @@ class LLMService:
                         "model": provider["model"],
                         "messages": [
                             {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt}
+                            {"role": "user", "content": user_prompt},
                         ],
                         "temperature": temperature,
-                        "max_tokens": max_tokens
+                        "max_tokens": max_tokens,
                     }
                     kwargs["response_format"] = {"type": "json_object"}
                     response = provider["client"].chat.completions.create(**kwargs)
                     content = response.choices[0].message.content
 
-                    usage_raw = getattr(response, 'usage', None)
-                    in_t = getattr(usage_raw, 'prompt_tokens', len(system_prompt + user_prompt) // 4) if usage_raw else len(system_prompt + user_prompt) // 4
-                    out_t = getattr(usage_raw, 'completion_tokens', len(content) // 4) if usage_raw else len(content) // 4
+                    usage_raw = getattr(response, "usage", None)
+                    in_t = (
+                        getattr(usage_raw, "prompt_tokens", len(system_prompt + user_prompt) // 4)
+                        if usage_raw
+                        else len(system_prompt + user_prompt) // 4
+                    )
+                    out_t = (
+                        getattr(usage_raw, "completion_tokens", len(content) // 4) if usage_raw else len(content) // 4
+                    )
                     usage_metrics = self._calculate_cost(provider["name"], provider["model"], in_t, out_t)
 
                 content_str = content.strip()

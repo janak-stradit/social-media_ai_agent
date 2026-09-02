@@ -642,9 +642,9 @@ $(document).ready(function() {
         return `<div class="text-center text-muted py-5"><i class="fas fa-hourglass-half mb-3" style="font-size: 1.75rem; opacity: 0.4;"></i><p class="small m-0">${msg}</p></div>`;
     }
 
-    function renderAssetItems(assetContent) {
+    function renderAssetItems(assetContent, pipelineId = null) {
         const items = Array.isArray(assetContent) ? assetContent : [assetContent];
-        return items.map(a => {
+        return items.map((a, index) => {
             const type = (a.type || '').toLowerCase();
             if (type.includes('video')) {
                 return `<video controls class="w-100 rounded-3 mb-2" src="${a.content}"></video>`;
@@ -652,7 +652,15 @@ $(document).ready(function() {
             if (type.includes('image')) {
                 return `<img src="${a.content}" class="w-100 rounded-3 mb-2" alt="Generated asset">`;
             }
-            return `<div class="bg-light rounded-3 p-3 small mb-2" style="white-space: pre-wrap;">${a.content}</div>`;
+            return `
+                <div class="position-relative mb-2">
+                    <div class="d-flex justify-content-start gap-3 position-absolute" style="bottom: 15px; left: 20px; font-size: 1.1rem; z-index: 10;">
+                        <i class="far fa-copy text-muted" style="cursor:pointer; transition: color 0.2s;" onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="copyCaptionText(this)" title="Copy Caption"></i>
+                        ${pipelineId ? `<i class="fas fa-sync-alt text-muted" style="cursor:pointer; transition: color 0.2s;" onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="regenerateModalCaptionText(${pipelineId}, ${index}, event)" title="Regenerate Caption"></i>` : ''}
+                    </div>
+                    <div class="bg-light rounded-3 p-3 pb-5 small caption-text-content" style="white-space: pre-wrap; font-size: 0.875rem; line-height: 1.65; color: #334155;">${a.content}</div>
+                </div>
+            `;
         }).join('');
     }
 
@@ -702,7 +710,7 @@ $(document).ready(function() {
             if (!pipeline.assetContent) return emptyStageState('Content has not been generated yet.');
             return `
                 <h6 class="fw-bold text-primary mb-3"><i class="fas fa-magic me-2"></i>Content Generated ${pipeline.assetType ? `<span class="badge bg-light text-dark border ms-1">${pipeline.assetType}</span>` : ''}</h6>
-                <div style="max-height: 75vh; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent)}</div>
+                <div style="max-height: 75vh; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent, pipeline.id)}</div>
                 <div class="d-flex gap-2">
                     <button class="btn btn-sm btn-outline-danger fw-bold flex-grow-1" onclick="rejectPipelineAsset(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject Asset</button>
                     <button class="btn btn-sm btn-success fw-bold flex-grow-1" onclick="approvePipelineAsset(${pipeline.id})"><i class="fas fa-check me-1"></i>Approve Asset</button>
@@ -714,7 +722,7 @@ $(document).ready(function() {
             return `
                 <h6 class="fw-bold text-success mb-3"><i class="fas fa-thumbs-up me-2"></i>Asset Approved</h6>
                 <p class="small text-muted">This asset was reviewed and approved for publishing.</p>
-                ${pipeline.assetContent ? `<div style="max-height: 320px; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent)}</div>` : ''}
+                ${pipeline.assetContent ? `<div style="max-height: 320px; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent, pipeline.id)}</div>` : ''}
                 ${pipeline.status === 'approved' ? `
                     <button class="btn btn-dark fw-bold w-100 py-2 mt-2" onclick="publishModalPipelineContent(${pipeline.id})" id="modalPublishBtn">
                         <i class="fas fa-paper-plane me-2"></i>Publish to Platforms
@@ -833,7 +841,15 @@ $(document).ready(function() {
             
             let outHtml = '';
             if (item.type === 'Text (Caption)') {
-                outHtml = `<div class="p-3 text-dark" style="background-color: #f8fafc; border-radius: 8px; max-height: calc(100vh - 340px); min-height: 150px; overflow-y: auto !important; white-space: pre-wrap; font-size: 0.875rem; line-height: 1.65; color: #334155;">${item.content}</div>`;
+                outHtml = `
+                    <div class="position-relative">
+                        <div class="d-flex justify-content-start gap-3 position-absolute" style="bottom: 15px; left: 20px; font-size: 1.1rem; z-index: 10;">
+                            <i class="far fa-copy text-muted" style="cursor:pointer; transition: color 0.2s;" onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="copyCaptionText(this)" title="Copy Caption"></i>
+                            <i class="fas fa-sync-alt text-muted" style="cursor:pointer; transition: color 0.2s;" onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="regenerateCaptionText(${index}, event)" title="Regenerate Caption"></i>
+                        </div>
+                        <div class="p-3 pb-5 text-dark caption-text-content" style="background-color: #f8fafc; border-radius: 8px; max-height: calc(100vh - 340px); min-height: 150px; overflow-y: auto !important; white-space: pre-wrap; font-size: 0.875rem; line-height: 1.65; color: #334155;">${item.content}</div>
+                    </div>
+                `;
             } else if (item.type === 'image') {
                 outHtml = `<img src="${item.content}" class="d-block w-100 rounded-top" style="object-fit: cover; max-height: 350px;">
                            <div class="p-3 bg-light border-top"><p class="small text-muted m-0"><strong>Caption:</strong> ${item.caption}</p></div>`;
@@ -1457,3 +1473,129 @@ $(document).ready(function() {
             });
     };
 });
+
+// Caption Action Utilities
+window.copyCaptionText = function(btnElement) {
+    const textToCopy = $(btnElement).closest('.position-relative').find('.caption-text-content').text();
+    
+    const copySuccess = () => {
+        $(btnElement).removeClass('far fa-copy').addClass('fas fa-check text-success');
+        setTimeout(() => {
+            $(btnElement).removeClass('fas fa-check text-success').addClass('far fa-copy');
+        }, 2000);
+    };
+
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(textToCopy).then(copySuccess).catch(() => fallbackCopy(textToCopy, copySuccess));
+    } else {
+        fallbackCopy(textToCopy, copySuccess);
+    }
+    
+    function fallbackCopy(text, successCb) {
+        let textArea = document.createElement("textarea");
+        textArea.value = text;
+        textArea.style.position = "fixed";
+        textArea.style.left = "-999999px";
+        document.body.appendChild(textArea);
+        textArea.select();
+        try {
+            document.execCommand('copy');
+            successCb();
+        } catch (err) {
+            console.error('Fallback copy failed', err);
+        }
+        document.body.removeChild(textArea);
+    }
+};
+
+window.regenerateModalCaptionText = function(pipelineId, index, event) {
+    const pipelineIndex = window.pipelineHistory.findIndex(p => p.id === pipelineId);
+    if (pipelineIndex === -1) return;
+    const pipeline = window.pipelineHistory[pipelineIndex];
+    const item = pipeline.assetContent[index];
+    const iconElement = $(event.currentTarget);
+    
+    if (iconElement.hasClass('fa-spin')) return;
+    iconElement.addClass('fa-spin text-primary').removeClass('text-muted');
+    
+    const platform = item.platform || 'linkedin';
+    const prompt = item.prompt || '';
+    const combinedStory = `STRATEGY SYNTHESIS:\n${JSON.stringify(pipeline.strategy, null, 2)}\n\nUSER INSTRUCTIONS / CHARACTERS / HOOK:\n${prompt}`;
+
+    $.ajax({
+        url: '/api/generate',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({
+            story: combinedStory,
+            platforms: [platform],
+            selected_outputs: ['text'],
+            include_strategy: false
+        }),
+        success: function(res) {
+            iconElement.removeClass('fa-spin text-primary').addClass('text-muted');
+            if (res.success && res.content && res.content[platform]) {
+                const captions = res.content[platform].caption;
+                pipeline.assetContent[index].content = captions.primary_caption;
+                
+                localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+                showPipelineStageDetail(pipelineIndex, pipeline.status);
+            } else {
+                showToast('Failed to regenerate caption.', 'danger');
+            }
+        },
+        error: function() {
+            iconElement.removeClass('fa-spin text-primary').addClass('text-muted');
+            showToast('Error regenerating caption.', 'danger');
+        }
+    });
+};
+
+window.regenerateCaptionText = function(index, event) {
+    const item = window.currentCarouselAssets[index];
+    const iconElement = $(event.currentTarget);
+    
+    if (iconElement.hasClass('fa-spin')) return;
+    iconElement.addClass('fa-spin text-primary').removeClass('text-muted');
+    
+    let combinedStory = "";
+    let platform = item.platform || 'linkedin';
+    
+    if (window.activePipeline && window.activePipeline.strategy) {
+        combinedStory = `STRATEGY SYNTHESIS:\n${JSON.stringify(window.activePipeline.strategy, null, 2)}\n\nUSER INSTRUCTIONS / CHARACTERS / HOOK:\n${item.prompt || ''}`;
+    } else if (window.lastStrategyData) {
+        combinedStory = `STRATEGY SYNTHESIS:\n${JSON.stringify(window.lastStrategyData, null, 2)}\n\nUSER INSTRUCTIONS / CHARACTERS / HOOK:\n${item.prompt || ''}`;
+    }
+
+    $.ajax({
+        url: '/api/generate',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({
+            story: combinedStory,
+            platforms: [platform],
+            selected_outputs: ['text'],
+            include_strategy: false
+        }),
+        success: function(res) {
+            iconElement.removeClass('fa-spin text-primary').addClass('text-muted');
+            if (res.success && res.content && res.content[platform]) {
+                const captions = res.content[platform].caption;
+                window.currentCarouselAssets[index].content = captions.primary_caption;
+                
+                if (window.activePipeline) {
+                    window.activePipeline.assetContent = window.currentCarouselAssets;
+                    localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+                }
+                
+                renderCarousel(); 
+            } else {
+                showToast('Failed to regenerate caption.', 'danger');
+            }
+        },
+        error: function() {
+            iconElement.removeClass('fa-spin text-primary').addClass('text-muted');
+            showToast('Error regenerating caption.', 'danger');
+        }
+    });
+};

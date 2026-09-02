@@ -1,5 +1,6 @@
 from services.llm_service import LLMService
 
+
 class OpportunityAgent:
     """Agent that identifies content whitespace and product/domain expansion opportunities
     by comparing competitor posts against our own project context."""

@@ -609,8 +609,6 @@ $(document).ready(function () {
 
             // Strategy
             const strat = pData.strategy || {};
-            const bestTime = safeStr(strat.best_time_to_post || strat.posting_schedule || 'Peak Hours');
-            const formatRec = safeStr(strat.content_format || strat.recommended_format || 'Standard Post');
             const reach = safeReach(strat.expected_reach || strat.reach_score);
 
             const cardId = `${msgId}_caption_target_${p}`;
@@ -1063,17 +1061,6 @@ $(document).ready(function () {
     function capitalize(str) {
         if (!str) return '';
         return str.charAt(0).toUpperCase() + str.slice(1);
-    }
-
-    function safeStr(val) {
-        if (val == null) return '—';
-        if (typeof val === 'string') return val;
-        if (typeof val === 'number') return String(val);
-        if (Array.isArray(val)) return val.join(', ');
-        if (typeof val === 'object') {
-            return val.text || val.value || val.time || val.label || val.name || '—';
-        }
-        return String(val);
     }
 
     function safeReach(val) {

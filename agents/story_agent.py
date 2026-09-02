@@ -1,8 +1,9 @@
 from services.llm_service import LLMService
 
+
 class StoryAgent:
     """Agent that analyzes story text and extracts key themes, emotions, and hooks"""
-    
+
     SYSTEM_PROMPT = """You are a Story Analysis Agent. Your job is to deeply analyze a given story or text and extract:
     1. Core themes (3-5 main themes)
     2. Emotional tone (joy, sadness, excitement, inspiration, etc.)
@@ -10,30 +11,30 @@ class StoryAgent:
     4. Target audience segments
     5. Visual imagery descriptions
     6. Call-to-action opportunities
-    
+
     Return ONLY a JSON object with these keys: themes, emotions, hooks, audience, imagery, cta_opportunities"""
-    
+
     def __init__(self):
         self.llm = LLMService()
-    
+
     def analyze(self, story_text, memory_context=None, return_usage=False):
         """Analyze story and return structured insights + usage"""
         user_prompt = f"Analyze this story and return structured insights:\n\n{story_text}"
         if memory_context:
             user_prompt += f"\n\n{memory_context}"
-            
+
         result, usage = self.llm.generate_json(self.SYSTEM_PROMPT, user_prompt, return_usage=True)
         if return_usage:
             return result, usage
         return result
-    
+
     def extract_key_points(self, story_text, max_points=5):
         """Extract key narrative points for social media adaptation"""
         system = """Extract the top key points from this story that would work best for social media posts.
         Each point should be concise (1-2 sentences) and impactful."""
         user = f"Story:\n{story_text}\n\nExtract {max_points} key points."
         response = self.llm.generate(system, user)
-        return [p.strip() for p in response.split('\n') if p.strip()]
+        return [p.strip() for p in response.split("\n") if p.strip()]
 
     def generate_channel_storyline(self, posts_text, project_context, return_usage=False):
         """Generate a structured channel storyline based on competitor posts and our project context"""
@@ -125,6 +126,15 @@ CRITICAL: Step 2 must inherit capabilities ONLY from the projects selected in St
 
 STRICT VALIDATOR: Before generating the content below, you MUST ensure you are not inventing specific processing times (e.g., "in minutes"), data volumes (e.g., "thousands of pages"), or specific UI recommendations (e.g., "PASS recommendation") unless explicitly documented in the project context. The image prompt MUST accurately reflect the actual selected project(s).
 
+UNIQUENESS RULE:
+Generate the image prompt and video script based specifically on the storyline provided. Do not reuse a generic visual template across different storylines.
+For every storyline, first identify:
+1. The main topic/problem discussed.
+2. The specific business challenge.
+3. The selected project and its actual capability.
+4. The key transformation or outcome.
+5. The most appropriate visual metaphor for that specific topic.
+
 Theme: [Description of the shared problem, or the single problem if not shared]
 Competitors Covered: [List the competitor names that fall under this theme]
 
@@ -132,30 +142,37 @@ Caption Prompt:
 [A detailed prompt instructing the social media writer on exactly what to write. Outline the specific hook, the core strategic topic, the exact product capabilities to highlight, and the tone. Do NOT write the actual caption here. Give instructions for writing it.]
 
 Image Prompt:
-[Write a highly detailed image prompt TAILORED TO THIS SPECIFIC THEME and the selected project's capabilities.
-Use a sophisticated split-screen composition.
-LEFT SIDE: Show the specific manual problem, fragmented data, or challenge described in the theme.
-RIGHT SIDE: Show the automated AI solution provided by the selected project (e.g., a structured compliance dashboard, sentiment analysis tools).
-Show a subtle visual transition from fragmented manual information to organized, automated intelligence.
-Style: premium institutional financial technology, realistic corporate environment, sophisticated enterprise UI, clean composition, photorealistic, cinematic professional lighting, high-end B2B aesthetic.
-IMPORTANT: Do not include competitor names, competitor logos, or competitor branding. Do not portray unsupported claims or unrealistic financial outcomes.]
+[Create a visually unique image concept that directly represents the specific storyline.
+Do NOT automatically use a split-screen composition.
+Do NOT automatically show a "cluttered desk -> clean AI dashboard."
+Do NOT automatically show a stressed analyst.
+Do NOT automatically use documents, spreadsheets, and dashboards unless genuinely relevant.
+Do NOT reuse the same camera angle, environment, composition, or visual metaphor from another storyline.
+Choose the visual setting based on the subject matter (e.g., Portfolio performance -> portfolio analytics; Bond-market volatility -> yield curves).
+The image must visually communicate the specific story, not simply "manual work versus AI."
+Use a professional, premium institutional-financial-technology aesthetic, but make the actual visual concept unique to the storyline.
+IMPORTANT: Do not include competitor names/logos or portray unsupported claims.]
 
 Video Script:
-[Write a 15-second premium cinematic B2B financial-technology video script TAILORED TO THIS SPECIFIC THEME and the selected project's capabilities.
-SCENE 1 — 0:00–0:05
-Visual: Show the specific manual problem/fragmented workflows related to this theme.
-Voiceover: Introduce the problem based on the theme.
-SCENE 2 — 0:05–0:10
-Visual: Transition into the sophisticated AI-powered financial platform, highlighting the selected project's specific features. Show the information becoming structured.
-Voiceover: Explain how the selected project automates the research/due diligence for this specific challenge.
-SCENE 3 — 0:10–0:15
-Visual: Show a professional investment analyst confidently evaluating the consolidated results and focusing on strategic decision-making.
-Voiceover: Summarize the strategic benefit for the team.
+[Create a video narrative that is directly derived from the storyline.
+Do NOT use the same generic scenes (e.g., Scene 1 = stressed analyst, Scene 2 = AI dashboard, etc.) for every storyline. Design each video's scenes around the actual subject.
+SCENE 1 — Establish the specific industry situation/problem: Show the real-world context described in the storyline.
+SCENE 2 — Demonstrate the specific challenge or consequence: Show what makes the problem difficult, costly, slow, risky, or strategically important.
+SCENE 3 — Show the selected project's specific capability solving that problem: Use visuals that accurately represent what the project actually does.
+SCENE 4 — Show the resulting business outcome: Demonstrate the strategic benefit relevant to the storyline.
 END FRAME: Minimal premium background with StradIT branding and the tagline: "Intelligence. Automated."
-VISUAL STYLE: Premium institutional financial technology, Photorealistic, Cinematic corporate lighting, Sophisticated enterprise software interfaces, Clean and minimal composition, High-end B2B aesthetic.
-IMPORTANT RULES: Do not mention or display any competitor names/logos. Do not invent product capabilities or claim specific processing times. Do not show guaranteed outcomes or "PASS/BUY" recommendations unless verified.]
+VISUAL STYLE: Premium institutional financial technology. The scenes can use different environments, subjects, camera movements, visual metaphors, data visualizations, people, markets, technology, or business situations depending on the storyline.
+IMPORTANT RULES: Do not mention/display competitor names/logos. Do not invent product capabilities or claim specific processing times. The video should have its own visual storytelling concept and not simply describe or animate the image prompt.]
 
-(Repeat the Theme block for each distinct theme you found among the Strong/Moderate matches)"""
+(Repeat the Theme block for each distinct theme you found among the Strong/Moderate matches)
+
+FINAL GUARDRAILS AND SAFETY CHECK:
+Before outputting, ensure:
+1. NO competitor names or logos appear anywhere in the Caption Prompt, Image Prompt, or Video Script.
+2. NO exaggerated performance claims ("instant", "100% accurate", "in seconds") are used.
+3. Every feature mentioned EXACTLY matches a capability provided in the StradIT project context.
+4. The visual concepts for the Image and Video are highly UNIQUE to this specific storyline and NOT generic templates.
+"""
         # Place the massive project context FIRST, and the small competitor posts LAST so the LLM doesn't ignore them.
         user = f"<OUR_PROJECT_CONTEXT>\n{project_context}\n</OUR_PROJECT_CONTEXT>\n\n<COMPETITOR_POSTS>\n{posts_text}\n</COMPETITOR_POSTS>"
         
