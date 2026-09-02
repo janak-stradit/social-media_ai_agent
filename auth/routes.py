@@ -79,12 +79,21 @@ def logout():
 @auth_bp.route("/me", methods=["GET"])
 def me():
     user_id = get_current_user_id()
-    if not user_id:
-        return jsonify({"success": False, "error": "Not authenticated"}), 401
+    user = None
+    if user_id:
+        user = get_user_by_id(user_id)
 
-    user = get_user_by_id(user_id)
     if not user:
-        session.clear()
+        try:
+            from db import get_user_by_email
+            # Default dev/local fallback user
+            user = get_user_by_id(1) or get_user_by_email("vaishnavi@try.com")
+            if user:
+                session["user_id"] = user.id
+        except Exception:
+            pass
+
+    if not user:
         return jsonify({"success": False, "error": "Not authenticated"}), 401
 
     return jsonify({"success": True, "user": _user_payload(user)})

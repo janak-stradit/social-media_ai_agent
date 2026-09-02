@@ -275,8 +275,8 @@
         <div class="row g-4">
             <!-- New Left Panel: History -->
             <div class="col-xl-3 col-lg-3">
-                <div class="premium-card d-flex flex-column position-sticky" style="top: calc(var(--header-h) + 24px); max-height: calc(100vh - 120px);">
-                    <div class="p-3 border-bottom bg-white text-center">
+                <div class="premium-card d-flex flex-column" style="height: calc(100vh - 110px); min-height: 550px;">
+                    <div class="p-3 border-bottom bg-white text-center flex-shrink-0">
                         <h6 class="fw-bold m-0 text-gray-700 text-uppercase tracking-wider" style="font-size: 0.85rem;">
                             <i class="fas fa-history me-2 text-primary"></i>History</h6>
                     </div>
@@ -291,9 +291,9 @@
 
             <!-- Center Panel: Filter & Feed -->
             <div class="col-xl-9 col-lg-9" id="centerFeedPanel" style="transition: var(--transition);">
-                <div class="premium-card h-100 d-flex flex-column">
+                <div class="premium-card d-flex flex-column" style="height: calc(100vh - 110px); min-height: 550px;">
                     <div
-                        class="p-4 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-3 bg-white">
+                        class="p-3 p-lg-4 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-3 bg-white flex-shrink-0">
                         <div class="d-flex align-items-center gap-3 flex-grow-1 flex-wrap">
                             <label class="fw-bold text-gray-700 m-0"><i
                                     class="fas fa-filter me-2 text-primary"></i>Platform:</label>
@@ -326,8 +326,7 @@
                         </button>
                     </div>
 
-                    <div class="p-4 bg-gray-50 flex-grow-1 overflow-auto"
-                        style="min-height: 400px; max-height: calc(100vh - 150px);">
+                    <div class="p-4 bg-gray-50 flex-grow-1 overflow-auto" style="min-height: 0;">
 
                         <!-- Loader -->
                         <div id="postsLoader" class="d-none empty-state">
@@ -353,15 +352,14 @@
 
             <!-- Right Panel: Synthesis (opens only once a post is selected) -->
             <div class="col-xl-3 col-lg-3 d-none" id="rightSynthesisPanel" style="transition: var(--transition);">
-                <div class="premium-card d-flex flex-column position-sticky" style="top: calc(var(--header-h) + 24px); max-height: calc(100vh - 120px);">
-                    <div class="p-4 border-bottom bg-white text-center">
-                        <div class="rounded-circle mx-auto d-flex align-items-center justify-content-center mb-3 shadow-sm"
-                            style="width: 50px; height: 50px; background: rgba(79, 70, 229, 0.1); color: var(--primary);">
-                            <i class="fas fa-brain fs-4"></i>
+                <div class="premium-card d-flex flex-column" style="height: calc(100vh - 110px); min-height: 550px;">
+                    <div class="p-3 border-bottom bg-white text-center flex-shrink-0">
+                        <div class="rounded-circle mx-auto d-flex align-items-center justify-content-center mb-2 shadow-sm"
+                            style="width: 42px; height: 42px; background: rgba(79, 70, 229, 0.1); color: var(--primary);">
+                            <i class="fas fa-brain fs-5"></i>
                         </div>
-                        <h5 class="fw-bold text-dark mb-1">Strategic Synthesis</h5>
-                        <p class="text-muted small fw-medium mb-0">Select posts from the feed to serve as context for
-                            the AI analysis.</p>
+                        <h6 class="fw-bold text-dark mb-1">Strategic Synthesis</h6>
+                        <p class="text-muted small fw-medium mb-0" style="font-size: 0.75rem;">Select posts from feed for AI context.</p>
                     </div>
 
                     <!-- Horizontal Wizard Container -->
@@ -370,8 +368,8 @@
                             style="width: 400%; transition: transform 0.4s ease-in-out; transform: translateX(0%); min-height: 0;">
 
                             <!-- SLIDE 1: Context -->
-                            <div class="p-4 d-flex flex-column gap-4 bg-white h-100" style="width: 25%;">
-                                <div class="d-flex justify-content-between align-items-center p-3 rounded-3"
+                            <div class="p-3 d-flex flex-column gap-3 bg-white h-100" style="width: 25%; min-height: 0;">
+                                <div class="d-flex justify-content-between align-items-center p-3 rounded-3 flex-shrink-0"
                                     style="background: rgba(243, 244, 246, 0.8);">
                                     <span class="fw-bold text-gray-700"><i
                                             class="fas fa-layer-group me-2 text-primary"></i>Selected Intel:</span>
@@ -384,13 +382,13 @@
                                                 class="fas fa-chevron-right ms-1"></i></button>
                                     </div>
                                 </div>
-                                <div class="d-flex flex-column gap-2 mb-3">
+                                <div class="d-flex flex-column gap-2 flex-grow-1" style="min-height: 0;">
                                     <label class="form-label fw-bold text-gray-700 m-0">Context Buffer</label>
-                                    <textarea id="storyContextInput" class="form-control textarea-premium"
+                                    <textarea id="storyContextInput" class="form-control textarea-premium flex-grow-1"
                                         placeholder="Select posts to fill the context buffer..." readonly
-                                        style="height: 35vh; resize: none;"></textarea>
+                                        style="resize: none; min-height: 0;"></textarea>
                                 </div>
-                                <div class="mt-auto position-sticky" style="bottom: 1rem; z-index: 10;">
+                                <div class="mt-auto flex-shrink-0 pt-2">
                                     <button class="premium-btn w-100 py-3 fs-6 shadow-sm" onclick="generateStoryFromSelection()"
                                         id="generateStoryBtn" disabled>
                                         <i class="fas fa-bolt me-2"></i>Generate Counter-Strategy
@@ -401,8 +399,8 @@
                             </div>
 
                             <!-- SLIDE 2: Synthesis Output -->
-                            <div class="p-4 d-flex flex-column gap-3 bg-white border-start h-100" style="width: 25%; min-height: 0;">
-                                <div class="d-flex justify-content-between align-items-center mb-2 flex-shrink-0">
+                            <div class="p-3 d-flex flex-column gap-2 bg-white border-start h-100" style="width: 25%; min-height: 0;">
+                                <div class="d-flex justify-content-between align-items-center mb-1 flex-shrink-0">
                                     <button
                                         class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border"
                                         onclick="slideWorkflow(0)"><i class="fas fa-chevron-left me-1"></i>Back</button>
@@ -415,13 +413,13 @@
                                 </div>
                                 <div id="structuredOutput"
                                     class="p-3 rounded-3 border border-success flex-grow-1"
-                                    style="background: #f0fdf4; max-height: 38vh; min-height: 150px; overflow-y: auto !important;">
+                                    style="background: #f0fdf4; min-height: 0; overflow-y: auto !important; overflow-x: hidden;">
                                     <!-- Populated by JS -->
                                 </div>
 
-                                <div class="mt-auto d-flex flex-column gap-2 flex-shrink-0">
+                                <div class="mt-auto d-flex flex-column gap-2 flex-shrink-0 pt-2">
                                     <button type="button"
-                                        class="btn btn-outline-primary fw-bold rounded-pill w-100 py-2 d-flex align-items-center justify-content-center gap-2"
+                                        class="btn btn-outline-primary fw-bold rounded-pill w-100 py-2.5 d-flex align-items-center justify-content-center gap-2"
                                         onclick="openOpportunityModal()">
                                         <i class="fas fa-lightbulb"></i>
                                         <span>Growth &amp; Expansion Opportunities</span>
@@ -486,8 +484,8 @@
                             </div>
 
                             <!-- SLIDE 4: Asset Review & Approval -->
-                            <div class="p-4 d-flex flex-column gap-3 bg-white border-start h-100" style="width: 25%;">
-                                <div class="d-flex justify-content-between align-items-center mb-2">
+                            <div class="p-3 d-flex flex-column gap-3 bg-white border-start h-100" style="width: 25%; min-height: 0;">
+                                <div class="d-flex justify-content-between align-items-center mb-1 flex-shrink-0">
                                     <button
                                         class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border"
                                         onclick="slideWorkflow(2)"><i
@@ -497,31 +495,30 @@
                                 </div>
 
                                 <div id="pipelineResultBlock"
-                                    class="d-flex flex-column gap-3 p-3 border border-primary rounded-3 flex-grow-1"
-                                    style="background: #e0e7ff;">
-                                    <div class="d-flex justify-content-between align-items-center">
-                                        <h6 class="fw-bold m-0 text-primary"><i class="fas fa-eye me-1"></i>Generated
-                                            Asset</h6>
+                                    class="d-flex flex-column gap-2 flex-grow-1"
+                                    style="min-height: 0;">
+                                    <div class="d-flex justify-content-between align-items-center flex-shrink-0">
+                                        <h6 class="fw-bold m-0 text-dark" style="font-size: 0.9rem;"><i class="fas fa-eye me-1 text-primary"></i>Generated Caption</h6>
                                         <span id="pipelineLoader" class="d-none text-primary small fw-bold"><i
                                                 class="fas fa-spinner fa-spin me-1"></i>Generating...</span>
                                     </div>
                                     <div id="pipelineOutputContent"
-                                        class="bg-white p-3 rounded border text-dark overflow-auto"
-                                        style="min-height: 150px;">
+                                        class="bg-white rounded-3 border text-dark flex-grow-1"
+                                        style="min-height: 0; overflow: hidden;">
                                         <div class="text-center text-muted py-5"><i
                                                 class="fas fa-ghost fs-3 mb-2 opacity-50"></i><br>Awaiting generation...
                                         </div>
                                     </div>
 
-                                    <div class="d-flex gap-2 mt-auto" id="approvalButtons">
-                                        <button class="btn btn-outline-danger flex-grow-1 fw-bold py-2"
+                                    <div class="d-flex gap-2 mt-auto flex-shrink-0 pt-2" id="approvalButtons">
+                                        <button class="btn btn-outline-danger flex-grow-1 fw-bold py-2.5 rounded-pill"
                                             onclick="rejectPipelineContent()"><i
                                                 class="fas fa-times me-1"></i>Reject</button>
-                                        <button class="btn btn-success flex-grow-1 fw-bold py-2"
+                                        <button class="btn btn-success flex-grow-1 fw-bold py-2.5 rounded-pill shadow-sm"
                                             onclick="approvePipelineContent()"><i
                                                 class="fas fa-check me-1"></i>Approve</button>
                                     </div>
-                                    <button class="btn btn-dark fw-bold w-100 d-none py-2 mt-auto"
+                                    <button class="btn btn-dark fw-bold w-100 d-none py-2.5 rounded-pill mt-auto flex-shrink-0"
                                         id="publishPipelineBtn" onclick="publishPipelineContent()">
                                         <i class="fas fa-paper-plane me-2"></i>Publish to Platforms
                                     </button>

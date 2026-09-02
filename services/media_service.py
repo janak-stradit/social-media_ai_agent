@@ -854,6 +854,14 @@ class MediaGenerationService:
         Generate a social media image.
         Returns: { url, local_path, prompt, size, platform }
         """
+        if caption and ("CONTENT GENERATION BLOCKED" in caption or "No Strong Match" in caption):
+            return {
+                "success": False,
+                "type": "image",
+                "platform": platform,
+                "error": "CONTENT GENERATION BLOCKED. Reason: No Strong Match was identified between this competitor topic and the available projects."
+            }
+
         if getattr(Config, 'USE_MOCK_LLM', False):
             print("[Media Service] USE_MOCK_LLM is enabled. Generating mock image asset...")
             return self._generate_mock_media(platform, "image", caption)
@@ -1007,6 +1015,14 @@ class MediaGenerationService:
     # ── Video Generation ───────────────────────────────────────────────────
     def generate_video(self, caption: str, platform: str, tone: str = None, image_path: str = None) -> dict:
         """Generate an actual MP4 video from caption/story text and optional reference image."""
+        if caption and ("CONTENT GENERATION BLOCKED" in caption or "No Strong Match" in caption):
+            return {
+                "success": False,
+                "type": "video",
+                "platform": platform,
+                "error": "CONTENT GENERATION BLOCKED. Reason: No Strong Match was identified between this competitor topic and the available projects."
+            }
+
         if getattr(Config, 'USE_MOCK_LLM', False):
             print("[Media Service] USE_MOCK_LLM is enabled. Generating mock video asset...")
             return self._generate_mock_media(platform, "video", caption)
@@ -1299,6 +1315,7 @@ Return JSON with keys:
             "composition (e.g. medium shot, rule of thirds), camera details (e.g. shot on 35mm lens, shallow depth of field, sharp focus), and color palette. "
             "Keep the style realistic and photorealistic unless requested otherwise. "
             "Strictly avoid any text overlays, labels, or watermarks. "
+            "SOURCE OF TRUTH ENFORCEMENT: The visual prompt must exactly represent the project and problem context given in the request. Do NOT invent or hallucinate features, projects, or problems. "
             "Output ONLY the final enhanced prompt in a single paragraph, under 500 characters."
         )
         
@@ -1330,6 +1347,7 @@ Return JSON with keys:
             "Focus purely on: subject actions, character movements (like lip sync, speaking, hand gestures, head nods, eye contact), "
             "camera motion (like cinematic push-in, steady shot), and style. "
             "Remove all conversational meta-instructions, negations (do not say 'no text', 'no cuts'), and redundant words. "
+            "SOURCE OF TRUTH ENFORCEMENT: The visual prompt must exactly represent the project and problem context given in the request. Do NOT invent or hallucinate features, projects, or problems. "
             "The output must be a single, continuous prompt, strictly under 400 characters."
         )
         try:

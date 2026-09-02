@@ -112,18 +112,14 @@ $(document).ready(function() {
                 if (r.success && r.posts && r.posts.length > 0) {
                     renderPlatformPosts(r.posts);
                 } else {
-                    $('#postsContainer').html(`
-                        <div class="col-12 empty-state">
-                            <i class="fas fa-database"></i>
-                            <h4 class="fw-bold text-dark mb-2">No Saved Data Yet</h4>
-                            <p class="fw-medium">Click "Start Scan" to pull the latest ${platform} posts and save them here.</p>
-                        </div>
-                    `);
+                    // Auto-scan if no stored posts exist so the dashboard lists posts immediately
+                    window.fetchPlatformPosts();
                 }
             },
             error: function() {
                 $('#postsLoader').addClass('d-none');
                 $('#postsContainer').removeClass('d-none');
+                window.fetchPlatformPosts();
             }
         });
     };
@@ -837,21 +833,21 @@ $(document).ready(function() {
             
             let outHtml = '';
             if (item.type === 'Text (Caption)') {
-                outHtml = `<div class="p-4"><p class="m-0" style="white-space: pre-wrap;">${item.content}</p></div>`;
+                outHtml = `<div class="p-3 text-dark" style="background-color: #f8fafc; border-radius: 8px; max-height: calc(100vh - 340px); min-height: 150px; overflow-y: auto !important; white-space: pre-wrap; font-size: 0.875rem; line-height: 1.65; color: #334155;">${item.content}</div>`;
             } else if (item.type === 'image') {
-                outHtml = `<img src="${item.content}" class="d-block w-100 rounded" style="object-fit: cover; max-height: 400px;">
+                outHtml = `<img src="${item.content}" class="d-block w-100 rounded-top" style="object-fit: cover; max-height: 350px;">
                            <div class="p-3 bg-light border-top"><p class="small text-muted m-0"><strong>Caption:</strong> ${item.caption}</p></div>`;
             } else if (item.type === 'video') {
-                outHtml = `<video controls autoplay loop class="d-block w-100 rounded" style="max-height: 400px;"><source src="${item.content}" type="video/mp4"></video>
+                outHtml = `<video controls autoplay loop class="d-block w-100 rounded-top" style="max-height: 350px;"><source src="${item.content}" type="video/mp4"></video>
                            <div class="p-3 bg-light border-top"><p class="small text-muted m-0"><strong>Caption:</strong> ${item.caption}</p></div>`;
             }
             
             innerHtml += `
                 <div class="carousel-item ${activeClass}">
                     ${outHtml}
-                    <div class="d-flex gap-2 mt-3 mb-2 px-3 pb-2">
-                        <button class="btn btn-outline-danger flex-grow-1 fw-bold" onclick="rejectPipelineContent()"><i class="fas fa-times me-1"></i>Reject</button>
-                        <button class="btn btn-success flex-grow-1 fw-bold" onclick="approveCarouselItem(${index})"><i class="fas fa-check me-2"></i>Approve</button>
+                    <div class="d-flex gap-2 mt-2 mb-2 px-3 pb-2">
+                        <button class="btn btn-outline-danger flex-grow-1 fw-bold rounded-pill" onclick="rejectPipelineContent()"><i class="fas fa-times me-1"></i>Reject</button>
+                        <button class="btn btn-success flex-grow-1 fw-bold rounded-pill shadow-sm" onclick="approveCarouselItem(${index})"><i class="fas fa-check me-2"></i>Approve</button>
                     </div>
                 </div>
             `;
@@ -862,7 +858,7 @@ $(document).ready(function() {
               <div class="carousel-indicators bg-dark rounded-pill py-1 mb-0" style="bottom: -15px;">
                 ${indicators}
               </div>
-              <div class="carousel-inner rounded border shadow-sm" style="background: #fff;">
+              <div class="carousel-inner rounded-3 border" style="background: #fff;">
                 ${innerHtml}
               </div>
               <button class="carousel-control-prev" type="button" data-bs-target="#generationCarousel" data-bs-slide="prev" style="width: 5%; background: rgba(0,0,0,0.1); margin-left: -20px; border-radius: 10px;">
