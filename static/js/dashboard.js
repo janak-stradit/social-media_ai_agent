@@ -276,6 +276,91 @@ $(document).ready(function() {
         return '<i class="fas fa-globe me-2 text-secondary"></i>';
     }
 
+    function formatPromptTabs(promptText, uniqueId) {
+        if (!promptText) return '';
+        let step2 = promptText;
+        const step2Match = promptText.split(/\[---\s*STEP 2:\s*CONTENT GENERATION\s*---\]?/i);
+        if (step2Match.length > 1) {
+            step2 = step2Match[1];
+        } else {
+            const step2MatchAlt = promptText.split(/STEP 2: CONTENT GENERATION/i);
+            if (step2MatchAlt.length > 1) step2 = step2MatchAlt[1];
+        }
+        
+        let captionText = '', imageText = '', videoText = '';
+        
+        const captionMatch = step2.match(/Caption Prompt:([\s\S]*?)(?=Image Prompt:|$)/i);
+        if (captionMatch) captionText = captionMatch[1].trim();
+        
+        const imageMatch = step2.match(/Image Prompt:([\s\S]*?)(?=Video Script:|$)/i);
+        if (imageMatch) imageText = imageMatch[1].trim();
+        
+        const videoMatch = step2.match(/Video Script:([\s\S]*?)$/i);
+        if (videoMatch) videoText = videoMatch[1].trim();
+        
+        if (!captionText && !imageText && !videoText) {
+            return `<div style="white-space: pre-wrap;">${promptText.replace(/\n/g, '<br>')}</div>`;
+        }
+        
+        const randId = Math.floor(Math.random() * 100000) + (uniqueId || 'tmp');
+        const contentBg = '#f4f8fd';
+        
+        return `
+            <div class="prompt-tabs-container mt-3">
+                <ul class="nav nav-pills mb-2 gap-2" id="pills-tab-${randId}" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active btn-sm rounded-pill py-1 px-3 fw-bold" id="pills-caption-tab-${randId}" data-bs-toggle="pill" data-bs-target="#pills-caption-${randId}" type="button" role="tab" aria-controls="pills-caption-${randId}" aria-selected="true"><i class="fas fa-align-left me-1"></i>Caption</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link btn-sm rounded-pill py-1 px-3 fw-bold" id="pills-image-tab-${randId}" data-bs-toggle="pill" data-bs-target="#pills-image-${randId}" type="button" role="tab" aria-controls="pills-image-${randId}" aria-selected="false"><i class="fas fa-image me-1"></i>Image</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link btn-sm rounded-pill py-1 px-3 fw-bold" id="pills-video-tab-${randId}" data-bs-toggle="pill" data-bs-target="#pills-video-${randId}" type="button" role="tab" aria-controls="pills-video-${randId}" aria-selected="false"><i class="fas fa-video me-1"></i>Video</button>
+                    </li>
+                </ul>
+                <div class="tab-content border rounded-3 p-3 shadow-sm position-relative" id="pills-tabContent-${randId}" style="min-height: 200px; max-height: 400px; overflow-y: auto; background-color: ${contentBg};">
+                    
+                    <div class="tab-pane fade show active text-dark small" id="pills-caption-${randId}" role="tabpanel" aria-labelledby="pills-caption-tab-${randId}">
+                        <button class="btn btn-sm border-0 shadow-none p-0 text-muted position-absolute" style="top: 10px; right: 15px; z-index: 10;" onclick="navigator.clipboard.writeText(this.nextElementSibling.innerText); const t = this; t.innerHTML='<i class=\\'fas fa-check text-success\\'></i>'; setTimeout(()=>t.innerHTML='<i class=\\'far fa-copy\\'></i>', 2000);" title="Copy Caption" style="font-size: 1.1rem;"><i class="far fa-copy"></i></button>
+                        <div style="white-space: pre-wrap; padding-top: 5px; padding-right: 20px;" class="mb-2">${captionText}</div>
+                    </div>
+                    
+                    <div class="tab-pane fade text-dark small" id="pills-image-${randId}" role="tabpanel" aria-labelledby="pills-image-tab-${randId}">
+                        <button class="btn btn-sm border-0 shadow-none p-0 text-muted position-absolute" style="top: 10px; right: 15px; z-index: 10;" onclick="navigator.clipboard.writeText(this.nextElementSibling.innerText); const t = this; t.innerHTML='<i class=\\'fas fa-check text-success\\'></i>'; setTimeout(()=>t.innerHTML='<i class=\\'far fa-copy\\'></i>', 2000);" title="Copy Image Prompt" style="font-size: 1.1rem;"><i class="far fa-copy"></i></button>
+                        <div style="white-space: pre-wrap; padding-top: 5px; padding-right: 20px;" class="mb-2">${imageText}</div>
+                    </div>
+                    
+                    <div class="tab-pane fade text-dark small" id="pills-video-${randId}" role="tabpanel" aria-labelledby="pills-video-tab-${randId}">
+                        <button class="btn btn-sm border-0 shadow-none p-0 text-muted position-absolute" style="top: 10px; right: 15px; z-index: 10;" onclick="navigator.clipboard.writeText(this.nextElementSibling.innerText); const t = this; t.innerHTML='<i class=\\'fas fa-check text-success\\'></i>'; setTimeout(()=>t.innerHTML='<i class=\\'far fa-copy\\'></i>', 2000);" title="Copy Video Script" style="font-size: 1.1rem;"><i class="far fa-copy"></i></button>
+                        <div style="white-space: pre-wrap; padding-top: 5px; padding-right: 20px;" class="mb-2">${videoText}</div>
+                    </div>
+                    
+                </div>
+            </div>
+        `;
+    }
+
+    window.navigateAssetHistory = function(pipelineId, index, dir, event) {
+        if (event) event.stopPropagation();
+        if (pipelineId) {
+            const pIndex = window.pipelineHistory.findIndex(p => p.id === pipelineId);
+            if (pIndex === -1) return;
+            const pipeline = window.pipelineHistory[pIndex];
+            const item = pipeline.assetContent[index];
+            if (!item.history) return;
+            item.historyIndex += dir;
+            item.content = item.history[item.historyIndex];
+            localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+            showPipelineStageDetail(pIndex, pipeline.status);
+        } else {
+            const item = window.currentCarouselAssets[index];
+            if (!item.history) return;
+            item.historyIndex += dir;
+            item.content = item.history[item.historyIndex];
+            renderCarousel();
+        }
+    };
+
     window.generateStoryFromSelection = function() {
         const context = $('#storyContextInput').val();
         if (!context) return;
@@ -335,9 +420,8 @@ $(document).ready(function() {
                         <div class="mb-4 d-flex flex-wrap">
                             ${factsHtml}
                         </div>
-                        <div class="mb-3 text-muted" style="line-height: 1.6; font-size: 0.95rem;">
-                            <strong class="text-dark">Storyline / Prompt:</strong> <br>
-                            ${(data.prompt || '').replace(/\n/g, '<br>')}
+                        <div class="mb-3" style="line-height: 1.6; font-size: 0.95rem;">
+                            ${formatPromptTabs(data.prompt, Date.now())}
                         </div>
                     `;
                     $('#structuredOutput').html(formattedHtml);
@@ -599,7 +683,7 @@ $(document).ready(function() {
                         <h6 class="mb-0 fw-bold text-dark text-truncate" style="font-size: 0.85rem;" title="Pipeline ID: ${pipeline.id}"><i class="fas fa-layer-group me-2 text-primary"></i>ID: ${pipeline.id}</h6>
                         <small class="text-muted" style="font-size: 0.7rem;">${date}</small>
                     </div>
-                    <p class="mb-1 text-muted small"><strong>Competitors:</strong> ${competitorsList}</p>
+                    <p class="mb-1 text-muted small"><strong>Analysis:</strong> ${competitorsList}</p>
                     <p class="mb-1 text-muted small"><strong>Asset:</strong> ${pipeline.assetType || 'Pending'}</p>
                     ${timelineHtml}
                     ${pipelineStatus === 'approved' || pipelineStatus === 'published' || pipelineStatus === 'asset_generated' ?
@@ -652,11 +736,31 @@ $(document).ready(function() {
             if (type.includes('image')) {
                 return `<img src="${a.content}" class="w-100 rounded-3 mb-2" alt="Generated asset">`;
             }
+            // Ensure history is initialized
+            if (!a.history) {
+                a.history = [a.content];
+                a.historyIndex = 0;
+            }
+
+            let navHtml = '';
+            if (a.history.length > 1) {
+                const pDisabled = a.historyIndex === 0 ? 'opacity: 0.3; cursor: not-allowed;' : 'cursor: pointer; transition: color 0.2s;';
+                const nDisabled = a.historyIndex === a.history.length - 1 ? 'opacity: 0.3; cursor: not-allowed;' : 'cursor: pointer; transition: color 0.2s;';
+                navHtml = `
+                    <div class="d-flex gap-2 ms-3 border-start ps-3 align-items-center">
+                        <i class="fas fa-chevron-left text-muted" style="${pDisabled}" ${a.historyIndex > 0 ? `onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="navigateAssetHistory(${pipelineId}, ${index}, -1, event)"` : ''} title="Previous"></i>
+                        <span class="small text-muted" style="font-size: 0.75rem;">${a.historyIndex + 1}/${a.history.length}</span>
+                        <i class="fas fa-chevron-right text-muted" style="${nDisabled}" ${a.historyIndex < a.history.length - 1 ? `onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="navigateAssetHistory(${pipelineId}, ${index}, 1, event)"` : ''} title="Next"></i>
+                    </div>
+                `;
+            }
+
             return `
                 <div class="position-relative mb-2">
-                    <div class="d-flex justify-content-start gap-3 position-absolute" style="bottom: 15px; left: 20px; font-size: 1.1rem; z-index: 10;">
+                    <div class="d-flex justify-content-start gap-3 position-absolute align-items-center" style="bottom: 15px; left: 20px; font-size: 1.1rem; z-index: 10;">
                         <i class="far fa-copy text-muted" style="cursor:pointer; transition: color 0.2s;" onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="copyCaptionText(this)" title="Copy Caption"></i>
                         ${pipelineId ? `<i class="fas fa-sync-alt text-muted" style="cursor:pointer; transition: color 0.2s;" onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="regenerateModalCaptionText(${pipelineId}, ${index}, event)" title="Regenerate Caption"></i>` : ''}
+                        ${navHtml}
                     </div>
                     <div class="bg-light rounded-3 p-3 pb-5 small caption-text-content" style="white-space: pre-wrap; font-size: 0.875rem; line-height: 1.65; color: #334155;">${a.content}</div>
                 </div>
@@ -672,7 +776,7 @@ $(document).ready(function() {
             const safeContext = (pipeline.context || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
             return `
                 <h6 class="fw-bold text-primary mb-3"><i class="fas fa-layer-group me-2"></i>Post Pipeline</h6>
-                <p class="small text-muted mb-2"><strong class="text-dark">Competitors:</strong> ${competitorsList}</p>
+                <p class="small text-muted mb-2"><strong class="text-dark">Analysis:</strong> ${competitorsList}</p>
                 
                 <div id="intelSelectedReadMode">
                     <div class="bg-light rounded-3 p-3 small" style="white-space: pre-wrap; max-height: 320px; overflow-y: auto;">${pipeline.context || 'No context captured for this pipeline.'}</div>
@@ -699,7 +803,7 @@ $(document).ready(function() {
             return `
                 <h6 class="fw-bold text-primary mb-3"><i class="fas fa-brain me-2"></i>Counter Strategy Generated</h6>
                 <div class="mb-3 d-flex flex-wrap">${facts || '<span class="text-muted small">No observed facts recorded.</span>'}</div>
-                <div class="small text-muted bg-light rounded-3 p-3 mb-3" style="white-space: pre-wrap; max-height: 400px; overflow-y: auto;">${pipeline.strategy.prompt || ''}</div>
+                <div class="mb-3 w-100">${formatPromptTabs(pipeline.strategy.prompt, pipeline.id)}</div>
                 <div class="d-flex gap-2">
                     <button class="btn btn-sm btn-outline-danger fw-bold" onclick="rejectPipelineStrategy(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject</button>
                     <button class="btn btn-sm btn-success fw-bold" onclick="approvePipelineStrategy(${pipeline.id})"><i class="fas fa-check me-1"></i>Approve & Continue</button>
@@ -841,11 +945,30 @@ $(document).ready(function() {
             
             let outHtml = '';
             if (item.type === 'Text (Caption)') {
+                if (!item.history) {
+                    item.history = [item.content];
+                    item.historyIndex = 0;
+                }
+
+                let navHtml = '';
+                if (item.history.length > 1) {
+                    const pDisabled = item.historyIndex === 0 ? 'opacity: 0.3; cursor: not-allowed;' : 'cursor: pointer; transition: color 0.2s;';
+                    const nDisabled = item.historyIndex === item.history.length - 1 ? 'opacity: 0.3; cursor: not-allowed;' : 'cursor: pointer; transition: color 0.2s;';
+                    navHtml = `
+                        <div class="d-flex gap-2 ms-3 border-start ps-3 align-items-center">
+                            <i class="fas fa-chevron-left text-muted" style="${pDisabled}" ${item.historyIndex > 0 ? `onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="navigateAssetHistory(null, ${index}, -1, event)"` : ''} title="Previous"></i>
+                            <span class="small text-muted" style="font-size: 0.75rem;">${item.historyIndex + 1}/${item.history.length}</span>
+                            <i class="fas fa-chevron-right text-muted" style="${nDisabled}" ${item.historyIndex < item.history.length - 1 ? `onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="navigateAssetHistory(null, ${index}, 1, event)"` : ''} title="Next"></i>
+                        </div>
+                    `;
+                }
+
                 outHtml = `
                     <div class="position-relative">
-                        <div class="d-flex justify-content-start gap-3 position-absolute" style="bottom: 15px; left: 20px; font-size: 1.1rem; z-index: 10;">
+                        <div class="d-flex justify-content-start gap-3 position-absolute align-items-center" style="bottom: 15px; left: 20px; font-size: 1.1rem; z-index: 10;">
                             <i class="far fa-copy text-muted" style="cursor:pointer; transition: color 0.2s;" onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="copyCaptionText(this)" title="Copy Caption"></i>
                             <i class="fas fa-sync-alt text-muted" style="cursor:pointer; transition: color 0.2s;" onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="regenerateCaptionText(${index}, event)" title="Regenerate Caption"></i>
+                            ${navHtml}
                         </div>
                         <div class="p-3 pb-5 text-dark caption-text-content" style="background-color: #f8fafc; border-radius: 8px; max-height: calc(100vh - 340px); min-height: 150px; overflow-y: auto !important; white-space: pre-wrap; font-size: 0.875rem; line-height: 1.65; color: #334155;">${item.content}</div>
                     </div>
@@ -1266,7 +1389,7 @@ $(document).ready(function() {
                     </div>
                 </div>
                 <div class="position-relative mt-2">
-                    <i class="fas fa-paperclip position-absolute" style="top: 15px; left: 15px; color: #9ca3af;"></i>
+                    <i class="fas fa-paperclip position-absolute" style="top: 15px; left: 15px; color: #9ca3af; cursor: pointer; transition: color 0.2s;" onmouseover="this.style.color='#0d6efd'" onmouseout="this.style.color='#9ca3af'" onclick="handlePromptAttachment('modalPipelinePrompt')" title="Attach text file"></i>
                     <textarea id="modalPipelinePrompt" class="form-control" rows="3" style="padding-left: 2.5rem; border-radius: 12px; resize: none;" placeholder="Attach an optional creative prompt (e.g. 'Use an energetic tone', 'Include branding colors')"></textarea>
                 </div>
                 <button class="btn btn-primary fw-bold rounded-pill w-100 py-3 shadow-sm mt-3" onclick="startModalPipelineGeneration(${pipeline.id})" id="startModalPipelineBtn">
@@ -1475,6 +1598,31 @@ $(document).ready(function() {
 });
 
 // Caption Action Utilities
+window.handlePromptAttachment = function(textareaId) {
+    const fileInput = document.createElement('input');
+    fileInput.type = 'file';
+    fileInput.accept = '.txt,.md,.csv,.json';
+    fileInput.onchange = function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+            const content = evt.target.result;
+            const textarea = document.getElementById(textareaId);
+            if (textarea) {
+                const existing = textarea.value;
+                textarea.value = existing + (existing ? '\n\n' : '') + `--- Attached File: ${file.name} ---\n` + content;
+                showToast(`Attached ${file.name}`, 'success');
+            }
+        };
+        reader.onerror = function() {
+            showToast('Error reading file.', 'danger');
+        };
+        reader.readAsText(file);
+    };
+    fileInput.click();
+};
+
 window.copyCaptionText = function(btnElement) {
     const textToCopy = $(btnElement).closest('.position-relative').find('.caption-text-content').text();
     
@@ -1536,7 +1684,15 @@ window.regenerateModalCaptionText = function(pipelineId, index, event) {
             iconElement.removeClass('fa-spin text-primary').addClass('text-muted');
             if (res.success && res.content && res.content[platform]) {
                 const captions = res.content[platform].caption;
-                pipeline.assetContent[index].content = captions.primary_caption;
+                
+                const itemToUpdate = pipeline.assetContent[index];
+                if (!itemToUpdate.history) {
+                    itemToUpdate.history = [itemToUpdate.content];
+                    itemToUpdate.historyIndex = 0;
+                }
+                itemToUpdate.history.push(captions.primary_caption);
+                itemToUpdate.historyIndex = itemToUpdate.history.length - 1;
+                itemToUpdate.content = captions.primary_caption;
                 
                 localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
                 showPipelineStageDetail(pipelineIndex, pipeline.status);
@@ -1581,7 +1737,15 @@ window.regenerateCaptionText = function(index, event) {
             iconElement.removeClass('fa-spin text-primary').addClass('text-muted');
             if (res.success && res.content && res.content[platform]) {
                 const captions = res.content[platform].caption;
-                window.currentCarouselAssets[index].content = captions.primary_caption;
+                
+                const itemToUpdate = window.currentCarouselAssets[index];
+                if (!itemToUpdate.history) {
+                    itemToUpdate.history = [itemToUpdate.content];
+                    itemToUpdate.historyIndex = 0;
+                }
+                itemToUpdate.history.push(captions.primary_caption);
+                itemToUpdate.historyIndex = itemToUpdate.history.length - 1;
+                itemToUpdate.content = captions.primary_caption;
                 
                 if (window.activePipeline) {
                     window.activePipeline.assetContent = window.currentCarouselAssets;

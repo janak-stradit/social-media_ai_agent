@@ -142,27 +142,57 @@ Caption Prompt:
 [A detailed prompt instructing the social media writer on exactly what to write. Outline the specific hook, the core strategic topic, the exact product capabilities to highlight, and the tone. Do NOT write the actual caption here. Give instructions for writing it.]
 
 Image Prompt:
-[Create a visually unique image concept that directly represents the specific storyline.
-Do NOT automatically use a split-screen composition.
-Do NOT automatically show a "cluttered desk -> clean AI dashboard."
-Do NOT automatically show a stressed analyst.
-Do NOT automatically use documents, spreadsheets, and dashboards unless genuinely relevant.
-Do NOT reuse the same camera angle, environment, composition, or visual metaphor from another storyline.
-Choose the visual setting based on the subject matter (e.g., Portfolio performance -> portfolio analytics; Bond-market volatility -> yield curves).
-The image must visually communicate the specific story, not simply "manual work versus AI."
-Use a professional, premium institutional-financial-technology aesthetic, but make the actual visual concept unique to the storyline.
-IMPORTANT: Do not include competitor names/logos or portray unsupported claims.]
+[Create a highly detailed prompt for a multi-slide Carousel (e.g., 3-5 slides) that directly represents the specific storyline. Each slide must be text-oriented, deeply informative, and visually connected to the others.
+The carousel MUST mimic the high-end, colorful, and highly professional layout used by top-tier consulting and financial technology firms. It must rely heavily on clean typography, data visualization, and a cohesive, vibrant color palette (e.g., deep navy, vibrant orange, or slate grey) rather than just abstract graphics.
+
+To understand the exact level of detail and formatting required, here is a PERFECT example of what you must generate. You must adapt this exact level of granular detail, color selection, and typography specification to the new storyline:
+
+--- EXAMPLE FORMAT ---
+Overall Aesthetic/Style: Premium institutional financial technology, text-oriented data visualization, vibrant and cohesive brand palette of deep navy (#0B1B33), slate grey (#454B54), and vibrant orange (#E0703A) as the singular accent color, clean modern sans-serif typography for UI/data elements paired with a serif display face for headlines, professional corporate presentation style consistent with top-tier wealth management and consulting decks. Every slide carries a persistent thin orange underline rule beneath its headline as a recurring brand device, tying the carousel together visually.
+
+Slide 1 (Title/Hook): Deep navy background (#0B1B33) with a subtle diagonal gradient darkening toward the bottom-right corner. Layout is left-aligned (not centered) — a text block sits in the left 60% of the frame, vertically centered, leaving the right 40% for a graphic. Headline in large bold white serif font: "[Title]". Beneath it, a thin horizontal orange rule (4px, #E0703A, 180px wide). Below the rule, a smaller sans-serif subhead in slate-blue grey: "[Subhead]". On the right third of the frame: [Extremely detailed description of graphic, e.g. a minimalist balance-beam graphic rendered in thin white and orange linework].
+
+Slide 2 (Context/Problem): Split-screen layout, left side slate grey (#454B54), right side deep navy (#0B1B33), divided by a 3px vertical orange rule. Eyebrow label centered above the divide in small tracked-out orange caps: "THE PROBLEM." Left panel: [Detailed description of data viz/metric]. Right panel: [Detailed description of UI element or workflow graphic]. Body copy centered beneath both panels in light grey sans-serif: "[Context copy]".
+
+Slide 3 (Solution/StradIT Capabilities): Full-bleed dark-mode UI dashboard on deep navy (#0B1B33), styled as a live product screen. Top-left header text: "[StradIT Project Name]" in bold white sans-serif, with smaller slate-grey subtext "[Subhead]". Top-right pill badge in orange-outlined rounded rectangle reading "LIVE MONITORING." Three metric cards arranged in a horizontal row beneath the header... [Extremely detailed description of the metrics and line chart representing the specific StradIT capability]. Below the cards, bold white text: "[Solution Copy]".
+
+Slide 4 (Outcome/CTA): Deep navy background (#0B1B33) with two soft glowing circles. Centered graphic: [Detailed description of final graphic]. Beneath the graphic, large bold white sans-serif headline centered: "[Headline]". Beneath that, a smaller tracked-out orange caps tagline: "[Tagline]".
+
+Negative Constraints: No logos, no competitor branding or names, no cluttered stock photography, no generic abstract art unconnected to the data narrative, no photographic human figures, no overly minimalist compositions devoid of text or metrics — every slide must remain text-oriented and data-driven, with graphics functioning as supporting infographic elements rather than standalone decoration.
+----------------------
+
+IMPORTANT RULES: 
+- The carousel MUST be text-oriented and data-driven. Visuals should support the text (like a premium infographic or presentation slide), not the other way around.
+- IF a specific StradIT project was selected, at least one slide MUST visually integrate highly detailed elements representing that project's exact capabilities (e.g., if AltsIQ, show a slide with a glowing 233-point compliance report layout).
+- Do NOT reuse the exact same visual metaphor for every storyline. Tailor the format to the specific competitor's post and StradIT project.
+- Do NOT include competitor names or logos.
+- Make the prompt rich, highly detailed, text-heavy, informative, and visually stunning, exactly like top-tier professional corporate posts.]
 
 Video Script:
 [Create a video narrative that is directly derived from the storyline.
-Do NOT use the same generic scenes (e.g., Scene 1 = stressed analyst, Scene 2 = AI dashboard, etc.) for every storyline. Design each video's scenes around the actual subject.
-SCENE 1 — Establish the specific industry situation/problem: Show the real-world context described in the storyline.
-SCENE 2 — Demonstrate the specific challenge or consequence: Show what makes the problem difficult, costly, slow, risky, or strategically important.
-SCENE 3 — Show the selected project's specific capability solving that problem: Use visuals that accurately represent what the project actually does.
-SCENE 4 — Show the resulting business outcome: Demonstrate the strategic benefit relevant to the storyline.
-END FRAME: Minimal premium background with StradIT branding and the tagline: "Intelligence. Automated."
-VISUAL STYLE: Premium institutional financial technology. The scenes can use different environments, subjects, camera movements, visual metaphors, data visualizations, people, markets, technology, or business situations depending on the storyline.
-IMPORTANT RULES: Do not mention/display competitor names/logos. Do not invent product capabilities or claim specific processing times. The video should have its own visual storytelling concept and not simply describe or animate the image prompt.]
+Do NOT use the same generic scenes for every storyline. Design each video's scenes around a unique, compelling visual metaphor.
+
+To understand the exact level of cinematic vision, pacing, lighting, and detail required, here is a PERFECT example of what you must generate. You must adapt this exact level of granular detail and professional tone to the new storyline:
+
+--- EXAMPLE FORMAT ---
+[Overall style description] A premium corporate technology video in a single continuous narrative flow, shot with the restrained cinematography of an institutional investment film — shallow depth of field, cool navy and slate color grading with a single warm orange accent light source, slow deliberate camera moves, no jump cuts, no handheld shake. The film treats "[Insert core theme metaphor, e.g. drift]" as its visual throughline: the opening shot begins slightly off-balance, and by the final shot everything has settled into alignment.
+
+0:00-0:04 [Extremely detailed shot description: e.g. Extreme close-up of a physical desk-model gyroscope balanced on a dark slate surface, spinning slowly and tilting a few degrees off its vertical axis, rack focus pulling from the tilted spindle to soft bokeh in the background, then slowly sharpening again as the spindle drifts back toward vertical. Low, directional lighting from the upper left casts a long shadow across the table, with a faint warm orange rim light catching the gyroscope's edge. Environment is a minimal, unbranded office surface — no visible logos, papers, or screens.]
+
+0:04-0:08 [Extremely detailed shot description: e.g. Slow overhead tracking shot moving across a glass conference table where a single tablet lies face-up beside a relaxed, open hand — not reaching for it. The screen glows a calm, steady navy-white, its light spilling softly across the tabletop. A single warm orange indicator pulses once on the tablet's edge, then holds steady. Cool ambient light dominates, with the screen the brightest element in frame; the background is a softly blurred, unbranded skyline, deliberately out of focus.]
+
+0:08-0:10 [Extremely detailed shot description: e.g. Slow pull-back and slight rise, revealing the gyroscope now spinning perfectly upright in the near foreground and the glowing tablet steady in the background, both elements in quiet equilibrium within the same frame. Lighting warms subtly as the camera settles, as though the room itself has found its balance.]
+
+Audio: A calm, authoritative voiceover saying: "[Voiceover script tailored to the storyline]". Subtle ambient room tone with a faint low synth pad, swelling gently as the camera settles in the final shot; no dialogue, no sound effects, no ticking clocks or alarm tones. No subtitles. No text overlays.
+
+End frame: Minimal premium navy background with StradIT branding and the tagline: "Intelligence. Automated."
+----------------------
+
+IMPORTANT RULES: 
+- Do not mention or display competitor names or logos. 
+- Do not invent product capabilities or claim specific processing times. 
+- The video MUST have its own visual storytelling concept (like the gyroscope metaphor above) and not simply describe or animate the image prompt.
+- Make the cinematography rich, highly detailed, and deeply professional.]
 
 (Repeat the Theme block for each distinct theme you found among the Strong/Moderate matches)
 
