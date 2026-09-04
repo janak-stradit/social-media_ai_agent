@@ -14,7 +14,7 @@ $(document).ready(function() {
     });
 
     // Toast notification helper
-    function showToast(message, type = 'info') {
+    window.showToast = function(message, type = 'info') {
         const bgClass = type === 'success' ? 'bg-success' : type === 'danger' ? 'bg-danger' : type === 'warning' ? 'bg-warning' : 'bg-primary';
         const toastHtml = `
             <div class="toast align-items-center text-white ${bgClass} border-0 show" role="alert" aria-live="assertive" aria-atomic="true" style="position: fixed; bottom: 20px; right: 20px; z-index: 1055; min-width: 250px;">
@@ -924,7 +924,7 @@ $(document).ready(function() {
 
     window.currentCarouselAssets = [];
     
-    function renderCarousel() {
+    window.renderCarousel = function() {
         if (window.currentCarouselAssets.length === 0) return;
         
         // Update header dynamically
