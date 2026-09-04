@@ -18,3 +18,7 @@ sqlalchemy>=2.0
 psycopg2-binary
 boto3
 duckduckgo-search
+json_repair
+demjson3
+gtts
+moviepy
