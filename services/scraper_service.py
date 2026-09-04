@@ -38,8 +38,13 @@ class ScraperService:
             company_key = company_map.get(company_name, company_name.lower().replace(" ", "_"))
 
             # Attempt to fetch from the scraper's REST API
+            # Known issue, tracked in COMPETITOR_DASHBOARD_ENHANCEMENTS.md: this disables TLS
+            # cert verification against a self-signed scraper endpoint.
             response = requests.get(
-                f"{self.base_url}/accounts/{company_key}", headers=self.headers, timeout=8, verify=False
+                f"{self.base_url}/accounts/{company_key}",
+                headers=self.headers,
+                timeout=8,
+                verify=False,  # nosec B501
             )
             response.raise_for_status()
             data = response.json()
@@ -93,8 +98,13 @@ class ScraperService:
             }
             company_key = company_map.get(company_name, company_name.lower().replace(" ", "_"))
 
+            # Known issue, tracked in COMPETITOR_DASHBOARD_ENHANCEMENTS.md: this disables TLS
+            # cert verification against a self-signed scraper endpoint.
             response = requests.get(
-                f"{self.base_url}/accounts/{company_key}", headers=self.headers, timeout=8, verify=False
+                f"{self.base_url}/accounts/{company_key}",
+                headers=self.headers,
+                timeout=8,
+                verify=False,  # nosec B501
             )
             response.raise_for_status()
             data = response.json()
@@ -103,7 +113,7 @@ class ScraperService:
             store_data = store.get("data", {})
 
             all_posts = []
-            for platform, platform_data in store_data.items():
+            for _platform, platform_data in store_data.items():
                 if isinstance(platform_data, dict):
                     posts = platform_data.get("posts", [])
                     all_posts.extend(posts)

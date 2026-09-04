@@ -25,7 +25,7 @@ class HashtagAgent:
         - Research shows: {platform} posts with {max_tags // 2} hashtags get best engagement
         - Avoid banned or overused spam hashtags
         - Include 1-2 location-based if relevant
-        
+
         Return JSON with: hashtags (list), categories (dict), engagement_prediction (score 1-10)"""
 
         user_prompt = f"""Story Themes: {story_analysis.get("themes", [])}

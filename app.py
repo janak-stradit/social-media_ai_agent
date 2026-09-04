@@ -84,5 +84,7 @@ def create_app(config_name="development"):
 
 
 if __name__ == "__main__":
+    # Local dev entrypoint only -- production runs via gunicorn (see Dockerfile), which never
+    # executes this block. B201 (debug=True) and B104 (bind-all) are both dev-only here.
     app = create_app()
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True)  # nosec B201 B104

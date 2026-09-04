@@ -39,7 +39,7 @@ class StrategyAgent:
         4. Follow-up post suggestions
         5. Cross-posting recommendations
         6. Expected engagement metrics
-        
+
         Return as JSON with keys: optimal_time, format, engagement_tactics, follow_up, cross_post, metrics_forecast"""
 
         user_prompt = f"""Content Analysis: {story_analysis}
@@ -57,10 +57,14 @@ class StrategyAgent:
 
     def generate_all_strategies(self, story_analysis, memory_context=None):
         """Generate strategies for all platforms"""
+        return self.schedule_posts(["facebook", "instagram", "linkedin"], story_analysis, memory_context)
+
+    def schedule_posts(self, platforms, story_analysis, memory_context=None):
+        """Generate strategies for specified platforms"""
         results = {}
         total_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cost_usd": 0.0}
 
-        for platform in ["facebook", "instagram", "linkedin"]:
+        for platform in platforms:
             res = self.create_strategy(platform, story_analysis, memory_context=memory_context)
             u = res.pop("_usage", {})
             total_usage["input_tokens"] += u.get("input_tokens", 0)
