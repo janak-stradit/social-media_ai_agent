@@ -1018,7 +1018,9 @@ class MediaGenerationService:
         }
 
     # ── Video Generation ───────────────────────────────────────────────────
-    def generate_video(self, caption: str, platform: str, tone: str | None = None, image_path: str | None = None) -> dict:
+    def generate_video(
+        self, caption: str, platform: str, tone: str | None = None, image_path: str | None = None
+    ) -> dict:
         """Generate an actual MP4 video from caption/story text and optional reference image."""
         if caption and ("CONTENT GENERATION BLOCKED" in caption or "No Strong Match" in caption):
             return {
