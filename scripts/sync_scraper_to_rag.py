@@ -33,7 +33,7 @@ def sync_companies(companies):
             memory.store_content(
                 content_id=f"intelligence_{company.replace(' ', '_').lower()}",
                 text=intelligence,
-                metadata={"topic": f"{company} Social Intelligence", "user_id": str(system_user_id)}
+                metadata={"topic": f"{company} Social Intelligence", "user_id": str(system_user_id)},
             )
             print("Successfully stored in ChromaDB.")
         else:

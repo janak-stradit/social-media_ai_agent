@@ -797,7 +797,7 @@ def approve_asset():
         user_id = get_current_user_id()
         if user_id is None:
             return jsonify({"error": "User not authenticated"}), 401
-            
+
         content_type = data.get("type", "text")
         content_data = json.dumps(data["content"]) if isinstance(data["content"], dict) else data["content"]
 

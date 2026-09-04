@@ -103,7 +103,7 @@ class SocialPublisherService:
             # Convert objects to dicts so the rest of the logic works without change
             acc_map = {}
             for acc_obj in connected_accs:
-                acc_map[str(acc_obj.platform)] = {
+                acc_map[acc_obj.platform] = {
                     "account_id": acc_obj.account_id,
                     "access_token": acc_obj.access_token,
                     "refresh_token": acc_obj.refresh_token,
@@ -177,7 +177,9 @@ class SocialPublisherService:
                             except Exception:
                                 pass
 
-                        results[plat] = self.publish_to_linkedin(str(author_urn), str(access_token), caption, image_path)
+                        results[plat] = self.publish_to_linkedin(
+                            str(author_urn), str(access_token), caption, image_path
+                        )
             else:
                 results[plat] = {"success": True, "platform": plat, "message": f"{plat.capitalize()} post processed."}
 
@@ -216,7 +218,9 @@ class SocialPublisherService:
                 "message": f"LinkedIn MCP post queued for tool [{tool_name}].",
             }
 
-    def publish_to_linkedin(self, author_urn: str, access_token: str, message: str, image_path: str | None = None) -> dict:
+    def publish_to_linkedin(
+        self, author_urn: str, access_token: str, message: str, image_path: str | None = None
+    ) -> dict:
         """Publish a real post to a LinkedIn Member or Organization using the ugcPosts API."""
         if not author_urn or not access_token:
             return {"success": False, "error": "Missing LinkedIn Author URN or Access Token"}
@@ -324,7 +328,9 @@ class SocialPublisherService:
         except Exception as e:
             return {"success": False, "platform": "linkedin", "error": f"LinkedIn network error: {str(e)}"}
 
-    def publish_to_youtube(self, channel_id: str, access_token: str, message: str, video_path: str | None = None) -> dict:
+    def publish_to_youtube(
+        self, channel_id: str, access_token: str, message: str, video_path: str | None = None
+    ) -> dict:
         """Publish (upload) a video to YouTube using Data API v3 Resumable Upload."""
         import os
 
