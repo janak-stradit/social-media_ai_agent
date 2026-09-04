@@ -32,6 +32,7 @@ from sqlalchemy.sql import func
 def _utcnow():
     return datetime.now(timezone.utc)
 
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     try:
