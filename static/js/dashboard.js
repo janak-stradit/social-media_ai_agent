@@ -1,3 +1,4 @@
+/* global showToast, renderCarousel */
 $(document).ready(function() {
 
     // Load current user info into the shared app header
