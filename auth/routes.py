@@ -94,6 +94,7 @@ def me():
     if not user:
         try:
             from db import get_user_by_email
+
             # Default dev/local fallback user
             user = get_user_by_id(1) or get_user_by_email("vaishnavi@try.com")
             if user:

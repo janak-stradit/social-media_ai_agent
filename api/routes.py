@@ -81,30 +81,60 @@ def _public_upload_url(filepath: str | None) -> str | None:
 def _persist_generated_media(run_id: int | None, platform: str, media_type: str, result: dict, user_id: int) -> None:
     if not DB_AVAILABLE or not run_id or not result.get("success"):
         return
-        
+
+
 import re
+
+
 def extract_prompt_for_type(full_text: str, content_type: str) -> str:
     """Extracts unified or individual prompts from the Counter Strategy text."""
-    if not full_text: return full_text
-    
-    if content_type in ('text', 'caption'):
-        unified = re.search(r'Unified Caption(?: Prompt)?:\s*(.*?)(?=\n\n(?:Unified Image Prompt|Unified Video Script|Theme:)|$)', full_text, re.DOTALL)
-        if unified: return unified.group(1).strip()
-        matches = re.findall(r'Caption(?: Prompt)?:\s*(.*?)(?=\n\n(?:Image Prompt|Video Script|Theme:|Reason for No Match:)|$)', full_text, re.DOTALL)
-        if matches: return "\n\n---\n\n".join([m.strip() for m in matches])
-        
-    elif content_type == 'image':
-        unified = re.search(r'Unified Image Prompt:\s*(.*?)(?=\n\n(?:Unified Video Script|Unified Caption|Theme:)|$)', full_text, re.DOTALL)
-        if unified: return unified.group(1).strip()
-        matches = re.findall(r'Image Prompt:\s*(.*?)(?=\n\n(?:Video Script|Caption|Theme:|Reason for No Match:)|$)', full_text, re.DOTALL)
-        if matches: return "\n\n---\n\n".join([m.strip() for m in matches])
-        
-    elif content_type == 'video':
-        unified = re.search(r'Unified Video Script:\s*(.*?)(?=\n\n(?:Unified Caption|Unified Image Prompt|Theme:)|$)', full_text, re.DOTALL)
-        if unified: return unified.group(1).strip()
-        matches = re.findall(r'Video Script:\s*(.*?)(?=\n\n(?:Caption|Image Prompt|Theme:|Reason for No Match:)|$)', full_text, re.DOTALL)
-        if matches: return "\n\n---\n\n".join([m.strip() for m in matches])
-        
+    if not full_text:
+        return full_text
+
+    if content_type in ("text", "caption"):
+        unified = re.search(
+            r"Unified Caption(?: Prompt)?:\s*(.*?)(?=\n\n(?:Unified Image Prompt|Unified Video Script|Theme:)|$)",
+            full_text,
+            re.DOTALL,
+        )
+        if unified:
+            return unified.group(1).strip()
+        matches = re.findall(
+            r"Caption(?: Prompt)?:\s*(.*?)(?=\n\n(?:Image Prompt|Video Script|Theme:|Reason for No Match:)|$)",
+            full_text,
+            re.DOTALL,
+        )
+        if matches:
+            return "\n\n---\n\n".join([m.strip() for m in matches])
+
+    elif content_type == "image":
+        unified = re.search(
+            r"Unified Image Prompt:\s*(.*?)(?=\n\n(?:Unified Video Script|Unified Caption|Theme:)|$)",
+            full_text,
+            re.DOTALL,
+        )
+        if unified:
+            return unified.group(1).strip()
+        matches = re.findall(
+            r"Image Prompt:\s*(.*?)(?=\n\n(?:Video Script|Caption|Theme:|Reason for No Match:)|$)", full_text, re.DOTALL
+        )
+        if matches:
+            return "\n\n---\n\n".join([m.strip() for m in matches])
+
+    elif content_type == "video":
+        unified = re.search(
+            r"Unified Video Script:\s*(.*?)(?=\n\n(?:Unified Caption|Unified Image Prompt|Theme:)|$)",
+            full_text,
+            re.DOTALL,
+        )
+        if unified:
+            return unified.group(1).strip()
+        matches = re.findall(
+            r"Video Script:\s*(.*?)(?=\n\n(?:Caption|Image Prompt|Theme:|Reason for No Match:)|$)", full_text, re.DOTALL
+        )
+        if matches:
+            return "\n\n---\n\n".join([m.strip() for m in matches])
+
     return full_text
 
     media_payload = {
@@ -459,9 +489,11 @@ def generate_content():
             story_analysis = {"themes": ["Strategy", "Industry"], "emotions": ["Professional"]}
             story_usage = None
         else:
-            story_analysis, story_usage = story_agent.analyze(story_prompt, memory_context=mem_prompt, return_usage=True)
-            caption_input = extract_prompt_for_type(story_prompt, 'text')
-            
+            story_analysis, story_usage = story_agent.analyze(
+                story_prompt, memory_context=mem_prompt, return_usage=True
+            )
+            caption_input = extract_prompt_for_type(story_prompt, "text")
+
         if story_usage:
             total_tokens += story_usage.get("total_tokens", 0)
             total_cost_usd += story_usage.get("cost_usd", 0.0)
@@ -906,7 +938,7 @@ def generate_media():
 
     try:
         caption_to_use = extract_prompt_for_type(caption, media_type)
-        if media_type == 'video':
+        if media_type == "video":
             result = media_service.generate_video(caption_to_use, platform, tone, image_path=image_path)
         else:
             result = media_service.generate_image(caption_to_use, platform, tone, image_path=image_path)
@@ -1556,16 +1588,14 @@ def competitor_posts():
         # --- NEW FILTERING LOGIC ---
         from services.stradit_service import StradITService
         from agents.story_agent import StoryAgent
+
         stradit = StradITService()
         project_context = stradit.get_all_projects_context()
         story_agent_local = StoryAgent()
         posts = story_agent_local.filter_relevant_posts(posts, project_context)
         # ---------------------------
 
-        return jsonify({
-            "success": True,
-            "posts": posts
-        })
+        return jsonify({"success": True, "posts": posts})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -1586,6 +1616,7 @@ def platform_posts():
         # --- NEW FILTERING LOGIC ---
         from services.stradit_service import StradITService
         from agents.story_agent import StoryAgent
+
         stradit = StradITService()
         project_context = stradit.get_all_projects_context()
         story_agent_local = StoryAgent()

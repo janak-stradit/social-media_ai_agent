@@ -845,10 +845,10 @@ class MediaGenerationService:
                 "success": False,
                 "type": "image",
                 "platform": platform,
-                "error": "CONTENT GENERATION BLOCKED. Reason: No Strong Match was identified between this competitor topic and the available projects."
+                "error": "CONTENT GENERATION BLOCKED. Reason: No Strong Match was identified between this competitor topic and the available projects.",
             }
 
-        if getattr(Config, 'USE_MOCK_LLM', False):
+        if getattr(Config, "USE_MOCK_LLM", False):
             print("[Media Service] USE_MOCK_LLM is enabled. Generating mock image asset...")
             return self._generate_mock_media(platform, "image", caption)
 
@@ -1018,10 +1018,10 @@ class MediaGenerationService:
                 "success": False,
                 "type": "video",
                 "platform": platform,
-                "error": "CONTENT GENERATION BLOCKED. Reason: No Strong Match was identified between this competitor topic and the available projects."
+                "error": "CONTENT GENERATION BLOCKED. Reason: No Strong Match was identified between this competitor topic and the available projects.",
             }
 
-        if getattr(Config, 'USE_MOCK_LLM', False):
+        if getattr(Config, "USE_MOCK_LLM", False):
             print("[Media Service] USE_MOCK_LLM is enabled. Generating mock video asset...")
             return self._generate_mock_media(platform, "video", caption)
 

@@ -205,13 +205,12 @@ Before outputting, ensure:
 """
         # Place the massive project context FIRST, and the small competitor posts LAST so the LLM doesn't ignore them.
         user = f"<OUR_PROJECT_CONTEXT>\n{project_context}\n</OUR_PROJECT_CONTEXT>\n\n<COMPETITOR_POSTS>\n{posts_text}\n</COMPETITOR_POSTS>"
-        
+
         result, usage = self.llm.generate_json(system, user, temperature=0.3, max_tokens=4000, return_usage=True)
-        
+
         if result and "prompt" in result:
             result["prompt"] = result["prompt"].strip()
-            
-            
+
         if return_usage:
             return result, usage
         return result
@@ -220,7 +219,7 @@ Before outputting, ensure:
         """Filter a list of scraped competitor posts to only those relevant to our projects."""
         if not posts:
             return []
-        
+
         system_prompt = """You are an expert strategic analyst.
 Your task is to review a list of scraped competitor social media posts and determine which ones are RELEVANT to our company's projects/capabilities.
 
@@ -230,14 +229,14 @@ Unrelated topics include: Generic HR updates, internships, employee volunteering
 Return a JSON object with a single key "relevant_indices" containing a list of integers representing the indices of the posts that ARE relevant.
 Example: {"relevant_indices": [0, 2, 5]}
 """
-        
+
         posts_text = ""
         for i, p in enumerate(posts):
             text = (p.get("text") or "")[:500]
             posts_text += f"[{i}] {text}\n---\n"
-            
+
         user_prompt = f"<OUR_PROJECT_CONTEXT>\n{project_context}\n</OUR_PROJECT_CONTEXT>\n\n<COMPETITOR_POSTS>\n{posts_text}\n</COMPETITOR_POSTS>\n\nIdentify the relevant indices."
-        
+
         try:
             result = self.llm.generate_json(system_prompt, user_prompt, temperature=0.1)
             relevant_indices = result.get("relevant_indices", [])
@@ -247,11 +246,12 @@ Example: {"relevant_indices": [0, 2, 5]}
                     valid_indices.append(int(idx))
                 except (ValueError, TypeError):
                     pass
-                    
+
             filtered_posts = [posts[i] for i in valid_indices if 0 <= i < len(posts)]
             return filtered_posts
         except Exception as e:
             import traceback
+
             print(f"[StoryAgent] Error filtering posts: {e}")
             traceback.print_exc()
             return posts
