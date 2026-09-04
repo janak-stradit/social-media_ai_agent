@@ -13,14 +13,8 @@ import json
 import os
 from datetime import datetime, timezone
 
-
-def _utcnow():
-    return datetime.now(timezone.utc)
-
-
 from sqlalchemy import (
     Boolean,
-    Column,
     DateTime,
     Float,
     ForeignKey,
@@ -33,6 +27,10 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql import func
+
+
+def _utcnow():
+    return datetime.now(timezone.utc)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
