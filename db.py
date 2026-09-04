@@ -13,8 +13,10 @@ import json
 import os
 from datetime import datetime, timezone
 
+
 def _utcnow():
     return datetime.now(timezone.utc)
+
 
 from sqlalchemy import (
     Boolean,
@@ -113,14 +115,18 @@ class SocialAccount(Base):
     )
     platform: Mapped[str] = mapped_column(String(32), nullable=False)  # facebook, instagram, linkedin, youtube
     account_name: Mapped[str] = mapped_column(String(120), nullable=False)
-    account_id: Mapped[str | None] = mapped_column(String(120), nullable=True)  # Page ID, IG ID, Author URN, or Channel ID
+    account_id: Mapped[str | None] = mapped_column(
+        String(120), nullable=True
+    )  # Page ID, IG ID, Author URN, or Channel ID
     access_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)  # Required for YouTube offline access
     connection_type: Mapped[str] = mapped_column(String(32), default="direct", nullable=False)  # direct, mcp
     mcp_endpoint: Mapped[str | None] = mapped_column(Text, nullable=True)
     mcp_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     mcp_tool_name: Mapped[str | None] = mapped_column(String(120), default="linkedin_publish_post", nullable=True)
-    status: Mapped[str] = mapped_column(String(32), default="connected", nullable=False)  # connected, disconnected, expired
+    status: Mapped[str] = mapped_column(
+        String(32), default="connected", nullable=False
+    )  # connected, disconnected, expired
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
 
@@ -170,7 +176,9 @@ class OpportunitySuggestion(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    category: Mapped[str] = mapped_column(String(32), nullable=False, index=True)  # 'unserved_theme' | 'domain_expansion'
+    category: Mapped[str] = mapped_column(
+        String(32), nullable=False, index=True
+    )  # 'unserved_theme' | 'domain_expansion'
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_accounts: Mapped[str | None] = mapped_column(Text, nullable=True)  # comma-separated competitor/account names
@@ -188,7 +196,9 @@ class ScheduledPost(Base):
     run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     platforms: Mapped[str] = mapped_column(Text, nullable=False)  # JSON or comma-separated string
     scheduled_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)  # pending, published, failed, cancelled
+    status: Mapped[str] = mapped_column(
+        String(32), default="pending", nullable=False
+    )  # pending, published, failed, cancelled
     content_json: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
