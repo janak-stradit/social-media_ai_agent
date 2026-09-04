@@ -604,7 +604,7 @@ def reject_credit_request(request_id: int) -> dict | None:
         return {"request_id": req.id, "status": "rejected"}
 
 
-def update_user_credit_limit(user_id: int, new_limit: float = None, add_amount: float = None) -> dict | None:
+def update_user_credit_limit(user_id: int, new_limit: float | None = None, add_amount: float | None = None) -> dict | None:
     """Update or add to a user's credit limit (admin action)."""
     with Session(engine) as session:
         user = session.get(User, user_id)

@@ -14,9 +14,6 @@ from services.memory_service import MemoryService  # noqa: E402  pylint: disable
 from services.scraper_service import ScraperService  # noqa: E402  pylint: disable=wrong-import-position
 
 
-# KNOWN BUG (pre-existing): this standalone script is out of sync with MemoryService's current
-# API -- __init__ takes no user_id kwarg and there is no add_context() method, so running this
-# script raises immediately. Flagged during lint adoption, not fixed here.
 def sync_companies(companies):
     print("Initializing Database and RAG Memory...")
     init_db()
@@ -25,7 +22,7 @@ def sync_companies(companies):
     system_user_id = 999999
 
     scraper = ScraperService()
-    memory = MemoryService(user_id=system_user_id)  # pylint: disable=unexpected-keyword-arg
+    memory = MemoryService()
 
     for company in companies:
         print(f"\nFetching live intelligence for {company}...")
@@ -33,8 +30,11 @@ def sync_companies(companies):
 
         if intelligence and "API OFFLINE" not in intelligence:
             print(f"Syncing {len(intelligence)} chars of data to RAG memory...")
-            # pylint: disable-next=no-member
-            memory.add_context(topic=f"{company} Social Intelligence", content=intelligence)
+            memory.store_content(
+                content_id=f"intelligence_{company.replace(' ', '_').lower()}",
+                text=intelligence,
+                metadata={"topic": f"{company} Social Intelligence", "user_id": str(system_user_id)}
+            )
             print("Successfully stored in ChromaDB.")
         else:
             print(f"Skipping {company} - No valid live data retrieved.")

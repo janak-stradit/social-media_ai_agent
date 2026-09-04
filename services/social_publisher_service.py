@@ -9,7 +9,7 @@ class SocialPublisherService:
     def __init__(self):
         self.fb_graph_version = "v19.0"
 
-    def publish_to_facebook(self, page_id: str, access_token: str, message: str, image_path: str = None) -> dict:
+    def publish_to_facebook(self, page_id: str, access_token: str, message: str, image_path: str | None = None) -> dict:
         """Publish a real post or photo to a Facebook Page via Meta Graph API v19.0."""
         if not page_id or not access_token:
             return {"success": False, "error": "Missing Facebook Page ID or Access Token"}
@@ -86,7 +86,7 @@ class SocialPublisherService:
             }
 
     def publish_post_to_connected_accounts(
-        self, user_id: int, platforms: list, caption: str, image_path: str = None
+        self, user_id: int, platforms: list[str], caption: str, image_path: str | None = None
     ) -> dict:
         """Publish post to user's connected social media accounts."""
         from sqlalchemy.orm import Session
@@ -103,7 +103,7 @@ class SocialPublisherService:
             # Convert objects to dicts so the rest of the logic works without change
             acc_map = {}
             for acc_obj in connected_accs:
-                acc_map[acc_obj.platform] = {
+                acc_map[str(acc_obj.platform)] = {
                     "account_id": acc_obj.account_id,
                     "access_token": acc_obj.access_token,
                     "refresh_token": acc_obj.refresh_token,
@@ -113,7 +113,7 @@ class SocialPublisherService:
                     "mcp_tool_name": getattr(acc_obj, "mcp_tool_name", None),
                 }
 
-        results = {}
+        results: dict = {}
         for plat in platforms:
             plat = plat.lower()
             if plat not in acc_map:
@@ -134,7 +134,7 @@ class SocialPublisherService:
                         "error": "Facebook Page ID or Access Token is missing on /settings",
                     }
                 else:
-                    results[plat] = self.publish_to_facebook(page_id, token, caption, image_path)
+                    results[plat] = self.publish_to_facebook(str(page_id), str(token), caption, image_path)
             elif plat == "youtube":
                 channel_id = acc.get("account_id")
                 token = acc.get("access_token")
@@ -146,7 +146,7 @@ class SocialPublisherService:
                 else:
                     # In a real implementation, you would check if token is expired, refresh it if needed, and do a multipart upload.
                     # For now, we simulate a successful YouTube upload.
-                    results[plat] = self.publish_to_youtube(channel_id, token, caption, image_path)
+                    results[plat] = self.publish_to_youtube(str(channel_id), str(token), caption, image_path)
             elif plat == "linkedin":
                 if acc.get("connection_type") == "mcp":
                     results[plat] = self._publish_linkedin_mcp(acc, caption)
@@ -154,24 +154,30 @@ class SocialPublisherService:
                     access_token = acc.get("access_token")
                     author_urn = acc.get("account_id")
 
-                    # Auto-fetch Member ID if user typed 'me' or left it simple
-                    if author_urn in ["me", "urn:li:person:me", "urn:li:member:me"]:
-                        import requests
+                    if not author_urn or not access_token:
+                        results[plat] = {
+                            "success": False,
+                            "error": "LinkedIn Author URN or Access Token is missing on /settings",
+                        }
+                    else:
+                        # Auto-fetch Member ID if user typed 'me' or left it simple
+                        if author_urn in ["me", "urn:li:person:me", "urn:li:member:me"]:
+                            import requests
 
-                        try:
-                            me_resp = requests.get(
-                                "https://api.linkedin.com/v2/userinfo",
-                                headers={"Authorization": f"Bearer {access_token}"},
-                                timeout=10,
-                            )
-                            if me_resp.status_code == 200:
-                                sub = me_resp.json().get("sub")
-                                if sub:
-                                    author_urn = f"urn:li:person:{sub}"
-                        except Exception:
-                            pass
+                            try:
+                                me_resp = requests.get(
+                                    "https://api.linkedin.com/v2/userinfo",
+                                    headers={"Authorization": f"Bearer {access_token}"},
+                                    timeout=10,
+                                )
+                                if me_resp.status_code == 200:
+                                    sub = me_resp.json().get("sub")
+                                    if sub:
+                                        author_urn = f"urn:li:person:{sub}"
+                            except Exception:
+                                pass
 
-                    results[plat] = self.publish_to_linkedin(author_urn, access_token, caption, image_path)
+                        results[plat] = self.publish_to_linkedin(str(author_urn), str(access_token), caption, image_path)
             else:
                 results[plat] = {"success": True, "platform": plat, "message": f"{plat.capitalize()} post processed."}
 
@@ -210,7 +216,7 @@ class SocialPublisherService:
                 "message": f"LinkedIn MCP post queued for tool [{tool_name}].",
             }
 
-    def publish_to_linkedin(self, author_urn: str, access_token: str, message: str, image_path: str = None) -> dict:
+    def publish_to_linkedin(self, author_urn: str, access_token: str, message: str, image_path: str | None = None) -> dict:
         """Publish a real post to a LinkedIn Member or Organization using the ugcPosts API."""
         if not author_urn or not access_token:
             return {"success": False, "error": "Missing LinkedIn Author URN or Access Token"}
@@ -318,7 +324,7 @@ class SocialPublisherService:
         except Exception as e:
             return {"success": False, "platform": "linkedin", "error": f"LinkedIn network error: {str(e)}"}
 
-    def publish_to_youtube(self, channel_id: str, access_token: str, message: str, video_path: str = None) -> dict:
+    def publish_to_youtube(self, channel_id: str, access_token: str, message: str, video_path: str | None = None) -> dict:
         """Publish (upload) a video to YouTube using Data API v3 Resumable Upload."""
         import os
 

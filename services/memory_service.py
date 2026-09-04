@@ -110,6 +110,16 @@ class MemoryService:
             print(f"[MemoryService] get_trending_hashtags notice: {e}")
         return ["#VortexSocial", "#AIStrategy", "#GrowthMarketing", "#DigitalGrowth"]
 
+    def get_stats(self):
+        """Return basic statistics about the memory store."""
+        if not self.enabled:
+            return {"total_memories": 0}
+        try:
+            return {"total_memories": self.collection.count()}
+        except Exception as e:
+            print(f"[MemoryService] get_stats warning: {e}")
+            return {"total_memories": 0}
+
     def format_memory_prompt(self, retrieved_items):
         """Format retrieved memories into prompt section for agents"""
         if not retrieved_items:

@@ -1,7 +1,9 @@
 import json
 import os
+import re
 import urllib.parse
 import uuid
+import typing
 
 import requests
 from flask import Blueprint, current_app, jsonify, request
@@ -82,8 +84,20 @@ def _persist_generated_media(run_id: int | None, platform: str, media_type: str,
     if not DB_AVAILABLE or not run_id or not result.get("success"):
         return
 
-
-import re
+    media_payload = {
+        "url": result.get("url"),
+        "prompt": result.get("prompt"),
+        "type": result.get("type", media_type),
+        "duration": result.get("duration"),
+        "resolution": result.get("resolution"),
+        "size": result.get("size"),
+        "model": result.get("model"),
+        "source_image_url": result.get("source_image_url"),
+    }
+    try:
+        append_run_media(run_id, platform, media_type, media_payload, user_id=user_id)
+    except Exception as db_err:
+        current_app.logger.warning(f"[DB] Could not save generated media: {db_err}")
 
 
 def extract_prompt_for_type(full_text: str, content_type: str) -> str:
@@ -136,21 +150,6 @@ def extract_prompt_for_type(full_text: str, content_type: str) -> str:
             return "\n\n---\n\n".join([m.strip() for m in matches])
 
     return full_text
-
-    media_payload = {
-        "url": result.get("url"),
-        "prompt": result.get("prompt"),
-        "type": result.get("type", media_type),
-        "duration": result.get("duration"),
-        "resolution": result.get("resolution"),
-        "size": result.get("size"),
-        "model": result.get("model"),
-        "source_image_url": result.get("source_image_url"),
-    }
-    try:
-        append_run_media(run_id, platform, media_type, media_payload, user_id=user_id)
-    except Exception as db_err:
-        current_app.logger.warning(f"[DB] Could not save generated media: {db_err}")
 
 
 def allowed_file(filename):
@@ -231,10 +230,8 @@ def get_models_info():
         video_status = "STANDBY"
 
     # 5. Dynamic RAG Memory Engine Stats
-    # KNOWN BUG (pre-existing): MemoryService has no get_stats() method, so this always raises
-    # and mem_count silently stays 0. Flagged during lint adoption, not fixed here.
     try:
-        mem_stats = memory_service.get_stats()  # pylint: disable=no-member
+        mem_stats = memory_service.get_stats()
         mem_count = mem_stats.get("total_memories", 0)
     except Exception:
         mem_count = 0
@@ -346,12 +343,13 @@ def upload_image():
         return jsonify({"error": "No image file provided"}), 400
 
     file = request.files["image"]
-    if file.filename == "":
+    filename = file.filename
+    if not filename:
         return jsonify({"error": "No file selected"}), 400
 
-    if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        unique_name = f"{uuid.uuid4()}_{filename}"
+    if file and allowed_file(filename):
+        secure_name = secure_filename(filename)
+        unique_name = f"{uuid.uuid4()}_{secure_name}"
         filepath = os.path.join(current_app.config["UPLOAD_FOLDER"], unique_name)
         file.save(filepath)
 
@@ -658,9 +656,9 @@ def generate_content():
 
         # ── Persist to PostgreSQL ──────────────────────────────────────────
         run_id = None
-        if DB_AVAILABLE:
+        if DB_AVAILABLE and user_id is not None:
             try:
-                content_to_save = dict(response["content"])
+                content_to_save: dict[str, typing.Any] = dict(response["content"])
                 content_to_save["_agents"] = agents_executed
                 content_to_save["_quality"] = response["quality_summary"]
                 if image_path and os.path.exists(image_path):
@@ -797,6 +795,9 @@ def approve_asset():
 
     try:
         user_id = get_current_user_id()
+        if user_id is None:
+            return jsonify({"error": "User not authenticated"}), 401
+            
         content_type = data.get("type", "text")
         content_data = json.dumps(data["content"]) if isinstance(data["content"], dict) else data["content"]
 
@@ -830,6 +831,9 @@ def publish_pipeline_asset():
         return jsonify({"error": "content is required"}), 400
 
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
     is_media = "image" in asset_type or "video" in asset_type
     message = (caption or content) if is_media else content
 
@@ -863,9 +867,7 @@ def schedule_campaign():
 
     try:
         story_analysis = story_agent.analyze(data["story"])
-        # KNOWN BUG (pre-existing): StrategyAgent has no schedule_posts() method, so this
-        # endpoint always raises and returns a 500. Flagged during lint adoption, not fixed here.
-        schedule = strategy_agent.schedule_posts(platforms, story_analysis)  # pylint: disable=no-member
+        schedule = strategy_agent.schedule_posts(platforms, story_analysis)
 
         return jsonify({"success": True, "schedule": schedule})
 
@@ -947,7 +949,8 @@ def generate_media():
             result["source_image_url"] = _public_upload_url(image_path)
         if run_id:
             result["run_id"] = run_id
-            _persist_generated_media(run_id, platform, media_type, result, user_id)
+            if user_id is not None:
+                _persist_generated_media(run_id, platform, media_type, result, user_id)
 
         return jsonify(result)
 
@@ -966,6 +969,8 @@ def request_credit_extension():
         return jsonify({"error": "Database not available"}), 503
 
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "User not authenticated"}), 401
     data = request.get_json() or {}
 
     try:
@@ -998,6 +1003,9 @@ def get_my_credit_requests():
         return jsonify({"error": "Database not available"}), 503
 
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
     try:
         requests_list = get_user_credit_requests(user_id)
         return jsonify({"success": True, "requests": requests_list})
@@ -1358,9 +1366,14 @@ def schedule_post_endpoint():
     except Exception:
         return jsonify({"error": "Invalid scheduled date/time format"}), 400
 
-    post = create_scheduled_post(
-        user_id=user_id, platforms=platforms, scheduled_at=scheduled_at, content_json=content_json, run_id=run_id
-    )
+    if run_id is not None:
+        post = create_scheduled_post(
+            user_id=user_id, platforms=platforms, scheduled_at=scheduled_at, content_json=content_json, run_id=run_id
+        )
+    else:
+        post = create_scheduled_post(
+            user_id=user_id, platforms=platforms, scheduled_at=scheduled_at, content_json=content_json
+        )
     return jsonify({"success": True, "scheduled_post": post})
 
 
@@ -1421,7 +1434,7 @@ def create_manual_scheduled_post_endpoint():
     image_url = None
     if "photo" in request.files and request.files["photo"].filename:
         file = request.files["photo"]
-        filename = secure_filename(file.filename)
+        filename = secure_filename(file.filename or "")
         unique_name = f"manual_{uuid.uuid4().hex[:8]}_{filename}"
         upload_folder = current_app.config.get(
             "UPLOAD_FOLDER", os.path.join(current_app.root_path, "static", "uploads")
@@ -1431,15 +1444,15 @@ def create_manual_scheduled_post_endpoint():
         file.save(file_path)
         image_url = f"/static/uploads/{unique_name}"
 
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     if publish_now or not scheduled_at_str:
-        scheduled_at = datetime.utcnow()
+        scheduled_at = datetime.now(timezone.utc)
     else:
         try:
             scheduled_at = datetime.fromisoformat(scheduled_at_str.replace("Z", "+00:00"))
         except Exception:
-            scheduled_at = datetime.utcnow()
+            scheduled_at = datetime.now(timezone.utc)
 
     content_json = {
         "caption": caption,
@@ -1603,7 +1616,7 @@ def competitor_posts():
 @api_bp.route("/platform-posts", methods=["GET"])
 def platform_posts():
     platform = request.args.get("platform")
-    competitor = request.args.get("competitor")
+    competitor = request.args.get("competitor") or ""
     if not platform:
         return jsonify({"error": "No platform provided"}), 400
 
@@ -1642,6 +1655,8 @@ def competitor_posts_db():
     competitor = request.args.get("competitor")
     if not platform:
         return jsonify({"error": "No platform provided"}), 400
+    if not competitor:
+        return jsonify({"error": "No competitor provided"}), 400
 
     try:
         from db import get_competitor_posts

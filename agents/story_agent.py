@@ -38,7 +38,7 @@ class StoryAgent:
 
     def generate_channel_storyline(self, posts_text, project_context, return_usage=False):
         """Generate a structured channel storyline based on competitor posts and our project context"""
-        system = """You are an expert strategic analyst. 
+        system = """You are an expert strategic analyst.
 You will be provided with specific text from multiple competitor posts in the <COMPETITOR_POSTS> block and a list of StradIT projects in the <OUR_PROJECT_CONTEXT> block.
 
 REQUIRED BEHAVIOR:
@@ -47,7 +47,7 @@ For EACH competitor post independently:
 2. Identify the underlying BUSINESS / INVESTMENT / OPERATIONAL / RESEARCH / COMPLIANCE problem related to that specific topic.
 3. Compare that underlying problem against ALL available projects in <OUR_PROJECT_CONTEXT>.
 4. Follow the Project Selection Rule below to determine the connection strength and select the project.
-5. Create a storyline following a 55:45 ratio: 
+5. Create a storyline following a 55:45 ratio:
    - ~55% focusing on the competitor's actual topic, the underlying business/investment problem, why the problem matters, and the context surrounding it.
    - ~45% focusing on the selected project, how the project addresses the underlying problem, and the business/investment impact.
    The competitor/problem portion MUST remain the larger portion of the storyline. Do not simply mention the competitor and then become a product advertisement. First establish a strong understanding of the problem.
@@ -161,7 +161,7 @@ Slide 4 (Outcome/CTA): Deep navy background (#0B1B33) with two soft glowing circ
 Negative Constraints: No logos, no competitor branding or names, no cluttered stock photography, no generic abstract art unconnected to the data narrative, no photographic human figures, no overly minimalist compositions devoid of text or metrics — every slide must remain text-oriented and data-driven, with graphics functioning as supporting infographic elements rather than standalone decoration.
 ----------------------
 
-IMPORTANT RULES: 
+IMPORTANT RULES:
 - The carousel MUST be text-oriented and data-driven. Visuals should support the text (like a premium infographic or presentation slide), not the other way around.
 - IF a specific StradIT project was selected, at least one slide MUST visually integrate highly detailed elements representing that project's exact capabilities (e.g., if AltsIQ, show a slide with a glowing 233-point compliance report layout).
 - Do NOT reuse the exact same visual metaphor for every storyline. Tailor the format to the specific competitor's post and StradIT project.
@@ -188,9 +188,9 @@ Audio: A calm, authoritative voiceover saying: "[Voiceover script tailored to th
 End frame: Minimal premium navy background with StradIT branding and the tagline: "Intelligence. Automated."
 ----------------------
 
-IMPORTANT RULES: 
-- Do not mention or display competitor names or logos. 
-- Do not invent product capabilities or claim specific processing times. 
+IMPORTANT RULES:
+- Do not mention or display competitor names or logos.
+- Do not invent product capabilities or claim specific processing times.
 - The video MUST have its own visual storytelling concept (like the gyroscope metaphor above) and not simply describe or animate the image prompt.
 - Make the cinematography rich, highly detailed, and deeply professional.]
 
