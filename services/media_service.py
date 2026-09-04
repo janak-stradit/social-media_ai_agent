@@ -8,6 +8,7 @@ import base64
 import mimetypes
 import os
 import time
+import typing
 import uuid
 
 import openai
@@ -161,7 +162,7 @@ class MediaGenerationService:
         data_uri = self._image_to_data_uri(image_path)
 
         if model.startswith("vidu"):
-            payload = {
+            payload: dict[str, typing.Any] = {
                 "model": model,
                 "prompt": prompt[:512],
                 "image_url": data_uri,
@@ -325,7 +326,7 @@ class MediaGenerationService:
         return cleaned
 
     def _build_video_prompt(
-        self, caption: str, platform: str, tone: str = None, has_reference_image: bool = False
+        self, caption: str, platform: str, tone: str | None = None, has_reference_image: bool = False
     ) -> str:
         platform_style = {
             "instagram": "vibrant portrait vertical video, cinematic lighting, modern style",
@@ -363,14 +364,14 @@ class MediaGenerationService:
         # Ensure strict adherence to model limits (Amazon Nova Reel 512-character max)
         return prompt[:480]
 
-    def _generate_video_openrouter(self, prompt: str, platform: str, image_path: str = None) -> dict:
+    def _generate_video_openrouter(self, prompt: str, platform: str, image_path: str | None = None) -> dict:
         """Submit an OpenRouter video job, poll until done, and save the MP4 locally."""
         aspect_ratio_map = {
             "instagram": "9:16",
             "facebook": "16:9",
             "linkedin": "16:9",
         }
-        payload = {
+        payload: dict[str, typing.Any] = {
             "model": Config.VIDEO_MODEL,
             "prompt": prompt,
             "aspect_ratio": aspect_ratio_map.get(platform, "16:9"),
@@ -459,14 +460,14 @@ class MediaGenerationService:
             f.write(img_data)
         return local_filename, local_path
 
-    def _generate_image_openrouter(self, prompt: str, platform: str, size: str, image_path: str = None) -> dict:
+    def _generate_image_openrouter(self, prompt: str, platform: str, size: str, image_path: str | None = None) -> dict:
         """Generate via OpenRouter's dedicated /v1/images API."""
         aspect_ratio_map = {
             "instagram": "1:1",
             "facebook": "16:9",
             "linkedin": "16:9",
         }
-        payload = {
+        payload: dict[str, typing.Any] = {
             "model": Config.IMAGE_MODEL,
             "prompt": prompt,
             "aspect_ratio": aspect_ratio_map.get(platform, "1:1"),
@@ -542,7 +543,7 @@ class MediaGenerationService:
         except Exception:
             return 1024, 1024
 
-    def _get_image_as_jpeg_base64(self, image_path: str, target_size: tuple[int, int] = None) -> str:
+    def _get_image_as_jpeg_base64(self, image_path: str, target_size: tuple[int, int] | None = None) -> str:
         import io
 
         from PIL import Image
@@ -564,7 +565,7 @@ class MediaGenerationService:
             img.save(buffer, format="JPEG", quality=90)
             return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
-    def _generate_image_bedrock(self, prompt: str, platform: str, size: str, image_path: str = None) -> dict:
+    def _generate_image_bedrock(self, prompt: str, platform: str, size: str, image_path: str | None = None) -> dict:
         """Generate an image using AWS Bedrock (low cost model, e.g. Amazon Nova Canvas)."""
         if not self.bedrock_client:
             raise RuntimeError("AWS Bedrock client is not initialized. Check AWS credentials.")
@@ -658,7 +659,7 @@ class MediaGenerationService:
             "model": model_id,
         }
 
-    def _generate_video_bedrock(self, prompt: str, platform: str, image_path: str = None) -> dict:
+    def _generate_video_bedrock(self, prompt: str, platform: str, image_path: str | None = None) -> dict:
         """Generate a video using AWS Bedrock (low cost model, e.g. Amazon Nova Reel)."""
         if not self.bedrock_client or not self.s3_client:
             raise RuntimeError("AWS Bedrock or S3 client is not initialized. Check AWS credentials.")
@@ -701,8 +702,9 @@ class MediaGenerationService:
         s3_uri = f"s3://{s3_bucket.strip('/')}/bedrock-video-outputs/{job_id}/"
 
         output_config = {"s3OutputDataConfig": {"s3Uri": s3_uri}}
-        if getattr(Config, "AWS_BUCKET_OWNER", None):
-            output_config["s3OutputDataConfig"]["bucketOwner"] = Config.AWS_BUCKET_OWNER
+        bucket_owner = getattr(Config, "AWS_BUCKET_OWNER", None)
+        if bucket_owner:
+            output_config["s3OutputDataConfig"]["bucketOwner"] = str(bucket_owner)
 
         response = self.bedrock_client.start_async_invoke(
             clientRequestToken=str(uuid.uuid4()),
@@ -812,6 +814,9 @@ class MediaGenerationService:
         else:
             oai_size = "1024x1024"
 
+        if not self.client:
+            raise RuntimeError("OpenAI client is not initialized")
+
         response = self.client.images.generate(
             model="dall-e-3",
             prompt=prompt[:4000],
@@ -820,6 +825,8 @@ class MediaGenerationService:
             n=1,
         )
         image_url = response.data[0].url
+        if not image_url:
+            raise RuntimeError("Failed to generate image: OpenAI returned no URL")
         img_data = requests.get(image_url, timeout=30).content
         local_filename, _ = self._save_image_bytes(img_data, platform)
         return {
@@ -834,7 +841,7 @@ class MediaGenerationService:
     # The linter flags that not every path through this function returns a dict (some fall
     # through, implicitly returning None). Worth tracing properly; not done as part of lint adoption.
     def generate_image(  # pylint: disable=inconsistent-return-statements
-        self, caption: str, platform: str, tone: str = None, image_path: str = None
+        self, caption: str, platform: str, tone: str | None = None, image_path: str | None = None
     ) -> dict:
         """
         Generate a social media image.
@@ -914,24 +921,11 @@ class MediaGenerationService:
                     "model": "pollinations",
                 }
 
-            return {
-                "success": True,
-                "type": "image",
-                "platform": platform,
-                "url": result["url"],
-                "original_url": result.get("original_url"),
-                "prompt": result["prompt"],
-                "size": size,
-                "provider": result.get("model", "bedrock"),
-                "cost": result.get("cost", 0.03),
-                "model": result.get("model", "bedrock"),
-            }
-
         # KNOWN BUG (pre-existing): this except is unreachable -- the earlier
         # `except Exception as bedrock_err:` above already catches everything, so a failure of
         # all three providers propagates unhandled instead of hitting this fallback. Flagged
         # during lint adoption, not fixed here.
-        except Exception as e:  # pylint: disable=duplicate-except
+        except Exception as e:  # type: ignore  # pylint: disable=duplicate-except
             return {
                 "success": False,
                 "type": "image",
@@ -939,7 +933,20 @@ class MediaGenerationService:
                 "error": str(e),
             }
 
-    def _generate_google_gemini_video(self, prompt: str, platform: str, image_path: str = None) -> dict:
+        return {
+            "success": True,
+            "type": "image",
+            "platform": platform,
+            "url": result["url"],
+            "original_url": result.get("original_url"),
+            "prompt": result["prompt"],
+            "size": size,
+            "provider": result.get("model", "bedrock"),
+            "cost": result.get("cost", 0.03),
+            "model": result.get("model", "bedrock"),
+        }
+
+    def _generate_google_gemini_video(self, prompt: str, platform: str, image_path: str | None = None) -> dict:
         """Generate a video using Google Gemini / Veo Video Generation API via google-genai SDK."""
         google_key = getattr(Config, "GOOGLE_API_KEY", None) or os.getenv("GOOGLE_API_KEY")
         if not google_key:
@@ -1011,7 +1018,7 @@ class MediaGenerationService:
         }
 
     # ── Video Generation ───────────────────────────────────────────────────
-    def generate_video(self, caption: str, platform: str, tone: str = None, image_path: str = None) -> dict:
+    def generate_video(self, caption: str, platform: str, tone: str | None = None, image_path: str | None = None) -> dict:
         """Generate an actual MP4 video from caption/story text and optional reference image."""
         if caption and ("CONTENT GENERATION BLOCKED" in caption or "No Strong Match" in caption):
             return {
@@ -1251,7 +1258,7 @@ class MediaGenerationService:
             }
 
     # ── Video Storyboard Generation (fallback / reference) ─────────────────
-    def generate_video_storyboard(self, caption: str, platform: str, tone: str = None) -> dict:
+    def generate_video_storyboard(self, caption: str, platform: str, tone: str | None = None) -> dict:
         """
         Generate a detailed video script/storyboard using the LLM.
         Actual video rendering needs Runway ML, Sora, or similar.
@@ -1307,7 +1314,7 @@ Return JSON with keys:
         cleaned = re.sub(r"\s+", " ", cleaned)
         return cleaned.strip()
 
-    def _enhance_image_prompt(self, user_caption: str, platform: str, tone: str = None) -> str:
+    def _enhance_image_prompt(self, user_caption: str, platform: str, tone: str | None = None) -> str:
         """
         Enhance a simple user prompt into a professional, visually rich prompt
         for image generation models, optimized for high aesthetic quality.

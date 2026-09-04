@@ -61,10 +61,12 @@ except Exception as _media_err:
     MEDIA_AVAILABLE = False
     print(f"[routes] Media service not available: {_media_err}")
 
+from typing import Optional
+
 try:
     from services.social_publisher_service import SocialPublisherService
 
-    publisher_service = SocialPublisherService()
+    publisher_service: Optional[SocialPublisherService] = SocialPublisherService()
 except Exception as _pub_err:
     publisher_service = None
     print(f"[routes] Social publisher service not available: {_pub_err}")
