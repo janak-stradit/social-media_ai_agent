@@ -4,6 +4,7 @@ import re
 import urllib.parse
 import uuid
 import typing
+from typing import Optional
 
 import requests
 from flask import Blueprint, current_app, jsonify, request
@@ -60,8 +61,6 @@ try:
 except Exception as _media_err:
     MEDIA_AVAILABLE = False
     print(f"[routes] Media service not available: {_media_err}")
-
-from typing import Optional
 
 try:
     from services.social_publisher_service import SocialPublisherService
