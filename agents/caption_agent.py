@@ -185,8 +185,11 @@ class CaptionAgent:
         system_prompt = f"""
 You are a {platform.capitalize()} Content Specialist.
 
-Generate ONE final narrative social media post based STRICTLY
+Generate THREE distinct narrative social media post variations based STRICTLY
 on the instructions in the Story Analysis.
+- Primary Hook: Direct and value-driven.
+- Story Hook: Narrative-driven and engaging.
+- Contrarian Hook: Bold and thought-provoking.
 
 PRIMARY REQUIREMENT:
 The final caption must be natural, human-written, and suitable
@@ -222,7 +225,7 @@ No Strong Match was identified between this competitor topic and the available p
 
 9. Do NOT ask the reader to "visit our website", "read our whitepaper", "reach out to me", "see a demonstration", or "download the document".
 
-10. You SHOULD include hashtags at the very end of the post. You MUST ensure every hashtag starts with a '#' symbol (e.g. #Technology #Innovation). Do NOT just list words without the '#' symbol.
+10. You SHOULD include hashtags at the very end of the post. You MUST ensure every hashtag starts with a '#' symbol. IMPORTANT: You must provide UNIQUE and DIFFERENT hashtags tailored to each specific variation. Do NOT reuse the exact same set of hashtags across the three variations.
 
 FINAL VALIDATION:
 Before returning the answer, scan the complete caption.
@@ -277,9 +280,11 @@ Maximum length: {config["max_length"]} characters
 Tone: {config["tone"]}
 Optimal length: {config["optimal_length"]}
 
-Return ONLY a JSON object with a single key:
+Return ONLY a JSON object with the following keys:
 
 primary_caption
+story_hook_caption
+contrarian_hook_caption
 """
 
         user_prompt = self._build_prompt(
@@ -299,6 +304,8 @@ primary_caption
             )
 
             primary = parsed.get("primary_caption", "")
+            story = parsed.get("story_hook_caption", "")
+            contrarian = parsed.get("contrarian_hook_caption", "")
 
         except Exception as e:
             print(f"[CaptionAgent] JSON generation fallback: {e}")
@@ -309,12 +316,16 @@ primary_caption
                 temperature=0.8,
                 return_usage=True,
             )
+            story = primary
+            contrarian = primary
 
         # ---------------------------------------------------------
         # FINAL CLEANING
         # ---------------------------------------------------------
 
         primary = self._clean_caption(primary)
+        story = self._clean_caption(story)
+        contrarian = self._clean_caption(contrarian)
 
         # ---------------------------------------------------------
         # Return result
@@ -323,8 +334,8 @@ primary_caption
         return {
             "platform": platform,
             "primary_caption": primary,
-            "story_hook_caption": primary,
-            "contrarian_hook_caption": primary,
+            "story_hook_caption": story,
+            "contrarian_hook_caption": contrarian,
             "character_count": len(primary),
             "estimated_read_time": f"{len(primary.split()) // 200 + 1} min read",
             "usage": usage,

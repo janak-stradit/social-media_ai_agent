@@ -1,5 +1,5 @@
 /* global showToast, renderCarousel */
-$(document).ready(function() {
+$(document).ready(function () {
 
     // Load current user info into the shared app header
     $.ajax({
@@ -14,8 +14,24 @@ $(document).ready(function() {
         }
     });
 
+    $('input[name="mediaType"]').on('change', function () {
+        if ($(this).val() === 'image') {
+            $('#imageContextContainer').removeClass('d-none');
+        } else {
+            $('#imageContextContainer').addClass('d-none');
+        }
+    });
+
+    $(document).on('change', 'input[name="modalMediaType"]', function () {
+        if ($(this).val() === 'image') {
+            $('#modalImageContextContainer').removeClass('d-none');
+        } else {
+            $('#modalImageContextContainer').addClass('d-none');
+        }
+    });
+
     // Toast notification helper
-    window.showToast = function(message, type = 'info') {
+    window.showToast = function (message, type = 'info') {
         const bgClass = type === 'success' ? 'bg-success' : type === 'danger' ? 'bg-danger' : type === 'warning' ? 'bg-warning' : 'bg-primary';
         const toastHtml = `
             <div class="toast align-items-center text-white ${bgClass} border-0 show" role="alert" aria-live="assertive" aria-atomic="true" style="position: fixed; bottom: 20px; right: 20px; z-index: 1055; min-width: 250px;">
@@ -30,11 +46,11 @@ $(document).ready(function() {
         const $toast = $(toastHtml);
         $('body').append($toast);
         setTimeout(() => {
-            $toast.fadeOut(300, function() { $(this).remove(); });
+            $toast.fadeOut(300, function () { $(this).remove(); });
         }, 4000);
     }
 
-    window.fetchPlatformPosts = function() {
+    window.fetchPlatformPosts = function () {
         const platform = $('#dashboardPlatformSelect').val();
         if (!platform) return;
         const competitor = $('#dashboardCompetitorSelect').val();
@@ -56,7 +72,7 @@ $(document).ready(function() {
         $.ajax({
             url: url,
             type: 'GET',
-            success: function(r) {
+            success: function (r) {
                 if (r.success && r.posts && r.posts.length > 0) {
                     if (r.db && r.db.inserted > 0) {
                         showToast(`Saved ${r.db.inserted} new post${r.db.inserted === 1 ? '' : 's'} to the database.`, 'success');
@@ -77,7 +93,7 @@ $(document).ready(function() {
                     `);
                 }
             },
-            error: function(xhr) {
+            error: function (xhr) {
                 $('#postsLoader').addClass('d-none');
                 $('#postsContainer').removeClass('d-none').html(`
                     <div class="col-12 text-center py-5 my-5 text-danger">
@@ -90,7 +106,7 @@ $(document).ready(function() {
     };
 
     // Loads previously-scraped posts already saved in the DB (no external scan)
-    window.loadStoredPosts = function() {
+    window.loadStoredPosts = function () {
         const platform = $('#dashboardPlatformSelect').val();
         if (!platform) return;
         const competitor = $('#dashboardCompetitorSelect').val();
@@ -106,7 +122,7 @@ $(document).ready(function() {
         $.ajax({
             url: url,
             type: 'GET',
-            success: function(r) {
+            success: function (r) {
                 $('#postsLoader').addClass('d-none');
                 $('#postsContainer').removeClass('d-none');
 
@@ -117,7 +133,7 @@ $(document).ready(function() {
                     window.fetchPlatformPosts();
                 }
             },
-            error: function() {
+            error: function () {
                 $('#postsLoader').addClass('d-none');
                 $('#postsContainer').removeClass('d-none');
                 window.fetchPlatformPosts();
@@ -129,7 +145,7 @@ $(document).ready(function() {
 
     // Show whatever is already saved as soon as the dashboard loads / filters change
     loadStoredPosts();
-    $('#dashboardPlatformSelect, #dashboardCompetitorSelect').on('change', function() {
+    $('#dashboardPlatformSelect, #dashboardCompetitorSelect').on('change', function () {
         window.newlyInsertedPostUrls = new Set();
         loadStoredPosts();
     });
@@ -173,15 +189,15 @@ $(document).ready(function() {
             const platformIcon = getPlatformIcon(p.platform);
             const postDate = formatPostDate(p);
             let isNew = window.newlyInsertedPostUrls && p.post_url && window.newlyInsertedPostUrls.has(p.post_url);
-            
+
             if (!isNew) {
                 const rawDate = p.scraped_at || p.published_at || p.post_date || p.date || p.created_at || null;
                 if (rawDate) {
                     const d = new Date(rawDate);
                     const today = new Date();
-                    if (!isNaN(d.getTime()) && 
-                        d.getDate() === today.getDate() && 
-                        d.getMonth() === today.getMonth() && 
+                    if (!isNaN(d.getTime()) &&
+                        d.getDate() === today.getDate() &&
+                        d.getMonth() === today.getMonth() &&
                         d.getFullYear() === today.getFullYear()) {
                         isNew = true;
                     }
@@ -222,10 +238,10 @@ $(document).ready(function() {
         });
 
         html += '</div>';
-        
+
         $('#postsContainer').html(html);
-        
-        $('.comp-master-checkbox').on('change', function() {
+
+        $('.comp-master-checkbox').on('change', function () {
             updateSelection();
         });
     }
@@ -257,11 +273,11 @@ $(document).ready(function() {
         $('#generateStoryBtn').prop('disabled', false);
 
         let combinedText = "--- SELECTED COMPETITOR POSTS ---\n\n";
-        checked.each(function() {
+        checked.each(function () {
             const decoded = decodeURIComponent($(this).attr('data-payload'));
             combinedText += decoded;
         });
-        
+
         $('#storyContextInput').val(combinedText);
     }
 
@@ -277,35 +293,46 @@ $(document).ready(function() {
         return '<i class="fas fa-globe me-2 text-secondary"></i>';
     }
 
-    function formatPromptTabs(promptText, uniqueId) {
-        if (!promptText) return '';
-        let step2 = promptText;
-        const step2Match = promptText.split(/\[---\s*STEP 2:\s*CONTENT GENERATION\s*---\]?/i);
-        if (step2Match.length > 1) {
-            step2 = step2Match[1];
-        } else {
-            const step2MatchAlt = promptText.split(/STEP 2: CONTENT GENERATION/i);
-            if (step2MatchAlt.length > 1) step2 = step2MatchAlt[1];
-        }
-        
+    function formatPromptTabs(data, uniqueId) {
+        if (!data) return '';
+
         let captionText = '', imageText = '', videoText = '';
-        
-        const captionMatch = step2.match(/Caption Prompt:([\s\S]*?)(?=Image Prompt:|$)/i);
-        if (captionMatch) captionText = captionMatch[1].trim();
-        
-        const imageMatch = step2.match(/Image Prompt:([\s\S]*?)(?=Video Script:|$)/i);
-        if (imageMatch) imageText = imageMatch[1].trim();
-        
-        const videoMatch = step2.match(/Video Script:([\s\S]*?)$/i);
-        if (videoMatch) videoText = videoMatch[1].trim();
-        
-        if (!captionText && !imageText && !videoText) {
-            return `<div style="white-space: pre-wrap;">${promptText.replace(/\n/g, '<br>')}</div>`;
+
+        if (typeof data === 'object' && !data.prompt) {
+            captionText = data.caption || '';
+            imageText = data.image_prompt || '';
+            videoText = data.video_prompt || '';
+        } else {
+            let promptText = typeof data === 'string' ? data : (data.prompt || '');
+            if (!promptText) return '';
+
+            let step2 = promptText;
+            const step2Match = promptText.split(/\[---\s*STEP 2:\s*CONTENT GENERATION\s*---\]?/i);
+            if (step2Match.length > 1) {
+                step2 = step2Match[1];
+            } else {
+                const step2MatchAlt = promptText.split(/STEP 2: CONTENT GENERATION/i);
+                if (step2MatchAlt.length > 1) step2 = step2MatchAlt[1];
+            }
+
+            const captionMatch = step2.match(/Caption Prompt:([\s\S]*?)(?=Image Prompt:|$)/i);
+            if (captionMatch) captionText = captionMatch[1].trim();
+
+            const imageMatch = step2.match(/Image Prompt:([\s\S]*?)(?=Video Script:|$)/i);
+            if (imageMatch) imageText = imageMatch[1].trim();
+
+            const videoMatch = step2.match(/Video Script:([\s\S]*?)$/i);
+            if (videoMatch) videoText = videoMatch[1].trim();
+
+            if (!captionText && !imageText && !videoText) {
+                return `<div style="white-space: pre-wrap;">${promptText.replace(/\n/g, '<br>')}</div>`;
+            }
         }
-        
+
         const randId = Math.floor(Math.random() * 100000) + (uniqueId || 'tmp');
         const contentBg = '#f4f8fd';
-        
+        const pipelineIdArg = (uniqueId && uniqueId !== 'tmp') ? `'${uniqueId}'` : 'null';
+
         return `
             <div class="prompt-tabs-container mt-3">
                 <ul class="nav nav-pills mb-2 gap-2" id="pills-tab-${randId}" role="tablist">
@@ -321,19 +348,37 @@ $(document).ready(function() {
                 </ul>
                 <div class="tab-content border rounded-3 p-3 shadow-sm position-relative" id="pills-tabContent-${randId}" style="min-height: 200px; max-height: 400px; overflow-y: auto; background-color: ${contentBg};">
                     
-                    <div class="tab-pane fade show active text-dark small" id="pills-caption-${randId}" role="tabpanel" aria-labelledby="pills-caption-tab-${randId}">
-                        <button class="btn btn-sm border-0 shadow-none p-0 text-muted position-absolute" style="top: 10px; right: 15px; z-index: 10;" onclick="navigator.clipboard.writeText(this.nextElementSibling.innerText); const t = this; t.innerHTML='<i class=\\'fas fa-check text-success\\'></i>'; setTimeout(()=>t.innerHTML='<i class=\\'far fa-copy\\'></i>', 2000);" title="Copy Caption" style="font-size: 1.1rem;"><i class="far fa-copy"></i></button>
-                        <div style="white-space: pre-wrap; padding-top: 5px; padding-right: 20px;" class="mb-2">${captionText}</div>
+                    <div class="tab-pane fade show active text-dark small prompt-pane" id="pills-caption-${randId}" role="tabpanel" aria-labelledby="pills-caption-tab-${randId}">
+                        <div class="d-flex justify-content-end gap-2 position-absolute" style="top: 10px; right: 15px; z-index: 10;">
+                            <button class="btn btn-sm border-0 shadow-none p-0 text-muted btn-copy" onclick="navigator.clipboard.writeText(this.closest('.prompt-pane').querySelector('.prompt-content').innerText); const t = this; t.innerHTML='<i class=\'fas fa-check text-success\'></i>'; setTimeout(()=>t.innerHTML='<i class=\'far fa-copy\'></i>', 2000);" title="Copy Caption" style="font-size: 1.1rem;"><i class="far fa-copy"></i></button>
+                            <button class="btn btn-sm border-0 shadow-none p-0 text-muted btn-edit" onclick="window.togglePromptEdit(this)" title="Edit Caption" style="font-size: 1.1rem;"><i class="fas fa-pencil-alt"></i></button>
+                            <button class="btn btn-sm border-0 shadow-none p-0 text-success btn-save d-none" onclick="window.savePromptEdit(this, ${pipelineIdArg}, 'caption')" title="Save Caption" style="font-size: 1.1rem;"><i class="fas fa-save"></i></button>
+                            <button class="btn btn-sm border-0 shadow-none p-0 text-danger btn-cancel d-none" onclick="window.cancelPromptEdit(this)" title="Cancel Edit" style="font-size: 1.1rem;"><i class="fas fa-times"></i></button>
+                        </div>
+                        <div class="prompt-content" style="white-space: pre-wrap; padding-top: 5px; padding-right: 40px;" class="mb-2">${captionText}</div>
+                        <textarea class="form-control prompt-editor d-none w-100" style="min-height: 150px; font-size: 0.875rem;" spellcheck="false"></textarea>
                     </div>
                     
-                    <div class="tab-pane fade text-dark small" id="pills-image-${randId}" role="tabpanel" aria-labelledby="pills-image-tab-${randId}">
-                        <button class="btn btn-sm border-0 shadow-none p-0 text-muted position-absolute" style="top: 10px; right: 15px; z-index: 10;" onclick="navigator.clipboard.writeText(this.nextElementSibling.innerText); const t = this; t.innerHTML='<i class=\\'fas fa-check text-success\\'></i>'; setTimeout(()=>t.innerHTML='<i class=\\'far fa-copy\\'></i>', 2000);" title="Copy Image Prompt" style="font-size: 1.1rem;"><i class="far fa-copy"></i></button>
-                        <div style="white-space: pre-wrap; padding-top: 5px; padding-right: 20px;" class="mb-2">${imageText}</div>
+                    <div class="tab-pane fade text-dark small prompt-pane" id="pills-image-${randId}" role="tabpanel" aria-labelledby="pills-image-tab-${randId}">
+                        <div class="d-flex justify-content-end gap-2 position-absolute" style="top: 10px; right: 15px; z-index: 10;">
+                            <button class="btn btn-sm border-0 shadow-none p-0 text-muted btn-copy" onclick="navigator.clipboard.writeText(this.closest('.prompt-pane').querySelector('.prompt-content').innerText); const t = this; t.innerHTML='<i class=\'fas fa-check text-success\'></i>'; setTimeout(()=>t.innerHTML='<i class=\'far fa-copy\'></i>', 2000);" title="Copy Image Prompt" style="font-size: 1.1rem;"><i class="far fa-copy"></i></button>
+                            <button class="btn btn-sm border-0 shadow-none p-0 text-muted btn-edit" onclick="window.togglePromptEdit(this)" title="Edit Image Prompt" style="font-size: 1.1rem;"><i class="fas fa-pencil-alt"></i></button>
+                            <button class="btn btn-sm border-0 shadow-none p-0 text-success btn-save d-none" onclick="window.savePromptEdit(this, ${pipelineIdArg}, 'image_prompt')" title="Save Image Prompt" style="font-size: 1.1rem;"><i class="fas fa-save"></i></button>
+                            <button class="btn btn-sm border-0 shadow-none p-0 text-danger btn-cancel d-none" onclick="window.cancelPromptEdit(this)" title="Cancel Edit" style="font-size: 1.1rem;"><i class="fas fa-times"></i></button>
+                        </div>
+                        <div class="prompt-content" style="white-space: pre-wrap; padding-top: 5px; padding-right: 40px;" class="mb-2">${imageText}</div>
+                        <textarea class="form-control prompt-editor d-none w-100" style="min-height: 150px; font-size: 0.875rem;" spellcheck="false"></textarea>
                     </div>
                     
-                    <div class="tab-pane fade text-dark small" id="pills-video-${randId}" role="tabpanel" aria-labelledby="pills-video-tab-${randId}">
-                        <button class="btn btn-sm border-0 shadow-none p-0 text-muted position-absolute" style="top: 10px; right: 15px; z-index: 10;" onclick="navigator.clipboard.writeText(this.nextElementSibling.innerText); const t = this; t.innerHTML='<i class=\\'fas fa-check text-success\\'></i>'; setTimeout(()=>t.innerHTML='<i class=\\'far fa-copy\\'></i>', 2000);" title="Copy Video Script" style="font-size: 1.1rem;"><i class="far fa-copy"></i></button>
-                        <div style="white-space: pre-wrap; padding-top: 5px; padding-right: 20px;" class="mb-2">${videoText}</div>
+                    <div class="tab-pane fade text-dark small prompt-pane" id="pills-video-${randId}" role="tabpanel" aria-labelledby="pills-video-tab-${randId}">
+                        <div class="d-flex justify-content-end gap-2 position-absolute" style="top: 10px; right: 15px; z-index: 10;">
+                            <button class="btn btn-sm border-0 shadow-none p-0 text-muted btn-copy" onclick="navigator.clipboard.writeText(this.closest('.prompt-pane').querySelector('.prompt-content').innerText); const t = this; t.innerHTML='<i class=\'fas fa-check text-success\'></i>'; setTimeout(()=>t.innerHTML='<i class=\'far fa-copy\'></i>', 2000);" title="Copy Video Script" style="font-size: 1.1rem;"><i class="far fa-copy"></i></button>
+                            <button class="btn btn-sm border-0 shadow-none p-0 text-muted btn-edit" onclick="window.togglePromptEdit(this)" title="Edit Video Script" style="font-size: 1.1rem;"><i class="fas fa-pencil-alt"></i></button>
+                            <button class="btn btn-sm border-0 shadow-none p-0 text-success btn-save d-none" onclick="window.savePromptEdit(this, ${pipelineIdArg}, 'video_prompt')" title="Save Video Script" style="font-size: 1.1rem;"><i class="fas fa-save"></i></button>
+                            <button class="btn btn-sm border-0 shadow-none p-0 text-danger btn-cancel d-none" onclick="window.cancelPromptEdit(this)" title="Cancel Edit" style="font-size: 1.1rem;"><i class="fas fa-times"></i></button>
+                        </div>
+                        <div class="prompt-content" style="white-space: pre-wrap; padding-top: 5px; padding-right: 40px;" class="mb-2">${videoText}</div>
+                        <textarea class="form-control prompt-editor d-none w-100" style="min-height: 150px; font-size: 0.875rem;" spellcheck="false"></textarea>
                     </div>
                     
                 </div>
@@ -341,7 +386,79 @@ $(document).ready(function() {
         `;
     }
 
-    window.navigateAssetHistory = function(pipelineId, index, dir, event) {
+    window.togglePromptEdit = function (btn) {
+        const pane = btn.closest('.prompt-pane');
+        const content = pane.querySelector('.prompt-content');
+        const editor = pane.querySelector('.prompt-editor');
+
+        editor.value = content.innerText;
+
+        content.classList.add('d-none');
+        editor.classList.remove('d-none');
+
+        pane.querySelector('.btn-copy').classList.add('d-none');
+        pane.querySelector('.btn-edit').classList.add('d-none');
+        pane.querySelector('.btn-save').classList.remove('d-none');
+        pane.querySelector('.btn-cancel').classList.remove('d-none');
+    };
+
+    window.cancelPromptEdit = function (btn) {
+        const pane = btn.closest('.prompt-pane');
+
+        pane.querySelector('.prompt-content').classList.remove('d-none');
+        pane.querySelector('.prompt-editor').classList.add('d-none');
+
+        pane.querySelector('.btn-copy').classList.remove('d-none');
+        pane.querySelector('.btn-edit').classList.remove('d-none');
+        pane.querySelector('.btn-save').classList.add('d-none');
+        pane.querySelector('.btn-cancel').classList.add('d-none');
+    };
+
+    window.savePromptEdit = function (btn, pipelineId, type) {
+        const pane = btn.closest('.prompt-pane');
+        const content = pane.querySelector('.prompt-content');
+        const editor = pane.querySelector('.prompt-editor');
+        const newText = editor.value;
+
+        content.innerText = newText;
+
+        // Find pipeline
+        let targetPipeline = null;
+        if (pipelineId) {
+            targetPipeline = window.pipelineHistory.find(p => p.id == pipelineId);
+        } else if (window.activePipeline) {
+            targetPipeline = window.activePipeline;
+        }
+
+        if (targetPipeline) {
+            let strategyObj = {};
+            // If the strategy is a raw string (old format), we need to extract current texts to build an object
+            if (typeof targetPipeline.strategy === 'string' || (targetPipeline.strategy && targetPipeline.strategy.prompt)) {
+                const panes = pane.closest('.tab-content').querySelectorAll('.prompt-pane');
+                strategyObj = {
+                    caption: panes[0].querySelector('.prompt-content').innerText,
+                    image_prompt: panes[1].querySelector('.prompt-content').innerText,
+                    video_prompt: panes[2].querySelector('.prompt-content').innerText
+                };
+            } else if (typeof targetPipeline.strategy === 'object') {
+                strategyObj = targetPipeline.strategy;
+            }
+
+            // Apply edit
+            strategyObj[type] = newText;
+            targetPipeline.strategy = strategyObj;
+
+            // Save to local storage if it's in history
+            if (pipelineId && window.pipelineHistory) {
+                localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+            }
+        }
+
+        // Restore view mode
+        window.cancelPromptEdit(btn);
+    };
+
+    window.navigateAssetHistory = function (pipelineId, index, dir, event) {
         if (event) event.stopPropagation();
         if (pipelineId) {
             const pIndex = window.pipelineHistory.findIndex(p => p.id === pipelineId);
@@ -352,7 +469,7 @@ $(document).ready(function() {
             item.historyIndex += dir;
             item.content = item.history[item.historyIndex];
             localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
-            showPipelineStageDetail(pIndex, pipeline.status);
+            showPipelineStageDetail(pIndex, window._currentStageId || pipeline.status);
         } else {
             const item = window.currentCarouselAssets[index];
             if (!item.history) return;
@@ -362,20 +479,24 @@ $(document).ready(function() {
         }
     };
 
-    window.generateStoryFromSelection = function() {
+    window.generateStoryFromSelection = function () {
         const context = $('#storyContextInput').val();
         if (!context) return;
 
         // Initialize active pipeline
-        const checkedLabels = $('.comp-master-checkbox:checked').map(function() {
+        const checkedLabels = $('.comp-master-checkbox:checked').map(function () {
             return $(this).data('competitor');
         }).get().join(', ');
-        
+
+        const characterMode = $('#characterModeSelect').length ? $('#characterModeSelect').val() : 'without_character';
+        const characterConfig = { mode: characterMode };
+
         window.activePipeline = {
             id: Date.now(),
             timestamp: new Date().toISOString(),
             competitors: checkedLabels,
             context: context,
+            characterConfig: characterConfig,
             status: 'intel_selected',
             strategy: null,
             assetType: null,
@@ -389,22 +510,23 @@ $(document).ready(function() {
         $('#storyOutputContainer').removeClass('d-none');
         $('#generationLoader').removeClass('d-none');
         $('#structuredOutput').html('');
-        
+
         $.ajax({
             url: '/api/generate-channel-storyline',
             type: 'POST',
             contentType: 'application/json',
-            data: JSON.stringify({ 
-                story: context
+            data: JSON.stringify({
+                story: context,
+                characterConfig: characterConfig
             }),
-            success: function(r) {
+            success: function (r) {
                 $('#generateStoryBtn').prop('disabled', false);
                 $('#generationLoader').addClass('d-none');
-                
+
                 if (r.success && r.storyline) {
                     const data = r.storyline;
                     window.lastStrategyData = data;
-                    
+
                     // Render facts pills
                     let factsHtml = '';
                     if (data.observed_facts && Array.isArray(data.observed_facts)) {
@@ -422,19 +544,19 @@ $(document).ready(function() {
                             ${factsHtml}
                         </div>
                         <div class="mb-3" style="line-height: 1.6; font-size: 0.95rem;">
-                            ${formatPromptTabs(data.prompt, Date.now())}
+                            ${formatPromptTabs(data, Date.now())}
                         </div>
                     `;
                     $('#structuredOutput').html(formattedHtml);
-                    
+
                     // Slide to Strategy Output (Slide 2)
                     slideWorkflow(1);
-                    
+
                     window.activePipeline.status = 'strategy_generated';
                     window.activePipeline.strategy = data;
                     localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
                     renderPipelineHistory();
-                    
+
                     showToast('Synthesis generated successfully!', 'success');
                 } else {
                     $('#structuredOutput').html(`<div class="text-danger fw-bold">Error: ${r.error || 'Invalid response data'}</div>`);
@@ -444,7 +566,7 @@ $(document).ready(function() {
                     renderPipelineHistory();
                 }
             },
-            error: function(xhr) {
+            error: function (xhr) {
                 $('#generateStoryBtn').prop('disabled', false);
                 $('#generationLoader').addClass('d-none');
                 $('#structuredOutput').html('<div class="text-danger fw-bold">Network Error.</div>');
@@ -496,11 +618,11 @@ $(document).ready(function() {
         $('#opportunityCountBadge').text(themes.length + domains.length);
     }
 
-    window.loadOpportunitySuggestions = function() {
+    window.loadOpportunitySuggestions = function () {
         $.ajax({
             url: '/api/opportunity-suggestions',
             type: 'GET',
-            success: function(r) {
+            success: function (r) {
                 if (r.success && r.suggestions) {
                     window.opportunitySuggestions = r.suggestions;
                     renderOpportunityLists();
@@ -509,19 +631,19 @@ $(document).ready(function() {
         });
     };
 
-    window.openOpportunityModal = function() {
+    window.openOpportunityModal = function () {
         renderOpportunityLists();
         const modalEl = document.getElementById('opportunityModal');
         bootstrap.Modal.getOrCreateInstance(modalEl).show();
     };
 
-    window.generateOpportunitySuggestions = function() {
+    window.generateOpportunitySuggestions = function () {
         const context = $('#storyContextInput').val();
         if (!context) {
             showToast('Select competitor posts from the feed first.', 'warning');
             return;
         }
-        const accounts = $('.comp-master-checkbox:checked').map(function() {
+        const accounts = $('.comp-master-checkbox:checked').map(function () {
             return $(this).data('competitor');
         }).get().join(', ');
 
@@ -533,7 +655,7 @@ $(document).ready(function() {
             type: 'POST',
             contentType: 'application/json',
             data: JSON.stringify({ story: context, accounts: accounts }),
-            success: function(r) {
+            success: function (r) {
                 $('#findOpportunitiesBtn').prop('disabled', false);
                 $('#opportunityGenLoader').addClass('d-none');
 
@@ -549,7 +671,7 @@ $(document).ready(function() {
                     showToast('Failed to generate opportunities.', 'danger');
                 }
             },
-            error: function() {
+            error: function () {
                 $('#findOpportunitiesBtn').prop('disabled', false);
                 $('#opportunityGenLoader').addClass('d-none');
                 showToast('Network error generating opportunities.', 'danger');
@@ -559,20 +681,20 @@ $(document).ready(function() {
 
     loadOpportunitySuggestions();
 
-    window.copyStoryOutput = function() {
+    window.copyStoryOutput = function () {
         const text = $('#storyOutput').val();
         if (!text) return;
-        
+
         navigator.clipboard.writeText(text).then(() => {
             showToast('Copied to clipboard!', 'success');
         });
     }
 
-    window.slideWorkflow = function(stepIndex) {
+    window.slideWorkflow = function (stepIndex) {
         // stepIndex: 0 = Context, 1 = Strategy, 2 = Generation Settings, 3 = Asset Review
         const translation = -(stepIndex * 25);
         $('#workflowSlider').css('transform', `translateX(${translation}%)`);
-        
+
         if (stepIndex === 0) {
             if (window.activePipeline && window.activePipeline.strategy) {
                 $('#slide1NextBtn').removeClass('d-none');
@@ -594,7 +716,7 @@ $(document).ready(function() {
         }
     };
 
-    window.approveStrategy = function() {
+    window.approveStrategy = function () {
         if (!window.lastStrategyData) return;
         slideWorkflow(2); // Slide to Generation (Slide 3)
     };
@@ -602,7 +724,7 @@ $(document).ready(function() {
     // ==========================================
     // PIPELINE WORKFLOW (History, Generation, Approval)
     // ==========================================
-    
+
     // Store history in memory/localStorage
     window.pipelineHistory = JSON.parse(localStorage.getItem('straditPipelineHistory') || '[]');
 
@@ -625,7 +747,7 @@ $(document).ready(function() {
             `);
             return;
         }
-        
+
         let html = '<div class="list-group list-group-flush">';
         window.pipelineHistory.forEach((pipeline, index) => {
             const date = new Date(pipeline.timestamp).toLocaleString();
@@ -688,35 +810,35 @@ $(document).ready(function() {
                     <p class="mb-1 text-muted small"><strong>Asset:</strong> ${pipeline.assetType || 'Pending'}</p>
                     ${timelineHtml}
                     ${pipelineStatus === 'approved' || pipelineStatus === 'published' || pipelineStatus === 'asset_generated' ?
-                        `<button class="btn btn-sm btn-outline-primary mt-2 py-1 px-3 rounded-pill fw-bold" onclick="event.stopPropagation(); viewHistoryItem(${index})" style="font-size: 0.8rem;">View Pipeline Content</button>` : ''}
+                    `<button class="btn btn-sm btn-outline-primary mt-2 py-1 px-3 rounded-pill fw-bold" onclick="event.stopPropagation(); viewHistoryItem(${index})" style="font-size: 0.8rem;">View Pipeline Content</button>` : ''}
                 </div>
             `;
         });
         html += '</div>';
         container.html(html);
     }
-    
-    window.viewHistoryItem = function(index) {
+
+    window.viewHistoryItem = function (index) {
         const pipeline = window.pipelineHistory[index];
         if (!pipeline) return;
-        
+
         const item = pipeline.assetContent; // this might be an array or single item
         if (!item) return;
 
         let dispItem = Array.isArray(item) ? item[0] : item; // Fallback for carousel rendering if needed
-        
+
         window.currentCarouselAssets = Array.isArray(item) ? item : [item];
         renderCarousel();
 
         $('#pipelineResultBlock').removeClass('d-none');
         $('#approvalButtons').addClass('d-none');
-        
+
         if (pipeline.status === 'published') {
             $('#publishPipelineBtn').addClass('d-none');
         } else {
             $('#publishPipelineBtn').removeClass('d-none');
         }
-        
+
         window.lastGeneratedPipeline = dispItem; // Load it into state
         window.activePipeline = pipeline; // Set it as active
 
@@ -727,7 +849,7 @@ $(document).ready(function() {
         return `<div class="text-center text-muted py-5"><i class="fas fa-hourglass-half mb-3" style="font-size: 1.75rem; opacity: 0.4;"></i><p class="small m-0">${msg}</p></div>`;
     }
 
-    function renderAssetItems(assetContent, pipelineId = null) {
+    function renderAssetItems(assetContent, pipelineId = null, isFinal = false) {
         const items = Array.isArray(assetContent) ? assetContent : [assetContent];
         return items.map((a, index) => {
             const type = (a.type || '').toLowerCase();
@@ -735,7 +857,42 @@ $(document).ready(function() {
                 return `<video controls class="w-100 rounded-3 mb-2" src="${a.content}"></video>`;
             }
             if (type.includes('image')) {
-                return `<img src="${a.content}" class="w-100 rounded-3 mb-2" alt="Generated asset">`;
+                // Ensure history is initialized
+                if (!a.history) {
+                    a.history = [a.content];
+                    a.historyIndex = 0;
+                }
+                let navHtml = '';
+                if (a.history.length > 1 && !isFinal) {
+                    navHtml = `
+                        <div class="d-flex gap-2 align-items-center px-2 py-1 rounded me-2" style="background: transparent;">
+                            <i class="fas fa-chevron-left text-white" style="text-shadow: 0 2px 4px rgba(0,0,0,0.8); ${a.historyIndex === 0 ? 'opacity: 0.3; cursor: not-allowed;' : 'cursor: pointer; transition: color 0.2s;'}" ${a.historyIndex > 0 ? `onclick="navigateAssetHistory(${pipelineId}, ${index}, -1, event)"` : ''} title="Previous"></i>
+                            <span class="small text-white fw-bold" style="font-size: 0.85rem; text-shadow: 0 2px 4px rgba(0,0,0,0.8);">${a.historyIndex + 1}/${a.history.length}</span>
+                            <i class="fas fa-chevron-right text-white" style="text-shadow: 0 2px 4px rgba(0,0,0,0.8); ${a.historyIndex === a.history.length - 1 ? 'opacity: 0.3; cursor: not-allowed;' : 'cursor: pointer; transition: color 0.2s;'}" ${a.historyIndex < a.history.length - 1 ? `onclick="navigateAssetHistory(${pipelineId}, ${index}, 1, event)"` : ''} title="Next"></i>
+                        </div>
+                    `;
+                }
+                let regenHtml = '';
+                if (pipelineId && !isFinal) {
+                    regenHtml = `
+                        <button class="btn btn-sm text-white border-0 shadow-none p-1" id="modalRegenImgBtn_${pipelineId}_${index}" onclick="regenerateModalImage(${pipelineId}, ${index}, event)" title="Regenerate with original context" style="background: transparent;">
+                            <i class="fas fa-sync-alt" style="font-size: 1.1rem; text-shadow: 0 2px 4px rgba(0,0,0,0.8);"></i>
+                        </button>
+                    `;
+                }
+
+                return `
+                <div class="position-relative mb-2">
+                    <img src="${a.content}" class="w-100 rounded-3" alt="Generated asset">
+                    <div class="position-absolute d-flex gap-2 align-items-center" style="bottom: 15px; right: 15px; z-index: 10;">
+                        ${navHtml}
+                        ${regenHtml}
+                        <a href="${a.content}" target="_blank" download class="btn btn-sm text-white border-0 shadow-none p-1" title="Download" style="background: transparent;">
+                            <i class="fas fa-download" style="font-size: 1.1rem; text-shadow: 0 2px 4px rgba(0,0,0,0.8);"></i>
+                        </a>
+                    </div>
+                </div>
+                `;
             }
             // Ensure history is initialized
             if (!a.history) {
@@ -744,7 +901,7 @@ $(document).ready(function() {
             }
 
             let navHtml = '';
-            if (a.history.length > 1) {
+            if (a.history.length > 1 && !isFinal) {
                 const pDisabled = a.historyIndex === 0 ? 'opacity: 0.3; cursor: not-allowed;' : 'cursor: pointer; transition: color 0.2s;';
                 const nDisabled = a.historyIndex === a.history.length - 1 ? 'opacity: 0.3; cursor: not-allowed;' : 'cursor: pointer; transition: color 0.2s;';
                 navHtml = `
@@ -758,12 +915,14 @@ $(document).ready(function() {
 
             return `
                 <div class="position-relative mb-2">
+                    <div class="position-absolute" style="top: 15px; right: 20px; font-size: 1.1rem; z-index: 10;">
+                        <i class="far fa-copy text-muted" style="cursor:pointer; transition: all 0.2s;" onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="copyCaptionText(this)" title="Copy Caption"></i>
+                    </div>
                     <div class="d-flex justify-content-start gap-3 position-absolute align-items-center" style="bottom: 15px; left: 20px; font-size: 1.1rem; z-index: 10;">
-                        <i class="far fa-copy text-muted" style="cursor:pointer; transition: color 0.2s;" onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="copyCaptionText(this)" title="Copy Caption"></i>
-                        ${pipelineId ? `<i class="fas fa-sync-alt text-muted" style="cursor:pointer; transition: color 0.2s;" onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="regenerateModalCaptionText(${pipelineId}, ${index}, event)" title="Regenerate Caption"></i>` : ''}
+                        ${pipelineId && !isFinal ? `<i class="fas fa-sync-alt text-muted" style="cursor:pointer; transition: color 0.2s;" onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="regenerateModalCaptionText(${pipelineId}, ${index}, event)" title="Regenerate Caption"></i>` : ''}
                         ${navHtml}
                     </div>
-                    <div class="bg-light rounded-3 p-3 pb-5 small caption-text-content" style="white-space: pre-wrap; font-size: 0.875rem; line-height: 1.65; color: #334155;">${a.content}</div>
+                    <div class="bg-light rounded-3 p-3 pb-5 caption-text-content" style="white-space: pre-wrap; font-size: 0.75rem; line-height: 1.4; color: #334155;">${a.content}</div>
                 </div>
             `;
         }).join('');
@@ -800,11 +959,11 @@ $(document).ready(function() {
             const facts = (pipeline.strategy.observed_facts || [])
                 .map(f => `<span class="badge rounded-pill bg-white text-primary border border-primary px-3 py-2 me-2 mb-2 text-wrap text-start" style="font-size: 0.8rem; font-weight: 600; line-height: 1.4;">${f}</span>`)
                 .join('');
-            
+
             return `
                 <h6 class="fw-bold text-primary mb-3"><i class="fas fa-brain me-2"></i>Counter Strategy Generated</h6>
                 <div class="mb-3 d-flex flex-wrap">${facts || '<span class="text-muted small">No observed facts recorded.</span>'}</div>
-                <div class="mb-3 w-100">${formatPromptTabs(pipeline.strategy.prompt, pipeline.id)}</div>
+                <div class="mb-3 w-100">${formatPromptTabs(pipeline.strategy, pipeline.id)}</div>
                 <div class="d-flex gap-2">
                     <button class="btn btn-sm btn-outline-danger fw-bold" onclick="rejectPipelineStrategy(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject</button>
                     <button class="btn btn-sm btn-success fw-bold" onclick="approvePipelineStrategy(${pipeline.id})"><i class="fas fa-check me-1"></i>Approve & Continue</button>
@@ -827,7 +986,7 @@ $(document).ready(function() {
             return `
                 <h6 class="fw-bold text-success mb-3"><i class="fas fa-thumbs-up me-2"></i>Asset Approved</h6>
                 <p class="small text-muted">This asset was reviewed and approved for publishing.</p>
-                ${pipeline.assetContent ? `<div style="max-height: 320px; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent, pipeline.id)}</div>` : ''}
+                ${pipeline.assetContent ? `<div style="max-height: 320px; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent, pipeline.id, true)}</div>` : ''}
                 ${pipeline.status === 'approved' ? `
                     <button class="btn btn-dark fw-bold w-100 py-2 mt-2" onclick="publishModalPipelineContent(${pipeline.id})" id="modalPublishBtn">
                         <i class="fas fa-paper-plane me-2"></i>Publish to Platforms
@@ -840,12 +999,13 @@ $(document).ready(function() {
             return `
                 <h6 class="fw-bold text-dark mb-3"><i class="fas fa-paper-plane me-2"></i>Published</h6>
                 <p class="small text-muted">This content has been published live.</p>
+                ${pipeline.assetContent ? `<div style="max-height: 320px; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent, pipeline.id, true)}</div>` : ''}
             `;
         }
         return emptyStageState('No details available for this stage.');
     }
 
-    window.openPipelineModal = function(index) {
+    window.openPipelineModal = function (index) {
         const pipeline = window.pipelineHistory[index];
         if (!pipeline) return;
 
@@ -913,9 +1073,11 @@ $(document).ready(function() {
         $('#pipelineModalStepper').html(stepperHtml);
     }
 
-    window.showPipelineStageDetail = function(index, stageId) {
+    window.showPipelineStageDetail = function (index, stageId) {
         const pipeline = window.pipelineHistory[index];
         if (!pipeline) return;
+
+        window._currentStageId = stageId;
 
         renderPipelineModalStepper(index, stageId);
         $('#pipelineModalDetail').html(getStageDetailHtml(pipeline, stageId));
@@ -924,26 +1086,26 @@ $(document).ready(function() {
     renderPipelineHistory();
 
     window.currentCarouselAssets = [];
-    
-    window.renderCarousel = function() {
+
+    window.renderCarousel = function () {
         if (window.currentCarouselAssets.length === 0) return;
-        
+
         // Update header dynamically
         const firstItem = window.currentCarouselAssets[0];
         let headerText = 'Generated Asset';
         if (firstItem.type === 'Text (Caption)') headerText = 'Generated Caption';
         else if (firstItem.type === 'image') headerText = 'Generated Image';
         else if (firstItem.type === 'video') headerText = 'Generated Video';
-        
+
         $('#pipelineResultBlock h6').html(`<i class="fas fa-sparkles me-1"></i>${headerText}`);
-        
+
         let indicators = '';
         let innerHtml = '';
-        
+
         window.currentCarouselAssets.forEach((item, index) => {
             const activeClass = index === window.currentCarouselAssets.length - 1 ? 'active' : '';
             indicators += `<button type="button" data-bs-target="#generationCarousel" data-bs-slide-to="${index}" class="${activeClass}" aria-current="${activeClass ? 'true' : 'false'}" aria-label="Slide ${index + 1}"></button>`;
-            
+
             let outHtml = '';
             if (item.type === 'Text (Caption)') {
                 if (!item.history) {
@@ -966,8 +1128,10 @@ $(document).ready(function() {
 
                 outHtml = `
                     <div class="position-relative">
+                        <div class="position-absolute" style="top: 15px; right: 20px; font-size: 1.1rem; z-index: 10;">
+                            <i class="far fa-copy text-muted" style="cursor:pointer; transition: all 0.2s;" onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="copyCaptionText(this)" title="Copy Caption"></i>
+                        </div>
                         <div class="d-flex justify-content-start gap-3 position-absolute align-items-center" style="bottom: 15px; left: 20px; font-size: 1.1rem; z-index: 10;">
-                            <i class="far fa-copy text-muted" style="cursor:pointer; transition: color 0.2s;" onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="copyCaptionText(this)" title="Copy Caption"></i>
                             <i class="fas fa-sync-alt text-muted" style="cursor:pointer; transition: color 0.2s;" onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="regenerateCaptionText(${index}, event)" title="Regenerate Caption"></i>
                             ${navHtml}
                         </div>
@@ -975,13 +1139,43 @@ $(document).ready(function() {
                     </div>
                 `;
             } else if (item.type === 'image') {
-                outHtml = `<img src="${item.content}" class="d-block w-100 rounded-top" style="object-fit: cover; max-height: 350px;">
-                           <div class="p-3 bg-light border-top"><p class="small text-muted m-0"><strong>Caption:</strong> ${item.caption}</p></div>`;
+                if (!item.history) {
+                    item.history = [item.content];
+                    item.historyIndex = 0;
+                }
+                let navHtml = '';
+                if (item.history.length > 1) {
+                    navHtml = `
+                        <div class="d-flex gap-2 align-items-center me-2 px-2 py-1 rounded" style="background: transparent;">
+                            <i class="fas fa-chevron-left text-white" style="text-shadow: 0 2px 4px rgba(0,0,0,0.8); ${item.historyIndex === 0 ? 'opacity: 0.3; cursor: not-allowed;' : 'cursor: pointer; transition: color 0.2s;'}" ${item.historyIndex > 0 ? `onclick="navigateAssetHistory(null, ${index}, -1, event)"` : ''} title="Previous"></i>
+                            <span class="small text-white fw-bold" style="font-size: 0.85rem; text-shadow: 0 2px 4px rgba(0,0,0,0.8);">${item.historyIndex + 1}/${item.history.length}</span>
+                            <i class="fas fa-chevron-right text-white" style="text-shadow: 0 2px 4px rgba(0,0,0,0.8); ${item.historyIndex === item.history.length - 1 ? 'opacity: 0.3; cursor: not-allowed;' : 'cursor: pointer; transition: color 0.2s;'}" ${item.historyIndex < item.history.length - 1 ? `onclick="navigateAssetHistory(null, ${index}, 1, event)"` : ''} title="Next"></i>
+                        </div>
+                    `;
+                }
+
+                outHtml = `
+                    <div class="position-relative border rounded-top">
+                        <img src="${item.content}" class="d-block w-100 rounded-top" style="object-fit: cover; max-height: 350px;">
+                        
+                        <div class="position-absolute d-flex gap-2 align-items-center" style="bottom: 15px; right: 15px; z-index: 10;">
+                            ${navHtml}
+                            <button class="btn btn-sm text-white border-0 shadow-none p-1" id="regenImgBtn_${index}" onclick="regenerateImageInCarousel(${index})" title="Regenerate with original context" style="background: transparent;">
+                                <i class="fas fa-sync-alt" style="font-size: 1.1rem; text-shadow: 0 2px 4px rgba(0,0,0,0.8);"></i>
+                            </button>
+                            <a href="${item.content}" target="_blank" download class="btn btn-sm text-white border-0 shadow-none p-1" title="Download" style="background: transparent;">
+                                <i class="fas fa-download" style="font-size: 1.1rem; text-shadow: 0 2px 4px rgba(0,0,0,0.8);"></i>
+                            </a>
+                        </div>
+                        
+                        <div class="p-3 bg-light border-top"><p class="small text-muted m-0"><strong>Caption:</strong> ${item.caption}</p></div>
+                    </div>
+                `;
             } else if (item.type === 'video') {
                 outHtml = `<video controls autoplay loop class="d-block w-100 rounded-top" style="max-height: 350px;"><source src="${item.content}" type="video/mp4"></video>
                            <div class="p-3 bg-light border-top"><p class="small text-muted m-0"><strong>Caption:</strong> ${item.caption}</p></div>`;
             }
-            
+
             innerHtml += `
                 <div class="carousel-item ${activeClass}">
                     ${outHtml}
@@ -992,7 +1186,7 @@ $(document).ready(function() {
                 </div>
             `;
         });
-        
+
         const carouselHtml = `
             <div id="generationCarousel" class="carousel slide" data-bs-ride="false">
               <div class="carousel-indicators bg-dark rounded-pill py-1 mb-0" style="bottom: -15px;">
@@ -1011,12 +1205,12 @@ $(document).ready(function() {
               </button>
             </div>
         `;
-        
+
         $('#pipelineOutputContent').html(carouselHtml);
         $('#pipelineResultBlock').removeClass('d-none');
         $('#approvalButtons').addClass('d-none');
         $('#publishPipelineBtn').addClass('d-none');
-        
+
         // Initialize carousel explicitly since it's dynamically added
         const carouselEl = document.getElementById('generationCarousel');
         if (carouselEl) {
@@ -1027,16 +1221,16 @@ $(document).ready(function() {
         }
     }
 
-    window.approveCarouselItem = function(index) {
+    window.approveCarouselItem = function (index) {
         const item = window.currentCarouselAssets[index];
         window.lastGeneratedPipeline = item;
-        
+
         // Hide carousel controls, just show the approved item
         $('#generationCarousel .carousel-indicators, #generationCarousel .carousel-control-prev, #generationCarousel .carousel-control-next, #generationCarousel .btn-success, #generationCarousel .btn-outline-danger').addClass('d-none');
         $('#approvalButtons').removeClass('d-none');
     };
 
-    window.startPipelineGeneration = function() {
+    window.startPipelineGeneration = function () {
         if (!window.lastStrategyData) {
             showToast('Please generate a synthesis strategy first.', 'warning');
             return;
@@ -1045,17 +1239,17 @@ $(document).ready(function() {
         const mediaType = $('input[name="mediaType"]:checked').val();
         let prompt = $('#pipelinePrompt').val();
         const platform = $('#dashboardPlatformSelect').val() || 'linkedin';
-        
+
         slideWorkflow(3); // Slide to Asset Review (Slide 4)
-        
+
         $('#pipelineLoader').removeClass('d-none');
         $('#pipelineResultBlock').removeClass('d-none');
         $('#pipelineOutputContent').html('<div class="text-center py-4"><div class="spinner-border text-primary mb-2"></div><p class="text-muted small m-0">Generating assets...</p></div>');
         $('#approvalButtons').addClass('d-none');
         $('#publishPipelineBtn').addClass('d-none');
-        
+
         window.currentCarouselAssets = [];
-        
+
         if (window.activePipeline) {
             window.activePipeline.assetType = mediaType;
             window.activePipeline.status = 'asset_generating';
@@ -1076,24 +1270,24 @@ $(document).ready(function() {
                 selected_outputs: ['text'],
                 include_strategy: false
             }),
-            success: function(res) {
+            success: function (res) {
                 if (res.success && res.content && res.content[platform]) {
                     const captions = res.content[platform].caption;
-                    
+
                     if (mediaType === 'Text (Caption)') {
                         $('#startPipelineBtn').prop('disabled', false);
                         $('#pipelineLoader').addClass('d-none');
-                        
+
                         // Push ONLY 1 text variation (the best, most refined one)
                         window.currentCarouselAssets.push({ type: 'Text (Caption)', content: captions.primary_caption, title: 'Refined Narrative', platform: platform, prompt: prompt });
-                        
+
                         renderCarousel();
-                        
+
                         // Hide carousel controls if only 1 item
                         if (window.currentCarouselAssets.length === 1) {
                             $('#generationCarousel .carousel-indicators, #generationCarousel .carousel-control-prev, #generationCarousel .carousel-control-next').addClass('d-none');
                         }
-                        
+
                         if (window.activePipeline) {
                             window.activePipeline.status = 'asset_generated';
                             window.activePipeline.assetContent = window.currentCarouselAssets;
@@ -1105,12 +1299,12 @@ $(document).ready(function() {
                         let generatedCount = 0;
                         const totalToGenerate = 3;
                         $('#pipelineOutputContent').html('<div class="text-center py-4"><div class="spinner-border text-purple mb-2"></div><p class="text-muted small m-0">Rendering media variation 1 of 3...</p></div>');
-                        
+
                         function generateNextMedia() {
                             if (generatedCount >= totalToGenerate) {
                                 $('#startPipelineBtn').prop('disabled', false);
                                 $('#pipelineLoader').addClass('d-none');
-                                
+
                                 if (window.activePipeline) {
                                     window.activePipeline.status = 'asset_generated';
                                     window.activePipeline.assetContent = window.currentCarouselAssets;
@@ -1119,7 +1313,7 @@ $(document).ready(function() {
                                 }
                                 return;
                             }
-                            
+
                             $.ajax({
                                 url: '/api/generate-media',
                                 type: 'POST',
@@ -1128,19 +1322,21 @@ $(document).ready(function() {
                                     platform: platform,
                                     caption: captions.primary_caption,
                                     media_type: mediaType,
-                                    tone: generatedCount // slight seed variation
+                                    tone: generatedCount,
+                                    context: $('#preGenImageContext').val()
                                 }),
-                                success: function(mediaRes) {
+                                success: function (mediaRes) {
                                     if (mediaRes.success && mediaRes.url) {
                                         window.currentCarouselAssets.push({
                                             type: mediaType,
                                             content: mediaRes.url,
                                             caption: captions.primary_caption,
                                             platform: platform,
-                                            prompt: prompt
+                                            prompt: prompt,
+                                            context: $('#preGenImageContext').val()
                                         });
                                         renderCarousel();
-                                        
+
                                         generatedCount++;
                                         if (generatedCount < totalToGenerate) {
                                             $('#pipelineLoader').text(`Rendering media variation ${generatedCount + 1} of 3...`);
@@ -1150,22 +1346,22 @@ $(document).ready(function() {
                                             $('#pipelineLoader').addClass('d-none');
                                         }
                                     } else {
-                                        showPipelineError('Media generation failed on variation ' + (generatedCount+1));
+                                        showPipelineError('Media generation failed on variation ' + (generatedCount + 1));
                                     }
                                 },
-                                error: function() {
-                                    showPipelineError('Media API network error on variation ' + (generatedCount+1));
+                                error: function () {
+                                    showPipelineError('Media API network error on variation ' + (generatedCount + 1));
                                 }
                             });
                         }
-                        
+
                         generateNextMedia();
                     }
                 } else {
                     showPipelineError('Caption generation failed.');
                 }
             },
-            error: function(err) {
+            error: function (err) {
                 $('#startPipelineBtn').prop('disabled', false);
                 $('#pipelineLoader').addClass('d-none');
                 $('#pipelineOutputContent').html(`<div class="text-danger fw-bold p-3">Error generating assets.</div>`);
@@ -1178,7 +1374,7 @@ $(document).ready(function() {
             }
         });
     };
-    
+
     function showPipelineError(msg) {
         $('#startPipelineBtn').prop('disabled', false);
         $('#pipelineLoader').addClass('d-none');
@@ -1187,7 +1383,7 @@ $(document).ready(function() {
 
     window.lastGeneratedPipeline = null;
 
-    window.approvePipelineContent = function() {
+    window.approvePipelineContent = function () {
         if (!window.lastGeneratedPipeline) {
             showToast('No asset to approve.', 'error');
             return;
@@ -1206,22 +1402,22 @@ $(document).ready(function() {
                 type: window.lastGeneratedPipeline.type,
                 content: window.lastGeneratedPipeline.content || window.lastGeneratedPipeline.url
             }),
-            success: function(res) {
+            success: function (res) {
                 $('#approvalButtons').addClass('d-none');
                 $('#publishPipelineBtn').removeClass('d-none');
                 showToast('Asset Approved and saved to database!', 'success');
-                
+
                 if (window.activePipeline) {
                     window.activePipeline.status = 'approved';
                     localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
                     renderPipelineHistory();
                 }
             },
-            error: function(err) {
+            error: function (err) {
                 console.error(err);
                 btn.prop('disabled', false).html(origText);
                 showToast('Error saving asset to database.', 'error');
-                
+
                 if (window.activePipeline) {
                     window.activePipeline.status = 'stopped_error';
                     localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
@@ -1231,11 +1427,11 @@ $(document).ready(function() {
         });
     };
 
-    window.rejectPipelineContent = function() {
+    window.rejectPipelineContent = function () {
         $('#pipelineOutputContent').html('<div class="text-muted p-4 text-center"><em>Content Rejected. Please refine your prompt and regenerate.</em></div>');
         $('#approvalButtons').addClass('d-none');
         showToast('Asset Rejected', 'warning');
-        
+
         if (window.activePipeline) {
             window.activePipeline.status = 'rejected';
             localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
@@ -1259,7 +1455,7 @@ $(document).ready(function() {
         });
     }
 
-    window.publishPipelineContent = function() {
+    window.publishPipelineContent = function () {
         if (!window.lastGeneratedPipeline) {
             showToast('No approved asset to publish.', 'warning');
             return;
@@ -1273,7 +1469,7 @@ $(document).ready(function() {
         btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-2"></i>Publishing...');
 
         publishAssetToBackend(window.lastGeneratedPipeline)
-            .done(function(res) {
+            .done(function (res) {
                 const result = res.result || {};
                 if (res.success) {
                     btn.html('<i class="fas fa-check-circle me-2"></i>Published Successfully');
@@ -1296,16 +1492,16 @@ $(document).ready(function() {
                     showToast(result.error || res.error || 'Publish failed.', 'danger');
                 }
             })
-            .fail(function(xhr) {
+            .fail(function (xhr) {
                 btn.prop('disabled', false).html(origText);
                 showToast(xhr.responseJSON?.error || 'Network error while publishing.', 'danger');
             });
     };
 
-    window.saveAndRerunPipelineStrategy = function(pipelineId) {
+    window.saveAndRerunPipelineStrategy = function (pipelineId) {
         const newContext = $('#editPipelineContextArea').val();
         if (!newContext) return;
-        
+
         const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
         if (pipeline) {
             pipeline.context = newContext;
@@ -1314,7 +1510,7 @@ $(document).ready(function() {
         rerunPipelineStrategy(pipelineId);
     };
 
-    window.rerunPipelineStrategy = function(pipelineId) {
+    window.rerunPipelineStrategy = function (pipelineId) {
         const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
         if (!pipeline) return;
 
@@ -1326,18 +1522,18 @@ $(document).ready(function() {
             url: '/api/generate-channel-storyline',
             type: 'POST',
             contentType: 'application/json',
-            data: JSON.stringify({ 
+            data: JSON.stringify({
                 story: pipeline.context
             }),
-            success: function(r) {
+            success: function (r) {
                 if (r.success && r.storyline) {
                     pipeline.strategy = r.storyline;
                     pipeline.status = 'strategy_generated';
                     localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
                     renderPipelineHistory();
-                    
+
                     showToast('Counter-strategy regenerated successfully!', 'success');
-                    
+
                     // Refresh modal view directly to the strategy step
                     renderPipelineModalStepper(window.pipelineHistory.indexOf(pipeline), 'strategy_generated');
                     showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'strategy_generated');
@@ -1346,29 +1542,29 @@ $(document).ready(function() {
                     showToast('Failed to regenerate strategy.', 'error');
                 }
             },
-            error: function() {
+            error: function () {
                 btn.prop('disabled', false).html(origText);
                 showToast('Network error while regenerating strategy.', 'error');
             }
         });
     };
 
-    window.rejectPipelineStrategy = function(pipelineId) {
+    window.rejectPipelineStrategy = function (pipelineId) {
         const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
         if (!pipeline) return;
 
         pipeline.status = 'rejected';
         localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
         renderPipelineHistory();
-        
+
         showToast('Strategy Rejected.', 'warning');
-        
+
         const modalEl = document.getElementById('pipelineStageModal');
         const modal = bootstrap.Modal.getInstance(modalEl);
         if (modal) modal.hide();
     };
 
-    window.approvePipelineStrategy = function(pipelineId) {
+    window.approvePipelineStrategy = function (pipelineId) {
         const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
         if (!pipeline) return;
 
@@ -1393,6 +1589,15 @@ $(document).ready(function() {
                     <i class="fas fa-paperclip position-absolute" style="top: 15px; left: 15px; color: #9ca3af; cursor: pointer; transition: color 0.2s;" onmouseover="this.style.color='#0d6efd'" onmouseout="this.style.color='#9ca3af'" onclick="handlePromptAttachment('modalPipelinePrompt')" title="Attach text file"></i>
                     <textarea id="modalPipelinePrompt" class="form-control" rows="3" style="padding-left: 2.5rem; border-radius: 12px; resize: none;" placeholder="Attach an optional creative prompt (e.g. 'Use an energetic tone', 'Include branding colors')"></textarea>
                 </div>
+                <div id="modalImageContextContainer" class="mt-2 d-none">
+                    <label class="form-label small text-muted fw-bold mb-1"><i class="fas fa-paint-brush me-1"></i>Image Context/Style</label>
+                    <select class="form-select form-select-sm" id="modalPreGenImageContext">
+                        <option value="Professional">Professional</option>
+                        <option value="Casual">Casual</option>
+                        <option value="Cinematic">Cinematic</option>
+                        <option value="Abstract">Abstract</option>
+                    </select>
+                </div>
                 <button class="btn btn-primary fw-bold rounded-pill w-100 py-3 shadow-sm mt-3" onclick="startModalPipelineGeneration(${pipeline.id})" id="startModalPipelineBtn">
                     <i class="fas fa-magic me-2"></i>Generate Assets
                 </button>
@@ -1402,17 +1607,17 @@ $(document).ready(function() {
             </div>
             <div id="modalPipelineOutputContent" class="mt-3"></div>
         `;
-        
+
         $('#pipelineModalDetail').html(generatorHtml);
     };
 
-    window.startModalPipelineGeneration = function(pipelineId) {
+    window.startModalPipelineGeneration = function (pipelineId) {
         const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
         if (!pipeline) return;
 
         const mediaType = $('input[name="modalMediaType"]:checked').val();
         const prompt = $('#modalPipelinePrompt').val();
-        const platform = $('#dashboardPlatformSelect').val() || 'linkedin'; 
+        const platform = $('#dashboardPlatformSelect').val() || 'linkedin';
 
         $('#startModalPipelineBtn').prop('disabled', true);
         $('#modalPipelineLoader').removeClass('d-none');
@@ -1430,15 +1635,15 @@ $(document).ready(function() {
                 selected_outputs: ['text'],
                 include_strategy: false
             }),
-            success: function(res) {
+            success: function (res) {
                 if (res.success && res.content && res.content[platform]) {
                     const captions = res.content[platform].caption;
                     window.currentCarouselAssets = [];
-                    
+
                     if (mediaType === 'Text (Caption)') {
                         $('#startModalPipelineBtn').prop('disabled', false);
                         $('#modalPipelineLoader').addClass('d-none');
-                        
+
                         pipeline.status = 'asset_generated';
                         pipeline.assetType = mediaType;
                         pipeline.assetContent = [
@@ -1446,19 +1651,19 @@ $(document).ready(function() {
                         ];
                         localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
                         renderPipelineHistory();
-                        
+
                         showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'asset_generated');
                     } else {
                         // For image/video, just simulate or trigger generation like in main workflow
                         $('#modalPipelineLoader').html('<i class="fas fa-spinner fa-spin me-2"></i>Rendering media variation 1 of 3...');
                         let generatedCount = 0;
                         const totalToGenerate = 3;
-                        
+
                         function generateNextMedia() {
                             if (generatedCount >= totalToGenerate) {
                                 $('#startModalPipelineBtn').prop('disabled', false);
                                 $('#modalPipelineLoader').addClass('d-none');
-                                
+
                                 pipeline.status = 'asset_generated';
                                 pipeline.assetType = mediaType;
                                 pipeline.assetContent = window.currentCarouselAssets;
@@ -1467,7 +1672,7 @@ $(document).ready(function() {
                                 showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'asset_generated');
                                 return;
                             }
-                            
+
                             $.ajax({
                                 url: '/api/generate-media',
                                 type: 'POST',
@@ -1476,16 +1681,18 @@ $(document).ready(function() {
                                     platform: platform,
                                     caption: captions.primary_caption,
                                     media_type: mediaType,
-                                    tone: generatedCount
+                                    tone: generatedCount,
+                                    context: $('#modalPreGenImageContext').val()
                                 }),
-                                success: function(mediaRes) {
+                                success: function (mediaRes) {
                                     if (mediaRes.success && mediaRes.url) {
                                         window.currentCarouselAssets.push({
                                             type: mediaType,
                                             content: mediaRes.url,
                                             caption: captions.primary_caption,
                                             platform: platform,
-                                            prompt: prompt
+                                            prompt: prompt,
+                                            context: $('#modalPreGenImageContext').val()
                                         });
                                         generatedCount++;
                                         if (generatedCount < totalToGenerate) {
@@ -1494,7 +1701,7 @@ $(document).ready(function() {
                                         } else {
                                             $('#startModalPipelineBtn').prop('disabled', false);
                                             $('#modalPipelineLoader').addClass('d-none');
-                                            
+
                                             pipeline.status = 'asset_generated';
                                             pipeline.assetType = mediaType;
                                             pipeline.assetContent = window.currentCarouselAssets;
@@ -1503,19 +1710,19 @@ $(document).ready(function() {
                                             showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'asset_generated');
                                         }
                                     } else {
-                                        showToast('Media API failed on variation ' + (generatedCount+1), 'error');
+                                        showToast('Media API failed on variation ' + (generatedCount + 1), 'error');
                                         $('#startModalPipelineBtn').prop('disabled', false);
                                         $('#modalPipelineLoader').addClass('d-none');
                                     }
                                 },
-                                error: function() {
-                                    showToast('Network error on variation ' + (generatedCount+1), 'error');
+                                error: function () {
+                                    showToast('Network error on variation ' + (generatedCount + 1), 'error');
                                     $('#startModalPipelineBtn').prop('disabled', false);
                                     $('#modalPipelineLoader').addClass('d-none');
                                 }
                             });
                         }
-                        
+
                         generateNextMedia();
                     }
                 } else {
@@ -1524,7 +1731,7 @@ $(document).ready(function() {
                     showToast('Caption generation failed.', 'error');
                 }
             },
-            error: function() {
+            error: function () {
                 $('#startModalPipelineBtn').prop('disabled', false);
                 $('#modalPipelineLoader').addClass('d-none');
                 showToast('Error generating assets.', 'error');
@@ -1532,33 +1739,33 @@ $(document).ready(function() {
         });
     };
 
-    window.rejectPipelineAsset = function(pipelineId) {
+    window.rejectPipelineAsset = function (pipelineId) {
         const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
         if (!pipeline) return;
 
         pipeline.status = 'rejected';
         localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
         renderPipelineHistory();
-        
+
         showToast('Asset Rejected.', 'warning');
         showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'asset_generated');
     };
 
-    window.approvePipelineAsset = function(pipelineId) {
+    window.approvePipelineAsset = function (pipelineId) {
         const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
         if (!pipeline) return;
 
         pipeline.status = 'approved';
         localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
         renderPipelineHistory();
-        
+
         showToast('Asset Approved! Ready for publishing.', 'success');
-        
+
         renderPipelineModalStepper(window.pipelineHistory.indexOf(pipeline), 'approved');
         showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'approved');
     };
 
-    window.publishModalPipelineContent = function(pipelineId) {
+    window.publishModalPipelineContent = function (pipelineId) {
         const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
         if (!pipeline || !pipeline.assetContent) return;
 
@@ -1571,7 +1778,7 @@ $(document).ready(function() {
         btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-2"></i>Publishing...');
 
         publishAssetToBackend(item)
-            .done(function(res) {
+            .done(function (res) {
                 const result = res.result || {};
                 if (res.success) {
                     btn.html('<i class="fas fa-check-circle me-2"></i>Published Successfully');
@@ -1591,7 +1798,7 @@ $(document).ready(function() {
                     showToast(result.error || res.error || 'Publish failed.', 'danger');
                 }
             })
-            .fail(function(xhr) {
+            .fail(function (xhr) {
                 btn.prop('disabled', false).html(origText);
                 showToast(xhr.responseJSON?.error || 'Network error while publishing.', 'danger');
             });
@@ -1599,15 +1806,15 @@ $(document).ready(function() {
 });
 
 // Caption Action Utilities
-window.handlePromptAttachment = function(textareaId) {
+window.handlePromptAttachment = function (textareaId) {
     const fileInput = document.createElement('input');
     fileInput.type = 'file';
     fileInput.accept = '.txt,.md,.csv,.json';
-    fileInput.onchange = function(e) {
+    fileInput.onchange = function (e) {
         const file = e.target.files[0];
         if (!file) return;
         const reader = new FileReader();
-        reader.onload = function(evt) {
+        reader.onload = function (evt) {
             const content = evt.target.result;
             const textarea = document.getElementById(textareaId);
             if (textarea) {
@@ -1616,7 +1823,7 @@ window.handlePromptAttachment = function(textareaId) {
                 showToast(`Attached ${file.name}`, 'success');
             }
         };
-        reader.onerror = function() {
+        reader.onerror = function () {
             showToast('Error reading file.', 'danger');
         };
         reader.readAsText(file);
@@ -1624,9 +1831,9 @@ window.handlePromptAttachment = function(textareaId) {
     fileInput.click();
 };
 
-window.copyCaptionText = function(btnElement) {
+window.copyCaptionText = function (btnElement) {
     const textToCopy = $(btnElement).closest('.position-relative').find('.caption-text-content').text();
-    
+
     const copySuccess = () => {
         $(btnElement).removeClass('far fa-copy').addClass('fas fa-check text-success');
         setTimeout(() => {
@@ -1639,7 +1846,7 @@ window.copyCaptionText = function(btnElement) {
     } else {
         fallbackCopy(textToCopy, copySuccess);
     }
-    
+
     function fallbackCopy(text, successCb) {
         let textArea = document.createElement("textarea");
         textArea.value = text;
@@ -1657,16 +1864,16 @@ window.copyCaptionText = function(btnElement) {
     }
 };
 
-window.regenerateModalCaptionText = function(pipelineId, index, event) {
+window.regenerateModalCaptionText = function (pipelineId, index, event) {
     const pipelineIndex = window.pipelineHistory.findIndex(p => p.id === pipelineId);
     if (pipelineIndex === -1) return;
     const pipeline = window.pipelineHistory[pipelineIndex];
     const item = pipeline.assetContent[index];
     const iconElement = $(event.currentTarget);
-    
+
     if (iconElement.hasClass('fa-spin')) return;
     iconElement.addClass('fa-spin text-primary').removeClass('text-muted');
-    
+
     const platform = item.platform || 'linkedin';
     const prompt = item.prompt || '';
     const combinedStory = `STRATEGY SYNTHESIS:\n${JSON.stringify(pipeline.strategy, null, 2)}\n\nUSER INSTRUCTIONS / CHARACTERS / HOOK:\n${prompt}`;
@@ -1681,11 +1888,11 @@ window.regenerateModalCaptionText = function(pipelineId, index, event) {
             selected_outputs: ['text'],
             include_strategy: false
         }),
-        success: function(res) {
+        success: function (res) {
             iconElement.removeClass('fa-spin text-primary').addClass('text-muted');
             if (res.success && res.content && res.content[platform]) {
                 const captions = res.content[platform].caption;
-                
+
                 const itemToUpdate = pipeline.assetContent[index];
                 if (!itemToUpdate.history) {
                     itemToUpdate.history = [itemToUpdate.content];
@@ -1694,30 +1901,30 @@ window.regenerateModalCaptionText = function(pipelineId, index, event) {
                 itemToUpdate.history.push(captions.primary_caption);
                 itemToUpdate.historyIndex = itemToUpdate.history.length - 1;
                 itemToUpdate.content = captions.primary_caption;
-                
+
                 localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
                 showPipelineStageDetail(pipelineIndex, pipeline.status);
             } else {
                 showToast('Failed to regenerate caption.', 'danger');
             }
         },
-        error: function() {
+        error: function () {
             iconElement.removeClass('fa-spin text-primary').addClass('text-muted');
             showToast('Error regenerating caption.', 'danger');
         }
     });
 };
 
-window.regenerateCaptionText = function(index, event) {
+window.regenerateCaptionText = function (index, event) {
     const item = window.currentCarouselAssets[index];
     const iconElement = $(event.currentTarget);
-    
+
     if (iconElement.hasClass('fa-spin')) return;
     iconElement.addClass('fa-spin text-primary').removeClass('text-muted');
-    
+
     let combinedStory = "";
     let platform = item.platform || 'linkedin';
-    
+
     if (window.activePipeline && window.activePipeline.strategy) {
         combinedStory = `STRATEGY SYNTHESIS:\n${JSON.stringify(window.activePipeline.strategy, null, 2)}\n\nUSER INSTRUCTIONS / CHARACTERS / HOOK:\n${item.prompt || ''}`;
     } else if (window.lastStrategyData) {
@@ -1734,11 +1941,11 @@ window.regenerateCaptionText = function(index, event) {
             selected_outputs: ['text'],
             include_strategy: false
         }),
-        success: function(res) {
+        success: function (res) {
             iconElement.removeClass('fa-spin text-primary').addClass('text-muted');
             if (res.success && res.content && res.content[platform]) {
                 const captions = res.content[platform].caption;
-                
+
                 const itemToUpdate = window.currentCarouselAssets[index];
                 if (!itemToUpdate.history) {
                     itemToUpdate.history = [itemToUpdate.content];
@@ -1747,20 +1954,113 @@ window.regenerateCaptionText = function(index, event) {
                 itemToUpdate.history.push(captions.primary_caption);
                 itemToUpdate.historyIndex = itemToUpdate.history.length - 1;
                 itemToUpdate.content = captions.primary_caption;
-                
+
                 if (window.activePipeline) {
                     window.activePipeline.assetContent = window.currentCarouselAssets;
                     localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
                 }
-                
-                renderCarousel(); 
+
+                renderCarousel();
             } else {
                 showToast('Failed to regenerate caption.', 'danger');
             }
         },
-        error: function() {
+        error: function () {
             iconElement.removeClass('fa-spin text-primary').addClass('text-muted');
             showToast('Error regenerating caption.', 'danger');
+        }
+    });
+};
+
+window.regenerateImageInCarousel = function (index) {
+    const item = window.currentCarouselAssets[index];
+    const context = item.context || 'Professional';
+
+    const btn = $(`#regenImgBtn_${index}`);
+    const originalHtml = btn.html();
+    btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Wait...');
+
+    $.ajax({
+        url: '/api/generate-media',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({
+            platform: item.platform || 'instagram',
+            caption: item.prompt || item.caption,
+            media_type: 'image',
+            context: context
+        }),
+        success: function (mediaRes) {
+            if (mediaRes.success && mediaRes.url) {
+                if (!item.history) {
+                    item.history = [item.content];
+                    item.historyIndex = 0;
+                }
+                item.history.push(mediaRes.url);
+                item.historyIndex = item.history.length - 1;
+                item.content = mediaRes.url;
+
+                // Keep the caption prompt updated if context is meant to override it
+                if (window.activePipeline) {
+                    window.activePipeline.assetContent = window.currentCarouselAssets;
+                    localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+                }
+                renderCarousel();
+            } else {
+                showToast('Image generation failed: ' + (mediaRes.error || 'Unknown error'), 'danger');
+                btn.prop('disabled', false).html(originalHtml);
+            }
+        },
+        error: function (err) {
+            showToast('Error connecting to image generation service.', 'danger');
+            btn.prop('disabled', false).html(originalHtml);
+        }
+    });
+};
+
+window.regenerateModalImage = function (pipelineId, index, event) {
+    if (event) event.stopPropagation();
+    const pipelineIndex = window.pipelineHistory.findIndex(p => p.id === pipelineId);
+    if (pipelineIndex === -1) return;
+    const pipeline = window.pipelineHistory[pipelineIndex];
+    const item = pipeline.assetContent[index];
+
+    const context = item.context || 'Professional';
+    const btn = $(`#modalRegenImgBtn_${pipelineId}_${index}`);
+    const originalHtml = btn.html();
+
+    btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i>');
+
+    $.ajax({
+        url: '/api/generate-media',
+        type: 'POST',
+        contentType: 'application/json',
+        data: JSON.stringify({
+            platform: item.platform || 'instagram',
+            caption: item.prompt || item.caption,
+            media_type: 'image',
+            context: context
+        }),
+        success: function (mediaRes) {
+            if (mediaRes.success && mediaRes.url) {
+                if (!item.history) {
+                    item.history = [item.content];
+                    item.historyIndex = 0;
+                }
+                item.history.push(mediaRes.url);
+                item.historyIndex = item.history.length - 1;
+                item.content = mediaRes.url;
+
+                localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+                showPipelineStageDetail(pipelineIndex, window._currentStageId || pipeline.status);
+            } else {
+                showToast('Image generation failed: ' + (mediaRes.error || 'Unknown error'), 'danger');
+                btn.prop('disabled', false).html(originalHtml);
+            }
+        },
+        error: function (err) {
+            showToast('Error connecting to image generation service.', 'danger');
+            btn.prop('disabled', false).html(originalHtml);
         }
     });
 };

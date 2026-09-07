@@ -36,172 +36,248 @@ class StoryAgent:
         response = self.llm.generate(system, user)
         return [p.strip() for p in response.split("\n") if p.strip()]
 
-    def generate_channel_storyline(self, posts_text, project_context, return_usage=False):
+    def generate_channel_storyline(self, posts_text, project_context, return_usage=False, character_config=None):
         """Generate a structured channel storyline based on competitor posts and our project context"""
-        system = """You are an expert strategic analyst.
-You will be provided with specific text from multiple competitor posts in the <COMPETITOR_POSTS> block and a list of StradIT projects in the <OUR_PROJECT_CONTEXT> block.
+        if not character_config:
+            character_config = {"mode": "auto", "details": ""}
 
-REQUIRED BEHAVIOR:
-For EACH competitor post independently:
-1. Understand what the competitor is actually talking about in the specific post provided. Do not combine unrelated competitor posts.
-2. Identify the underlying BUSINESS / INVESTMENT / OPERATIONAL / RESEARCH / COMPLIANCE problem related to that specific topic.
-3. Compare that underlying problem against ALL available projects in <OUR_PROJECT_CONTEXT>.
-4. Follow the Project Selection Rule below to determine the connection strength and select the project.
-5. Create a storyline following a 55:45 ratio:
-   - ~55% focusing on the competitor's actual topic, the underlying business/investment problem, why the problem matters, and the context surrounding it.
-   - ~45% focusing on the selected project, how the project addresses the underlying problem, and the business/investment impact.
-   The competitor/problem portion MUST remain the larger portion of the storyline. Do not simply mention the competitor and then become a product advertisement. First establish a strong understanding of the problem.
+        mode = character_config.get("mode", "without_character")
 
-PROJECT SELECTION RULE:
-- Evaluate the competitor topic against ALL available projects before selecting a project.
-- Select a project only when there is a clear and defensible connection between:
-  1. The actual topic/problem discussed by the competitor.
-  2. The business or industry challenge implied by that topic.
-  3. A specific capability of one of our projects.
-- Do not select a project merely because the competitor topic can be loosely associated with it.
-- Do not force project diversity. Multiple competitors may select the same project if it is genuinely the strongest match.
-- Do not select a different project merely to ensure every project is represented.
-- If the connection requires multiple unsupported assumptions, select "No Strong Match."
-- Select "No Strong Match" when no project has a defensible connection.
-- When selecting a project, use the project whose core capability most directly addresses the competitor's actual topic.
+        char_rules_prompt = ""
+        image_prompt = ""
+        video_prompt = ""
+        validation_prompt = ""
 
-EVIDENCE RULE:
-- Never invent competitor pain points.
-- Do not state that a competitor "faces", "struggles with", "needs", or "has a problem with" something unless it is explicitly stated or strongly supported by the competitor content.
-- When making an industry-level inference, use language such as:
-  "this reflects a broader industry opportunity"
-  "this creates an opportunity for"
-  "this can create challenges for firms"
-- Do not present an inference as a competitor-specific problem.
+        if mode == "with_character":
+            char_rules_prompt = """### CHARACTER GENERATION
 
-CONTENT CONSISTENCY RULE:
-- Use only the selected projects from STEP 1.
-- Every feature, capability, metric, workflow, or outcome mentioned in the caption, image prompt, or video must be supported by the verified capabilities of those selected projects.
-- Do not borrow capabilities from other projects.
-- Do not invent:
-  - processing times
-  - real-time capabilities
-  - accuracy claims
-  - databases/integrations
-  - reports
-  - risk indicators
-  - business outcomes
-  - performance improvements
-- Competitor names are internal context only and must never appear in public-facing content.
+The user has explicitly requested to include a character.
+You MUST automatically create a suitable character based on the storyline, business context, company context, and intended audience.
+The AI must determine these details automatically.
 
-GENERAL CRITICAL WRITING RULES:
-1. NEVER change the meaning of the competitor's post or criticize the competitor.
-2. NO SELLING: Do not include ANY Call-To-Action (CTA) or links.
-3. NO MARKDOWN OR BULLET POINTS in the storyline: Write in flowing paragraphs.
-4. PROFESSIONAL TONE: Keep the tone highly professional, analytical, institutional, and credible. Write like an authoritative industry expert.
-5. Do not connect two unrelated competitor topics just to create one storyline. Each competitor is analyzed independently.
+#### Character Selection Rules
+Select a character whose professional role naturally fits the storyline.
+Examples:
+- Investment/portfolio storyline -> investment professional, portfolio manager, investment analyst, or advisor
+- Fund analysis storyline -> fund analyst, portfolio manager, or investment professional
+- AML/compliance storyline -> compliance professional, AML analyst, or risk officer
+- Due diligence storyline -> investment analyst, due diligence professional, or compliance professional
+- Wealth management storyline -> financial advisor, wealth manager, or client-facing investment professional
+- Executive/business strategy storyline -> senior financial executive or business leader
+- Technology/AI transformation storyline -> appropriate financial-services professional interacting with the technology
 
-You MUST return a single JSON object with two keys:
-{
-    "observed_facts": ["Headline for post 1", "Headline for post 2", "... one for EVERY post provided"],
-    "prompt": "A single continuous string containing the structured storylines for ALL provided posts."
-}
+Do not force the same character role into every storyline. The selected character must be appropriate to the actual business problem being presented.
 
-CRITICAL REQUIREMENT: You MUST generate a storyline for EVERY SINGLE post provided in the input. Do not group them. If 5 posts are provided, there must be 5 distinct storylines separated by '\n\n---\n\n'.
+#### Character Profile
+Before generating the image and video prompts, internally determine:
+- Professional role
+- Appropriate age range
+- Professional appearance
+- Business-appropriate clothing
+- Relevant environment
+- Natural personality/expression
+- Relevant actions
+- Purpose of the character in the storyline
 
-The `prompt` string MUST be formatted exactly like this:
+The character should look like a credible professional working in the relevant business environment.
+Avoid generic stock-photo people, random models, unrelated professions, overly casual clothing, exaggerated expressions, characters that do not logically interact with the storyline, or decorative characters with no meaningful purpose."""
 
-[--- STEP 1: INDIVIDUAL ANALYSIS ---]
-(Repeat this block for EVERY post provided, separated by \n\n---\n\n)
-Competitor: [Competitor Name]
-Counter Strategy Headline: [A concise headline describing the competitor's actual topic and the underlying challenge]
-Selected Project: [Best matching project or "No Strong Match"]
-Connection Strength: [Strong / Moderate / Weak / No Strong Match]
-Storyline:
-[One cohesive storyline following the required 55:45 ratio, plain text paragraphs]
+            image_prompt = """### IMAGE GENERATION
+Create a highly detailed prompt for a multi-slide Carousel (e.g., 3-5 slides) that directly represents the specific storyline. Each slide must be text-oriented, deeply informative, and visually connected to the others.
+Mimic high-end, colorful, professional layouts (clean typography, data visualization, cohesive vibrant color palette).
 
-[IF Connection Strength is Weak or No Strong Match, include:]
-Reason for No Match:
-[Briefly explain why this competitor topic does not strongly align with any internal projects.]
+Create the image prompt using the automatically generated character profile. The character must be relevant to the storyline, perform a meaningful business-related action, interact naturally with the environment, technology, data, or product, and look credible for the company/business context.
+Do not simply place a person next to a dashboard. The character should help communicate the business problem, solution, or outcome.
+Integrate their description directly into the relevant slide descriptions (e.g., Slide 1 or 2).
 
-[--- STEP 2: CONTENT GENERATION ---]
-(Review all the Strong/Moderate matches from Step 1. Group them by underlying problem/theme. For each distinct theme, generate ONE set of prompts. If posts are unrelated, they get their own Theme block.)
+For Carousels, follow this exact formatting style. Integrate the character description (e.g. "A 35-year-old Institutional Investment Analyst wearing a charcoal-grey tailored suit...") directly into the relevant slide descriptions:
 
-CRITICAL: Step 2 must inherit capabilities ONLY from the projects selected in Step 1.
+--- EXAMPLE CAROUSEL FORMAT ---
+Overall Aesthetic/Style: Premium institutional financial technology...
+Slide 1 (Title/Hook): Deep navy background... [Describe character here]
+Slide 2 (Context/Problem): Split-screen layout...
+Slide 3 (Solution/Capabilities): Full-bleed dark-mode UI dashboard...
+Slide 4 (Outcome/CTA): Deep navy background...
+----------------------"""
 
-STRICT VALIDATOR: Before generating the content below, you MUST ensure you are not inventing specific processing times (e.g., "in minutes"), data volumes (e.g., "thousands of pages"), or specific UI recommendations (e.g., "PASS recommendation") unless explicitly documented in the project context. The image prompt MUST accurately reflect the actual selected project(s).
+            video_prompt = """### VIDEO GENERATION
+Create a video narrative directly derived from the storyline.
 
-UNIQUENESS RULE:
-Generate the image prompt and video script based specifically on the storyline provided. Do not reuse a generic visual template across different storylines.
-For every storyline, first identify:
-1. The main topic/problem discussed.
-2. The specific business challenge.
-3. The selected project and its actual capability.
-4. The key transformation or outcome.
-5. The most appropriate visual metaphor for that specific topic.
+Use the same AI-generated character consistently throughout the video.
+Maintain: Same professional identity, general appearance, clothing, hairstyle, age range, role.
+The character's actions should evolve with the storyline.
+Do not use the same character type or the same "stressed employee -> AI dashboard -> confident employee" sequence for every video.
+Create a 15-second cinematic institutional-finance video script featuring the character. Ensure the scenes progress the storyline logically (e.g. Environment -> Challenge -> Intelligent Analysis -> Decision).
 
-Theme: [Description of the shared problem, or the single problem if not shared]
-Competitors Covered: [List the competitor names that fall under this theme]
+Follow this exact formatting style:
+--- EXAMPLE CHARACTER VIDEO FORMAT ---
+Create a 15-second cinematic institutional-finance video based on the storyline...
 
-Caption Prompt:
-[A detailed prompt instructing the social media writer on exactly what to write. Outline the specific hook, the core strategic topic, the exact product capabilities to highlight, and the tone. Do NOT write the actual caption here. Give instructions for writing it.]
+CHARACTER:
+A [Age]-year-old [Role] in [Clothing]. [Personality]. Maintain the same character appearance, clothing, hairstyle, and overall identity throughout all scenes.
 
-Image Prompt:
-[Create a highly detailed prompt for a multi-slide Carousel (e.g., 3-5 slides) that directly represents the specific storyline. Each slide must be text-oriented, deeply informative, and visually connected to the others.
-The carousel MUST mimic the high-end, colorful, and highly professional layout used by top-tier consulting and financial technology firms. It must rely heavily on clean typography, data visualization, and a cohesive, vibrant color palette (e.g., deep navy, vibrant orange, or slate grey) rather than just abstract graphics.
+SCENE 1 — MARKET ENVIRONMENT
+[Detailed description of the character observing the environment]
 
-To understand the exact level of detail and formatting required, here is a PERFECT example of what you must generate. You must adapt this exact level of granular detail, color selection, and typography specification to the new storyline:
+SCENE 2 — ANALYTICAL CHALLENGE
+[Detailed description of the character encountering the specific problem/challenge]
 
---- EXAMPLE FORMAT ---
-Overall Aesthetic/Style: Premium institutional financial technology, text-oriented data visualization, vibrant and cohesive brand palette of deep navy (#0B1B33), slate grey (#454B54), and vibrant orange (#E0703A) as the singular accent color, clean modern sans-serif typography for UI/data elements paired with a serif display face for headlines, professional corporate presentation style consistent with top-tier wealth management and consulting decks. Every slide carries a persistent thin orange underline rule beneath its headline as a recurring brand device, tying the carousel together visually.
+SCENE 3 — INTELLIGENT ANALYSIS
+[Detailed description of the solution interface and the character interacting with/observing it]
 
-Slide 1 (Title/Hook): Deep navy background (#0B1B33) with a subtle diagonal gradient darkening toward the bottom-right corner. Layout is left-aligned (not centered) — a text block sits in the left 60% of the frame, vertically centered, leaving the right 40% for a graphic. Headline in large bold white serif font: "[Title]". Beneath it, a thin horizontal orange rule (4px, #E0703A, 180px wide). Below the rule, a smaller sans-serif subhead in slate-blue grey: "[Subhead]". On the right third of the frame: [Extremely detailed description of graphic, e.g. a minimalist balance-beam graphic rendered in thin white and orange linework].
+SCENE 4 — DECISION
+[Detailed description of the character confidently taking action based on the insights]
 
-Slide 2 (Context/Problem): Split-screen layout, left side slate grey (#454B54), right side deep navy (#0B1B33), divided by a 3px vertical orange rule. Eyebrow label centered above the divide in small tracked-out orange caps: "THE PROBLEM." Left panel: [Detailed description of data viz/metric]. Right panel: [Detailed description of UI element or workflow graphic]. Body copy centered beneath both panels in light grey sans-serif: "[Context copy]".
+VISUAL STYLE:
+Premium institutional financial technology, photorealistic, cinematic professional lighting, realistic corporate environment, sophisticated financial-data visualization, restrained and credible.
 
-Slide 3 (Solution/StradIT Capabilities): Full-bleed dark-mode UI dashboard on deep navy (#0B1B33), styled as a live product screen. Top-left header text: "[StradIT Project Name]" in bold white sans-serif, with smaller slate-grey subtext "[Subhead]". Top-right pill badge in orange-outlined rounded rectangle reading "LIVE MONITORING." Three metric cards arranged in a horizontal row beneath the header... [Extremely detailed description of the metrics and line chart representing the specific StradIT capability]. Below the cards, bold white text: "[Solution Copy]".
+CHARACTER CONSISTENCY:
+The same analyst must appear consistently throughout all scenes. Do not change the person's age, clothing, appearance, or role.
 
-Slide 4 (Outcome/CTA): Deep navy background (#0B1B33) with two soft glowing circles. Centered graphic: [Detailed description of final graphic]. Beneath the graphic, large bold white sans-serif headline centered: "[Headline]". Beneath that, a smaller tracked-out orange caps tagline: "[Tagline]".
+AUDIO:
+A calm, authoritative voiceover saying: "[Voiceover script tailored to the storyline]". Subtle ambient room tone; no dialogue, no sound effects.
+----------------------"""
 
-Negative Constraints: No logos, no competitor branding or names, no cluttered stock photography, no generic abstract art unconnected to the data narrative, no photographic human figures, no overly minimalist compositions devoid of text or metrics — every slide must remain text-oriented and data-driven, with graphics functioning as supporting infographic elements rather than standalone decoration.
-----------------------
+            validation_prompt = """### FINAL CHARACTER VALIDATION
+* At least one relevant character is present
+* Character role matches the storyline
+* Character performs a meaningful action
+* Character fits the business environment
+* Character is consistent across video scenes
+* Character is not merely decorative"""
 
-IMPORTANT RULES:
-- The carousel MUST be text-oriented and data-driven. Visuals should support the text (like a premium infographic or presentation slide), not the other way around.
-- IF a specific StradIT project was selected, at least one slide MUST visually integrate highly detailed elements representing that project's exact capabilities (e.g., if AltsIQ, show a slide with a glowing 233-point compliance report layout).
-- Do NOT reuse the exact same visual metaphor for every storyline. Tailor the format to the specific competitor's post and StradIT project.
-- Do NOT include competitor names or logos.
-- Make the prompt rich, highly detailed, text-heavy, informative, and visually stunning, exactly like top-tier professional corporate posts.]
+        else:
+            char_rules_prompt = """### CHARACTER GENERATION
+The user has explicitly requested WITHOUT CHARACTER. Do not generate or define any characters."""
 
-Video Script:
-[Create a video narrative that is directly derived from the storyline.
-Do NOT use the same generic scenes for every storyline. Design each video's scenes around a unique, compelling visual metaphor.
+            image_prompt = """### IMAGE GENERATION
+Create a highly detailed prompt for a multi-slide Carousel (e.g., 3-5 slides) that directly represents the specific storyline. Each slide must be text-oriented, deeply informative, and visually connected to the others.
+Mimic high-end, colorful, professional layouts (clean typography, data visualization, cohesive vibrant color palette).
 
-To understand the exact level of cinematic vision, pacing, lighting, and detail required, here is a PERFECT example of what you must generate. You must adapt this exact level of granular detail and professional tone to the new storyline:
+Do not include human characters in the image.
+Use appropriate: Business environments, Financial data, Technology, Market visualizations, Documents, Product interfaces, Objects, Abstract visual metaphors.
 
---- EXAMPLE FORMAT ---
-[Overall style description] A premium corporate technology video in a single continuous narrative flow, shot with the restrained cinematography of an institutional investment film — shallow depth of field, cool navy and slate color grading with a single warm orange accent light source, slow deliberate camera moves, no jump cuts, no handheld shake. The film treats "[Insert core theme metaphor, e.g. drift]" as its visual throughline: the opening shot begins slightly off-balance, and by the final shot everything has settled into alignment.
+For Carousels, follow this exact formatting style:
 
-0:00-0:04 [Extremely detailed shot description: e.g. Extreme close-up of a physical desk-model gyroscope balanced on a dark slate surface, spinning slowly and tilting a few degrees off its vertical axis, rack focus pulling from the tilted spindle to soft bokeh in the background, then slowly sharpening again as the spindle drifts back toward vertical. Low, directional lighting from the upper left casts a long shadow across the table, with a faint warm orange rim light catching the gyroscope's edge. Environment is a minimal, unbranded office surface — no visible logos, papers, or screens.]
+--- EXAMPLE CAROUSEL FORMAT ---
+Overall Aesthetic/Style: Premium institutional financial technology...
+Slide 1 (Title/Hook): Deep navy background...
+Slide 2 (Context/Problem): Split-screen layout...
+Slide 3 (Solution/Capabilities): Full-bleed dark-mode UI dashboard...
+Slide 4 (Outcome/CTA): Deep navy background...
+----------------------"""
 
-0:04-0:08 [Extremely detailed shot description: e.g. Slow overhead tracking shot moving across a glass conference table where a single tablet lies face-up beside a relaxed, open hand — not reaching for it. The screen glows a calm, steady navy-white, its light spilling softly across the tabletop. A single warm orange indicator pulses once on the tablet's edge, then holds steady. Cool ambient light dominates, with the screen the brightest element in frame; the background is a softly blurred, unbranded skyline, deliberately out of focus.]
+            video_prompt = """### VIDEO GENERATION
+Create a video narrative directly derived from the storyline.
 
-0:08-0:10 [Extremely detailed shot description: e.g. Slow pull-back and slight rise, revealing the gyroscope now spinning perfectly upright in the near foreground and the glowing tablet steady in the background, both elements in quiet equilibrium within the same frame. Lighting warms subtly as the camera settles, as though the room itself has found its balance.]
+Create a 10-second premium corporate technology video in a single continuous narrative flow.
+Do not introduce human characters. Build the narrative using environments, objects, data, technology, or visual metaphors.
 
-Audio: A calm, authoritative voiceover saying: "[Voiceover script tailored to the storyline]". Subtle ambient room tone with a faint low synth pad, swelling gently as the camera settles in the final shot; no dialogue, no sound effects, no ticking clocks or alarm tones. No subtitles. No text overlays.
+Follow this exact formatting style:
+--- EXAMPLE NON-CHARACTER VIDEO FORMAT ---
+[Overall style description] A premium corporate technology video...
 
-End frame: Minimal premium navy background with StradIT branding and the tagline: "Intelligence. Automated."
-----------------------
+0:00-0:04 [Extremely detailed shot description of a visual metaphor...]
+0:04-0:08 [Extremely detailed shot description progressing the metaphor...]
+0:08-0:10 [Extremely detailed shot description concluding the metaphor...]
 
-IMPORTANT RULES:
-- Do not mention or display competitor names or logos.
-- Do not invent product capabilities or claim specific processing times.
-- The video MUST have its own visual storytelling concept (like the gyroscope metaphor above) and not simply describe or animate the image prompt.
-- Make the cinematography rich, highly detailed, and deeply professional.]
+Audio: A calm, authoritative voiceover saying: "[Voiceover script]".
+----------------------"""
 
-(Repeat the Theme block for each distinct theme you found among the Strong/Moderate matches)
+            validation_prompt = """### FINAL CHARACTER VALIDATION
+* Are there absolutely no human characters?"""
 
-FINAL GUARDRAILS AND SAFETY CHECK:
-Before outputting, ensure:
-1. NO competitor names or logos appear anywhere in the Caption Prompt, Image Prompt, or Video Script.
-2. NO exaggerated performance claims ("instant", "100% accurate", "in seconds") are used.
-3. Every feature mentioned EXACTLY matches a capability provided in the StradIT project context.
-4. The visual concepts for the Image and Video are highly UNIQUE to this specific storyline and NOT generic templates.
+        system = f"""You are an expert strategic analyst and Content Generation Agent.
+You will be provided with a Storyline or Context (in <COMPETITOR_POSTS>) and a list of StradIT projects (in <OUR_PROJECT_CONTEXT>).
+
+## CONTENT GENERATION FLOW
+
+Follow this sequence strictly:
+
+### STEP 1 — STORYLINE
+
+Use the provided storyline as the **single source of truth**.
+
+Extract:
+* Main topic
+* Industry context
+* Business problem
+* Key message
+* Selected project
+* Project capabilities
+* Desired business outcome
+* Competitor context, if relevant
+
+Do not generate the image or video prompt yet.
+
+{char_rules_prompt}
+
+### STEP 3 — PROMPT GENERATION
+
+Only after completing the character selection should you generate the content prompts.
+Generate independently:
+1. Caption Prompt
+2. Image Prompt
+3. Video Prompt / Video Script
+
+All three must originate from the same storyline, but they must be independently designed.
+
+{image_prompt}
+
+{video_prompt}
+
+### BUSINESS CONTEXT RULE
+The character must always feel appropriate for a professional B2B/company video. The visual should communicate: "Here is a real professional dealing with this specific business problem.", not: "Here is a random person placed into a corporate image."
+
+CAPTION PROMPT
+Provide a detailed prompt instructing the social media writer on exactly what to write. 
+Outline the specific hook, the core strategic topic, the exact product capabilities to highlight, and the tone.
+Do NOT write the actual caption here. Only provide the instructions/context for the writer.
+If characters are selected, characters may be referenced when naturally relevant.
+Do not invent fictional customer experiences, quotes, names, testimonials, personal claims, or unsupported facts.
+
+### STEP 4 — GUARDRAILS
+
+After generating the prompts, validate all outputs against the following guardrails:
+
+Storyline Alignment
+* Does the image represent the actual storyline?
+* Does the video represent the actual storyline?
+* Does the caption communicate the actual storyline?
+* Is the selected project used accurately?
+
+Character Consistency
+{validation_prompt}
+
+Product Accuracy
+* Do not invent product capabilities.
+* Do not show functionality that the project does not provide.
+* Do not make unsupported claims.
+
+Final Validation
+Before returning the result, ensure:
+1. Is this clearly derived from the storyline?
+2. Are the characters intentional rather than decorative?
+3. Is the image visually different from previous storylines?
+4. Is the video structurally different from previous videos?
+5. Is the project capability accurately represented?
+6. Are all claims supported by the storyline?
+7. Are the guardrails satisfied?
+If any answer is NO, regenerate the affected output internally.
+
+### OUTPUT FORMAT
+
+You must perform Steps 1, 2, and 4 internally. 
+Your final response MUST be a valid JSON object containing ONLY the final generated content (Step 3), as well as a VERY SHORT list of facts you observed (maximum 2 or 3 facts total, keep them minimal but informative). Do not include your internal reasoning in the final JSON.
+
+Respond with exactly this JSON structure and nothing else:
+
+{{
+  "observed_facts": ["concise fact 1", "concise fact 2"],
+  "caption": "The instructions for the social media writer here (do NOT write the actual caption)...",
+  "image_prompt": "The highly detailed multi-slide carousel prompt here...",
+  "video_prompt": "The highly detailed 10-second cinematic video script here..."
+}}
 """
         # Place the massive project context FIRST, and the small competitor posts LAST so the LLM doesn't ignore them.
         user = f"<OUR_PROJECT_CONTEXT>\n{project_context}\n</OUR_PROJECT_CONTEXT>\n\n<COMPETITOR_POSTS>\n{posts_text}\n</COMPETITOR_POSTS>"

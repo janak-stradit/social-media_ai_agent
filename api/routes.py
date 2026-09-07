@@ -944,7 +944,13 @@ def generate_media():
         if media_type == "video":
             result = media_service.generate_video(caption_to_use, platform, tone, image_path=image_path)
         else:
-            result = media_service.generate_image(caption_to_use, platform, tone, image_path=image_path)
+            ai_model = data.get("ai_model", "pollinations")
+            # If the client sent context, use it as tone to guide the style
+            if "context" in data and data["context"]:
+                tone = data["context"]
+            result = media_service.generate_image(
+                caption_to_use, platform, tone, image_path=image_path, ai_model=ai_model
+            )
 
         if image_path:
             result["source_image_url"] = _public_upload_url(image_path)
@@ -1656,8 +1662,6 @@ def competitor_posts_db():
     competitor = request.args.get("competitor")
     if not platform:
         return jsonify({"error": "No platform provided"}), 400
-    if not competitor:
-        return jsonify({"error": "No competitor provided"}), 400
 
     try:
         from db import get_competitor_posts
@@ -1688,6 +1692,7 @@ def generate_channel_storyline():
         return jsonify({"error": "Request body required"}), 400
 
     story = data.get("story", "")
+    character_config = data.get("characterConfig", {})
 
     if not story:
         return jsonify({"error": "Story text is required"}), 400
@@ -1700,7 +1705,7 @@ def generate_channel_storyline():
         project_context = stradit.get_all_projects_context()
 
         story_agent_local = StoryAgent()
-        result = story_agent_local.generate_channel_storyline(story, project_context)
+        result = story_agent_local.generate_channel_storyline(story, project_context, character_config=character_config)
 
         return jsonify({"success": True, "storyline": result})
     except Exception as e:

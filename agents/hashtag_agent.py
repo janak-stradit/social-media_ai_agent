@@ -20,13 +20,16 @@ class HashtagAgent:
 
         system_prompt = f"""You are a Hashtag Strategy Expert for {platform.capitalize()}.
         Rules:
-        - Generate exactly {max_tags} hashtags
-        - Mix: 40% broad reach, 40% niche, 20% branded/trending
-        - Research shows: {platform} posts with {max_tags // 2} hashtags get best engagement
-        - Avoid banned or overused spam hashtags
-        - Include 1-2 location-based if relevant
+        - Generate exactly {max_tags} hashtags per variation.
+        - Avoid banned or overused spam hashtags.
+        - Include 1-2 location-based if relevant.
 
-        Return JSON with: hashtags (list), categories (dict), engagement_prediction (score 1-10)"""
+        Provide THREE distinct hashtag variations:
+        - reach_hashtags: Broad hashtags for maximum visibility.
+        - niche_hashtags: Highly targeted hashtags.
+        - branded_hashtags: Brand-specific and trending hashtags.
+
+        Return JSON with: reach_hashtags (list), niche_hashtags (list), branded_hashtags (list), engagement_prediction (score 1-10)"""
 
         user_prompt = f"""Story Themes: {story_analysis.get("themes", [])}
         Emotions: {story_analysis.get("emotions", [])}
@@ -41,28 +44,28 @@ class HashtagAgent:
         if not isinstance(result, dict):
             result = {}
 
-        hashtags_list = result.get("hashtags")
-        if not isinstance(hashtags_list, list) or not hashtags_list:
+        reach_list = result.get("reach_hashtags")
+        if not isinstance(reach_list, list) or not reach_list:
             themes = (
                 story_analysis.get("themes", ["Marketing", "AI"])
                 if isinstance(story_analysis, dict)
                 else ["Marketing", "AI"]
             )
             clean_themes = [f"#{str(t).replace(' ', '').replace('-', '')}" for t in themes[:3]]
-            result["hashtags"] = clean_themes + [
+            base_tags = clean_themes + [
                 f"#{platform.capitalize()}Strategy",
                 "#VortexSocial",
                 "#ContentAI",
-                "#DigitalGrowth",
-                "#SocialMediaMarketing",
-                "#TrendingNow",
             ]
+            result["reach_hashtags"] = base_tags + ["#TrendingNow", "#Viral"]
+            result["niche_hashtags"] = base_tags + ["#DeepDive", "#Specialist"]
+            result["branded_hashtags"] = base_tags + ["#BrandVoice", "#Official"]
 
         # Store for future trend analysis
         try:
             self.memory.store_content(
                 f"hashtag_{platform}_{hash(str(result))}",
-                " ".join(result.get("hashtags", [])),
+                " ".join(result.get("reach_hashtags", [])),
                 {"type": "hashtag", "platform": platform},
             )
         except Exception as mem_err:

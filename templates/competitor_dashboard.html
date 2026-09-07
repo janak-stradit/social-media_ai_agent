@@ -399,7 +399,17 @@
                                         placeholder="Select posts to fill the context buffer..." readonly
                                         style="resize: none; min-height: 0;"></textarea>
                                 </div>
-                                <div class="mt-auto flex-shrink-0 pt-2">
+                                <!-- Character Settings UI -->
+                                <div class="mt-2 pt-3 border-top flex-shrink-0">
+                                    <label class="form-label fw-bold text-gray-700 m-0 small"><i
+                                            class="fas fa-user-tie me-1 text-primary"></i>Character Setup</label>
+                                    <select class="form-select form-select-sm mb-2 mt-1" id="characterModeSelect">
+                                        <option value="with_character">With Character</option>
+                                        <option value="without_character">Without Character</option>
+                                    </select>
+                                </div>
+
+                                <div class="mt-2 flex-shrink-0 pt-2">
                                     <button class="premium-btn w-100 py-3 fs-6 shadow-sm"
                                         onclick="generateStoryFromSelection()" id="generateStoryBtn" disabled>
                                         <i class="fas fa-bolt me-2"></i>Generate Counter-Strategy
@@ -482,10 +492,24 @@
                                     </div>
                                     <div class="position-relative mt-2">
                                         <i class="fas fa-paperclip position-absolute"
-                                            style="top: 15px; left: 15px; color: #9ca3af; cursor: pointer; transition: color 0.2s;" onmouseover="this.style.color='#0d6efd'" onmouseout="this.style.color='#9ca3af'" onclick="handlePromptAttachment('pipelinePrompt')" title="Attach text file"></i>
+                                            style="top: 15px; left: 15px; color: #9ca3af; cursor: pointer; transition: color 0.2s;"
+                                            onmouseover="this.style.color='#0d6efd'"
+                                            onmouseout="this.style.color='#9ca3af'"
+                                            onclick="handlePromptAttachment('pipelinePrompt')"
+                                            title="Attach text file"></i>
                                         <textarea id="pipelinePrompt" class="form-control" rows="3"
                                             style="padding-left: 2.5rem; border-radius: 12px; resize: none;"
                                             placeholder="Attach an optional creative prompt (e.g. 'Use an energetic tone', 'Include branding colors')"></textarea>
+                                    </div>
+                                    <div id="imageContextContainer" class="mt-2 d-none">
+                                        <label class="form-label small text-muted fw-bold mb-1"><i
+                                                class="fas fa-paint-brush me-1"></i>Image Context/Style</label>
+                                        <select class="form-select form-select-sm" id="preGenImageContext">
+                                            <option value="Professional">Professional</option>
+                                            <option value="Casual">Casual</option>
+                                            <option value="Cinematic">Cinematic</option>
+                                            <option value="Abstract">Abstract</option>
+                                        </select>
                                     </div>
                                     <button class="btn btn-primary fw-bold rounded-pill w-100 py-3 shadow-sm mt-auto"
                                         onclick="startPipelineGeneration()" id="startPipelineBtn">

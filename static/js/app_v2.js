@@ -4,6 +4,7 @@ $(document).ready(function () {
     let lastRunId = null;
     let lastAssistantContext = null;
     let messageCounter = 0;
+    window.chatHistory = {}; // Store generations per msgId
 
     $.ajaxSetup({
         xhrFields: { withCredentials: true }
@@ -221,7 +222,7 @@ $(document).ready(function () {
     function handleImageUpload(file) {
         const formData = new FormData();
         formData.append('image', file);
-        
+
         const reader = new FileReader();
         reader.onload = e => {
             $('#previewImg').attr('src', e.target.result);
@@ -257,16 +258,16 @@ $(document).ready(function () {
     window.analyzeStory = function () {
         const story = $('#storyInput').val().trim();
         const targetCompany = $('#targetCompanySelect').val() || 'None';
-        
+
         if (!story && targetCompany === 'None') {
             showToast('Please enter your brief text or select a company first!', 'warning');
             return;
         }
-        
+
         showToast('Contacting Scraper Explorer API for ' + targetCompany + '...', 'info');
         const btn = $('#analyzeBtn');
         btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i><span class="d-none d-md-inline ms-1">Fetching Data...</span>');
-        
+
         $.ajax({
             url: '/api/analyze-story',
             type: 'POST',
@@ -291,11 +292,104 @@ $(document).ready(function () {
         });
     };
 
+    function executeGeneration(msgId, requestBody, assistantElem, platforms, activeImgPath, mediaType, selectedOutputs) {
+        const hasImage = !!activeImgPath;
+        const stepIds = hasImage ? ['step_story', 'step_vision', 'step_caption', 'step_hashtag', 'step_strategy', 'step_reviewer']
+            : ['step_story', 'step_caption', 'step_hashtag', 'step_strategy', 'step_reviewer'];
+        let currentStep = 0;
+
+        const iv = setInterval(() => {
+            if (currentStep < stepIds.length) {
+                const prevId = currentStep > 0 ? stepIds[currentStep - 1] : null;
+                const currId = stepIds[currentStep];
+
+                if (prevId) {
+                    $(`#${msgId}_${prevId}`)
+                        .removeClass('active')
+                        .addClass('completed')
+                        .find('.agent-step-icon')
+                        .html('<i class="fas fa-check-circle text-success"></i>');
+                }
+
+                $(`#${msgId}_${currId}`)
+                    .addClass('active')
+                    .find('.agent-step-icon')
+                    .html('<div class="spinner-border spinner-border-sm text-primary" role="status"></div>');
+
+                currentStep++;
+            }
+        }, 750);
+
+        $.ajax({
+            url: '/api/generate',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(requestBody),
+            success: function (r) {
+                clearInterval(iv);
+                lastRunId = r.run_id || null;
+
+                // Cache summary context for multi-turn edits
+                let contextSummary = `Brief: ${requestBody.story}\nGenerated Captions:\n`;
+                platforms.forEach(p => {
+                    if (r.content[p]?.caption?.primary_caption) {
+                        contextSummary += `[${p.toUpperCase()}]: ${r.content[p].caption.primary_caption}\n`;
+                    }
+                });
+                lastAssistantContext = contextSummary;
+
+                if (!window.chatHistory[msgId]) {
+                    window.chatHistory[msgId] = { responses: [], currentIndex: 0, requestBody, platforms, activeImgPath, mediaType, selectedOutputs };
+                }
+
+                const rData = { content: r.content, runId: lastRunId, usage: r.usage, agentsExecuted: r.agents_executed, qualitySummary: r.quality_summary };
+                window.chatHistory[msgId].responses.push(rData);
+                window.chatHistory[msgId].currentIndex = window.chatHistory[msgId].responses.length - 1;
+
+                // Render finished Assistant Response inside Assistant Card
+                renderAssistantResponse(msgId);
+                renderHistory();
+                loadUserUsageMetrics();
+                scrollToBottom();
+            },
+            error: function (xhr) {
+                clearInterval(iv);
+                const res = xhr.responseJSON || {};
+                const errText = res.error || 'Generation failed';
+
+                if (xhr.status === 402 || res.credit_limit_exceeded) {
+                    assistantElem.find('.assistant-card').html(`
+                        <div class="alert alert-warning mb-0">
+                            <i class="fas fa-coins me-2"></i><strong>Credit Limit Reached:</strong> ${escapeHtml(errText)}
+                            <div class="mt-2">
+                                <button type="button" class="btn btn-sm btn-warning font-weight-bold" id="inlineRequestCreditBtn">
+                                    <i class="fas fa-plus-circle me-1"></i>Request Credit Extension
+                                </button>
+                            </div>
+                        </div>
+                    `);
+                    $('#inlineRequestCreditBtn').on('click', function () {
+                        openCreditRequestModal();
+                    });
+                    showToast('Credit limit reached. Please request a credit extension.', 'warning');
+                    openCreditRequestModal();
+                } else {
+                    assistantElem.find('.assistant-card').html(`
+                        <div class="alert alert-danger mb-0">
+                            <i class="fas fa-exclamation-triangle me-2"></i><strong>Error:</strong> ${escapeHtml(errText)}
+                        </div>
+                    `);
+                    showToast('Generation error: ' + errText, 'error');
+                }
+            }
+        });
+    }
+
     // ── Generate Content (Main Chat Flow) ──────────────────────────────
     window.generateContent = function () {
         const story = storyInput.val().trim();
         const targetCompany = $('#targetCompanySelect').val() || 'None';
-        
+
         if (!story && targetCompany === 'None') {
             showToast('Please enter a campaign brief or select a company!', 'warning');
             return;
@@ -338,34 +432,6 @@ $(document).ready(function () {
         // Scroll workspace to bottom
         scrollToBottom();
 
-        // 3. Step Progress Interval for Multi-Agent Stepper
-        const stepIds = hasImage ? ['step_story', 'step_vision', 'step_caption', 'step_hashtag', 'step_strategy', 'step_reviewer']
-                                 : ['step_story', 'step_caption', 'step_hashtag', 'step_strategy', 'step_reviewer'];
-        let currentStep = 0;
-
-        const iv = setInterval(() => {
-            if (currentStep < stepIds.length) {
-                const prevId = currentStep > 0 ? stepIds[currentStep - 1] : null;
-                const currId = stepIds[currentStep];
-
-                if (prevId) {
-                    $(`#${msgId}_${prevId}`)
-                        .removeClass('active')
-                        .addClass('completed')
-                        .find('.agent-step-icon')
-                        .html('<i class="fas fa-check-circle text-success"></i>');
-                }
-
-                $(`#${msgId}_${currId}`)
-                    .addClass('active')
-                    .find('.agent-step-icon')
-                    .html('<div class="spinner-border spinner-border-sm text-primary" role="status"></div>');
-
-                currentStep++;
-            }
-        }, 750);
-
-
         const requestBody = {
             story: story,
             image_path: activeImgPath,
@@ -378,61 +444,7 @@ $(document).ready(function () {
             target_company: targetCompany
         };
 
-        $.ajax({
-            url: '/api/generate',
-            type: 'POST',
-            contentType: 'application/json',
-            data: JSON.stringify(requestBody),
-            success: function (r) {
-                clearInterval(iv);
-                lastRunId = r.run_id || null;
-
-                // Cache summary context for multi-turn edits
-                let contextSummary = `Brief: ${story}\nGenerated Captions:\n`;
-                platforms.forEach(p => {
-                    if (r.content[p]?.caption?.primary_caption) {
-                        contextSummary += `[${p.toUpperCase()}]: ${r.content[p].caption.primary_caption}\n`;
-                    }
-                });
-                lastAssistantContext = contextSummary;
-
-                // Render finished Assistant Response inside Assistant Card
-                renderAssistantResponse(assistantElem, r.content, platforms, msgId, story, activeImgPath, mediaType, tone, lastRunId, r.usage, r.agents_executed, r.quality_summary, selectedOutputs);
-                renderHistory();
-                loadUserUsageMetrics();
-                scrollToBottom();
-            },
-            error: function (xhr) {
-                clearInterval(iv);
-                const res = xhr.responseJSON || {};
-                const errText = res.error || 'Generation failed';
-
-                if (xhr.status === 402 || res.credit_limit_exceeded) {
-                    assistantElem.find('.assistant-card').html(`
-                        <div class="alert alert-warning mb-0">
-                            <i class="fas fa-coins me-2"></i><strong>Credit Limit Reached:</strong> ${escapeHtml(errText)}
-                            <div class="mt-2">
-                                <button type="button" class="btn btn-sm btn-warning font-weight-bold" id="inlineRequestCreditBtn">
-                                    <i class="fas fa-plus-circle me-1"></i>Request Credit Extension
-                                </button>
-                            </div>
-                        </div>
-                    `);
-                    $('#inlineRequestCreditBtn').on('click', function () {
-                        openCreditRequestModal();
-                    });
-                    showToast('Credit limit reached. Please request a credit extension.', 'warning');
-                    openCreditRequestModal();
-                } else {
-                    assistantElem.find('.assistant-card').html(`
-                        <div class="alert alert-danger mb-0">
-                            <i class="fas fa-exclamation-triangle me-2"></i><strong>Error:</strong> ${escapeHtml(errText)}
-                        </div>
-                    `);
-                    showToast('Generation error: ' + errText, 'error');
-                }
-            }
-        });
+        executeGeneration(msgId, requestBody, assistantElem, platforms, activeImgPath, mediaType, selectedOutputs);
     };
 
     // ── Chat Bubble Render Helpers ─────────────────────────────────────
@@ -536,7 +548,12 @@ $(document).ready(function () {
         return elem;
     }
 
-    function renderAssistantResponse(elem, content, platforms, msgId, story, imagePath, mediaType, tone, runId, usage, agentsExecuted, qualitySummary, selectedOutputs = []) {
+    function renderAssistantResponse(msgId) {
+        const historyObj = window.chatHistory[msgId];
+        const rData = historyObj.responses[historyObj.currentIndex];
+        const { requestBody, platforms, selectedOutputs } = historyObj;
+        const { content, runId, usage, agentsExecuted, qualitySummary } = rData;
+        const elem = $(`#${msgId}`);
         // Badges for Token Usage & Memory Context
         const totalTokens = usage?.total_tokens ? Number(usage.total_tokens).toLocaleString() : '1,560';
         const costUsd = usage?.cost_usd ? '$' + Number(usage.cost_usd).toFixed(4) : '$0.0003';
@@ -583,24 +600,28 @@ $(document).ready(function () {
         platforms.forEach((p, idx) => {
             const pData = content[p] || {};
             const displayStyle = idx === 0 ? 'block' : 'none';
-            
+
             const primaryCap = pData.caption?.primary_caption || 'No caption generated.';
             const storyHookCap = pData.caption?.story_hook_caption || primaryCap;
             const contrarianHookCap = pData.caption?.contrarian_hook_caption || primaryCap;
-            
+
             const isRefined = pData.caption?.refined_by_critic || pData.quality?.self_corrected;
-            
+
             // Hashtags
-            const rawTags = pData.hashtags;
-            const tagList = Array.isArray(rawTags) 
-                ? rawTags 
-                : (Array.isArray(rawTags?.hashtags) 
-                    ? rawTags.hashtags 
-                    : (Array.isArray(rawTags?.primary_hashtags) 
-                        ? rawTags.primary_hashtags 
-                        : []));
-            const tagHtml = tagList.map(t => `<span class="hashtag-pill">${escapeHtml(t)}</span>`).join(' ') || '<em>No hashtags</em>';
-            const allTagsStr = tagList.join(' ');
+            const rawTags = pData.hashtags || {};
+            const reachList = Array.isArray(rawTags.reach_hashtags) ? rawTags.reach_hashtags : (Array.isArray(rawTags) ? rawTags : (Array.isArray(rawTags.hashtags) ? rawTags.hashtags : []));
+            const nicheList = Array.isArray(rawTags.niche_hashtags) ? rawTags.niche_hashtags : reachList;
+            const brandedList = Array.isArray(rawTags.branded_hashtags) ? rawTags.branded_hashtags : reachList;
+
+            const formatTags = (list) => list.map(t => `<span class="hashtag-pill">${escapeHtml(t)}</span>`).join(' ') || '<em>No hashtags</em>';
+
+            const reachTagsHtml = formatTags(reachList);
+            const nicheTagsHtml = formatTags(nicheList);
+            const brandedTagsHtml = formatTags(brandedList);
+
+            const reachTagsStr = reachList.join(' ');
+            const nicheTagsStr = nicheList.join(' ');
+            const brandedTagsStr = brandedList.join(' ');
 
             // Quality Scores
             const pQuality = pData.quality || {};
@@ -612,6 +633,7 @@ $(document).ready(function () {
             const reach = safeReach(strat.expected_reach || strat.reach_score);
 
             const cardId = `${msgId}_caption_target_${p}`;
+            const tagsCardId = `${msgId}_hashtags_target_${p}`;
 
             panelsHtml += `
                 <div class="platform-panel-item" id="${msgId}_tab_${p}" style="display: ${displayStyle}">
@@ -648,11 +670,25 @@ $(document).ready(function () {
                     <div class="post-box-card">
                         <div class="post-box-header">
                             <span class="post-box-title"><i class="fas fa-hashtag me-1"></i>Curated Hashtags</span>
-                            <button class="btn-copy-sm btn-copy-text" data-text="${escapeAttr(allTagsStr)}">
+                            <button class="btn-copy-sm btn-copy-text" id="${tagsCardId}_copy" data-text="${escapeAttr(reachTagsStr)}">
                                 <i class="fas fa-copy me-1"></i>Copy Tags
                             </button>
                         </div>
-                        <div class="hashtags-container">${tagHtml}</div>
+                        
+                        <!-- 1-Click Hashtag Angle Switcher Chips -->
+                        <div class="hook-angle-switcher hashtag-switcher mb-2">
+                            <button class="hook-chip-btn active" data-target-text="${tagsCardId}" data-target-copy="${tagsCardId}_copy" data-tags-html="${escapeAttr(reachTagsHtml)}" data-tags-str="${escapeAttr(reachTagsStr)}">
+                                <i class="fas fa-globe me-1 text-primary"></i>🌍 Broad Reach
+                            </button>
+                            <button class="hook-chip-btn" data-target-text="${tagsCardId}" data-target-copy="${tagsCardId}_copy" data-tags-html="${escapeAttr(nicheTagsHtml)}" data-tags-str="${escapeAttr(nicheTagsStr)}">
+                                <i class="fas fa-bullseye me-1 text-warning"></i>🎯 Niche
+                            </button>
+                            <button class="hook-chip-btn" data-target-text="${tagsCardId}" data-target-copy="${tagsCardId}_copy" data-tags-html="${escapeAttr(brandedTagsHtml)}" data-tags-str="${escapeAttr(brandedTagsStr)}">
+                                <i class="fas fa-fire me-1 text-danger"></i>🔥 Trending
+                            </button>
+                        </div>
+                        
+                        <div class="hashtags-container" id="${tagsCardId}">${reachTagsHtml}</div>
                     </div>
 
                     <!-- Strategy & Quality Breakdown Grid -->
@@ -702,10 +738,28 @@ $(document).ready(function () {
         });
         panelsHtml += `</div>`;
 
+        const totalGens = historyObj.responses.length;
+        const currentGen = historyObj.currentIndex + 1;
+        const paginationHtml = totalGens > 1 ? `
+            <div class="generation-pagination ms-2 d-inline-flex align-items-center bg-light rounded px-2 py-1 border">
+                <i class="fas fa-chevron-left cursor-pointer text-secondary me-2 gen-prev" data-msg="${msgId}" ${currentGen === 1 ? 'style="opacity: 0.5; pointer-events: none;"' : ''}></i>
+                <span class="small font-weight-bold">${currentGen} / ${totalGens}</span>
+                <i class="fas fa-chevron-right cursor-pointer text-secondary ms-2 gen-next" data-msg="${msgId}" ${currentGen === totalGens ? 'style="opacity: 0.5; pointer-events: none;"' : ''}></i>
+            </div>
+        ` : '';
+
+        const regenerateBtnHtml = `
+            <button class="btn btn-sm btn-outline-primary ms-2 btn-regenerate" data-msg="${msgId}">
+                <i class="fas fa-sync-alt me-1"></i>Regenerate
+            </button>
+        `;
+
         const cardContent = `
             <div class="assistant-header">
-                <div class="assistant-title">
-                    <i class="fas fa-sparkles text-primary me-1"></i>VortexSocial Studio Output
+                <div class="assistant-title d-flex align-items-center">
+                    <div><i class="fas fa-sparkles text-primary me-1"></i>VortexSocial Studio Output</div>
+                    ${paginationHtml}
+                    ${regenerateBtnHtml}
                 </div>
                 <div class="assistant-meta-tags">
                     ${qualityBadgeHtml}
@@ -729,10 +783,19 @@ $(document).ready(function () {
             $(this).addClass('active');
 
             const targetId = $(this).attr('data-target-text');
-            const newCaption = $(this).attr('data-caption');
+            const targetCopyId = $(this).attr('data-target-copy') || targetId + '_copy';
 
-            $(`#${targetId}`).hide().text(newCaption).fadeIn(150);
-            $(`#${targetId}_copy`).attr('data-text', newCaption);
+            const newCaption = $(this).attr('data-caption');
+            const newTagsHtml = $(this).attr('data-tags-html');
+            const newTagsStr = $(this).attr('data-tags-str');
+
+            if (newCaption !== undefined) {
+                $(`#${targetId}`).hide().text(newCaption).fadeIn(150);
+                $(`#${targetCopyId}`).attr('data-text', newCaption);
+            } else if (newTagsHtml !== undefined) {
+                $(`#${targetId}`).hide().html(newTagsHtml).fadeIn(150);
+                $(`#${targetCopyId}`).attr('data-text', newTagsStr);
+            }
         });
 
         // Bind Agent Pipeline toggle
@@ -747,6 +810,37 @@ $(document).ready(function () {
             const targetId = $(this).attr('data-target');
             elem.find('.platform-panel-item').hide();
             $('#' + targetId).fadeIn(150);
+        });
+
+        // Bind Pagination
+        elem.find('.gen-prev').on('click', function () {
+            const mId = $(this).attr('data-msg');
+            const h = window.chatHistory[mId];
+            if (h && h.currentIndex > 0) {
+                h.currentIndex--;
+                renderAssistantResponse(mId);
+            }
+        });
+
+        elem.find('.gen-next').on('click', function () {
+            const mId = $(this).attr('data-msg');
+            const h = window.chatHistory[mId];
+            if (h && h.currentIndex < h.responses.length - 1) {
+                h.currentIndex++;
+                renderAssistantResponse(mId);
+            }
+        });
+
+        // Bind Regenerate
+        elem.find('.btn-regenerate').on('click', function () {
+            const mId = $(this).attr('data-msg');
+            const h = window.chatHistory[mId];
+            if (h) {
+                const assistantElem = $(`#${mId}`);
+                const hasImage = !!h.activeImgPath;
+                assistantElem.replaceWith(appendAssistantThinking(mId, hasImage));
+                executeGeneration(mId, h.requestBody, $(`#${mId}`), h.platforms, h.activeImgPath, h.mediaType, h.selectedOutputs);
+            }
         });
 
         // Trigger Media Generation asynchronously if mediaType requested
@@ -867,7 +961,7 @@ $(document).ready(function () {
     function filterAndRenderHistory(query, isArchived) {
         if (!window._allHistoryItems) return;
         const q = query.toLowerCase();
-        const filtered = window._allHistoryItems.filter(item => 
+        const filtered = window._allHistoryItems.filter(item =>
             (item.story && item.story.toLowerCase().includes(q)) ||
             (item.tone && item.tone.toLowerCase().includes(q)) ||
             (Array.isArray(item.platforms) && item.platforms.join(' ').toLowerCase().includes(q))
@@ -1191,7 +1285,7 @@ $(document).ready(function () {
         if (!q) {
             renderAdminUsersTable(window._allAdminUsers);
         } else {
-            const filtered = window._allAdminUsers.filter(u => 
+            const filtered = window._allAdminUsers.filter(u =>
                 u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
             );
             renderAdminUsersTable(filtered);
@@ -1252,7 +1346,7 @@ $(document).ready(function () {
                 if (!r.success) return;
                 const requests = r.requests || [];
                 window._allAdminReqs = requests;
-                
+
                 const pendingCount = requests.filter(req => req.status === 'pending').length;
                 if (pendingCount > 0) {
                     $('#adminPendingBadge').text(pendingCount).removeClass('d-none');

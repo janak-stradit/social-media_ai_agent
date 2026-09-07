@@ -31,7 +31,7 @@ class MediaGenerationService:
 
         # Force Bedrock provider strictly as requested by the user
         self.media_provider = "bedrock"
-        self.uses_bedrock = True
+        self.uses_bedrock = False
         self.uses_zai = False
         self.uses_openrouter = False
 
@@ -42,12 +42,16 @@ class MediaGenerationService:
                 base_url=Config.Z_AI_BASE_URL,
             )
 
-        if self.uses_openrouter:
-            self.client = openai.OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
+        self.client = None
+        if api_key:
+            if self.uses_openrouter:
+                self.client = openai.OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
+            elif self.uses_zai:
+                self.client = self.zai_client
+            else:
+                self.client = openai.OpenAI(api_key=api_key)
         elif self.uses_zai:
             self.client = self.zai_client
-        else:
-            self.client = openai.OpenAI(api_key=api_key)
 
         # Initialize AWS Bedrock and S3 Clients if Bedrock is selected
         self.bedrock_client = None
@@ -824,6 +828,9 @@ class MediaGenerationService:
             quality="standard",
             n=1,
         )
+        if not response or not response.data:
+            raise RuntimeError("Failed to generate image: OpenAI returned no valid data")
+
         image_url = response.data[0].url
         if not image_url:
             raise RuntimeError("Failed to generate image: OpenAI returned no URL")
@@ -841,7 +848,12 @@ class MediaGenerationService:
     # The linter flags that not every path through this function returns a dict (some fall
     # through, implicitly returning None). Worth tracing properly; not done as part of lint adoption.
     def generate_image(  # pylint: disable=inconsistent-return-statements
-        self, caption: str, platform: str, tone: str | None = None, image_path: str | None = None
+        self,
+        caption: str,
+        platform: str,
+        tone: str | None = None,
+        image_path: str | None = None,
+        ai_model: str = "pollinations",
     ) -> dict:
         """
         Generate a social media image.
@@ -890,42 +902,20 @@ class MediaGenerationService:
                 prompt = self._enhance_image_prompt(caption, platform, tone)
 
         try:
-            if not self.bedrock_client:
-                raise RuntimeError("AWS Bedrock client is not initialized")
-            result = self._generate_image_bedrock(prompt, platform, size, image_path=image_path)
-        except Exception as bedrock_err:
-            print(f"[Media Service] Bedrock image generation failed: {bedrock_err}. Falling back to OpenAI DALL-E 3...")
-            try:
+            if ai_model == "google_gemini":
+                result = self._generate_google_gemini_image(prompt, platform, size, image_path)
+            elif ai_model == "openai":
                 result = self._generate_image_openai(prompt, platform, size)
-            except Exception as openai_err:
-                print(
-                    f"[Media Service] OpenAI image generation failed: {openai_err}. Falling back to Pollinations.ai..."
-                )
-                import urllib.parse
-
-                encoded_prompt = urllib.parse.quote(prompt[:800])
-                width, height = size.split("x")
-                url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&nologo=true"
-                response = requests.get(url, timeout=60)
-                if response.status_code != 200:
-                    raise Exception(
-                        f"Pollinations API returned status {response.status_code}: {response.text[:100]}"
-                    ) from openai_err
-                img_data = response.content
-                local_filename, _ = self._save_image_bytes(img_data, platform)
-                result = {
-                    "url": f"/static/uploads/{local_filename}",
-                    "original_url": url,
-                    "prompt": prompt,
-                    "cost": 0.0,
-                    "model": "pollinations",
-                }
-
-        # KNOWN BUG (pre-existing): this except is unreachable -- the earlier
-        # `except Exception as bedrock_err:` above already catches everything, so a failure of
-        # all three providers propagates unhandled instead of hitting this fallback. Flagged
-        # during lint adoption, not fixed here.
-        except Exception as e:  # type: ignore  # pylint: disable=duplicate-except
+            elif ai_model == "bedrock":
+                result = self._generate_image_bedrock(prompt, platform, size, image_path)
+            elif ai_model == "zai":
+                result = self._generate_image_zai(prompt, platform)
+            elif ai_model == "openrouter":
+                result = self._generate_image_openrouter(prompt, platform, size, image_path)
+            else:
+                # Default to pollinations
+                result = self._generate_pollinations_image(prompt, platform, size)
+        except Exception as e:
             return {
                 "success": False,
                 "type": "image",
@@ -944,6 +934,57 @@ class MediaGenerationService:
             "provider": result.get("model", "bedrock"),
             "cost": result.get("cost", 0.03),
             "model": result.get("model", "bedrock"),
+        }
+
+    def _generate_google_gemini_image(
+        self, prompt: str, platform: str, size: str, image_path: str | None = None
+    ) -> dict:
+        """Generate an image using Google Gemini (Imagen 3) API via google-genai SDK."""
+        import os
+        from config import Config
+
+        google_key = getattr(Config, "GOOGLE_API_KEY", None) or os.getenv("GOOGLE_API_KEY")
+        if not google_key:
+            raise RuntimeError("GOOGLE_API_KEY is missing in your environment or config file.")
+
+        try:
+            import google.genai as genai
+            from google.genai import types
+        except ImportError as exc:
+            raise RuntimeError("The 'google-genai' package is required. Run 'pip install google-genai'.") from exc
+
+        client = genai.Client(api_key=google_key)
+
+        aspect_ratio = "1:1"
+        if platform in ["facebook", "linkedin"]:
+            aspect_ratio = "16:9"
+        elif platform == "instagram":
+            aspect_ratio = "1:1"
+
+        print(f"[Media Service] Generating image via Google Gemini (imagen-3.0-generate-001) for {platform}...")
+
+        # Gemini does not natively support an image_path for image generation in this SDK endpoint currently,
+        # so we rely purely on the text prompt
+        result = client.models.generate_images(
+            model="imagen-3.0-generate-001",
+            prompt=prompt[:2000],
+            config=types.GenerateImagesConfig(
+                number_of_images=1, output_mime_type="image/jpeg", aspect_ratio=aspect_ratio
+            ),
+        )
+
+        if not result.generated_images:
+            raise RuntimeError("Google Gemini image generation returned empty result.")
+
+        img_bytes = result.generated_images[0].image.image_bytes
+        local_filename, _ = self._save_image_bytes(img_bytes, platform)
+
+        return {
+            "url": f"/static/uploads/{local_filename}",
+            "prompt": prompt,
+            "cost": 0.03,
+            "model": "imagen-3.0-generate-001",
+            "provider": "Google Gemini",
         }
 
     def _generate_google_gemini_video(self, prompt: str, platform: str, image_path: str | None = None) -> dict:
@@ -1000,6 +1041,8 @@ class MediaGenerationService:
             raise RuntimeError("Google Gemini Video generation returned empty result.")
 
         generated_video = result.generated_videos[0]
+        if not generated_video.video:
+            raise RuntimeError("Google Gemini Video generation returned empty video content.")
         filename = f"gemini_video_{uuid.uuid4().hex[:8]}.mp4"
         filepath = os.path.join(self.upload_folder, filename)
 
@@ -1016,6 +1059,37 @@ class MediaGenerationService:
             "has_native_audio": getattr(Config, "GENERATE_NATIVE_AUDIO", True),
             "audio_mode": "single_pass_native",
         }
+
+    def _generate_pollinations_image(self, prompt: str, platform: str, size: str) -> dict:
+        import urllib.parse
+        import requests
+        import time
+        import os
+        from config import Config
+
+        encoded_prompt = urllib.parse.quote(prompt)
+        w, h = size.split("x")
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={w}&height={h}&nologo=true"
+
+        print(f"[Media Service] Fetching Pollinations image from {url[:80]}...")
+
+        response = requests.get(url, stream=True)
+        if response.status_code == 200:
+            filename = f"media_{int(time.time()*1000)}.png"
+            local_path = os.path.join(Config.UPLOAD_FOLDER, filename)
+            with open(local_path, "wb") as f:
+                for chunk in response.iter_content(8192):
+                    f.write(chunk)
+
+            return {
+                "success": True,
+                "url": f"/static/uploads/{filename}",
+                "prompt": prompt,
+                "model": "pollinations",
+                "provider": "pollinations",
+            }
+        else:
+            raise RuntimeError(f"Pollinations returned status code {response.status_code}")
 
     # ── Video Generation ───────────────────────────────────────────────────
     def generate_video(

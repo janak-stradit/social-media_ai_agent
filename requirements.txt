@@ -22,3 +22,4 @@ json_repair
 demjson3
 gtts
 moviepy
+google-genai
