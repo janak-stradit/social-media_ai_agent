@@ -50,9 +50,14 @@ $(document).ready(function () {
         }, 4000);
     }
 
-    // "all" isn't a real generation target - fall back to linkedin for content generation
-    function getSelectedPlatform() {
-        const val = $('#dashboardPlatformSelect').val();
+    // "all" isn't a real generation target - fall back to linkedin for content generation.
+    // Pass a selector to read the dedicated per-generation platform picker
+    // (#pipelineTargetPlatform / #modalPipelineTargetPlatform) - each platform
+    // generates images/video at its own correct size. With no selector, falls
+    // back to the feed's platform filter (used only by defensive fallbacks
+    // where a generated asset is missing its platform tag).
+    function getSelectedPlatform(selector) {
+        const val = $(selector || '#dashboardPlatformSelect').val();
         return (!val || val === 'all') ? 'linkedin' : val;
     }
 
@@ -355,7 +360,7 @@ $(document).ready(function () {
                     <p class="text-muted small mb-1" style="font-size: 0.78rem; line-height: 1.4;">${escapeHtml(c.description)}</p>
                     <div class="d-flex flex-wrap gap-1">${tags}</div>
                     ${generatedDate ? `<small class="text-muted" style="font-size: 0.68rem;"><i class="fas fa-clock me-1"></i>Generated ${generatedDate}</small>` : ''}
-                    <button class="btn btn-sm btn-primary fw-bold mt-auto" onclick="useSuggestedCollection(${idx})">
+                    <button class="btn btn-sm btn-primary fw-bold rounded-pill mt-auto" onclick="useSuggestedCollection(${idx})">
                         <i class="fas fa-check me-1"></i>Use This Collection
                     </button>
                 </div>
@@ -1132,6 +1137,53 @@ $(document).ready(function () {
         }).join('');
     }
 
+    // Builds a plain-text seed message summarizing a pipeline's generated
+    // content, for handing off to Studio Chat as a fresh conversation.
+    function buildStudioChatSeedText(pipeline) {
+        const parts = ['Here is content I generated from a competitor counter-strategy on the Analysis Dashboard. Please help me refine it further.'];
+
+        if (pipeline.context) {
+            parts.push(`--- STRATEGY CONTEXT ---\n${pipeline.context}`);
+        }
+
+        const assets = Array.isArray(pipeline.assetContent) ? pipeline.assetContent : (pipeline.assetContent ? [pipeline.assetContent] : []);
+        assets.forEach((item, idx) => {
+            const label = item.type === 'Text (Caption)' ? 'GENERATED CAPTION' : `GENERATED ${(item.type || 'ASSET').toUpperCase()}`;
+            const platformTag = item.platform ? ` (${item.platform})` : '';
+            let body = item.type === 'Text (Caption)' ? item.content : (item.caption || item.content || '');
+            if (item.type !== 'Text (Caption)' && item.content) {
+                body += `\n[Asset URL: ${item.content}]`;
+            }
+            parts.push(`--- ${label}${platformTag} ${assets.length > 1 ? `#${idx + 1}` : ''} ---\n${body}`.trim());
+        });
+
+        return parts.join('\n\n');
+    }
+
+    // Hands a pipeline's generated content off to Studio Chat as a new
+    // conversation. Studio Chat is a separate page, so the seed is passed via
+    // localStorage and consumed once on load there (see app.js).
+    window.sendPipelineToStudioChat = function (pipelineId) {
+        const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
+        if (!pipeline || !pipeline.assetContent) {
+            showToast('No generated content to send yet.', 'warning');
+            return;
+        }
+
+        try {
+            localStorage.setItem('incomingStudioChatSeed', JSON.stringify({
+                text: buildStudioChatSeedText(pipeline),
+                sourcePipelineId: pipeline.id,
+                createdAt: new Date().toISOString()
+            }));
+        } catch (e) {
+            showToast('Could not prepare handoff to Studio Chat.', 'danger');
+            return;
+        }
+
+        window.location.href = '/';
+    };
+
     function getStageDetailHtml(pipeline, stageId) {
         if (stageId === 'intel_selected') {
             const competitorsList = pipeline.competitors
@@ -1169,8 +1221,8 @@ $(document).ready(function () {
                 <div class="mb-3 d-flex flex-wrap">${facts || '<span class="text-muted small">No observed facts recorded.</span>'}</div>
                 <div class="mb-3 w-100">${formatPromptTabs(pipeline.strategy, pipeline.id)}</div>
                 <div class="d-flex gap-2">
-                    <button class="btn btn-sm btn-outline-danger fw-bold" onclick="rejectPipelineStrategy(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject</button>
-                    <button class="btn btn-sm btn-success fw-bold" onclick="approvePipelineStrategy(${pipeline.id})"><i class="fas fa-check me-1"></i>Approve & Continue</button>
+                    <button class="btn btn-outline-danger action-btn flex-grow-1" onclick="rejectPipelineStrategy(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject</button>
+                    <button class="btn btn-success action-btn flex-grow-1" onclick="approvePipelineStrategy(${pipeline.id})"><i class="fas fa-check me-1"></i>Approve & Continue</button>
                 </div>
             `;
         }
@@ -1180,9 +1232,12 @@ $(document).ready(function () {
                 <h6 class="fw-bold text-primary mb-3"><i class="fas fa-magic me-2"></i>Content Generated ${pipeline.assetType ? `<span class="badge bg-light text-dark border ms-1">${pipeline.assetType}</span>` : ''}</h6>
                 <div style="max-height: 75vh; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent, pipeline.id)}</div>
                 <div class="d-flex gap-2">
-                    <button class="btn btn-sm btn-outline-danger fw-bold flex-grow-1" onclick="rejectPipelineAsset(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject Asset</button>
-                    <button class="btn btn-sm btn-success fw-bold flex-grow-1" onclick="approvePipelineAsset(${pipeline.id})"><i class="fas fa-check me-1"></i>Approve Asset</button>
+                    <button class="btn btn-outline-danger action-btn flex-grow-1" onclick="rejectPipelineAsset(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject Asset</button>
+                    <button class="btn btn-success action-btn flex-grow-1" onclick="approvePipelineAsset(${pipeline.id})"><i class="fas fa-check me-1"></i>Approve Asset</button>
                 </div>
+                <button class="btn btn-outline-primary action-btn w-100 mt-2" onclick="sendPipelineToStudioChat(${pipeline.id})">
+                    <i class="fas fa-comments me-1"></i>Refine in Studio Chat
+                </button>
             `;
         }
         if (stageId === 'approved') {
@@ -1192,7 +1247,7 @@ $(document).ready(function () {
                 <p class="small text-muted">This asset was reviewed and approved for publishing.</p>
                 ${pipeline.assetContent ? `<div style="max-height: 320px; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent, pipeline.id, true)}</div>` : ''}
                 ${pipeline.status === 'approved' ? `
-                    <button class="btn btn-dark fw-bold w-100 py-2 mt-2" onclick="publishModalPipelineContent(${pipeline.id})" id="modalPublishBtn">
+                    <button class="btn btn-dark action-btn w-100 mt-2" onclick="publishModalPipelineContent(${pipeline.id})" id="modalPublishBtn">
                         <i class="fas fa-paper-plane me-2"></i>Publish to Platforms
                     </button>
                 ` : ''}
@@ -1247,6 +1302,7 @@ $(document).ready(function () {
             let textClass = 'text-muted';
             let stepIcon = step.icon;
             const isLast = stepIdx === PIPELINE_STAGES.length - 1;
+            const isReached = reachedStatus;
 
             if (reachedStatus) {
                 badgeClass = 'bg-primary';
@@ -1263,15 +1319,28 @@ $(document).ready(function () {
             if (hasError && !reachedStatus && pipelineStatus !== step.id) {
                 badgeClass = 'bg-light border text-muted';
             }
-            if (step.id === activeStageId) {
+            const isViewing = step.id === activeStageId;
+            if (isViewing) {
                 textClass += ' text-primary';
             }
 
+            // Stages the pipeline hasn't reached yet aren't clickable - guides
+            // the journey step-by-step instead of letting users click ahead
+            // into an empty "not generated yet" state with no explanation.
+            const rowStyle = isReached
+                ? 'cursor: pointer;'
+                : 'cursor: not-allowed; opacity: 0.5;';
+            const rowClick = isReached
+                ? `onclick="showPipelineStageDetail(${index}, '${step.id}')"`
+                : `onclick="showToast('Complete the previous step first.', 'info')"`;
+            const rowTitle = isReached ? '' : 'title="Complete the previous step first"';
+            const viewingClass = isViewing ? ' pipeline-stage-row-active' : '';
+
             stepperHtml += `
-                <div class="d-flex align-items-stretch pipeline-stage-row" style="cursor: pointer;" onclick="showPipelineStageDetail(${index}, '${step.id}')">
+                <div class="d-flex align-items-stretch pipeline-stage-row${viewingClass}" style="${rowStyle}" ${rowClick} ${rowTitle}>
                     <div class="d-flex flex-column align-items-center" style="width: 28px;">
                         <div class="rounded-circle ${badgeClass} d-flex align-items-center justify-content-center shadow-sm flex-shrink-0" style="width: 24px; height: 24px;">
-                            <i class="fas ${stepIcon} text-white" style="font-size: 10px;"></i>
+                            <i class="fas ${isReached ? stepIcon : 'fa-lock'} text-white" style="font-size: 10px;"></i>
                         </div>
                         ${!isLast ? '<div class="flex-grow-1" style="width: 2px; background: #e5e7eb; min-height: 18px;"></div>' : ''}
                     </div>
@@ -1390,8 +1459,8 @@ $(document).ready(function () {
                 <div class="carousel-item ${activeClass}">
                     ${outHtml}
                     <div class="d-flex gap-2 mt-2 mb-2 px-3 pb-2">
-                        <button class="btn btn-outline-danger flex-grow-1 fw-bold rounded-pill" onclick="rejectPipelineContent()"><i class="fas fa-times me-1"></i>Reject</button>
-                        <button class="btn btn-success flex-grow-1 fw-bold rounded-pill shadow-sm" onclick="approveCarouselItem(${index})"><i class="fas fa-check me-2"></i>Approve</button>
+                        <button class="btn btn-outline-danger action-btn flex-grow-1" onclick="rejectPipelineContent()"><i class="fas fa-times me-1"></i>Reject</button>
+                        <button class="btn btn-success action-btn flex-grow-1 shadow-sm" onclick="approveCarouselItem(${index})"><i class="fas fa-check me-2"></i>Approve</button>
                     </div>
                 </div>
             `;
@@ -1448,7 +1517,7 @@ $(document).ready(function () {
 
         const mediaType = $('input[name="mediaType"]:checked').val();
         let prompt = $('#pipelinePrompt').val();
-        const platform = getSelectedPlatform();
+        const platform = getSelectedPlatform('#pipelineTargetPlatform');
 
         slideWorkflow(3); // Slide to Asset Review (Slide 4)
 
@@ -1778,12 +1847,34 @@ $(document).ready(function () {
         const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
         if (!pipeline) return;
 
+        // If this pipeline is the one already open in the live workspace
+        // (window.lastStrategyData already matches it), jump back there
+        // instead of duplicating the whole Generator UI inline - continuing
+        // a pipeline you're actively working on should feel like one
+        // experience, not two disconnected ones.
+        if (window.activePipeline && window.activePipeline.id === pipeline.id) {
+            const modalEl = document.getElementById('pipelineStageModal');
+            const modal = bootstrap.Modal.getInstance(modalEl);
+            if (modal) modal.hide();
+            slideWorkflow(2);
+            return;
+        }
+
         window.activePipeline = pipeline;
 
         // Render the Generator UI inside the modal
         const generatorHtml = `
             <h6 class="fw-bold text-primary mb-3"><i class="fas fa-magic me-2"></i>Content Generator</h6>
             <div id="modalGenerationPipelineBlock" class="d-flex flex-column gap-3 p-4 border rounded-3 bg-light mt-2">
+                <div class="d-flex flex-column gap-2">
+                    <label class="fw-bold m-0" style="font-size: 0.9rem;"><i class="fas fa-share-nodes me-2 text-primary"></i> Target Platform:</label>
+                    <select class="form-select form-select-sm" id="modalPipelineTargetPlatform"
+                        title="Each platform generates images/video at its own correct size (e.g. LinkedIn landscape vs Instagram square).">
+                        <option value="linkedin" selected>LinkedIn</option>
+                        <option value="facebook">Facebook</option>
+                        <option value="instagram">Instagram</option>
+                    </select>
+                </div>
                 <div class="d-flex flex-column gap-2">
                     <label class="fw-bold m-0" style="font-size: 0.9rem;"><i class="fas fa-photo-video me-2 text-primary"></i> Select Output Type:</label>
                     <div class="btn-group w-100" role="group" id="modalMediaTypeGroup">
@@ -1808,7 +1899,7 @@ $(document).ready(function () {
                         <option value="Abstract">Abstract</option>
                     </select>
                 </div>
-                <button class="btn btn-primary fw-bold rounded-pill w-100 py-3 shadow-sm mt-3" onclick="startModalPipelineGeneration(${pipeline.id})" id="startModalPipelineBtn">
+                <button class="btn btn-primary action-btn w-100 shadow-sm mt-3" onclick="startModalPipelineGeneration(${pipeline.id})" id="startModalPipelineBtn">
                     <i class="fas fa-magic me-2"></i>Generate Assets
                 </button>
             </div>
@@ -1827,7 +1918,7 @@ $(document).ready(function () {
 
         const mediaType = $('input[name="modalMediaType"]:checked').val();
         const prompt = $('#modalPipelinePrompt').val();
-        const platform = getSelectedPlatform();
+        const platform = getSelectedPlatform('#modalPipelineTargetPlatform');
 
         $('#startModalPipelineBtn').prop('disabled', true);
         $('#modalPipelineLoader').removeClass('d-none');

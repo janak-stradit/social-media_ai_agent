@@ -191,6 +191,28 @@ $(document).ready(function () {
         showToast('Started a new conversation', 'info');
     }
 
+    // ── Incoming handoff from the Analysis Dashboard's "Refine in Studio
+    // Chat" button (see sendPipelineToStudioChat in dashboard.js). Studio
+    // Chat is a separate page, so the seed content is passed via localStorage
+    // and consumed exactly once here on load. ──────────────────────────────
+    (function hydrateIncomingStudioChatSeed() {
+        let seed = null;
+        try {
+            const raw = localStorage.getItem('incomingStudioChatSeed');
+            if (raw) seed = JSON.parse(raw);
+        } catch (e) { /* ignore malformed/inaccessible storage */ }
+
+        if (!seed || !seed.text) return;
+
+        try {
+            localStorage.removeItem('incomingStudioChatSeed');
+        } catch (e) { /* ignore storage errors */ }
+
+        startNewChat();
+        storyInput.val(seed.text).trigger('input').focus();
+        showToast('Loaded content from the Analysis Dashboard - review and send to start refining.', 'info');
+    })();
+
     // ── Drag & Drop Visual Asset ───────────────────────────────────────
     const dropZone = $('#dropZone');
     dropZone.on('dragover', function (e) { e.preventDefault(); $(this).addClass('dragover'); });
@@ -923,6 +945,7 @@ $(document).ready(function () {
                     <div class="history-card-header">
                         <div class="history-card-title">${escapeHtml(item.story)}</div>
                         <div class="history-card-actions">
+                            <button class="btn-history-icon btn-view-details-item" data-id="${item.id}" title="View run details"><i class="fas fa-circle-info"></i></button>
                             ${actionBtn}
                         </div>
                     </div>
@@ -943,6 +966,12 @@ $(document).ready(function () {
             if ($(e.target).closest('.history-card-actions').length) return;
             $('.history-card').removeClass('active');
             $(this).addClass('active');
+            const id = $(this).data('id');
+            loadHistoryIntoChat(id);
+        });
+
+        $('.btn-view-details-item').on('click', function (e) {
+            e.stopPropagation();
             const id = $(this).data('id');
             openHistoryDetails(id);
         });
@@ -984,6 +1013,51 @@ $(document).ready(function () {
             },
             error: function () {
                 showToast('Failed to restore conversation', 'error');
+            }
+        });
+    }
+
+    // Loads a past run into the live chat workspace as a resumable
+    // conversation (instead of the read-only Run Details modal), so the user
+    // can send a follow-up message to fine-tune it with more information.
+    function loadHistoryIntoChat(runId) {
+        $.ajax({
+            url: `/api/history/${runId}`,
+            type: 'GET',
+            success: function (r) {
+                const run = r.run;
+                if (!run) return;
+
+                const platforms = Array.isArray(run.platforms) ? run.platforms : (run.platforms ? [run.platforms] : ['linkedin']);
+                const content = run.content || {};
+
+                startNewChat();
+                $('#welcomeHero').addClass('d-none');
+
+                messageCounter++;
+                const msgId = 'msg_' + Date.now() + '_' + messageCounter;
+
+                appendUserMessage(run.story, null, platforms, run.tone, 'Text (Caption)', 'Standard Enterprise');
+                const assistantElem = appendAssistantThinking(msgId, false);
+                renderAssistantResponse(assistantElem, content, platforms, msgId, run.story, null, 'Text (Caption)', run.tone, run.id, null, null, null, []);
+
+                // Seed multi-turn context the same way a live generation does,
+                // so the next message the user sends continues refining this
+                // run instead of starting from scratch.
+                lastRunId = run.id;
+                let contextSummary = `Brief: ${run.story}\nGenerated Captions:\n`;
+                platforms.forEach(p => {
+                    if (content[p]?.caption?.primary_caption) {
+                        contextSummary += `[${p.toUpperCase()}]: ${content[p].caption.primary_caption}\n`;
+                    }
+                });
+                lastAssistantContext = contextSummary;
+
+                scrollToBottom();
+                showToast('Loaded past conversation - send a message to keep refining it.', 'info');
+            },
+            error: function () {
+                showToast('Could not load that conversation.', 'error');
             }
         });
     }

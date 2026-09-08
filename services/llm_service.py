@@ -7,11 +7,39 @@ from config import Config
 
 
 class LLMService:
-    """LLM client for agents — Bedrock (preferred), OpenRouter, or OpenAI with automatic failover and token/cost tracking."""
+    """LLM client for agents — OpenRouter (preferred), Bedrock, or OpenAI with automatic failover and token/cost tracking."""
+
+    # Some reasoning models occasionally put their internal chain-of-thought
+    # directly into the answer field instead of the final response - seen in
+    # practice with the free OpenRouter model this app defaults to, independent
+    # of token budget. These are the phrases that trace consistently opens
+    # with; a response starting this way is meta-commentary about the task,
+    # not a usable answer (e.g. an image/video prompt), and should be retried.
+    _REASONING_LEAKAGE_PREFIXES = (
+        "we need to",
+        "i need to",
+        "let me",
+        "okay,",
+        "okay so",
+        "so,",
+        "so we",
+        "the user",
+        "user wants",
+        "user asked",
+        "should produce",
+    )
+
+    def _looks_like_reasoning_leakage(self, text: str) -> bool:
+        head = text.strip()[:40].lower()
+        return head.startswith(self._REASONING_LEAKAGE_PREFIXES)
 
     def __init__(self):
         api_key = Config.OPENAI_API_KEY
-        self.openrouter_key = (
+        # Prefer a dedicated OPENROUTER_API_KEY when set; otherwise fall back to
+        # sniffing OPENAI_API_KEY for an OpenRouter-shaped key (sk-or-...), which
+        # is how this was configured before OPENROUTER_API_KEY existed.
+        openrouter_api_key = getattr(Config, "OPENROUTER_API_KEY", None)
+        self.openrouter_key = openrouter_api_key or (
             api_key if (api_key and (api_key.startswith("sk-or-") or "openrouter" in api_key.lower())) else None
         )
         self.openai_key = api_key if (api_key and not self.openrouter_key) else None
@@ -49,9 +77,9 @@ class LLMService:
 
         self.providers = []
 
-        if self.bedrock_client:
-            self.providers.append({"name": "bedrock", "client": self.bedrock_client, "model": self.bedrock_model})
-
+        # OpenRouter is tried first when configured (currently a free model), so
+        # it's the effective default; Bedrock/OpenAI/Gemini remain as automatic
+        # failover if it errors or rate-limits.
         if self.openrouter_key:
             self.providers.append(
                 {
@@ -60,6 +88,9 @@ class LLMService:
                     "model": Config.AGENTSCOPE_MODEL,
                 }
             )
+
+        if self.bedrock_client:
+            self.providers.append({"name": "bedrock", "client": self.bedrock_client, "model": self.bedrock_model})
 
         if self.openai_key or (api_key and not self.openrouter_key):
             self.providers.append(
@@ -207,75 +238,86 @@ class LLMService:
             "model": model_name,
         }
 
-    def generate(self, system_prompt, user_prompt, temperature=0.7, max_tokens=1000, return_usage=False):
-        """Generate text using available LLM providers in sequence with optimal token budgeting."""
+    def generate(
+        self, system_prompt, user_prompt, temperature=0.7, max_tokens=1000, return_usage=False, max_retries_per_provider=2
+    ):
+        """Generate text using available LLM providers in sequence with optimal token budgeting.
+
+        Same empty-response safeguard as generate_json(): a provider call can
+        "succeed" but return empty/whitespace-only text (seen with free-tier
+        reasoning models that exhaust max_tokens on internal chain-of-thought
+        before producing an actual answer). That's retried on the same
+        provider before falling through to the next, instead of being
+        returned as if it were a real result.
+        """
         last_error = None
         for provider in self.providers:
-            try:
-                if provider["name"] == "mock":
-                    text_out = self._generate_mock_response(system_prompt, user_prompt)
-                    usage_metrics = self._calculate_cost("mock", "mock-llm-v1", 0, 0)
-                    if return_usage:
-                        return text_out, usage_metrics
-                    return text_out
-                elif provider["name"] == "bedrock":
-                    inference_config = {}
-                    if temperature is not None:
-                        inference_config["temperature"] = temperature
-                    if max_tokens is not None:
-                        inference_config["maxTokens"] = max_tokens
+            for attempt in range(max_retries_per_provider):
+                try:
+                    if provider["name"] == "mock":
+                        text_out = self._generate_mock_response(system_prompt, user_prompt)
+                        usage_metrics = self._calculate_cost("mock", "mock-llm-v1", 0, 0)
+                    elif provider["name"] == "bedrock":
+                        inference_config = {}
+                        if temperature is not None:
+                            inference_config["temperature"] = temperature
+                        if max_tokens is not None:
+                            inference_config["maxTokens"] = max_tokens
 
-                    response = provider["client"].converse(
-                        modelId=provider["model"],
-                        messages=[{"role": "user", "content": [{"text": user_prompt}]}],
-                        system=[{"text": system_prompt}],
-                        inferenceConfig=inference_config,
-                    )
-                    text_out = response["output"]["message"]["content"][0]["text"]
+                        response = provider["client"].converse(
+                            modelId=provider["model"],
+                            messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+                            system=[{"text": system_prompt}],
+                            inferenceConfig=inference_config,
+                        )
+                        text_out = response["output"]["message"]["content"][0]["text"]
 
-                    usage_raw = response.get("usage", {})
-                    in_t = usage_raw.get("inputTokens", len(system_prompt + user_prompt) // 4)
-                    out_t = usage_raw.get("outputTokens", len(text_out) // 4)
-                    usage_metrics = self._calculate_cost("bedrock", provider["model"], in_t, out_t)
+                        usage_raw = response.get("usage", {})
+                        in_t = usage_raw.get("inputTokens", len(system_prompt + user_prompt) // 4)
+                        out_t = usage_raw.get("outputTokens", len(text_out) // 4)
+                        usage_metrics = self._calculate_cost("bedrock", provider["model"], in_t, out_t)
+                    else:
+                        response = provider["client"].chat.completions.create(
+                            model=provider["model"],
+                            messages=[
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt},
+                            ],
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                        )
+                        text_out = response.choices[0].message.content
 
-                    if return_usage:
-                        return text_out, usage_metrics
-                    return text_out
-                elif provider["name"] == "mock":
-                    text_out = self._generate_mock_response(system_prompt, user_prompt)
-                    usage_metrics = self._calculate_cost("mock", "mock-llm-v1", 0, 0)
-                    if return_usage:
-                        return text_out, usage_metrics
-                    return text_out
-                else:
-                    response = provider["client"].chat.completions.create(
-                        model=provider["model"],
-                        messages=[
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        temperature=temperature,
-                        max_tokens=max_tokens,
-                    )
-                    text_out = response.choices[0].message.content
+                        usage_raw = getattr(response, "usage", None)
+                        in_t = (
+                            getattr(usage_raw, "prompt_tokens", len(system_prompt + user_prompt) // 4)
+                            if usage_raw
+                            else len(system_prompt + user_prompt) // 4
+                        )
+                        out_t = (
+                            getattr(usage_raw, "completion_tokens", len(text_out) // 4) if usage_raw else len(text_out) // 4
+                        )
+                        usage_metrics = self._calculate_cost(provider["name"], provider["model"], in_t, out_t)
 
-                    usage_raw = getattr(response, "usage", None)
-                    in_t = (
-                        getattr(usage_raw, "prompt_tokens", len(system_prompt + user_prompt) // 4)
-                        if usage_raw
-                        else len(system_prompt + user_prompt) // 4
-                    )
-                    out_t = (
-                        getattr(usage_raw, "completion_tokens", len(text_out) // 4) if usage_raw else len(text_out) // 4
-                    )
-                    usage_metrics = self._calculate_cost(provider["name"], provider["model"], in_t, out_t)
+                    if not text_out or not text_out.strip() or self._looks_like_reasoning_leakage(text_out):
+                        reason = "empty response" if not text_out or not text_out.strip() else "reasoning leakage"
+                        last_error = Exception(f"{provider['name']} returned a {reason}")
+                        print(
+                            f"[LLM Service] Provider {provider['name']} returned {reason} "
+                            f"(attempt {attempt + 1}/{max_retries_per_provider}). Retrying..."
+                        )
+                        continue
 
                     if return_usage:
                         return text_out, usage_metrics
                     return text_out
-            except Exception as e:
-                last_error = e
-                print(f"[LLM Service] Provider {provider['name']} failed: {e}. Trying fallback...")
+                except Exception as e:
+                    last_error = e
+                    print(
+                        f"[LLM Service] Provider {provider['name']} failed "
+                        f"(attempt {attempt + 1}/{max_retries_per_provider}): {e}."
+                    )
+            print(f"[LLM Service] Provider {provider['name']} exhausted retries. Trying fallback...")
         raise Exception(f"LLM Generation failed for all providers. Last error: {str(last_error)}")
 
     def _robust_parse_json(self, content_str: str) -> dict:
@@ -318,69 +360,93 @@ class LLMService:
         # Attempt 4: Fallback parse
         return json.loads(cleaned)
 
-    def generate_json(self, system_prompt, user_prompt, temperature=0.5, max_tokens=1200, return_usage=False):
-        """Generate structured JSON response with optimal token budgeting."""
+    def generate_json(
+        self, system_prompt, user_prompt, temperature=0.5, max_tokens=1200, return_usage=False, max_retries_per_provider=2
+    ):
+        """Generate structured JSON response with optimal token budgeting.
+
+        A provider call can "succeed" (no exception) but return an empty JSON
+        object - seen in practice with free-tier OpenRouter models under load.
+        That's indistinguishable from a real failure to the caller, so it's
+        retried on the same provider up to max_retries_per_provider times
+        before falling through to the next provider, same as an exception.
+        A dict with real keys (even an empty list value, e.g.
+        {"relevant_indices": []}) is a legitimate answer and returned as-is.
+        """
         last_error = None
         for provider in self.providers:
-            try:
-                if provider["name"] == "bedrock":
-                    json_system_prompt = system_prompt
-                    if "json" not in system_prompt.lower():
-                        json_system_prompt += "\n\nYou must return your response ONLY as a valid JSON object. Do not include any explanations or markdown formatting outside the JSON."
+            for attempt in range(max_retries_per_provider):
+                try:
+                    if provider["name"] == "bedrock":
+                        json_system_prompt = system_prompt
+                        if "json" not in system_prompt.lower():
+                            json_system_prompt += "\n\nYou must return your response ONLY as a valid JSON object. Do not include any explanations or markdown formatting outside the JSON."
 
-                    inference_config = {}
-                    if temperature is not None:
-                        inference_config["temperature"] = temperature
-                    if max_tokens is not None:
-                        inference_config["maxTokens"] = max_tokens
+                        inference_config = {}
+                        if temperature is not None:
+                            inference_config["temperature"] = temperature
+                        if max_tokens is not None:
+                            inference_config["maxTokens"] = max_tokens
 
-                    response = provider["client"].converse(
-                        modelId=provider["model"],
-                        messages=[{"role": "user", "content": [{"text": user_prompt}]}],
-                        system=[{"text": json_system_prompt}],
-                        inferenceConfig=inference_config,
+                        response = provider["client"].converse(
+                            modelId=provider["model"],
+                            messages=[{"role": "user", "content": [{"text": user_prompt}]}],
+                            system=[{"text": json_system_prompt}],
+                            inferenceConfig=inference_config,
+                        )
+                        content = response["output"]["message"]["content"][0]["text"]
+
+                        usage_raw = response.get("usage", {})
+                        in_t = usage_raw.get("inputTokens", len(json_system_prompt + user_prompt) // 4)
+                        out_t = usage_raw.get("outputTokens", len(content) // 4)
+                        usage_metrics = self._calculate_cost("bedrock", provider["model"], in_t, out_t)
+                    elif provider["name"] == "mock":
+                        content = self._generate_mock_response(system_prompt, user_prompt)
+                        usage_metrics = self._calculate_cost("mock", "mock-llm-v1", 0, 0)
+                    else:
+                        kwargs = {
+                            "model": provider["model"],
+                            "messages": [
+                                {"role": "system", "content": system_prompt},
+                                {"role": "user", "content": user_prompt},
+                            ],
+                            "temperature": temperature,
+                            "max_tokens": max_tokens,
+                        }
+                        kwargs["response_format"] = {"type": "json_object"}
+                        response = provider["client"].chat.completions.create(**kwargs)
+                        content = response.choices[0].message.content
+
+                        usage_raw = getattr(response, "usage", None)
+                        in_t = (
+                            getattr(usage_raw, "prompt_tokens", len(system_prompt + user_prompt) // 4)
+                            if usage_raw
+                            else len(system_prompt + user_prompt) // 4
+                        )
+                        out_t = (
+                            getattr(usage_raw, "completion_tokens", len(content) // 4) if usage_raw else len(content) // 4
+                        )
+                        usage_metrics = self._calculate_cost(provider["name"], provider["model"], in_t, out_t)
+
+                    content_str = content.strip()
+                    parsed_json = self._robust_parse_json(content_str)
+
+                    if not parsed_json:
+                        last_error = Exception(f"{provider['name']} returned an empty JSON object")
+                        print(
+                            f"[LLM Service] Provider {provider['name']} returned empty JSON "
+                            f"(attempt {attempt + 1}/{max_retries_per_provider}). Retrying..."
+                        )
+                        continue
+
+                    if return_usage:
+                        return parsed_json, usage_metrics
+                    return parsed_json
+                except Exception as e:
+                    last_error = e
+                    print(
+                        f"[LLM Service] Provider {provider['name']} failed JSON generation "
+                        f"(attempt {attempt + 1}/{max_retries_per_provider}): {e}."
                     )
-                    content = response["output"]["message"]["content"][0]["text"]
-
-                    usage_raw = response.get("usage", {})
-                    in_t = usage_raw.get("inputTokens", len(json_system_prompt + user_prompt) // 4)
-                    out_t = usage_raw.get("outputTokens", len(content) // 4)
-                    usage_metrics = self._calculate_cost("bedrock", provider["model"], in_t, out_t)
-                elif provider["name"] == "mock":
-                    content = self._generate_mock_response(system_prompt, user_prompt)
-                    usage_metrics = self._calculate_cost("mock", "mock-llm-v1", 0, 0)
-                else:
-                    kwargs = {
-                        "model": provider["model"],
-                        "messages": [
-                            {"role": "system", "content": system_prompt},
-                            {"role": "user", "content": user_prompt},
-                        ],
-                        "temperature": temperature,
-                        "max_tokens": max_tokens,
-                    }
-                    kwargs["response_format"] = {"type": "json_object"}
-                    response = provider["client"].chat.completions.create(**kwargs)
-                    content = response.choices[0].message.content
-
-                    usage_raw = getattr(response, "usage", None)
-                    in_t = (
-                        getattr(usage_raw, "prompt_tokens", len(system_prompt + user_prompt) // 4)
-                        if usage_raw
-                        else len(system_prompt + user_prompt) // 4
-                    )
-                    out_t = (
-                        getattr(usage_raw, "completion_tokens", len(content) // 4) if usage_raw else len(content) // 4
-                    )
-                    usage_metrics = self._calculate_cost(provider["name"], provider["model"], in_t, out_t)
-
-                content_str = content.strip()
-                parsed_json = self._robust_parse_json(content_str)
-
-                if return_usage:
-                    return parsed_json, usage_metrics
-                return parsed_json
-            except Exception as e:
-                last_error = e
-                print(f"[LLM Service] Provider {provider['name']} failed JSON generation: {e}. Trying fallback...")
+            print(f"[LLM Service] Provider {provider['name']} exhausted retries. Trying fallback...")
         raise Exception(f"LLM JSON Generation failed for all providers. Last error: {str(last_error)}")

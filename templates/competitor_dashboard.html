@@ -46,9 +46,9 @@
             background: linear-gradient(135deg, var(--primary) 0%, #6366f1 100%);
             color: white;
             border: none;
-            border-radius: 8px;
+            border-radius: 999px;
             padding: 0.5rem 1.25rem;
-            font-weight: 600;
+            font-weight: 700;
             transition: var(--transition);
             box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
         }
@@ -63,6 +63,39 @@
             background: #9ca3af;
             transform: none;
             box-shadow: none;
+        }
+
+        /* Unified footer/action-tier buttons: Approve, Reject, Generate Assets,
+           Publish, Refine in Studio Chat, etc. Same height, radius and weight
+           across every color variant (btn-success/btn-outline-danger/btn-primary/
+           btn-dark/...) and across both the live workflow panel and the History
+           modal's equivalent actions, instead of each spot picking its own
+           one-off padding. */
+        .action-btn {
+            padding: 0.75rem 1.25rem;
+            border-radius: 999px;
+            font-weight: 700;
+            font-size: 0.95rem;
+            line-height: 1.3;
+        }
+
+        /* Unified small pill nav buttons (Back / Next across workflow slides) */
+        .nav-pill-btn {
+            padding: 0.35rem 0.9rem;
+            border-radius: 999px;
+            font-weight: 700;
+            font-size: 0.8rem;
+        }
+
+        /* Unified small circular icon-toggle buttons (collapse/expand controls) */
+        .icon-toggle-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
         }
 
         .custom-select-wrapper {
@@ -210,6 +243,16 @@
         .pipeline-stage-row:hover .rounded-circle {
             transform: scale(1.1);
         }
+
+        /* Clear "you are here" marker for the stage currently shown on the
+           right, distinct from the muted primary-text used for reached-but-
+           not-currently-viewed stages. */
+        .pipeline-stage-row-active {
+            background: rgba(79, 70, 229, 0.08);
+            border-radius: 8px;
+            margin: -2px -8px;
+            padding: 2px 8px;
+        }
     </style>
 </head>
 
@@ -289,9 +332,8 @@
                         <h6 class="fw-bold m-0 text-gray-700 text-uppercase tracking-wider" style="font-size: 0.85rem;">
                             <i class="fas fa-history me-2 text-primary"></i>History
                         </h6>
-                        <button type="button" class="btn btn-sm btn-light border-0 rounded-circle d-flex align-items-center justify-content-center"
-                            id="collapseHistoryBtn" title="Hide history panel" onclick="toggleHistoryPanel(false)"
-                            style="width: 26px; height: 26px;">
+                        <button type="button" class="btn btn-sm btn-light border-0 icon-toggle-btn"
+                            id="collapseHistoryBtn" title="Hide history panel" onclick="toggleHistoryPanel(false)">
                             <i class="fas fa-chevron-left text-muted small"></i>
                         </button>
                     </div>
@@ -309,9 +351,8 @@
             <div class="col-auto d-none" id="historyCollapsedRail" style="transition: var(--transition);">
                 <div class="premium-card d-flex flex-column align-items-center h-100 py-3 gap-2"
                     style="width: 52px; min-height: 550px; height: calc(100vh - 110px); background: #fff;">
-                    <button type="button" class="btn btn-sm btn-light border-0 rounded-circle d-flex align-items-center justify-content-center flex-shrink-0"
-                        id="expandHistoryBtn" title="Show history panel" onclick="toggleHistoryPanel(true)"
-                        style="width: 28px; height: 28px;">
+                    <button type="button" class="btn btn-sm btn-light border-0 icon-toggle-btn"
+                        id="expandHistoryBtn" title="Show history panel" onclick="toggleHistoryPanel(true)">
                         <i class="fas fa-chevron-right text-primary small"></i>
                     </button>
                     <div id="collapsedHistoryList"
@@ -434,7 +475,7 @@
                                         <span class="badge rounded-pill" id="selectedPostCount"
                                             style="background: var(--primary); font-size: 0.9rem; padding: 0.35rem 0.75rem;">0</span>
                                         <button
-                                            class="btn btn-sm btn-light border d-none fw-bold text-muted px-3 rounded-pill"
+                                            class="btn btn-sm btn-light text-muted border nav-pill-btn d-none"
                                             id="slide1NextBtn" onclick="slideWorkflow(1)">Next <i
                                                 class="fas fa-chevron-right ms-1"></i></button>
                                     </div>
@@ -470,12 +511,12 @@
                                 style="width: 25%; min-height: 0;">
                                 <div class="d-flex justify-content-between align-items-center mb-1 flex-shrink-0">
                                     <button
-                                        class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border"
+                                        class="btn btn-sm btn-light text-muted border nav-pill-btn"
                                         onclick="slideWorkflow(0)"><i class="fas fa-chevron-left me-1"></i>Back</button>
                                     <label class="form-label fw-bold text-success m-0"><i
                                             class="fas fa-check-circle me-1"></i>Synthesis Output</label>
                                     <button
-                                        class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border d-none"
+                                        class="btn btn-sm btn-light text-muted border nav-pill-btn d-none"
                                         id="slide2NextBtn" onclick="slideWorkflow(2)">Next <i
                                             class="fas fa-chevron-right ms-1"></i></button>
                                 </div>
@@ -486,14 +527,14 @@
 
                                 <div class="mt-auto d-flex flex-column gap-2 flex-shrink-0 pt-2">
                                     <button type="button"
-                                        class="btn btn-outline-primary fw-bold rounded-pill w-100 py-2.5 d-flex align-items-center justify-content-center gap-2"
+                                        class="btn btn-outline-primary action-btn w-100 d-flex align-items-center justify-content-center gap-2"
                                         onclick="openOpportunityModal()">
                                         <i class="fas fa-lightbulb"></i>
                                         <span>Growth &amp; Expansion Opportunities</span>
                                         <span class="badge rounded-pill bg-primary" id="opportunityCountBadge">0</span>
                                     </button>
 
-                                    <button class="btn btn-success fw-bold rounded-pill w-100 py-3 shadow-sm"
+                                    <button class="btn btn-success action-btn w-100 shadow-sm"
                                         id="approveStrategyBtn" onclick="approveStrategy()">
                                         <i class="fas fa-thumbs-up me-2"></i>Approve Strategy &amp; Proceed
                                     </button>
@@ -504,19 +545,30 @@
                             <div class="p-4 d-flex flex-column gap-3 bg-white border-start h-100" style="width: 25%;">
                                 <div class="d-flex justify-content-between align-items-center mb-2">
                                     <button
-                                        class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border"
+                                        class="btn btn-sm btn-light text-muted border nav-pill-btn"
                                         onclick="slideWorkflow(1)"><i
                                             class="fas fa-chevron-left me-1"></i>Strategy</button>
                                     <label class="form-label fw-bold text-primary m-0"><i
                                             class="fas fa-magic me-1"></i>Content Generator</label>
                                     <button
-                                        class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border d-none"
+                                        class="btn btn-sm btn-light text-muted border nav-pill-btn d-none"
                                         id="slide3NextBtn" onclick="slideWorkflow(3)">Next <i
                                             class="fas fa-chevron-right ms-1"></i></button>
                                 </div>
 
                                 <div id="generationPipelineBlock"
                                     class="d-flex flex-column gap-3 p-4 border rounded-3 bg-light mt-2 overflow-auto flex-grow-1">
+                                    <div class="d-flex flex-column gap-2">
+                                        <label class="fw-bold m-0" style="font-size: 0.9rem;"><i
+                                                class="fas fa-share-nodes me-2 text-primary"></i> Target
+                                            Platform:</label>
+                                        <select class="form-select form-select-sm" id="pipelineTargetPlatform"
+                                            title="Each platform generates images/video at its own correct size (e.g. LinkedIn landscape vs Instagram square).">
+                                            <option value="linkedin" selected>LinkedIn</option>
+                                            <option value="facebook">Facebook</option>
+                                            <option value="instagram">Instagram</option>
+                                        </select>
+                                    </div>
                                     <div class="d-flex flex-column gap-2">
                                         <label class="fw-bold m-0" style="font-size: 0.9rem;"><i
                                                 class="fas fa-photo-video me-2 text-primary"></i> Select Output
@@ -557,7 +609,7 @@
                                             <option value="Abstract">Abstract</option>
                                         </select>
                                     </div>
-                                    <button class="btn btn-primary fw-bold rounded-pill w-100 py-3 shadow-sm mt-auto"
+                                    <button class="btn btn-primary action-btn w-100 shadow-sm mt-auto"
                                         onclick="startPipelineGeneration()" id="startPipelineBtn">
                                         <i class="fas fa-magic me-2"></i>Generate Assets
                                     </button>
@@ -569,7 +621,7 @@
                                 style="width: 25%; min-height: 0;">
                                 <div class="d-flex justify-content-between align-items-center mb-1 flex-shrink-0">
                                     <button
-                                        class="btn btn-sm btn-light text-muted fw-bold px-3 py-1 rounded-pill border"
+                                        class="btn btn-sm btn-light text-muted border nav-pill-btn"
                                         onclick="slideWorkflow(2)"><i
                                             class="fas fa-chevron-left me-1"></i>Generator</button>
                                     <label class="form-label fw-bold text-primary m-0"><i
@@ -593,16 +645,21 @@
                                     </div>
 
                                     <div class="d-flex gap-2 mt-auto flex-shrink-0 pt-2" id="approvalButtons">
-                                        <button class="btn btn-outline-danger flex-grow-1 fw-bold py-2.5 rounded-pill"
+                                        <button class="btn btn-outline-danger action-btn flex-grow-1"
                                             onclick="rejectPipelineContent()"><i
                                                 class="fas fa-times me-1"></i>Reject</button>
                                         <button
-                                            class="btn btn-success flex-grow-1 fw-bold py-2.5 rounded-pill shadow-sm"
+                                            class="btn btn-success action-btn flex-grow-1 shadow-sm"
                                             onclick="approvePipelineContent()"><i
                                                 class="fas fa-check me-1"></i>Approve</button>
                                     </div>
+                                    <button class="btn btn-outline-primary action-btn w-100 mt-2 flex-shrink-0"
+                                        id="sendToStudioChatBtn"
+                                        onclick="sendPipelineToStudioChat(window.activePipeline && window.activePipeline.id)">
+                                        <i class="fas fa-comments me-1"></i>Refine in Studio Chat
+                                    </button>
                                     <button
-                                        class="btn btn-dark fw-bold w-100 d-none py-2.5 rounded-pill mt-auto flex-shrink-0"
+                                        class="btn btn-dark action-btn w-100 d-none mt-auto flex-shrink-0"
                                         id="publishPipelineBtn" onclick="publishPipelineContent()">
                                         <i class="fas fa-paper-plane me-2"></i>Publish to Platforms
                                     </button>

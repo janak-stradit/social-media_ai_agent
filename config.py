@@ -19,6 +19,7 @@ class Config:
     YOUTUBE_CLIENT_SECRET = os.getenv("YOUTUBE_CLIENT_SECRET")
     HF_API_TOKEN = os.getenv("HF_API_TOKEN")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
     Z_AI_API_KEY = os.getenv("Z_AI_API_KEY")
     Z_AI_BASE_URL = os.getenv("Z_AI_BASE_URL", "https://api.z.ai/api/paas/v4/")
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")

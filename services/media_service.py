@@ -1417,8 +1417,12 @@ Return JSON with keys:
         user_prompt = f"Request: {user_caption}\nPlatform: {platform} ({platform_style}){tone_hint}"
 
         try:
+            # 200 tokens was too tight for reasoning models, which spend part of
+            # the budget on internal chain-of-thought before the actual answer -
+            # under-budgeting risks getting cut off mid-thought instead of the
+            # finished prompt. The final prompt itself is still capped at 500 chars.
             enhanced = self.llm_service.generate(
-                system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.7, max_tokens=200
+                system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.7, max_tokens=600
             )
             return enhanced.strip()[:500]
         except Exception as e:
@@ -1443,8 +1447,9 @@ Return JSON with keys:
             "The output must be a single, continuous prompt, strictly under 400 characters."
         )
         try:
+            # Same reasoning-model headroom concern as _enhance_image_prompt above.
             compressed = self.llm_service.generate(
-                system_prompt=system_prompt, user_prompt=user_caption, temperature=0.3, max_tokens=150
+                system_prompt=system_prompt, user_prompt=user_caption, temperature=0.3, max_tokens=500
             )
             compressed_str = compressed.strip()
             return compressed_str[:400]

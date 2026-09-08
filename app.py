@@ -1,4 +1,5 @@
 import os
+import sys
 
 from flask import Flask, jsonify, redirect, render_template, session, url_for
 from flask_cors import CORS
@@ -7,6 +8,16 @@ from api.routes import api_bp
 from auth.routes import auth_bp
 from auth.utils import get_current_user_id, login_required_page
 from config import config_map
+
+# LLM responses (captions, image/video prompts, error messages) can contain
+# Unicode punctuation the Windows console's default cp1252 stdout can't encode
+# (e.g. non-breaking hyphens) - print() would then raise UnicodeEncodeError and
+# abort whatever was mid-execution, including provider fallback loops meant to
+# recover from exactly this kind of failure. Force UTF-8 stdout/stderr so
+# logging output never crashes the process it's trying to report on.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 
 def create_app(config_name="development"):
