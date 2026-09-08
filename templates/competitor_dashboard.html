@@ -283,12 +283,17 @@
     <main class="container-fluid py-4 px-lg-4" style="margin-top: var(--header-h);">
         <div class="row g-4">
             <!-- New Left Panel: History -->
-            <div class="col-xl-3 col-lg-3">
+            <div class="col-xl-3 col-lg-3" id="historyPanelCol" style="transition: var(--transition);">
                 <div class="premium-card d-flex flex-column" style="height: calc(100vh - 110px); min-height: 550px;">
-                    <div class="p-3 border-bottom bg-white text-center flex-shrink-0">
+                    <div class="p-3 border-bottom bg-white d-flex align-items-center justify-content-between flex-shrink-0">
                         <h6 class="fw-bold m-0 text-gray-700 text-uppercase tracking-wider" style="font-size: 0.85rem;">
                             <i class="fas fa-history me-2 text-primary"></i>History
                         </h6>
+                        <button type="button" class="btn btn-sm btn-light border-0 rounded-circle d-flex align-items-center justify-content-center"
+                            id="collapseHistoryBtn" title="Hide history panel" onclick="toggleHistoryPanel(false)"
+                            style="width: 26px; height: 26px;">
+                            <i class="fas fa-chevron-left text-muted small"></i>
+                        </button>
                     </div>
                     <div class="flex-grow-1 p-0 bg-white" id="pipelineHistoryList" style="overflow-y: auto;">
                         <div class="empty-state p-4 text-center">
@@ -299,8 +304,27 @@
                 </div>
             </div>
 
-            <!-- Center Panel: Filter & Feed -->
-            <div class="col-xl-9 col-lg-9" id="centerFeedPanel" style="transition: var(--transition);">
+            <!-- Collapsed rail: shown only when the History panel is hidden. Still lists
+                 each pipeline as an icon + id so history stays reachable while collapsed. -->
+            <div class="col-auto d-none" id="historyCollapsedRail" style="transition: var(--transition);">
+                <div class="premium-card d-flex flex-column align-items-center h-100 py-3 gap-2"
+                    style="width: 52px; min-height: 550px; height: calc(100vh - 110px); background: #fff;">
+                    <button type="button" class="btn btn-sm btn-light border-0 rounded-circle d-flex align-items-center justify-content-center flex-shrink-0"
+                        id="expandHistoryBtn" title="Show history panel" onclick="toggleHistoryPanel(true)"
+                        style="width: 28px; height: 28px;">
+                        <i class="fas fa-chevron-right text-primary small"></i>
+                    </button>
+                    <div id="collapsedHistoryList"
+                        class="d-flex flex-column align-items-center gap-2 w-100 flex-grow-1 overflow-y-auto overflow-x-hidden pt-1">
+                        <!-- populated by renderPipelineHistory() -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Center Panel: Filter & Feed. Uses auto-layout (no numbered width) so it
+                 always fills whatever space is left beside the fixed-width History /
+                 collapsed-rail / Synthesis columns, regardless of which are visible. -->
+            <div class="col-xl col-lg" id="centerFeedPanel" style="transition: var(--transition); min-width: 0;">
                 <div class="premium-card d-flex flex-column" style="height: calc(100vh - 110px); min-height: 550px;">
                     <div
                         class="p-3 p-lg-4 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-3 bg-white flex-shrink-0">
@@ -309,6 +333,7 @@
                                     class="fas fa-filter me-2 text-primary"></i>Platform:</label>
                             <div class="custom-select-wrapper">
                                 <select id="dashboardPlatformSelect" class="custom-select">
+                                    <option value="all" selected>All Platforms</option>
                                     <option value="linkedin">LinkedIn</option>
                                     <option value="blog">Blog / Website</option>
                                     <option value="twitter">Twitter</option>
@@ -334,6 +359,27 @@
                             onclick="fetchPlatformPosts()">
                             <i class="fas fa-satellite-dish"></i> <span>Start Scan</span>
                         </button>
+                    </div>
+
+                    <!-- Suggested Storylines: optional accelerator above the manual feed. Groups
+                         already-scraped posts by semantic similarity (any competitor/platform
+                         combination) so the user can jump straight to Generate Storyline instead
+                         of hand-picking posts. Manual selection below is unaffected. -->
+                    <div class="p-3 p-lg-4 border-bottom bg-white flex-shrink-0" id="suggestedCollectionsSection">
+                        <div class="d-flex align-items-center justify-content-between mb-2 flex-wrap gap-2">
+                            <h6 class="fw-bold text-gray-700 m-0 d-flex align-items-center gap-2">
+                                <i class="fas fa-wand-magic-sparkles text-primary"></i>Suggested Storylines
+                            </h6>
+                            <button class="btn btn-sm btn-outline-primary fw-bold rounded-pill px-3"
+                                id="suggestCollectionsBtn" onclick="generateSuggestedCollections()">
+                                <i class="fas fa-sparkles me-1"></i>Suggest Storylines
+                            </button>
+                        </div>
+                        <div id="suggestedCollectionsLoader" class="d-none text-primary small fw-bold py-2">
+                            <i class="fas fa-spinner fa-spin me-2"></i>Finding related storylines across competitor
+                            posts...
+                        </div>
+                        <div id="suggestedCollectionsList" class="d-flex gap-3 overflow-x-auto pb-1"></div>
                     </div>
 
                     <div class="p-4 bg-gray-50 flex-grow-1 overflow-auto" style="min-height: 0;">
@@ -571,19 +617,30 @@
 
     <!-- Pipeline Stage Detail Modal -->
     <div class="modal fade" id="pipelineStageModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-xl modal-dialog-centered">
-            <div class="modal-content" style="border-radius: 16px; overflow: hidden;">
-                <div class="modal-header border-0 pb-0">
-                    <div>
-                        <h5 class="modal-title fw-bold text-dark mb-0" id="pipelineModalTitle">Pipeline Details</h5>
-                        <small class="text-muted" id="pipelineModalSubtitle"></small>
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable">
+            <div class="modal-content" style="border-radius: 16px; overflow: hidden; border: none;">
+                <div class="modal-header border-0 py-3 px-4" style="background: linear-gradient(135deg, rgba(79,70,229,0.06) 0%, rgba(99,102,241,0.02) 100%);">
+                    <div class="d-flex align-items-center gap-3">
+                        <div class="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0 shadow-sm"
+                            style="width: 40px; height: 40px; background: rgba(79, 70, 229, 0.1); color: var(--primary);">
+                            <i class="fas fa-layer-group"></i>
+                        </div>
+                        <div>
+                            <div class="d-flex align-items-center gap-2">
+                                <h5 class="modal-title fw-bold text-dark mb-0" id="pipelineModalTitle">Pipeline Details</h5>
+                                <span class="badge rounded-pill" id="pipelineModalStatusBadge"></span>
+                            </div>
+                            <small class="text-muted fw-medium" id="pipelineModalSubtitle"></small>
+                        </div>
                     </div>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
-                <div class="modal-body pt-3">
+                <div class="modal-body p-4">
                     <div class="row g-4">
-                        <div class="col-md-5" id="pipelineModalStepper"></div>
-                        <div class="col-md-7 border-start ps-md-4" id="pipelineModalDetail" style="min-height: 320px;">
+                        <div class="col-12 col-md-5">
+                            <div class="bg-light bg-opacity-50 rounded-4 p-3 h-100" id="pipelineModalStepper"></div>
+                        </div>
+                        <div class="col-12 col-md-7 ps-md-2" id="pipelineModalDetail" style="min-height: 320px;">
                         </div>
                     </div>
                 </div>

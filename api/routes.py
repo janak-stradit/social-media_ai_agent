@@ -1672,6 +1672,84 @@ def competitor_posts_db():
         return jsonify({"error": str(e)}), 500
 
 
+SUGGESTED_COLLECTIONS_DISPLAY_LIMIT = 10
+
+
+@api_bp.route("/suggested-collections", methods=["GET"])
+@login_required_api
+def suggested_collections():
+    """Return previously-generated Suggested Storyline collections from the DB
+    (no compute) - accumulated across runs, newest first, capped at 10."""
+    try:
+        from db import get_content_collections
+
+        collections = get_content_collections(limit=SUGGESTED_COLLECTIONS_DISPLAY_LIMIT)
+        return jsonify({"success": True, "collections": collections})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/generate-suggested-collections", methods=["POST"])
+@login_required_api
+def generate_suggested_collections():
+    """Group already-scraped competitor posts (last 15 days, per get_competitor_posts)
+    by semantic similarity into "storyline" suggestions, labeled with a theme and
+    relevance, then persist any newly-found ones. Clusters can span any combination
+    of competitor/platform - breadth is used only for ranking, not as a filter."""
+    data = request.get_json(silent=True) or {}
+    platform = data.get("platform") or "all"
+    competitor = data.get("competitor") or "all"
+
+    try:
+        from agents.collection_agent import CollectionAgent
+        from db import get_competitor_posts, get_content_collections, save_content_collections
+        from services.embedding_service import EmbeddingService
+        from services.stradit_service import StradITService
+
+        posts = get_competitor_posts(platform=platform, competitor=competitor)
+        db_stats = {"inserted": 0, "skipped": 0, "new_hashes": []}
+
+        if posts:
+            embedder = EmbeddingService()
+            clusters = embedder.cluster_posts(posts)
+
+            if clusters:
+                stradit = StradITService()
+                project_context = stradit.get_all_projects_context()
+
+                agent = CollectionAgent()
+                labeled = agent.label_clusters(clusters, project_context)
+
+                collections = []
+                for c in labeled:
+                    cluster_posts = c["posts"]
+                    competitors = sorted(
+                        {p.get("_source_competitor") or p.get("competitor") for p in cluster_posts} - {None, ""}
+                    )
+                    platforms = sorted({p.get("platform") for p in cluster_posts} - {None, ""})
+                    collections.append(
+                        {
+                            "label": c["label"],
+                            "description": c["description"],
+                            "relevance": c["relevance"],
+                            "competitors": competitors,
+                            "platforms": platforms,
+                            "post_count": len(cluster_posts),
+                            "post_urls": [p.get("post_url") for p in cluster_posts if p.get("post_url")],
+                        }
+                    )
+
+                db_stats = save_content_collections(collections)
+
+        stored = get_content_collections(limit=SUGGESTED_COLLECTIONS_DISPLAY_LIMIT)
+        return jsonify({"success": True, "collections": stored, "db": db_stats})
+    except Exception as e:
+        import traceback
+
+        print(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
+
 @api_bp.route("/stradit-projects", methods=["GET"])
 def get_stradit_projects():
     try:

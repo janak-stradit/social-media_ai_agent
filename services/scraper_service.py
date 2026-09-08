@@ -154,15 +154,15 @@ class ScraperService:
             competitors = [c for c in competitors if c.lower() == competitor.lower()]
         combined_posts = []
 
+        platform_lower = platform_name.lower()
         for comp in competitors:
             # Reusing the underlying fetch logic. A bit inefficient for multiple calls,
             # but works since we only have 4 competitors.
             comp_store = self.get_company_store(comp)
-            # Filter posts for the specific platform
+            # Filter posts for the specific platform (or include every platform when "all")
             # Note: platform_name should match the key in the JSON, e.g., 'linkedin', 'blog'
-            platform_lower = platform_name.lower()
             for post in comp_store:
-                if post.get("platform", "").lower() == platform_lower:
+                if platform_lower == "all" or post.get("platform", "").lower() == platform_lower:
                     # Tag the post with its source competitor
                     post["_source_competitor"] = comp
                     combined_posts.append(post)

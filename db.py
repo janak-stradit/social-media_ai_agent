@@ -9,9 +9,10 @@ Tables: users, run_history
 # pylint's static analysis can't see through it and misreports these two checks
 # throughout this file. Known false positive, not scoped per-line for readability.
 
+import hashlib
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
     Boolean,
@@ -154,7 +155,7 @@ class CompetitorPost(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     competitor: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
     platform: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
-    post_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    post_url: Mapped[str] = mapped_column(String(1000), nullable=False)
     title: Mapped[str | None] = mapped_column(Text, nullable=True)
     text: Mapped[str | None] = mapped_column(Text, nullable=True)
     author: Mapped[str | None] = mapped_column(String(120), nullable=True)
@@ -181,6 +182,30 @@ class OpportunitySuggestion(Base):
     title: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     source_accounts: Mapped[str | None] = mapped_column(Text, nullable=True)  # comma-separated competitor/account names
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class ContentCollection(Base):
+    """A "Suggested Storyline": a group of semantically-similar competitor posts
+    (see services/embedding_service.py), labeled by CollectionAgent. Deduped by
+    the exact set of posts it contains, so re-running suggestions doesn't create
+    duplicate rows for the same cluster."""
+
+    __tablename__ = "content_collections"
+    __table_args__ = (
+        UniqueConstraint("post_urls_hash", name="uq_content_collection_posts"),
+        {"schema": SCHEMA} if not IS_SQLITE else {},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    post_urls_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    relevance: Mapped[str] = mapped_column(String(16), nullable=False, default="medium")
+    competitors: Mapped[str | None] = mapped_column(Text, nullable=True)  # comma-separated
+    platforms: Mapped[str | None] = mapped_column(Text, nullable=True)  # comma-separated
+    post_urls: Mapped[str] = mapped_column(Text, nullable=False)  # JSON list
+    post_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
@@ -240,6 +265,16 @@ def init_db():
             try:
                 with engine.begin() as sub_conn:
                     sub_conn.execute(text(f"ALTER TABLE {soc_tbl} ADD COLUMN {col_name} {col_type}"))
+            except Exception:
+                pass
+
+        # Some source URLs (e.g. Google News RSS redirects) exceed the original
+        # VARCHAR(500) post_url limit and silently fail the whole insert batch.
+        if not IS_SQLITE:
+            comp_post_tbl = f'"{SCHEMA}".competitor_posts'
+            try:
+                with engine.begin() as sub_conn:
+                    sub_conn.execute(text(f"ALTER TABLE {comp_post_tbl} ALTER COLUMN post_url TYPE VARCHAR(1000)"))
             except Exception:
                 pass
 
@@ -937,6 +972,7 @@ def save_competitor_posts(posts: list[dict]) -> dict:
         inserted = 0
         skipped = 0
         new_post_urls = []
+        newly_inserted_posts = []
         for p in posts:
             competitor = p.get("_source_competitor") or "Unknown"
             platform = (p.get("platform") or "").lower()
@@ -968,22 +1004,41 @@ def save_competitor_posts(posts: list[dict]) -> dict:
             )
             existing.add(key)
             new_post_urls.append(post_url)
+            newly_inserted_posts.append(p)
             inserted += 1
 
         session.commit()
+
+        # Embed newly-inserted posts now so Suggested Storyline clustering
+        # (services/embedding_service.py) doesn't have to embed them on-demand
+        # at suggestion-generation time. Best-effort - embedding is a similarity
+        # feature, never allowed to break scraping/saving.
+        if newly_inserted_posts:
+            try:
+                from services.embedding_service import EmbeddingService
+
+                EmbeddingService().index_posts(newly_inserted_posts)
+            except Exception as e:
+                print(f"[save_competitor_posts] Embedding indexing warning: {e}")
+
         return {"inserted": inserted, "skipped": skipped, "new_post_urls": new_post_urls}
 
 
-def get_competitor_posts(platform: str | None = None, competitor: str | None = None, limit: int = 300) -> list[dict]:
-    """Return previously-scraped competitor posts stored in the DB, newest first."""
+def get_competitor_posts(
+    platform: str | None = None, competitor: str | None = None, limit: int = 300, days: int = 15
+) -> list[dict]:
+    """Return competitor posts from the last `days` days, stored in the DB, newest first."""
     with Session(engine) as session:
         query = session.query(CompetitorPost)
-        if platform:
+        if platform and platform.lower() != "all":
             query = query.filter(CompetitorPost.platform == platform.lower())
         if competitor and competitor.lower() != "all":
             query = query.filter(CompetitorPost.competitor == competitor)
 
         order_col = func.coalesce(CompetitorPost.published_at, CompetitorPost.scraped_at, CompetitorPost.created_at)
+        if days:
+            cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+            query = query.filter(order_col >= cutoff)
         rows = query.order_by(order_col.desc()).limit(limit).all()
 
         return [
@@ -1069,6 +1124,80 @@ def get_opportunity_suggestions(limit: int = 200) -> dict:
                 }
             )
         return result
+
+
+def _post_urls_hash(post_urls: list[str]) -> str:
+    """Stable fingerprint for a cluster's exact post composition, used to
+    dedupe re-generated Suggested Storylines that group the same posts."""
+    joined = "|".join(sorted(u for u in post_urls if u))
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
+def save_content_collections(collections: list[dict]) -> dict:
+    """
+    Persist Suggested Storyline collections, skipping any whose exact post
+    composition (post_urls_hash) is already stored. Returns
+    {"inserted": n, "skipped": n, "new_hashes": [...]}.
+    """
+    if not collections:
+        return {"inserted": 0, "skipped": 0, "new_hashes": []}
+
+    with Session(engine) as session:
+        existing = {r[0] for r in session.query(ContentCollection.post_urls_hash).all()}
+
+        inserted = 0
+        skipped = 0
+        new_hashes = []
+        for item in collections:
+            post_urls = item.get("post_urls") or []
+            if len(post_urls) < 2:
+                skipped += 1
+                continue
+
+            urls_hash = _post_urls_hash(post_urls)
+            if urls_hash in existing:
+                skipped += 1
+                continue
+
+            session.add(
+                ContentCollection(
+                    post_urls_hash=urls_hash,
+                    label=item.get("label") or "Related Storyline",
+                    description=item.get("description"),
+                    relevance=item.get("relevance") or "medium",
+                    competitors=", ".join(item.get("competitors") or []),
+                    platforms=", ".join(item.get("platforms") or []),
+                    post_urls=json.dumps(post_urls),
+                    post_count=item.get("post_count") or len(post_urls),
+                )
+            )
+            existing.add(urls_hash)
+            new_hashes.append(urls_hash)
+            inserted += 1
+
+        session.commit()
+        return {"inserted": inserted, "skipped": skipped, "new_hashes": new_hashes}
+
+
+def get_content_collections(limit: int = 50) -> list[dict]:
+    """Return all accumulated Suggested Storyline collections, newest first."""
+    with Session(engine) as session:
+        rows = session.query(ContentCollection).order_by(ContentCollection.created_at.desc()).limit(limit).all()
+
+        return [
+            {
+                "post_urls_hash": r.post_urls_hash,
+                "label": r.label,
+                "description": r.description,
+                "relevance": r.relevance,
+                "competitors": [c.strip() for c in (r.competitors or "").split(",") if c.strip()],
+                "platforms": [p.strip() for p in (r.platforms or "").split(",") if p.strip()],
+                "post_urls": json.loads(r.post_urls) if r.post_urls else [],
+                "post_count": r.post_count,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
 
 
 def update_scheduled_post_status(user_id: int, post_id: int, status: str) -> bool:

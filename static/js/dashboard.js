@@ -50,6 +50,12 @@ $(document).ready(function () {
         }, 4000);
     }
 
+    // "all" isn't a real generation target - fall back to linkedin for content generation
+    function getSelectedPlatform() {
+        const val = $('#dashboardPlatformSelect').val();
+        return (!val || val === 'all') ? 'linkedin' : val;
+    }
+
     window.fetchPlatformPosts = function () {
         const platform = $('#dashboardPlatformSelect').val();
         if (!platform) return;
@@ -88,7 +94,7 @@ $(document).ready(function () {
                     $('#postsContainer').removeClass('d-none').html(`
                         <div class="col-12 text-center py-5 my-5 text-muted">
                             <i class="fas fa-exclamation-circle fa-3x mb-3 text-secondary opacity-50"></i>
-                            <p class="fw-semibold">No ${platform} posts found for any competitors.</p>
+                            <p class="fw-semibold">No ${platform === 'all' ? '' : platform + ' '}posts found for any competitors.</p>
                         </div>
                     `);
                 }
@@ -105,8 +111,10 @@ $(document).ready(function () {
         });
     };
 
-    // Loads previously-scraped posts already saved in the DB (no external scan)
-    window.loadStoredPosts = function () {
+    // Loads previously-scraped posts already saved in the DB (no external scan).
+    // onComplete (optional) fires once the feed has been rendered, so callers
+    // like useSuggestedCollection() can act on the resulting checkboxes.
+    window.loadStoredPosts = function (onComplete) {
         const platform = $('#dashboardPlatformSelect').val();
         if (!platform) return;
         const competitor = $('#dashboardCompetitorSelect').val();
@@ -128,6 +136,7 @@ $(document).ready(function () {
 
                 if (r.success && r.posts && r.posts.length > 0) {
                     renderPlatformPosts(r.posts);
+                    if (typeof onComplete === 'function') onComplete();
                 } else {
                     // Auto-scan if no stored posts exist so the dashboard lists posts immediately
                     window.fetchPlatformPosts();
@@ -222,7 +231,7 @@ $(document).ready(function () {
                             </div>
                         </div>
                         <div class="form-check m-0" style="transform: scale(1.3);">
-                            <input class="form-check-input comp-master-checkbox cursor-pointer shadow-sm border-primary" type="checkbox" value="${cIdx}" id="masterCheck${cIdx}" data-payload="${encodedPayload}" data-competitor="${comp}">
+                            <input class="form-check-input comp-master-checkbox cursor-pointer shadow-sm border-primary" type="checkbox" value="${cIdx}" id="masterCheck${cIdx}" data-payload="${encodedPayload}" data-competitor="${comp}" data-post-url="${escapeHtml(p.post_url).replace(/"/g, '&quot;')}">
                         </div>
                     </div>
 
@@ -246,15 +255,176 @@ $(document).ready(function () {
         });
     }
 
+    // ==========================================
+    // SUGGESTED STORYLINES (similarity-based post collections)
+    // ==========================================
+    window.suggestedCollections = [];
+    window.newSuggestedCollectionHashes = new Set();
+
+    // Hydrate from previously-generated (persisted) suggestions on page load,
+    // same pattern as loadOpportunitySuggestions() - no compute, just a read.
+    window.loadSuggestedCollections = function () {
+        $.ajax({
+            url: '/api/suggested-collections',
+            type: 'GET',
+            success: function (r) {
+                if (r.success && r.collections) {
+                    window.suggestedCollections = r.collections;
+                    renderSuggestedCollections();
+                }
+            }
+        });
+    };
+
+    window.generateSuggestedCollections = function () {
+        const platform = $('#dashboardPlatformSelect').val() || 'all';
+        const competitor = $('#dashboardCompetitorSelect').val() || 'all';
+
+        $('#suggestCollectionsBtn').prop('disabled', true);
+        $('#suggestedCollectionsLoader').removeClass('d-none');
+
+        $.ajax({
+            url: '/api/generate-suggested-collections',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ platform: platform, competitor: competitor }),
+            success: function (r) {
+                $('#suggestedCollectionsLoader').addClass('d-none');
+                $('#suggestCollectionsBtn').prop('disabled', false);
+
+                if (r.success) {
+                    window.suggestedCollections = r.collections || [];
+                    window.newSuggestedCollectionHashes = new Set((r.db && r.db.new_hashes) || []);
+                    renderSuggestedCollections();
+
+                    if (r.db && r.db.inserted > 0) {
+                        showToast(`Found ${r.db.inserted} new storyline${r.db.inserted === 1 ? '' : 's'}.`, 'success');
+                    } else {
+                        showToast('No new related storylines found this run.', 'info');
+                    }
+                } else {
+                    showToast('Failed to generate suggestions.', 'danger');
+                }
+            },
+            error: function (xhr) {
+                $('#suggestedCollectionsLoader').addClass('d-none');
+                $('#suggestCollectionsBtn').prop('disabled', false);
+                showToast('Could not generate suggestions: ' + (xhr.responseJSON?.error || 'Unknown error'), 'danger');
+            }
+        });
+    };
+
+    function renderSuggestedCollections() {
+        const list = $('#suggestedCollectionsList');
+        if (window.suggestedCollections.length === 0) {
+            list.html('<p class="text-muted small m-0">No storylines suggested yet - click "Suggest Storylines" to scan for related posts.</p>');
+            return;
+        }
+
+        const relevanceClass = {
+            high: 'bg-success-subtle text-success',
+            medium: 'bg-warning-subtle text-warning',
+            low: 'bg-secondary-subtle text-secondary'
+        };
+
+        let html = '';
+        window.suggestedCollections.forEach((c, idx) => {
+            const badgeClass = relevanceClass[c.relevance] || relevanceClass.medium;
+            const isNew = window.newSuggestedCollectionHashes.has(c.post_urls_hash);
+            const tags = [...(c.competitors || []), ...(c.platforms || []).map(p => p.toUpperCase())]
+                .map(t => `<span class="badge bg-light text-dark border" style="font-size: 0.65rem;">${escapeHtml(t)}</span>`)
+                .join(' ');
+
+            let generatedDate = '';
+            if (c.created_at) {
+                const d = new Date(c.created_at);
+                if (!isNaN(d.getTime())) {
+                    generatedDate = d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
+                        + ' · ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+                }
+            }
+
+            html += `
+                <div class="border rounded-4 p-3 flex-shrink-0 d-flex flex-column gap-2 position-relative" style="min-width: 260px; max-width: 280px; background: #f8fafc;">
+                    ${isNew ? '<span class="badge rounded-pill bg-success position-absolute" style="top: -8px; right: 10px; font-size: 0.6rem;">New</span>' : ''}
+                    <div class="d-flex align-items-center justify-content-between">
+                        <span class="badge rounded-pill ${badgeClass} text-uppercase" style="font-size: 0.65rem;">${escapeHtml(c.relevance)}</span>
+                        <span class="text-muted small">${c.post_count} posts</span>
+                    </div>
+                    <h6 class="fw-bold text-dark mb-0" style="font-size: 0.9rem;">${escapeHtml(c.label)}</h6>
+                    <p class="text-muted small mb-1" style="font-size: 0.78rem; line-height: 1.4;">${escapeHtml(c.description)}</p>
+                    <div class="d-flex flex-wrap gap-1">${tags}</div>
+                    ${generatedDate ? `<small class="text-muted" style="font-size: 0.68rem;"><i class="fas fa-clock me-1"></i>Generated ${generatedDate}</small>` : ''}
+                    <button class="btn btn-sm btn-primary fw-bold mt-auto" onclick="useSuggestedCollection(${idx})">
+                        <i class="fas fa-check me-1"></i>Use This Collection
+                    </button>
+                </div>
+            `;
+        });
+        list.html(html);
+    }
+
+    window.loadSuggestedCollections();
+
+    // Selects every post belonging to a suggested collection and opens the
+    // Synthesis panel, reusing the existing manual-selection pipeline as-is.
+    // A collection can span competitors/platforms outside the current feed
+    // filter, so the filters are switched to "all" and the feed reloaded
+    // before matching checkboxes by data-post-url.
+    window.useSuggestedCollection = function (idx) {
+        const collection = window.suggestedCollections[idx];
+        if (!collection) return;
+
+        const targetUrls = new Set(collection.post_urls || []);
+
+        $('#dashboardPlatformSelect').val('all');
+        $('#dashboardCompetitorSelect').val('all');
+
+        window.loadStoredPosts(function () {
+            $('.comp-master-checkbox').each(function () {
+                $(this).prop('checked', targetUrls.has($(this).data('post-url')));
+            });
+            updateSelection();
+            showToast(`Selected ${collection.post_count} posts from "${collection.label}".`, 'success');
+        });
+    };
+
+    // #centerFeedPanel uses Bootstrap's auto-layout column (col-xl/col-lg with no
+    // number), so it always fills whatever space is left beside the fixed-width
+    // History / collapsed-rail / Synthesis columns - no manual width math needed.
+
     function openSynthesisPanel() {
         $('#rightSynthesisPanel').removeClass('d-none');
-        $('#centerFeedPanel').removeClass('col-xl-9 col-lg-9').addClass('col-xl-6 col-lg-6');
     }
 
     function closeSynthesisPanel() {
         $('#rightSynthesisPanel').addClass('d-none');
-        $('#centerFeedPanel').removeClass('col-xl-6 col-lg-6').addClass('col-xl-9 col-lg-9');
     }
+
+    // Toggles the History panel between its full column and a slim collapsed rail
+    window.toggleHistoryPanel = function (show) {
+        if (show) {
+            $('#historyPanelCol').removeClass('d-none');
+            $('#historyCollapsedRail').addClass('d-none');
+        } else {
+            $('#historyPanelCol').addClass('d-none');
+            $('#historyCollapsedRail').removeClass('d-none');
+        }
+        try {
+            localStorage.setItem('historyPanelVisible', show ? '1' : '0');
+        } catch (e) { /* ignore storage errors */ }
+    };
+
+    // Restore the last-used History panel visibility (defaults to visible)
+    (function initHistoryPanelState() {
+        let visible = true;
+        try {
+            visible = localStorage.getItem('historyPanelVisible') !== '0';
+        } catch (e) { /* ignore storage errors */ }
+        if (!visible) {
+            window.toggleHistoryPanel(false);
+        }
+    })();
 
     function updateSelection() {
         const checked = $('.comp-master-checkbox:checked');
@@ -736,7 +906,41 @@ $(document).ready(function () {
         { id: 'published', label: 'Published', icon: 'fa-paper-plane' }
     ];
 
+    // Mirrors the full history list as a compact icon + id strip for the
+    // collapsed rail, so history stays reachable while the panel is hidden.
+    function renderCollapsedHistoryRail() {
+        const rail = $('#collapsedHistoryList');
+        if (window.pipelineHistory.length === 0) {
+            rail.html('');
+            return;
+        }
+
+        let html = '';
+        window.pipelineHistory.forEach((pipeline, index) => {
+            const pipelineStatus = pipeline.status || 'unknown';
+            const hasError = pipelineStatus.startsWith('stopped') || pipelineStatus === 'rejected';
+            const isDone = pipelineStatus === 'published' || pipelineStatus === 'approved';
+            const badgeClass = hasError ? 'bg-danger' : (isDone ? 'bg-success' : 'bg-primary');
+            const icon = hasError ? 'fa-times' : (isDone ? 'fa-check' : 'fa-layer-group');
+            const shortId = String(pipeline.id).slice(-4);
+            const generatedDate = pipeline.timestamp ? new Date(pipeline.timestamp).toLocaleString() : '';
+
+            html += `
+                <button type="button" class="btn p-0 border-0 bg-transparent d-flex flex-column align-items-center gap-1 flex-shrink-0"
+                    title="ID: ${pipeline.id}${generatedDate ? ' • Generated ' + generatedDate : ''}" onclick="openPipelineModal(${index})">
+                    <span class="rounded-circle ${badgeClass} d-flex align-items-center justify-content-center shadow-sm" style="width: 22px; height: 22px;">
+                        <i class="fas ${icon} text-white" style="font-size: 9px;"></i>
+                    </span>
+                    <span class="text-muted" style="font-size: 0.6rem; line-height: 1;">${shortId}</span>
+                </button>
+            `;
+        });
+        rail.html(html);
+    }
+
     function renderPipelineHistory() {
+        renderCollapsedHistoryRail();
+
         const container = $('#pipelineHistoryList');
         if (window.pipelineHistory.length === 0) {
             container.html(`
@@ -1013,7 +1217,13 @@ $(document).ready(function () {
         const pipelineStatus = pipeline.status || 'unknown';
         const reachedIdx = Math.max(0, PIPELINE_STAGES.findIndex(s => s.id === pipelineStatus));
 
-        $('#pipelineModalTitle').text('Pipeline ID: ' + pipeline.id);
+        const hasError = pipelineStatus.startsWith('stopped') || pipelineStatus === 'rejected';
+        const stageLabel = (PIPELINE_STAGES.find(s => s.id === pipelineStatus) || {}).label;
+        const badgeText = hasError ? 'Stopped' : (stageLabel || 'In Progress');
+        const badgeClass = hasError ? 'bg-danger-subtle text-danger' : (pipelineStatus === 'published' ? 'bg-success-subtle text-success' : 'bg-primary-subtle text-primary');
+
+        $('#pipelineModalTitle').text('Pipeline #' + String(pipeline.id).slice(-4)).attr('title', 'Full ID: ' + pipeline.id);
+        $('#pipelineModalStatusBadge').text(badgeText).attr('class', 'badge rounded-pill ' + badgeClass);
         $('#pipelineModalSubtitle').text(new Date(pipeline.timestamp).toLocaleString());
         $('#pipelineModalStepper').data('pipeline-index', index);
 
@@ -1238,7 +1448,7 @@ $(document).ready(function () {
 
         const mediaType = $('input[name="mediaType"]:checked').val();
         let prompt = $('#pipelinePrompt').val();
-        const platform = $('#dashboardPlatformSelect').val() || 'linkedin';
+        const platform = getSelectedPlatform();
 
         slideWorkflow(3); // Slide to Asset Review (Slide 4)
 
@@ -1461,7 +1671,7 @@ $(document).ready(function () {
             return;
         }
         if (!window.lastGeneratedPipeline.platform) {
-            window.lastGeneratedPipeline.platform = $('#dashboardPlatformSelect').val() || 'linkedin';
+            window.lastGeneratedPipeline.platform = getSelectedPlatform();
         }
 
         const btn = $('#publishPipelineBtn');
@@ -1617,7 +1827,7 @@ $(document).ready(function () {
 
         const mediaType = $('input[name="modalMediaType"]:checked').val();
         const prompt = $('#modalPipelinePrompt').val();
-        const platform = $('#dashboardPlatformSelect').val() || 'linkedin';
+        const platform = getSelectedPlatform();
 
         $('#startModalPipelineBtn').prop('disabled', true);
         $('#modalPipelineLoader').removeClass('d-none');
@@ -1771,7 +1981,7 @@ $(document).ready(function () {
 
         const assets = Array.isArray(pipeline.assetContent) ? pipeline.assetContent : [pipeline.assetContent];
         const item = assets[assets.length - 1];
-        if (!item.platform) item.platform = $('#dashboardPlatformSelect').val() || 'linkedin';
+        if (!item.platform) item.platform = getSelectedPlatform();
 
         const btn = $('#modalPublishBtn');
         const origText = btn.html();

@@ -92,6 +92,35 @@ class LLMService:
         """Generate high-quality structured mock response tailored to prompt intent."""
         prompt_lower = (system_prompt + " " + user_prompt).lower()
 
+        # 0. Relevant-post-index filtering (e.g. StoryAgent.filter_relevant_posts).
+        # Must be checked before the generic "json" campaign branch below, which
+        # would otherwise shadow it and return a shape with no relevant_indices key
+        # - silently zeroing out every scan while USE_MOCK_LLM is enabled.
+        if "relevant_indices" in prompt_lower:
+            import re
+
+            indices = [int(m) for m in re.findall(r"^\[(\d+)\]", user_prompt, re.MULTILINE)]
+            return json.dumps({"relevant_indices": indices})
+
+        # 0b. Cluster labeling (CollectionAgent.label_clusters). Same reasoning as
+        # above - "json"/"strategist" would otherwise fall into the generic
+        # campaign branch and produce a shape with no "clusters" key.
+        if "cluster_index" in prompt_lower:
+            import re
+
+            group_indices = [int(m) for m in re.findall(r"=== GROUP (\d+) ", user_prompt)]
+            relevance_cycle = ["high", "medium", "low"]
+            clusters = [
+                {
+                    "cluster_index": idx,
+                    "label": f"Related Storyline #{idx + 1}",
+                    "description": "Multiple competitor posts touching a related theme - review for a counter-narrative angle.",
+                    "relevance": relevance_cycle[idx % len(relevance_cycle)],
+                }
+                for idx in group_indices
+            ]
+            return json.dumps({"clusters": clusters})
+
         # 1. Campaign Generation (JSON)
         if "campaign" in prompt_lower or "plan" in prompt_lower or "strategy" in prompt_lower or "json" in prompt_lower:
             mock_campaign = {
