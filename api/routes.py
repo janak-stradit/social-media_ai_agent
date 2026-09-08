@@ -5,9 +5,11 @@ import urllib.parse
 import uuid
 import typing
 from typing import Optional
+import io
+import zipfile
 
 import requests
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, request, send_file
 from werkzeug.utils import secure_filename
 
 from agents.caption_agent import CaptionAgent
@@ -1838,3 +1840,32 @@ def generate_opportunity_suggestions():
 
         print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/download-zip", methods=["POST"])
+@login_required_api
+def download_zip():
+    data = request.json or {}
+    urls = data.get("urls", [])
+    if not urls:
+        return jsonify({"error": "No URLs provided"}), 400
+
+    memory_file = io.BytesIO()
+    with zipfile.ZipFile(memory_file, "w", zipfile.ZIP_DEFLATED) as zf:
+        for url in urls:
+            if not url:
+                continue
+            path = url.split("?")[0].lstrip("/")
+            if os.path.exists(path):
+                filename = os.path.basename(path)
+                zf.write(path, arcname=filename)
+            else:
+                current_app.logger.warning(f"File not found for zip: {path}")
+
+    memory_file.seek(0)
+    return send_file(
+        memory_file,
+        mimetype="application/zip",
+        as_attachment=True,
+        download_name="generated_assets.zip"
+    )

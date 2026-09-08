@@ -1060,7 +1060,7 @@ $(document).ready(function () {
 
     function renderAssetItems(assetContent, pipelineId = null, isFinal = false) {
         const items = Array.isArray(assetContent) ? assetContent : [assetContent];
-        return items.map((a, index) => {
+        const html = items.map((a, index) => {
             const type = (a.type || '').toLowerCase();
             if (type.includes('video')) {
                 return `<video controls class="w-100 rounded-3 mb-2" src="${a.content}"></video>`;
@@ -1096,9 +1096,6 @@ $(document).ready(function () {
                     <div class="position-absolute d-flex gap-2 align-items-center" style="bottom: 15px; right: 15px; z-index: 10;">
                         ${navHtml}
                         ${regenHtml}
-                        <a href="${a.content}" target="_blank" download class="btn btn-sm text-white border-0 shadow-none p-1" title="Download" style="background: transparent;">
-                            <i class="fas fa-download" style="font-size: 1.1rem; text-shadow: 0 2px 4px rgba(0,0,0,0.8);"></i>
-                        </a>
                     </div>
                 </div>
                 `;
@@ -1135,6 +1132,17 @@ $(document).ready(function () {
                 </div>
             `;
         }).join('');
+        
+        const hasImages = items.some(a => (a.type || '').toLowerCase().includes('image'));
+        if (hasImages) {
+            const imageUrls = items.filter(a => (a.type || '').toLowerCase().includes('image')).map(a => a.content);
+            const btnHtml = `
+            <button class="btn btn-sm btn-outline-primary w-100 mt-3" onclick='downloadAllAsZip(${JSON.stringify(imageUrls)})'>
+                <i class="fas fa-file-archive me-1"></i>Download All Images (ZIP)
+            </button>`;
+            return html + btnHtml;
+        }
+        return html;
     }
 
     // Builds a plain-text seed message summarizing a pipeline's generated
@@ -1442,9 +1450,6 @@ $(document).ready(function () {
                             <button class="btn btn-sm text-white border-0 shadow-none p-1" id="regenImgBtn_${index}" onclick="regenerateImageInCarousel(${index})" title="Regenerate with original context" style="background: transparent;">
                                 <i class="fas fa-sync-alt" style="font-size: 1.1rem; text-shadow: 0 2px 4px rgba(0,0,0,0.8);"></i>
                             </button>
-                            <a href="${item.content}" target="_blank" download class="btn btn-sm text-white border-0 shadow-none p-1" title="Download" style="background: transparent;">
-                                <i class="fas fa-download" style="font-size: 1.1rem; text-shadow: 0 2px 4px rgba(0,0,0,0.8);"></i>
-                            </a>
                         </div>
                         
                         <div class="p-3 bg-light border-top"><p class="small text-muted m-0"><strong>Caption:</strong> ${item.caption}</p></div>
@@ -1458,6 +1463,11 @@ $(document).ready(function () {
             innerHtml += `
                 <div class="carousel-item ${activeClass}">
                     ${outHtml}
+                    <div class="px-3 pt-3">
+                        <button class="btn btn-outline-primary w-100 fw-bold rounded-pill mb-2" onclick='downloadAllAsZip(${JSON.stringify(item.history.map(h => h.content))})'>
+                            <i class="fas fa-file-archive me-1"></i>Download All Variations (ZIP)
+                        </button>
+                    </div>
                     <div class="d-flex gap-2 mt-2 mb-2 px-3 pb-2">
                         <button class="btn btn-outline-danger action-btn flex-grow-1" onclick="rejectPipelineContent()"><i class="fas fa-times me-1"></i>Reject</button>
                         <button class="btn btn-success action-btn flex-grow-1 shadow-sm" onclick="approveCarouselItem(${index})"><i class="fas fa-check me-2"></i>Approve</button>
@@ -2363,5 +2373,41 @@ window.regenerateModalImage = function (pipelineId, index, event) {
             showToast('Error connecting to image generation service.', 'danger');
             btn.prop('disabled', false).html(originalHtml);
         }
+    });
+};
+window.downloadAllAsZip = function(urls) {
+    if (!urls || urls.length === 0) {
+        alert("No images to download!");
+        return;
+    }
+    
+    // Show a loading toast or change button state if desired
+    
+    fetch('/api/download-zip', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ urls: urls })
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Network response was not ok');
+        }
+        return response.blob();
+    })
+    .then(blob => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = 'generated_assets.zip';
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+    })
+    .catch(error => {
+        console.error('Error downloading zip:', error);
+        alert('Failed to download ZIP file. Please try again later.');
     });
 };

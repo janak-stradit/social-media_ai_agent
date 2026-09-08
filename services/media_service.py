@@ -1065,15 +1065,23 @@ class MediaGenerationService:
         import requests
         import time
         import os
+        import random
         from config import Config
 
         encoded_prompt = urllib.parse.quote(prompt)
         w, h = size.split("x")
-        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={w}&height={h}&nologo=true"
+        seed = random.randint(1, 1000000)
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={w}&height={h}&nologo=true&seed={seed}"
 
         print(f"[Media Service] Fetching Pollinations image from {url[:80]}...")
 
-        response = requests.get(url, stream=True, timeout=15)
+        try:
+            response = requests.get(url, stream=True, timeout=60)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as req_err:
+            print(f"[Media Service] Request to Pollinations failed: {req_err}")
+            return {"success": False, "error": str(req_err)}
+
         if response.status_code == 200:
             filename = f"media_{int(time.time()*1000)}.png"
             local_path = os.path.join(Config.UPLOAD_FOLDER, filename)
