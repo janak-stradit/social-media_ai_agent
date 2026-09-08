@@ -74,12 +74,15 @@ class HashtagAgent:
         result["_usage"] = usage
         return result
 
-    def generate_all_platforms(self, story_analysis, vision_analysis=None, memory_context=None):
+    def generate_all_platforms(self, story_analysis, vision_analysis=None, memory_context=None, platforms=None):
         """Generate hashtags for all platforms"""
         results = {}
         total_usage = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0, "cost_usd": 0.0}
 
-        for platform in ["facebook", "instagram", "linkedin"]:
+        if not platforms:
+            platforms = ["facebook", "instagram", "linkedin"]
+
+        for platform in platforms:
             res = self.generate_hashtags(platform, story_analysis, vision_analysis, memory_context=memory_context)
             u = res.pop("_usage", {})
             total_usage["input_tokens"] += u.get("input_tokens", 0)

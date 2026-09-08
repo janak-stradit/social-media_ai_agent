@@ -460,6 +460,7 @@ Rewrite and return ONLY the improved plain-text caption.
         tone=None,
         memory_context=None,
         brand_voice=None,
+        platforms=None,
     ):
         """Generate captions for all platforms."""
 
@@ -472,11 +473,10 @@ Rewrite and return ONLY the improved plain-text caption.
             "cost_usd": 0.0,
         }
 
-        for platform in [
-            "facebook",
-            "instagram",
-            "linkedin",
-        ]:
+        if not platforms:
+            platforms = ["facebook", "instagram", "linkedin"]
+
+        for platform in platforms:
             res = self.generate_caption(
                 platform,
                 story_analysis,

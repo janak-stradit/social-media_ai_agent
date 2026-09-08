@@ -55,9 +55,11 @@ class StrategyAgent:
         strategy["_usage"] = usage
         return strategy
 
-    def generate_all_strategies(self, story_analysis, memory_context=None):
+    def generate_all_strategies(self, story_analysis, memory_context=None, platforms=None):
         """Generate strategies for all platforms"""
-        return self.schedule_posts(["facebook", "instagram", "linkedin"], story_analysis, memory_context)
+        if not platforms:
+            platforms = ["facebook", "instagram", "linkedin"]
+        return self.schedule_posts(platforms, story_analysis, memory_context)
 
     def schedule_posts(self, platforms, story_analysis, memory_context=None):
         """Generate strategies for specified platforms"""

@@ -525,7 +525,7 @@ def generate_content():
         captions = {}
         if generate_text:
             captions = caption_agent.generate_all_platforms(
-                caption_input, vision_analysis, tone, memory_context=mem_prompt, brand_voice=brand_voice
+                caption_input, vision_analysis, tone, memory_context=mem_prompt, brand_voice=brand_voice, platforms=platforms
             )
             cap_usage = captions.pop("_usage", {})
             total_tokens += cap_usage.get("total_tokens", 0)
@@ -543,7 +543,7 @@ def generate_content():
         # Step 4: Generate hashtags
         hashtags = {}
         if generate_text:
-            hashtags = hashtag_agent.generate_all_platforms(story_analysis, vision_analysis, memory_context=mem_prompt)
+            hashtags = hashtag_agent.generate_all_platforms(story_analysis, vision_analysis, memory_context=mem_prompt, platforms=platforms)
             hash_usage = hashtags.pop("_usage", {})
             total_tokens += hash_usage.get("total_tokens", 0)
             total_cost_usd += hash_usage.get("cost_usd", 0.0)
@@ -560,7 +560,7 @@ def generate_content():
         # Step 5: Generate strategy
         strategies = {}
         if include_strategy and generate_text:
-            strategies = strategy_agent.generate_all_strategies(story_analysis, memory_context=mem_prompt)
+            strategies = strategy_agent.generate_all_strategies(story_analysis, memory_context=mem_prompt, platforms=platforms)
             strat_usage = strategies.pop("_usage", {})
             total_tokens += strat_usage.get("total_tokens", 0)
             total_cost_usd += strat_usage.get("cost_usd", 0.0)
