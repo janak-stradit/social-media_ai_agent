@@ -230,7 +230,7 @@ All three must originate from the same storyline, but they must be independently
 The character must always feel appropriate for a professional B2B/company video. The visual should communicate: "Here is a real professional dealing with this specific business problem.", not: "Here is a random person placed into a corporate image."
 
 CAPTION PROMPT
-Provide a detailed prompt instructing the social media writer on exactly what to write. 
+Provide a detailed prompt instructing the social media writer on exactly what to write.
 Outline the specific hook, the core strategic topic, the exact product capabilities to highlight, and the tone.
 Do NOT write the actual caption here. Only provide the instructions/context for the writer.
 If characters are selected, characters may be referenced when naturally relevant.
@@ -267,7 +267,7 @@ If any answer is NO, regenerate the affected output internally.
 
 ### OUTPUT FORMAT
 
-You must perform Steps 1, 2, and 4 internally. 
+You must perform Steps 1, 2, and 4 internally.
 Your final response MUST be a valid JSON object containing ONLY the final generated content (Step 3), as well as a VERY SHORT list of facts you observed (maximum 2 or 3 facts total, keep them minimal but informative). Do not include your internal reasoning in the final JSON.
 
 Respond with exactly this JSON structure and nothing else:
