@@ -193,7 +193,10 @@ $(document).ready(function () {
         // Show every post, sorted by most recent first
         const sortedPosts = [...posts].sort((a, b) => getPostTimestamp(b) - getPostTimestamp(a));
 
-        let html = '<div class="row g-4 pt-3">';
+        // Update KPI Stats
+        $('#statScrapedCount').text(`${posts.length} Posts`);
+
+        let html = '<div class="row g-4 pt-3" id="feedCardsRow">';
         let cIdx = 0;
 
         sortedPosts.forEach(p => {
@@ -222,8 +225,8 @@ $(document).ready(function () {
             const encodedPayload = encodeURIComponent(`[${comp} - ${title}]\n${p.text || title}\n\n---\n\n`);
 
             html += `
-            <div class="col-md-6 mt-2">
-                <div class="premium-card h-100 d-flex flex-column competitor-post-card position-relative p-4" style="background: white; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden;">
+            <div class="col-md-6 mt-2 competitor-post-card-col">
+                <div class="premium-card h-100 d-flex flex-column competitor-post-card position-relative p-4" id="postCard_${cIdx}" style="background: white; border: 1px solid #e2e8f0; border-radius: 16px; overflow: hidden;">
                     ${isNew ? '<span class="badge bg-success position-absolute" style="top: 0; left: 0; font-size: 0.7rem; padding: 0.35rem 0.8rem; box-shadow: 2px 2px 6px rgba(0,0,0,0.1); z-index: 10; border-bottom-right-radius: 12px;"><i class="fas fa-sparkles me-1"></i>New</span>' : ''}
                     <div class="d-flex justify-content-between align-items-start mb-3">
                         <div class="d-flex align-items-center gap-2">
@@ -246,6 +249,7 @@ $(document).ready(function () {
                         </h6>
                         <p class="text-muted small mb-0 lh-sm" style="line-height: 1.5 !important;">${textSnippet}</p>
                     </label>
+                    ${p.post_url ? `<div class="pt-2 mt-auto text-end"><a href="${escapeHtml(p.post_url)}" target="_blank" class="small text-decoration-none text-primary font-semibold" onclick="event.stopPropagation();"><i class="fas fa-external-link-alt me-1"></i>View Source</a></div>` : ''}
                 </div>
             </div>`;
             cIdx++;
@@ -433,12 +437,21 @@ $(document).ready(function () {
 
     function updateSelection() {
         const checked = $('.comp-master-checkbox:checked');
-        $('#selectedPostCount').text(checked.length);
+        const count = checked.length;
+        $('#selectedPostCount').text(count);
+        $('#selectedPostCountBadge').text(`${count} Selected`);
 
-        if (checked.length === 0) {
+        // Highlight selected cards
+        $('.competitor-post-card').removeClass('selected-card');
+        checked.each(function () {
+            $(this).closest('.competitor-post-card').addClass('selected-card');
+        });
+
+        if (count === 0) {
             $('#storyContextInput').val('');
             $('#generateStoryBtn').prop('disabled', true);
             closeSynthesisPanel();
+            window.slideWorkflow(0);
             return;
         }
 
@@ -455,6 +468,63 @@ $(document).ready(function () {
 
         $('#storyContextInput').val(combinedText);
     }
+
+    // ── Workflow Slider & User Journey Stepper Synchronizer ──────────────────
+    window.slideWorkflow = function (stepIndex) {
+        const percentages = [0, -25, -50, -75];
+        const pct = percentages[stepIndex] !== undefined ? percentages[stepIndex] : 0;
+        $('#workflowSlider').css('transform', `translateX(${pct}%)`);
+
+        // Update wizard header step badges
+        $('.wizard-step-badge').removeClass('active');
+        $(`#wizStepBadge${stepIndex}`).addClass('active');
+
+        // Update top 4-step user journey stepper
+        $('.journey-step-item').removeClass('active completed');
+        for (let i = 1; i <= 4; i++) {
+            if (i - 1 < stepIndex) {
+                $(`#journeyStep${i}`).addClass('completed');
+            } else if (i - 1 === stepIndex) {
+                $(`#journeyStep${i}`).addClass('active');
+            }
+        }
+    };
+
+    // ── Feed Live Search Filtering ─────────────────────────────────────────
+    window.filterFeedPosts = function () {
+        const q = ($('#feedSearchInput').val() || '').toLowerCase().trim();
+        $('.competitor-post-card-col').each(function () {
+            const text = $(this).text().toLowerCase();
+            if (!q || text.includes(q)) {
+                $(this).removeClass('d-none');
+            } else {
+                $(this).addClass('d-none');
+            }
+        });
+    };
+
+    window.selectAllFilteredPosts = function () {
+        $('.competitor-post-card-col:not(.d-none) .comp-master-checkbox').prop('checked', true);
+        updateSelection();
+    };
+
+    window.clearAllPostSelections = function () {
+        $('.comp-master-checkbox').prop('checked', false);
+        updateSelection();
+    };
+
+    // ── History Search Filtering ───────────────────────────────────────────
+    window.filterHistoryList = function () {
+        const q = ($('#historySearchInput').val() || '').toLowerCase().trim();
+        $('#pipelineHistoryList .pipeline-timeline').each(function () {
+            const text = $(this).text().toLowerCase();
+            if (!q || text.includes(q)) {
+                $(this).removeClass('d-none');
+            } else {
+                $(this).addClass('d-none');
+            }
+        });
+    };
 
     function getPlatformIcon(platform) {
         if (!platform) return '<i class="fas fa-globe me-2 text-secondary"></i>';
@@ -1184,23 +1254,27 @@ $(document).ready(function () {
         window.location.href = '/';
     };
 
+    // Returns {body, footer}: body renders inside the scrollable
+    // #pipelineModalDetail, footer renders inside the fixed #pipelineModalFooter
+    // bar pinned to the bottom of the panel - so Reject/Approve/Publish/etc.
+    // stay reachable without scrolling, however long the content above is.
     function getStageDetailHtml(pipeline, stageId) {
         if (stageId === 'intel_selected') {
             const competitorsList = pipeline.competitors
                 ? [...new Set(pipeline.competitors.split(',').map(c => c.trim()).filter(Boolean))].join(', ')
                 : 'None';
             const safeContext = (pipeline.context || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-            return `
+            const body = `
                 <h6 class="fw-bold text-primary mb-3"><i class="fas fa-layer-group me-2"></i>Post Pipeline</h6>
                 <p class="small text-muted mb-2"><strong class="text-dark">Analysis:</strong> ${competitorsList}</p>
-                
+
                 <div id="intelSelectedReadMode">
                     <div class="bg-light rounded-3 p-3 small" style="white-space: pre-wrap; max-height: 320px; overflow-y: auto;">${pipeline.context || 'No context captured for this pipeline.'}</div>
                     <div class="mt-3 d-flex gap-2">
                         <button class="btn btn-sm btn-outline-primary fw-bold" onclick="$('#intelSelectedReadMode').addClass('d-none'); $('#intelSelectedEditMode').removeClass('d-none');"><i class="fas fa-edit me-1"></i>Edit Context</button>
                     </div>
                 </div>
-                
+
                 <div id="intelSelectedEditMode" class="d-none">
                     <textarea class="form-control textarea-premium small mb-2" id="editPipelineContextArea" style="min-height: 320px;">${safeContext}</textarea>
                     <div class="d-flex gap-2 justify-content-end">
@@ -1209,59 +1283,64 @@ $(document).ready(function () {
                     </div>
                 </div>
             `;
+            return { body, footer: '' };
         }
         if (stageId === 'strategy_generated') {
-            if (!pipeline.strategy) return emptyStageState('Counter strategy has not been generated yet.');
+            if (!pipeline.strategy) return { body: emptyStageState('Counter strategy has not been generated yet.'), footer: '' };
             const facts = (pipeline.strategy.observed_facts || [])
                 .map(f => `<span class="badge rounded-pill bg-white text-primary border border-primary px-3 py-2 me-2 mb-2 text-wrap text-start" style="font-size: 0.8rem; font-weight: 600; line-height: 1.4;">${f}</span>`)
                 .join('');
 
-            return `
+            const body = `
                 <h6 class="fw-bold text-primary mb-3"><i class="fas fa-brain me-2"></i>Counter Strategy Generated</h6>
                 <div class="mb-3 d-flex flex-wrap">${facts || '<span class="text-muted small">No observed facts recorded.</span>'}</div>
                 <div class="mb-3 w-100">${formatPromptTabs(pipeline.strategy, pipeline.id)}</div>
-                <div class="d-flex gap-2">
-                    <button class="btn btn-outline-danger action-btn flex-grow-1" onclick="rejectPipelineStrategy(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject</button>
-                    <button class="btn btn-success action-btn flex-grow-1" onclick="approvePipelineStrategy(${pipeline.id})"><i class="fas fa-check me-1"></i>Approve & Continue</button>
-                </div>
             `;
+            const footer = `
+                <button class="btn btn-outline-danger action-btn flex-grow-1" onclick="rejectPipelineStrategy(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject</button>
+                <button class="btn btn-success action-btn flex-grow-1" onclick="approvePipelineStrategy(${pipeline.id})"><i class="fas fa-check me-1"></i>Approve & Continue</button>
+            `;
+            return { body, footer };
         }
         if (stageId === 'asset_generated') {
-            if (!pipeline.assetContent) return emptyStageState('Content has not been generated yet.');
-            return `
+            if (!pipeline.assetContent) return { body: emptyStageState('Content has not been generated yet.'), footer: '' };
+            const body = `
                 <h6 class="fw-bold text-primary mb-3"><i class="fas fa-magic me-2"></i>Content Generated ${pipeline.assetType ? `<span class="badge bg-light text-dark border ms-1">${pipeline.assetType}</span>` : ''}</h6>
                 <div style="max-height: 75vh; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent, pipeline.id)}</div>
-                <div class="d-flex gap-2">
-                    <button class="btn btn-outline-danger action-btn flex-grow-1" onclick="rejectPipelineAsset(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject Asset</button>
-                    <button class="btn btn-success action-btn flex-grow-1" onclick="approvePipelineAsset(${pipeline.id})"><i class="fas fa-check me-1"></i>Approve Asset</button>
-                </div>
-                <button class="btn btn-outline-primary action-btn w-100 mt-2" onclick="sendPipelineToStudioChat(${pipeline.id})">
+            `;
+            const footer = `
+                <button class="btn btn-outline-danger action-btn flex-grow-1" onclick="rejectPipelineAsset(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject Asset</button>
+                <button class="btn btn-success action-btn flex-grow-1" onclick="approvePipelineAsset(${pipeline.id})"><i class="fas fa-check me-1"></i>Approve Asset</button>
+                <button class="btn btn-outline-primary action-btn flex-grow-1" onclick="sendPipelineToStudioChat(${pipeline.id})">
                     <i class="fas fa-comments me-1"></i>Refine in Studio Chat
                 </button>
             `;
+            return { body, footer };
         }
         if (stageId === 'approved') {
-            if (pipeline.status !== 'approved' && pipeline.status !== 'published') return emptyStageState('This asset has not been approved yet.');
-            return `
+            if (pipeline.status !== 'approved' && pipeline.status !== 'published') return { body: emptyStageState('This asset has not been approved yet.'), footer: '' };
+            const body = `
                 <h6 class="fw-bold text-success mb-3"><i class="fas fa-thumbs-up me-2"></i>Asset Approved</h6>
                 <p class="small text-muted">This asset was reviewed and approved for publishing.</p>
                 ${pipeline.assetContent ? `<div style="max-height: 320px; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent, pipeline.id, true)}</div>` : ''}
-                ${pipeline.status === 'approved' ? `
-                    <button class="btn btn-dark action-btn w-100 mt-2" onclick="publishModalPipelineContent(${pipeline.id})" id="modalPublishBtn">
-                        <i class="fas fa-paper-plane me-2"></i>Publish to Platforms
-                    </button>
-                ` : ''}
             `;
+            const footer = pipeline.status === 'approved' ? `
+                <button class="btn btn-dark action-btn flex-grow-1" onclick="publishModalPipelineContent(${pipeline.id})" id="modalPublishBtn">
+                    <i class="fas fa-paper-plane me-2"></i>Publish to Platforms
+                </button>
+            ` : '';
+            return { body, footer };
         }
         if (stageId === 'published') {
-            if (pipeline.status !== 'published') return emptyStageState('This pipeline has not been published yet.');
-            return `
+            if (pipeline.status !== 'published') return { body: emptyStageState('This pipeline has not been published yet.'), footer: '' };
+            const body = `
                 <h6 class="fw-bold text-dark mb-3"><i class="fas fa-paper-plane me-2"></i>Published</h6>
                 <p class="small text-muted">This content has been published live.</p>
                 ${pipeline.assetContent ? `<div style="max-height: 320px; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent, pipeline.id, true)}</div>` : ''}
             `;
+            return { body, footer: '' };
         }
-        return emptyStageState('No details available for this stage.');
+        return { body: emptyStageState('No details available for this stage.'), footer: '' };
     }
 
     window.openPipelineModal = function (index) {
@@ -1301,7 +1380,6 @@ $(document).ready(function () {
             let badgeClass = 'bg-secondary';
             let textClass = 'text-muted';
             let stepIcon = step.icon;
-            const isLast = stepIdx === PIPELINE_STAGES.length - 1;
             const isReached = reachedStatus;
 
             if (reachedStatus) {
@@ -1327,9 +1405,7 @@ $(document).ready(function () {
             // Stages the pipeline hasn't reached yet aren't clickable - guides
             // the journey step-by-step instead of letting users click ahead
             // into an empty "not generated yet" state with no explanation.
-            const rowStyle = isReached
-                ? 'cursor: pointer;'
-                : 'cursor: not-allowed; opacity: 0.5;';
+            const stateClass = isReached ? 'pipeline-stage-row-clickable' : 'pipeline-stage-row-locked';
             const rowClick = isReached
                 ? `onclick="showPipelineStageDetail(${index}, '${step.id}')"`
                 : `onclick="showToast('Complete the previous step first.', 'info')"`;
@@ -1337,14 +1413,11 @@ $(document).ready(function () {
             const viewingClass = isViewing ? ' pipeline-stage-row-active' : '';
 
             stepperHtml += `
-                <div class="d-flex align-items-stretch pipeline-stage-row${viewingClass}" style="${rowStyle}" ${rowClick} ${rowTitle}>
-                    <div class="d-flex flex-column align-items-center" style="width: 28px;">
-                        <div class="rounded-circle ${badgeClass} d-flex align-items-center justify-content-center shadow-sm flex-shrink-0" style="width: 24px; height: 24px;">
-                            <i class="fas ${isReached ? stepIcon : 'fa-lock'} text-white" style="font-size: 10px;"></i>
-                        </div>
-                        ${!isLast ? '<div class="flex-grow-1" style="width: 2px; background: #e5e7eb; min-height: 18px;"></div>' : ''}
-                    </div>
-                    <div class="${textClass} small ps-2 pb-3" style="font-size: 0.85rem;">${step.label}</div>
+                <div class="pipeline-stage-row ${stateClass}${viewingClass}" ${rowClick} ${rowTitle}>
+                    <span class="pipeline-step-dot rounded-circle ${badgeClass} shadow-sm">
+                        <i class="fas ${isReached ? stepIcon : 'fa-lock'} text-white"></i>
+                    </span>
+                    <div class="${textClass} pipeline-step-label">${step.label}</div>
                 </div>
             `;
         });
@@ -1359,7 +1432,9 @@ $(document).ready(function () {
         window._currentStageId = stageId;
 
         renderPipelineModalStepper(index, stageId);
-        $('#pipelineModalDetail').html(getStageDetailHtml(pipeline, stageId));
+        const { body, footer } = getStageDetailHtml(pipeline, stageId);
+        $('#pipelineModalDetail').html(body);
+        $('#pipelineModalFooter').html(footer).toggleClass('d-none', !footer);
     };
 
     renderPipelineHistory();
@@ -2365,3 +2440,21 @@ window.regenerateModalImage = function (pipelineId, index, event) {
         }
     });
 };
+
+    // ── KPI Stat Counters Updater ─────────────────────────────────────────
+    function updateKpiMetricsFromHistoryAndDB() {
+        const historyCount = Array.isArray(window.pipelineHistory) ? window.pipelineHistory.length : 0;
+        $('#statPipelinesCount').text(`${historyCount} Runs`);
+
+        $.ajax({
+            url: '/api/opportunity-suggestions',
+            type: 'GET',
+            success: function (r) {
+                if (r.success && Array.isArray(r.suggestions)) {
+                    $('#statOpportunitiesCount').text(`${r.suggestions.length} Found`);
+                }
+            }
+        });
+    }
+
+    setTimeout(updateKpiMetricsFromHistoryAndDB, 800);
