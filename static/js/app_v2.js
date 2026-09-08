@@ -846,12 +846,12 @@ $(document).ready(function () {
         // Trigger Media Generation asynchronously if mediaType requested
         if (selectedOutputs && selectedOutputs.length > 0) {
             platforms.forEach(p => {
-                const pCaption = content[p]?.caption?.primary_caption || story;
+                const pCaption = content[p]?.caption?.primary_caption || requestBody.story;
                 if (selectedOutputs.includes('image')) {
-                    triggerMediaGenInChat(p, pCaption, 'image', tone, runId, imagePath, `${msgId}_media_image_${p}`);
+                    triggerMediaGenInChat(p, pCaption, 'image', requestBody.tone, runId, historyObj.activeImgPath, `${msgId}_media_image_${p}`);
                 }
                 if (selectedOutputs.includes('video')) {
-                    triggerMediaGenInChat(p, pCaption, 'video', tone, runId, imagePath, `${msgId}_media_video_${p}`);
+                    triggerMediaGenInChat(p, pCaption, 'video', requestBody.tone, runId, historyObj.activeImgPath, `${msgId}_media_video_${p}`);
                 }
             });
         }

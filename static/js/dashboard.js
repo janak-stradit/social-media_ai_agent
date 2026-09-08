@@ -425,7 +425,7 @@ $(document).ready(function () {
         // Find pipeline
         let targetPipeline = null;
         if (pipelineId) {
-            targetPipeline = window.pipelineHistory.find(p => p.id == pipelineId);
+            targetPipeline = window.pipelineHistory.find(p => p.id === pipelineId);
         } else if (window.activePipeline) {
             targetPipeline = window.activePipeline;
         }
