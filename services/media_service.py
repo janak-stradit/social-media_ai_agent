@@ -1008,7 +1008,7 @@ class MediaGenerationService:
         gen_kwargs = {
             "model": model_name,
             "prompt": prompt[:512],
-            "config": types.GenerateVideosConfig(
+            "config": types.GenerateVideosConfig(  # pylint: disable=no-member
                 aspect_ratio=aspect_ratio,
                 duration_seconds=5,
                 number_of_videos=1,
@@ -1025,13 +1025,13 @@ class MediaGenerationService:
             except Exception as img_err:
                 print(f"[Media Service] Warning loading image for Gemini Video: {img_err}")
 
-        operation = client.models.generate_videos(**gen_kwargs)
+        operation = client.models.generate_videos(**gen_kwargs)  # pylint: disable=no-member
 
         print("[Media Service] Polling Google Gemini Video operation (Native Single-Pass Video + Audio)...")
         deadline = time.time() + 300
         while not operation.done and time.time() < deadline:
             time.sleep(8)
-            operation = client.operations.get(operation)
+            operation = client.operations.get(operation)  # pylint: disable=no-member
 
         if not operation.done:
             raise RuntimeError("Google Gemini Video generation operation timed out after 300s.")
@@ -1073,7 +1073,7 @@ class MediaGenerationService:
 
         print(f"[Media Service] Fetching Pollinations image from {url[:80]}...")
 
-        response = requests.get(url, stream=True)
+        response = requests.get(url, stream=True, timeout=15)
         if response.status_code == 200:
             filename = f"media_{int(time.time()*1000)}.png"
             local_path = os.path.join(Config.UPLOAD_FOLDER, filename)
