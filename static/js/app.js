@@ -400,12 +400,13 @@ $(document).ready(function () {
             target_company: targetCompany
         };
 
-        $.ajax({
+        window.currentGenerationRequest = $.ajax({
             url: '/api/generate',
             type: 'POST',
             contentType: 'application/json',
             data: JSON.stringify(requestBody),
             success: function (r) {
+                window.currentGenerationRequest = null;
                 clearInterval(iv);
                 lastRunId = r.run_id || null;
 
@@ -424,8 +425,16 @@ $(document).ready(function () {
                 loadUserUsageMetrics();
                 scrollToBottom();
             },
-            error: function (xhr) {
+            error: function (xhr, status, error) {
+                window.currentGenerationRequest = null;
                 clearInterval(iv);
+                
+                if (status === 'abort') {
+                    assistantElem.remove();
+                    showToast('Generation cancelled', 'info');
+                    return;
+                }
+
                 const res = xhr.responseJSON || {};
                 const errText = res.error || 'Generation failed';
 
@@ -455,6 +464,13 @@ $(document).ready(function () {
                 }
             }
         });
+    };
+
+    window.cancelGeneration = function(msgId) {
+        if (window.currentGenerationRequest) {
+            window.currentGenerationRequest.abort();
+            window.currentGenerationRequest = null;
+        }
     };
 
     // ── Chat Bubble Render Helpers ─────────────────────────────────────
@@ -508,7 +524,10 @@ $(document).ready(function () {
                         <div class="assistant-title">
                             <i class="fas fa-network-wired text-primary me-1"></i>Multi-Agent Execution Pipeline
                         </div>
-                        <span class="assistant-run-tag">Active Agents</span>
+                        <div class="d-flex align-items-center">
+                            <span class="assistant-run-tag me-2">Active Agents</span>
+                            <button class="btn btn-sm btn-outline-danger py-0 px-2 cancel-generation-btn" onclick="cancelGeneration('${msgId}')" title="Cancel generation"><i class="fas fa-times me-1"></i>Cancel</button>
+                        </div>
                     </div>
                     
                     <!-- Live Agent Execution Stepper -->

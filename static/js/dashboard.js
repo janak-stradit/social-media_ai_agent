@@ -595,34 +595,34 @@ $(document).ready(function () {
                     
                     <div class="tab-pane fade show active text-dark small prompt-pane" id="pills-caption-${randId}" role="tabpanel" aria-labelledby="pills-caption-tab-${randId}">
                         <div class="d-flex justify-content-end gap-2 position-absolute" style="top: 10px; right: 15px; z-index: 10;">
-                            <button class="btn btn-sm border-0 shadow-none p-0 text-muted btn-copy" onclick="navigator.clipboard.writeText(this.closest('.prompt-pane').querySelector('.prompt-content').innerText); const t = this; t.innerHTML='<i class=\'fas fa-check text-success\'></i>'; setTimeout(()=>t.innerHTML='<i class=\'far fa-copy\'></i>', 2000);" title="Copy Caption" style="font-size: 1.1rem;"><i class="far fa-copy"></i></button>
+                            <button class="btn btn-sm border-0 shadow-none p-0 text-muted btn-copy" onclick="window.copyPromptTabContent(this)" title="Copy Caption" style="font-size: 1.1rem;"><i class="far fa-copy"></i></button>
                             <button class="btn btn-sm border-0 shadow-none p-0 text-muted btn-edit" onclick="window.togglePromptEdit(this)" title="Edit Caption" style="font-size: 1.1rem;"><i class="fas fa-pencil-alt"></i></button>
                             <button class="btn btn-sm border-0 shadow-none p-0 text-success btn-save d-none" onclick="window.savePromptEdit(this, ${pipelineIdArg}, 'caption')" title="Save Caption" style="font-size: 1.1rem;"><i class="fas fa-save"></i></button>
                             <button class="btn btn-sm border-0 shadow-none p-0 text-danger btn-cancel d-none" onclick="window.cancelPromptEdit(this)" title="Cancel Edit" style="font-size: 1.1rem;"><i class="fas fa-times"></i></button>
                         </div>
-                        <div class="prompt-content" style="white-space: pre-wrap; padding-top: 5px; padding-right: 40px;" class="mb-2">${captionText}</div>
+                        <div class="prompt-content mb-2" style="white-space: pre-wrap; padding-top: 5px; padding-right: 40px;">${captionText}</div>
                         <textarea class="form-control prompt-editor d-none w-100" style="min-height: 150px; font-size: 0.875rem;" spellcheck="false"></textarea>
                     </div>
                     
                     <div class="tab-pane fade text-dark small prompt-pane" id="pills-image-${randId}" role="tabpanel" aria-labelledby="pills-image-tab-${randId}">
                         <div class="d-flex justify-content-end gap-2 position-absolute" style="top: 10px; right: 15px; z-index: 10;">
-                            <button class="btn btn-sm border-0 shadow-none p-0 text-muted btn-copy" onclick="navigator.clipboard.writeText(this.closest('.prompt-pane').querySelector('.prompt-content').innerText); const t = this; t.innerHTML='<i class=\'fas fa-check text-success\'></i>'; setTimeout(()=>t.innerHTML='<i class=\'far fa-copy\'></i>', 2000);" title="Copy Image Prompt" style="font-size: 1.1rem;"><i class="far fa-copy"></i></button>
+                            <button class="btn btn-sm border-0 shadow-none p-0 text-muted btn-copy" onclick="window.copyPromptTabContent(this)" title="Copy Image Prompt" style="font-size: 1.1rem;"><i class="far fa-copy"></i></button>
                             <button class="btn btn-sm border-0 shadow-none p-0 text-muted btn-edit" onclick="window.togglePromptEdit(this)" title="Edit Image Prompt" style="font-size: 1.1rem;"><i class="fas fa-pencil-alt"></i></button>
                             <button class="btn btn-sm border-0 shadow-none p-0 text-success btn-save d-none" onclick="window.savePromptEdit(this, ${pipelineIdArg}, 'image_prompt')" title="Save Image Prompt" style="font-size: 1.1rem;"><i class="fas fa-save"></i></button>
                             <button class="btn btn-sm border-0 shadow-none p-0 text-danger btn-cancel d-none" onclick="window.cancelPromptEdit(this)" title="Cancel Edit" style="font-size: 1.1rem;"><i class="fas fa-times"></i></button>
                         </div>
-                        <div class="prompt-content" style="white-space: pre-wrap; padding-top: 5px; padding-right: 40px;" class="mb-2">${imageText}</div>
+                        <div class="prompt-content mb-2" style="white-space: pre-wrap; padding-top: 5px; padding-right: 40px;">${imageText}</div>
                         <textarea class="form-control prompt-editor d-none w-100" style="min-height: 150px; font-size: 0.875rem;" spellcheck="false"></textarea>
                     </div>
                     
                     <div class="tab-pane fade text-dark small prompt-pane" id="pills-video-${randId}" role="tabpanel" aria-labelledby="pills-video-tab-${randId}">
                         <div class="d-flex justify-content-end gap-2 position-absolute" style="top: 10px; right: 15px; z-index: 10;">
-                            <button class="btn btn-sm border-0 shadow-none p-0 text-muted btn-copy" onclick="navigator.clipboard.writeText(this.closest('.prompt-pane').querySelector('.prompt-content').innerText); const t = this; t.innerHTML='<i class=\'fas fa-check text-success\'></i>'; setTimeout(()=>t.innerHTML='<i class=\'far fa-copy\'></i>', 2000);" title="Copy Video Script" style="font-size: 1.1rem;"><i class="far fa-copy"></i></button>
+                            <button class="btn btn-sm border-0 shadow-none p-0 text-muted btn-copy" onclick="window.copyPromptTabContent(this)" title="Copy Video Script" style="font-size: 1.1rem;"><i class="far fa-copy"></i></button>
                             <button class="btn btn-sm border-0 shadow-none p-0 text-muted btn-edit" onclick="window.togglePromptEdit(this)" title="Edit Video Script" style="font-size: 1.1rem;"><i class="fas fa-pencil-alt"></i></button>
                             <button class="btn btn-sm border-0 shadow-none p-0 text-success btn-save d-none" onclick="window.savePromptEdit(this, ${pipelineIdArg}, 'video_prompt')" title="Save Video Script" style="font-size: 1.1rem;"><i class="fas fa-save"></i></button>
                             <button class="btn btn-sm border-0 shadow-none p-0 text-danger btn-cancel d-none" onclick="window.cancelPromptEdit(this)" title="Cancel Edit" style="font-size: 1.1rem;"><i class="fas fa-times"></i></button>
                         </div>
-                        <div class="prompt-content" style="white-space: pre-wrap; padding-top: 5px; padding-right: 40px;" class="mb-2">${videoText}</div>
+                        <div class="prompt-content mb-2" style="white-space: pre-wrap; padding-top: 5px; padding-right: 40px;">${videoText}</div>
                         <textarea class="form-control prompt-editor d-none w-100" style="min-height: 150px; font-size: 0.875rem;" spellcheck="false"></textarea>
                     </div>
                     
@@ -630,6 +630,28 @@ $(document).ready(function () {
             </div>
         `;
     }
+
+    window.copyPromptTabContent = function(btn) {
+        const pane = btn.closest('.prompt-pane');
+        const text = pane.querySelector('.prompt-content').innerText;
+        
+        function onSuccess() {
+            const oldHtml = btn.innerHTML;
+            btn.innerHTML = '<i class="fas fa-check text-success"></i>';
+            setTimeout(() => { btn.innerHTML = oldHtml; }, 2000);
+            showToast('Copied to clipboard!', 'success');
+        }
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(onSuccess).catch(err => {
+                if (window.fallbackCopyTextToClipboard) window.fallbackCopyTextToClipboard(text);
+                onSuccess();
+            });
+        } else {
+            if (window.fallbackCopyTextToClipboard) window.fallbackCopyTextToClipboard(text);
+            onSuccess();
+        }
+    };
 
     window.togglePromptEdit = function (btn) {
         const pane = btn.closest('.prompt-pane');
@@ -814,8 +836,12 @@ $(document).ready(function () {
             error: function (xhr) {
                 $('#generateStoryBtn').prop('disabled', false);
                 $('#generationLoader').addClass('d-none');
-                $('#structuredOutput').html('<div class="text-danger fw-bold">Network Error.</div>');
-                showToast('Network error.', 'danger');
+                
+                const res = xhr.responseJSON || {};
+                const errText = res.error || 'Network Error.';
+                
+                $('#structuredOutput').html(`<div class="text-danger fw-bold"><i class="fas fa-exclamation-triangle me-2"></i>Generation Error: ${escapeHtml(errText)}</div>`);
+                showToast('Generation failed: ' + errText, 'danger');
                 window.activePipeline.status = 'stopped_error';
                 localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
                 renderPipelineHistory();
