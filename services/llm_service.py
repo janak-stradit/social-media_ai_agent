@@ -239,7 +239,13 @@ class LLMService:
         }
 
     def generate(
-        self, system_prompt, user_prompt, temperature=0.7, max_tokens=1000, return_usage=False, max_retries_per_provider=2
+        self,
+        system_prompt,
+        user_prompt,
+        temperature=0.7,
+        max_tokens=1000,
+        return_usage=False,
+        max_retries_per_provider=2,
     ):
         """Generate text using available LLM providers in sequence with optimal token budgeting.
 
@@ -295,7 +301,9 @@ class LLMService:
                             else len(system_prompt + user_prompt) // 4
                         )
                         out_t = (
-                            getattr(usage_raw, "completion_tokens", len(text_out) // 4) if usage_raw else len(text_out) // 4
+                            getattr(usage_raw, "completion_tokens", len(text_out) // 4)
+                            if usage_raw
+                            else len(text_out) // 4
                         )
                         usage_metrics = self._calculate_cost(provider["name"], provider["model"], in_t, out_t)
 
@@ -361,7 +369,13 @@ class LLMService:
         return json.loads(cleaned)
 
     def generate_json(
-        self, system_prompt, user_prompt, temperature=0.5, max_tokens=1200, return_usage=False, max_retries_per_provider=2
+        self,
+        system_prompt,
+        user_prompt,
+        temperature=0.5,
+        max_tokens=1200,
+        return_usage=False,
+        max_retries_per_provider=2,
     ):
         """Generate structured JSON response with optimal token budgeting.
 
@@ -424,7 +438,9 @@ class LLMService:
                             else len(system_prompt + user_prompt) // 4
                         )
                         out_t = (
-                            getattr(usage_raw, "completion_tokens", len(content) // 4) if usage_raw else len(content) // 4
+                            getattr(usage_raw, "completion_tokens", len(content) // 4)
+                            if usage_raw
+                            else len(content) // 4
                         )
                         usage_metrics = self._calculate_cost(provider["name"], provider["model"], in_t, out_t)
 
