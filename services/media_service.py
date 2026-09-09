@@ -1065,12 +1065,12 @@ class MediaGenerationService:
         import requests
         import time
         import os
-        import random
+        import secrets
         from config import Config
 
         encoded_prompt = urllib.parse.quote(prompt)
         w, h = size.split("x")
-        seed = random.randint(1, 1000000)
+        seed = secrets.SystemRandom().randint(1, 1000000)
         url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={w}&height={h}&nologo=true&seed={seed}"
 
         print(f"[Media Service] Fetching Pollinations image from {url[:80]}...")
