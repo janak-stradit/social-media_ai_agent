@@ -136,6 +136,9 @@ The same analyst must appear consistently throughout all scenes. Do not change t
 
 AUDIO:
 A calm, authoritative voiceover saying: "[Voiceover script tailored to the storyline]". Subtle ambient room tone; no dialogue, no sound effects.
+
+BRANDING RULE:
+If there is a visual of StradIT, the text "Strad" must be strictly ORANGE and "IT" must be strictly WHITE. The tagline is "Automate.Elevate.Accelerate" and the tagline color must also be WHITE. Ensure this specific styling is explicitly mentioned in the prompt whenever StradIT is visualized.
 ----------------------"""
 
             validation_prompt = """### FINAL CHARACTER VALIDATION
@@ -182,6 +185,9 @@ Follow this exact formatting style:
 0:08-0:10 [Extremely detailed shot description concluding the metaphor...]
 
 Audio: A calm, authoritative voiceover saying: "[Voiceover script]".
+
+BRANDING RULE:
+If there is a visual of StradIT, the text "Strad" must be strictly ORANGE and "IT" must be strictly WHITE. The tagline is "Automate.Elevate.Accelerate" and the tagline color must also be WHITE. Ensure this specific styling is explicitly mentioned in the prompt whenever StradIT is visualized.
 ----------------------"""
 
             validation_prompt = """### FINAL CHARACTER VALIDATION
