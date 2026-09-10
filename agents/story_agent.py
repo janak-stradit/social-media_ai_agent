@@ -209,12 +209,35 @@ Extract:
 * Industry context
 * Business problem
 * Key message
-* Selected project
-* Project capabilities
 * Desired business outcome
 * Competitor context, if relevant
 
 Do not generate the image or video prompt yet.
+
+### STEP 2 — PROJECT MATCHING (STRICT)
+
+<OUR_PROJECT_CONTEXT> lists the ONLY real StradIT projects/products that exist. Each project's
+context is introduced by a "=== PROJECT: <NAME> ===" heading - those exact names are the complete
+set of valid selections.
+
+Compare the storyline's actual topic/business problem against what each project's documentation
+says it genuinely does. Select the ONE project whose real, documented capabilities most directly
+address the storyline's topic.
+
+If NONE of the projects genuinely address the storyline's topic - do not force a connection just
+because the topic is in the same broad industry (e.g. "finance"). A tax-advisory or wealth-management
+storyline is NOT automatically about AML risk assessment, fund screening, or alternative-investment
+due diligence just because they're all financial-services topics - only select a project if its
+documented capabilities would let StradIT credibly speak to this specific problem.
+
+Set:
+* selected_project = the exact project name from <OUR_PROJECT_CONTEXT>, OR the literal string
+  "No Strong Match" if no project's real capabilities genuinely fit.
+* connection_strength = "Strong", "Moderate", or "No Strong Match" (matching selected_project when
+  there's no fit).
+
+If selected_project is "No Strong Match", the caption instructions (Step 3) MUST say so explicitly
+and MUST NOT invent a connection to any project - downstream generation blocks entirely in that case.
 
 {char_rules_prompt}
 
@@ -237,7 +260,12 @@ The character must always feel appropriate for a professional B2B/company video.
 
 CAPTION PROMPT
 Provide a detailed prompt instructing the social media writer on exactly what to write.
-Outline the specific hook, the core strategic topic, the exact product capabilities to highlight, and the tone.
+If connection_strength is "No Strong Match", the caption prompt must be exactly:
+"No Strong Match was identified between this competitor topic and the available projects." -
+nothing else, and do not proceed to describe a topic or product angle.
+Otherwise, explicitly name selected_project by its real project name and state its actual
+documented capability being highlighted (pulled from <OUR_PROJECT_CONTEXT>, not invented) -
+along with the specific hook, core strategic topic, and tone.
 Do NOT write the actual caption here. Only provide the instructions/context for the writer.
 If characters are selected, characters may be referenced when naturally relevant.
 Do not invent fictional customer experiences, quotes, names, testimonials, personal claims, or unsupported facts.
@@ -273,12 +301,15 @@ If any answer is NO, regenerate the affected output internally.
 
 ### OUTPUT FORMAT
 
-You must perform Steps 1, 2, and 4 internally.
-Your final response MUST be a valid JSON object containing ONLY the final generated content (Step 3), as well as a VERY SHORT list of facts you observed (maximum 2 or 3 facts total, keep them minimal but informative). Do not include your internal reasoning in the final JSON.
+Perform Step 1 and Step 4 internally - do not include that reasoning in the final JSON.
+Step 2's outcome (selected_project, connection_strength) MUST be reported explicitly in the JSON below,
+since it's what downstream generation uses to block output when there's no real project fit.
 
 Respond with exactly this JSON structure and nothing else:
 
 {{
+  "selected_project": "The exact project name from OUR_PROJECT_CONTEXT, or \\"No Strong Match\\"",
+  "connection_strength": "Strong, Moderate, or No Strong Match",
   "observed_facts": ["concise fact 1", "concise fact 2"],
   "caption": "The instructions for the social media writer here (do NOT write the actual caption)...",
   "image_prompt": "The highly detailed multi-slide carousel prompt here...",

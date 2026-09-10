@@ -703,6 +703,18 @@
                                         <option value="with_character">With Character</option>
                                         <option value="without_character">Without Character</option>
                                     </select>
+                                    <div id="characterAssetContainer">
+                                        <label class="form-label small text-muted fw-bold mb-1">Character</label>
+                                        <select class="form-select form-select-sm" id="characterAssetSelect"
+                                            title="Auto-generated uses a text-described AI persona. Ada/Logo use the real brand image as a reference for generated visuals.">
+                                            <option value="auto" selected>AI Auto-Generated Character</option>
+                                            <option value="ada">Ada &mdash; Brand Mascot</option>
+                                            <option value="logo">StradIT Logo</option>
+                                        </select>
+                                        <div class="d-flex align-items-center gap-2 mt-2" id="characterAssetPreview">
+                                            <!-- populated by JS to preview the selected brand asset -->
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <div class="mt-2 flex-shrink-0 pt-2">

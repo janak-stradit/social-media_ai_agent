@@ -466,10 +466,13 @@ class MediaGenerationService:
 
     def _generate_image_openrouter(self, prompt: str, platform: str, size: str, image_path: str | None = None) -> dict:
         """Generate via OpenRouter's dedicated /v1/images API."""
+        # The default routed model (openai/gpt-image-1) only accepts
+        # 1:1, 3:2, 2:3, auto - "16:9" is rejected outright (400). 3:2 is the
+        # closest landscape approximation it actually supports.
         aspect_ratio_map = {
             "instagram": "1:1",
-            "facebook": "16:9",
-            "linkedin": "16:9",
+            "facebook": "3:2",
+            "linkedin": "3:2",
         }
         payload: dict[str, typing.Any] = {
             "model": Config.IMAGE_MODEL,
@@ -531,6 +534,117 @@ class MediaGenerationService:
             }
 
         raise RuntimeError("OpenRouter returned no image data")
+
+    def _upload_reference_to_kie(self, api_key: str, local_path: str) -> str | None:
+        """Uploads a local image to kie.ai's own temporary file host so it
+        gets a real fetchable URL - kie.ai's image_urls input requires an
+        actual URL its servers can reach, not a data: URI, and our images are
+        only served locally. Returns the public downloadUrl, or None on
+        failure (caller falls back to text-to-image rather than hard-failing)."""
+        try:
+            with open(local_path, "rb") as f:
+                upload_resp = requests.post(
+                    "https://kieai.redpandaai.co/api/file-stream-upload",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    files={"file": (os.path.basename(local_path), f)},
+                    data={"uploadPath": "character-references"},
+                    timeout=30,
+                )
+            if not upload_resp.ok:
+                print(f"[Media Service] kie.ai file upload failed: {upload_resp.status_code} - {upload_resp.text[:200]}")
+                return None
+            return ((upload_resp.json() or {}).get("data") or {}).get("downloadUrl")
+        except Exception as e:
+            print(f"[Media Service] kie.ai file upload error: {e}")
+            return None
+
+    def _generate_image_kie(self, prompt: str, platform: str, size: str, image_path: str | None = None) -> dict:
+        """Generate via kie.ai's Google Nano Banana model - the base
+        text-to-image model, or the "edit" variant (image-to-image) when a
+        reference image is given.
+
+        kie.ai's job API is async: createTask returns a taskId immediately,
+        the actual image is only ready once recordInfo reports state=success.
+        callBackUrl is intentionally omitted - it requires a public endpoint
+        kie.ai's servers can reach, which this app doesn't have in local/dev
+        - polling recordInfo works everywhere instead.
+        """
+        import json
+
+        api_key = getattr(Config, "KIE_API_KEY", None) or os.getenv("KIE_API_KEY")
+        if not api_key:
+            raise RuntimeError("KIE_API_KEY is not configured.")
+
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        aspect_ratio_map = {
+            "instagram": "1:1",
+            "facebook": "16:9",
+            "linkedin": "16:9",
+        }
+
+        model = "google/nano-banana"
+        task_input = {
+            "prompt": prompt[:2000],
+            "output_format": "png",
+            "aspect_ratio": aspect_ratio_map.get(platform, "1:1"),
+        }
+
+        resolved_image = self._resolve_image_path(image_path)
+        if resolved_image:
+            reference_url = self._upload_reference_to_kie(api_key, resolved_image)
+            if reference_url:
+                model = "google/nano-banana-edit"
+                task_input["image_urls"] = [reference_url]
+
+        create_resp = requests.post(
+            "https://api.kie.ai/api/v1/jobs/createTask",
+            headers=headers,
+            json={"model": model, "input": task_input},
+            timeout=30,
+        )
+        if not create_resp.ok:
+            raise RuntimeError(f"kie.ai createTask failed: {create_resp.status_code} - {create_resp.text[:300]}")
+
+        task_id = ((create_resp.json() or {}).get("data") or {}).get("taskId")
+        if not task_id:
+            raise RuntimeError(f"kie.ai createTask returned no taskId: {create_resp.text[:300]}")
+
+        # Nano Banana generations are typically fast; poll for up to ~60s.
+        result_url = None
+        for _ in range(30):
+            time.sleep(2)
+            poll_resp = requests.get(
+                "https://api.kie.ai/api/v1/jobs/recordInfo",
+                headers=headers,
+                params={"taskId": task_id},
+                timeout=30,
+            )
+            poll_resp.raise_for_status()
+            poll_data = (poll_resp.json() or {}).get("data") or {}
+            state = poll_data.get("state")
+
+            if state == "success":
+                result = json.loads(poll_data.get("resultJson") or "{}")
+                urls = result.get("resultUrls") or []
+                if urls:
+                    result_url = urls[0]
+                break
+            if state == "fail":
+                raise RuntimeError(f"kie.ai generation failed: {poll_data.get('failMsg') or 'Unknown error'}")
+            # waiting / queuing / generating - keep polling
+
+        if not result_url:
+            raise RuntimeError("kie.ai task timed out or returned no result URL.")
+
+        img_data = requests.get(result_url, timeout=30).content
+        local_filename, _ = self._save_image_bytes(img_data, platform)
+        return {
+            "url": f"/static/uploads/{local_filename}",
+            "original_url": result_url,
+            "prompt": prompt,
+            "model": model,
+            "cost": 0.02,
+        }
 
     # ── Image Generation ───────────────────────────────────────────────────
     def _parse_size(self, size_str: str) -> tuple[int, int]:
@@ -853,7 +967,7 @@ class MediaGenerationService:
         platform: str,
         tone: str | None = None,
         image_path: str | None = None,
-        ai_model: str = "pollinations",
+        ai_model: str = "kie",
     ) -> dict:
         """
         Generate a social media image.
@@ -887,12 +1001,16 @@ class MediaGenerationService:
                 "linkedin": "corporate executive, clean design, high-end business style",
             }.get(platform, "professional and engaging")
             tone_hint = f", {tone} tone" if tone else ""
+            headline = self._extract_headline(caption)
             prompt = (
                 f"Create a professional social media image for {platform.capitalize()} based on the uploaded reference image. "
                 f"Preserve the main subject's exact facial features, hair, skin tone, and visual identity from the reference image. "
                 f"Brief: {caption[:200]}. "
                 f"Style: {platform_style}{tone_hint}. "
-                f"No text overlays, premium quality, highly detailed."
+                f"Render the bold headline text \"{headline}\" in large clean sans-serif typography, high contrast against "
+                f"the background, positioned so it does not cover the subject's face, plus a small 'STRAD IT' wordmark in "
+                f"one corner as a subtle brand tag. Do not add any other text, captions, or watermarks. "
+                f"Premium quality, highly detailed."
             )
         else:
             # If the user provides a detailed prompt (like a Midjourney prompt), use it directly
@@ -912,6 +1030,8 @@ class MediaGenerationService:
                 result = self._generate_image_zai(prompt, platform)
             elif ai_model == "openrouter":
                 result = self._generate_image_openrouter(prompt, platform, size, image_path)
+            elif ai_model == "kie":
+                result = self._generate_image_kie(prompt, platform, size, image_path)
             else:
                 # Default to pollinations
                 result = self._generate_pollinations_image(prompt, platform, size)
@@ -935,6 +1055,62 @@ class MediaGenerationService:
             "cost": result.get("cost", 0.03),
             "model": result.get("model", "bedrock"),
         }
+
+    def generate_carousel_images(
+        self, image_prompt: str, platform: str, reference_image_path: str | None = None
+    ) -> list[dict]:
+        """Splits a multi-slide carousel image_prompt (as produced by
+        StoryAgent.generate_channel_storyline, format: "Slide N (Title): description")
+        into its individual slide descriptions and generates one distinct
+        image per slide via kie.ai - instead of regenerating near-identical
+        "variations" from a single short caption, which is why repeated
+        generations kept coming out with the same background/composition.
+        Each slide naturally looks different since it describes a different
+        scene (hook / problem / solution / outcome), while sharing the
+        prompt's own "Overall Aesthetic/Style" line for a cohesive carousel look.
+        """
+        import re
+
+        if not image_prompt:
+            return []
+
+        style_match = re.search(r"Overall Aesthetic/Style:\s*(.+?)(?=\n\s*Slide\s+\d+|\Z)", image_prompt, re.DOTALL)
+        overall_style = style_match.group(1).strip() if style_match else ""
+
+        slide_matches = list(
+            re.finditer(r"Slide\s+(\d+)\s*\(([^)]+)\):\s*(.+?)(?=\n\s*Slide\s+\d+\s*\(|\Z)", image_prompt, re.DOTALL)
+        )
+        slides = (
+            [(int(m.group(1)), m.group(2).strip(), m.group(3).strip()) for m in slide_matches]
+            if slide_matches
+            else [(1, "Single Image", image_prompt)]
+        )
+
+        results = []
+        for slide_num, slide_title, slide_desc in slides:
+            prompt_parts = []
+            if overall_style:
+                prompt_parts.append(f"Overall style: {overall_style}.")
+            prompt_parts.append(f"Slide {slide_num} ({slide_title}): {slide_desc}")
+            if reference_image_path:
+                prompt_parts.append(
+                    "Preserve the main subject's exact facial features, hair, skin tone, and visual "
+                    "identity from the uploaded reference image."
+                )
+            prompt_parts.append("Include a small 'STRAD IT' wordmark in one corner as a subtle brand tag.")
+            slide_prompt = " ".join(prompt_parts)[:2000]
+
+            try:
+                result = self._generate_image_kie(slide_prompt, platform, "1792x1024", reference_image_path)
+                result["success"] = True
+                result["slide_number"] = slide_num
+                result["slide_title"] = slide_title
+            except Exception as e:
+                print(f"[Media Service] Carousel slide {slide_num} ({slide_title}) generation failed: {e}")
+                result = {"success": False, "slide_number": slide_num, "slide_title": slide_title, "error": str(e)}
+            results.append(result)
+
+        return results
 
     def _generate_google_gemini_image(
         self, prompt: str, platform: str, size: str, image_path: str | None = None
@@ -1398,6 +1574,30 @@ Return JSON with keys:
         cleaned = re.sub(r"\s+", " ", cleaned)
         return cleaned.strip()
 
+    def _extract_headline(self, caption: str) -> str:
+        """Derives a short, complete, punchy headline (under 8 words) from a
+        longer caption for on-image text overlays. A dedicated LLM call
+        rather than blind character truncation, which can chop a phrase off
+        mid-word (e.g. "AI-driven due diligence" -> "AI-dri")."""
+        if not caption:
+            return ""
+        try:
+            headline = self.llm_service.generate(
+                system_prompt=(
+                    "Extract a short, punchy, grammatically complete headline (strictly under 8 words) "
+                    "that captures the core message of the given social media caption. "
+                    "Output ONLY the headline text, nothing else - no quotes, no trailing punctuation."
+                ),
+                user_prompt=caption[:500],
+                temperature=0.5,
+                max_tokens=300,
+            )
+            return headline.strip().strip('"').strip("'")[:80]
+        except Exception as e:
+            print(f"[Media Service] Headline extraction failed: {e}. Using fallback.")
+            trimmed = caption.split(".")[0].split("\n")[0].strip()[:60]
+            return trimmed.rsplit(" ", 1)[0] if " " in trimmed else trimmed
+
     def _enhance_image_prompt(self, user_caption: str, platform: str, tone: str | None = None) -> str:
         """
         Enhance a simple user prompt into a professional, visually rich prompt
@@ -1413,13 +1613,18 @@ Return JSON with keys:
 
         system_prompt = (
             "You are an expert AI image prompt engineer. Your job is to transform a simple social media image request "
-            "into a highly detailed, visually rich, and professional prompt for image generation models (like Amazon Nova Canvas). "
+            "into a highly detailed, visually rich, and professional prompt for image generation models (like Google Nano Banana / Amazon Nova Canvas). "
             "Describe the scene in vivid detail: the main subject, clothing, environment/background, lighting (e.g. volumetric, warm golden hour, professional studio lighting), "
             "composition (e.g. medium shot, rule of thirds), camera details (e.g. shot on 35mm lens, shallow depth of field, sharp focus), and color palette. "
             "Keep the style realistic and photorealistic unless requested otherwise. "
-            "Strictly avoid any text overlays, labels, or watermarks. "
+            "TEXT OVERLAY: Extract a short, punchy headline (under 8 words) that captures the core message of the request. "
+            "Explicitly instruct the image to render that exact headline as bold, clearly legible text integrated into the "
+            "composition (large clean sans-serif typography, high contrast against the background, positioned so it doesn't "
+            "cover the main subject's face). Also instruct a small 'STRAD IT' wordmark to appear subtly in one corner of the "
+            "image, in a small clean font - a brand tag, not the main focus. Do not add any other text, captions, or watermarks "
+            "beyond that one headline and the brand tag. "
             "SOURCE OF TRUTH ENFORCEMENT: The visual prompt must exactly represent the project and problem context given in the request. Do NOT invent or hallucinate features, projects, or problems. "
-            "Output ONLY the final enhanced prompt in a single paragraph, under 500 characters."
+            "Output ONLY the final enhanced prompt in a single paragraph, under 600 characters."
         )
 
         user_prompt = f"Request: {user_caption}\nPlatform: {platform} ({platform_style}){tone_hint}"
@@ -1428,15 +1633,22 @@ Return JSON with keys:
             # 200 tokens was too tight for reasoning models, which spend part of
             # the budget on internal chain-of-thought before the actual answer -
             # under-budgeting risks getting cut off mid-thought instead of the
-            # finished prompt. The final prompt itself is still capped at 500 chars.
+            # finished prompt. The final prompt itself is still capped at 600 chars.
             enhanced = self.llm_service.generate(
-                system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.7, max_tokens=600
+                system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.7, max_tokens=700
             )
-            return enhanced.strip()[:500]
+            return enhanced.strip()[:600]
         except Exception as e:
             print(f"[Media Service] Image prompt enhancement failed: {e}. Using fallback.")
+            # No further LLM call here - the one above just failed. Trim to the
+            # last full word within the limit instead of a blind character cut,
+            # which can chop a phrase off mid-word (e.g. "AI-driven" -> "AI-dri").
+            trimmed = user_caption.split(".")[0].split("\n")[0].strip()[:60]
+            headline = trimmed.rsplit(" ", 1)[0] if " " in trimmed else trimmed
             return (
                 f"A professional, photorealistic social media image for {platform.capitalize()}: {user_caption}. "
+                f"Render the bold headline text \"{headline}\" in large clean sans-serif typography, high contrast, "
+                f"not covering the main subject's face, plus a small 'STRAD IT' wordmark in one corner. "
                 f"Sleek visual composition, shallow depth of field, studio lighting, highly detailed."
             )
 

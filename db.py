@@ -1200,6 +1200,16 @@ def get_content_collections(limit: int = 50) -> list[dict]:
         ]
 
 
+def clear_content_collections() -> int:
+    """Delete every stored Suggested Storyline collection. Used when
+    regenerating the whole list from scratch instead of accumulating on top
+    of a stale prior batch. Returns the number of rows deleted."""
+    with Session(engine) as session:
+        deleted = session.query(ContentCollection).delete()
+        session.commit()
+        return deleted
+
+
 def update_scheduled_post_status(user_id: int, post_id: int, status: str) -> bool:
     """Update status of a scheduled post."""
     from sqlalchemy.orm import Session

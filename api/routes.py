@@ -955,7 +955,7 @@ def generate_media():
         if media_type == "video":
             result = media_service.generate_video(caption_to_use, platform, tone, image_path=image_path)
         else:
-            ai_model = data.get("ai_model", "pollinations")
+            ai_model = data.get("ai_model", "kie")
             # If the client sent context, use it as tone to guide the style
             if "context" in data and data["context"]:
                 tone = data["context"]
@@ -974,6 +974,38 @@ def generate_media():
 
     except Exception as e:
         return jsonify({"error": str(e), "success": False}), 500
+
+
+@api_bp.route("/send-approval-email", methods=["POST"])
+@login_required_api
+def send_approval_email():
+    """Sends an HTML notification email (with the generated asset attached,
+    if it's an image) when a piece of content is approved on the Analysis
+    Dashboard. Fails soft with an error payload rather than a 500 if SMTP
+    isn't configured, since approval itself should still succeed either way."""
+    data = request.get_json(silent=True) or {}
+
+    try:
+        from services.email_service import EmailService
+
+        is_image = (data.get("asset_type") or "").lower() == "image"
+        image_urls = data.get("image_urls") if is_image else None
+        image_path = data.get("image_url") if (is_image and not image_urls) else None
+
+        email_service = EmailService()
+        result = email_service.send_approval_notification(
+            story=data.get("story"),
+            platform=data.get("platform"),
+            competitors=data.get("competitors"),
+            caption=data.get("caption"),
+            asset_type=data.get("asset_type"),
+            image_path=image_path,
+            image_paths=image_urls,
+            slide_titles=data.get("slide_titles"),
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 # ── Credit Extension Requests Endpoints (User Side) ─────────────────────────
@@ -1713,9 +1745,15 @@ def generate_suggested_collections():
 
     try:
         from agents.collection_agent import CollectionAgent
-        from db import get_competitor_posts, get_content_collections, save_content_collections
+        from db import clear_content_collections, get_competitor_posts, get_content_collections, save_content_collections
         from services.embedding_service import EmbeddingService
         from services.stradit_service import StradITService
+
+        # "Regenerate" replaces the shown list rather than accumulating on top
+        # of it - clear whatever's stored before computing the fresh batch, so
+        # a run that finds nothing leaves an honestly-empty list instead of
+        # stale results from a previous scan.
+        clear_content_collections()
 
         posts = get_competitor_posts(platform=platform, competitor=competitor)
         db_stats = {"inserted": 0, "skipped": 0, "new_hashes": []}
