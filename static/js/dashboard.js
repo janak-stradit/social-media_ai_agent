@@ -30,6 +30,39 @@ $(document).ready(function () {
         }
     });
 
+    // Brand character assets selectable under Character Setup. "auto" has no
+    // image - the AI invents a text-described persona instead. "ada"/"logo"
+    // use the real brand image as a reference for generated visuals. Global
+    // (not closure-local) since regenerateImageInCarousel/regenerateModalImage
+    // are defined outside this $(document).ready block.
+    window.CHARACTER_ASSETS = {
+        ada: { path: 'static/img/brand/ada-character.png', url: '/static/img/brand/ada-character.png', label: 'Ada' },
+        logo: { path: 'static/img/brand/stradit-logo.png', url: '/static/img/brand/stradit-logo.png', label: 'StradIT Logo' }
+    };
+
+    // Resolves a pipeline's configured brand character (if any) to the
+    // reference image path media generation should use. Returns null for
+    // "auto" (AI-invented persona, no real reference image) or no config.
+    window.getCharacterAssetPath = function (pipeline) {
+        const character = pipeline && pipeline.characterConfig && pipeline.characterConfig.character;
+        const asset = window.CHARACTER_ASSETS[character];
+        return asset ? asset.path : null;
+    };
+
+    function renderCharacterAssetPreview() {
+        const asset = window.CHARACTER_ASSETS[$('#characterAssetSelect').val()];
+        $('#characterAssetPreview').html(asset
+            ? `<img src="${asset.url}" alt="${asset.label}" style="width: 36px; height: 36px; object-fit: contain; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; padding: 2px;"><span class="small text-muted">${asset.label} will be used as the reference image for generated visuals.</span>`
+            : '');
+    }
+
+    $('#characterModeSelect').on('change', function () {
+        $('#characterAssetContainer').toggleClass('d-none', $(this).val() !== 'with_character');
+    }).trigger('change');
+
+    $('#characterAssetSelect').on('change', renderCharacterAssetPreview);
+    renderCharacterAssetPreview();
+
     // Toast notification helper
     window.showToast = function (message, type = 'info') {
         const bgClass = type === 'success' ? 'bg-success' : type === 'danger' ? 'bg-danger' : type === 'warning' ? 'bg-warning' : 'bg-primary';
@@ -381,6 +414,86 @@ $(document).ready(function () {
     }
 
     window.loadSuggestedCollections();
+
+    // ==========================================
+    // FESTIVE STORYLINES (upcoming US holidays / Indian festivals)
+    // ==========================================
+    window.festiveStorylines = [];
+
+    window.loadFestiveStorylines = function () {
+        $('#festiveStorylinesLoader').removeClass('d-none');
+        $.ajax({
+            url: '/api/festive-storylines?days_ahead=60',
+            type: 'GET',
+            success: function (r) {
+                $('#festiveStorylinesLoader').addClass('d-none');
+                window.festiveStorylines = (r.success && r.festivals) || [];
+                renderFestiveStorylines();
+            },
+            error: function () {
+                $('#festiveStorylinesLoader').addClass('d-none');
+            }
+        });
+    };
+
+    function renderFestiveStorylines() {
+        const list = $('#festiveStorylinesList');
+        if (window.festiveStorylines.length === 0) {
+            list.html('<p class="text-muted small m-0">No upcoming holidays or festivals in the next 60 days.</p>');
+            return;
+        }
+
+        const regionClass = {
+            USA: 'bg-primary-subtle text-primary',
+            India: 'bg-warning-subtle text-warning'
+        };
+
+        let html = '';
+        window.festiveStorylines.forEach((f, idx) => {
+            const badgeClass = regionClass[f.region] || 'bg-secondary-subtle text-secondary';
+            const dateLabel = new Date(f.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+            const daysLabel = f.days_until === 0 ? 'Today' : (f.days_until === 1 ? 'Tomorrow' : `In ${f.days_until} days`);
+
+            html += `
+                <div class="border rounded-4 p-3 flex-shrink-0 d-flex flex-column gap-2" style="min-width: 220px; max-width: 240px; background: #fffbeb;">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <span class="badge rounded-pill ${badgeClass}" style="font-size: 0.65rem;">${escapeHtml(f.region)}</span>
+                        <span class="text-muted small">${daysLabel}</span>
+                    </div>
+                    <h6 class="fw-bold text-dark mb-0" style="font-size: 0.9rem;"><i class="fas fa-champagne-glasses text-warning me-1"></i>${escapeHtml(f.name)}</h6>
+                    <p class="text-muted small mb-0" style="font-size: 0.78rem;">${dateLabel}</p>
+                    <button class="btn btn-sm btn-warning fw-bold rounded-pill mt-auto" onclick="useFestiveStoryline(${idx})">
+                        <i class="fas fa-wand-magic-sparkles me-1"></i>Create Festive Post
+                    </button>
+                </div>
+            `;
+        });
+        list.html(html);
+    }
+
+    // Seeds the context buffer with a festive greeting brief (no competitor
+    // posts) and opens the Synthesis panel, reusing the same Generate
+    // Counter-Strategy -> images/video pipeline as competitor-based
+    // storylines. StoryAgent recognizes the "--- FESTIVE GREETING ---" marker
+    // and skips the strict project-matching gate for this content.
+    window.useFestiveStoryline = function (idx) {
+        const festival = window.festiveStorylines[idx];
+        if (!festival) return;
+
+        $('.comp-master-checkbox').prop('checked', false);
+        $('.competitor-post-card').removeClass('selected-card');
+        $('#selectedPostCount').text(0);
+        $('#selectedPostCountBadge').text('0 Selected');
+
+        const context = `--- FESTIVE GREETING ---\nFestival: ${festival.name}\nDate: ${festival.date}\nRegion: ${festival.region}\n\nCreate a warm, professional festive greeting/social media post for this occasion, reflecting StradIT's brand voice.`;
+        $('#storyContextInput').val(context);
+        $('#generateStoryBtn').prop('disabled', false);
+        openSynthesisPanel();
+
+        showToast(`Ready to create a ${festival.name} post - click Generate Counter-Strategy.`, 'success');
+    };
+
+    window.loadFestiveStorylines();
 
     // Selects every post belonging to a suggested collection and opens the
     // Synthesis panel, reusing the existing manual-selection pipeline as-is.
@@ -778,7 +891,10 @@ $(document).ready(function () {
         }).get().join(', ');
 
         const characterMode = $('#characterModeSelect').length ? $('#characterModeSelect').val() : 'without_character';
-        const characterConfig = { mode: characterMode };
+        const characterAsset = (characterMode === 'with_character' && $('#characterAssetSelect').length)
+            ? $('#characterAssetSelect').val()
+            : 'auto';
+        const characterConfig = { mode: characterMode, character: characterAsset };
 
         window.activePipeline = {
             id: Date.now(),
@@ -1633,6 +1749,43 @@ $(document).ready(function () {
         }
     }
 
+    // Fires the HTML approval-notification email (story context + generated
+    // asset, if it's an image) whenever a piece of content is approved.
+    // Best-effort: failures are logged, never surfaced as an approval error -
+    // the asset is already approved regardless of whether the email sends.
+    function sendApprovalEmail(pipeline, item) {
+        if (!pipeline || !item) return;
+
+        const competitors = pipeline.competitors
+            ? [...new Set(pipeline.competitors.split(',').map(c => c.trim()).filter(Boolean))]
+            : [];
+        const caption = item.type === 'Text (Caption)' ? item.content : (item.caption || '');
+
+        $.ajax({
+            url: '/api/send-approval-email',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                story: pipeline.context || '',
+                platform: item.platform || '',
+                competitors: competitors,
+                caption: caption,
+                asset_type: item.type || '',
+                image_url: item.type === 'image' ? item.content : null
+            }),
+            success: function (res) {
+                if (res.success) {
+                    showToast('Approval notification emailed.', 'info');
+                } else {
+                    console.warn('[Approval Email] Not sent:', res.error);
+                }
+            },
+            error: function (xhr) {
+                console.warn('[Approval Email] Request failed:', xhr.responseJSON?.error || xhr.statusText);
+            }
+        });
+    }
+
     window.approveCarouselItem = function (index) {
         const item = window.currentCarouselAssets[index];
         window.lastGeneratedPipeline = item;
@@ -1735,7 +1888,8 @@ $(document).ready(function () {
                                     caption: captions.primary_caption,
                                     media_type: mediaType,
                                     tone: generatedCount,
-                                    context: $('#preGenImageContext').val()
+                                    context: $('#preGenImageContext').val(),
+                                    image_path: window.getCharacterAssetPath(window.activePipeline)
                                 }),
                                 success: function (mediaRes) {
                                     if (mediaRes.success && mediaRes.url) {
@@ -1823,6 +1977,7 @@ $(document).ready(function () {
                     window.activePipeline.status = 'approved';
                     localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
                     renderPipelineHistory();
+                    sendApprovalEmail(window.activePipeline, window.lastGeneratedPipeline);
                 }
             },
             error: function (err) {
@@ -2116,7 +2271,8 @@ $(document).ready(function () {
                                     caption: captions.primary_caption,
                                     media_type: mediaType,
                                     tone: generatedCount,
-                                    context: $('#modalPreGenImageContext').val()
+                                    context: $('#modalPreGenImageContext').val(),
+                                    image_path: window.getCharacterAssetPath(pipeline)
                                 }),
                                 success: function (mediaRes) {
                                     if (mediaRes.success && mediaRes.url) {
@@ -2197,6 +2353,9 @@ $(document).ready(function () {
 
         renderPipelineModalStepper(window.pipelineHistory.indexOf(pipeline), 'approved');
         showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'approved');
+
+        const assets = Array.isArray(pipeline.assetContent) ? pipeline.assetContent : [pipeline.assetContent];
+        sendApprovalEmail(pipeline, assets[assets.length - 1]);
     };
 
     window.publishModalPipelineContent = function (pipelineId) {
@@ -2422,7 +2581,8 @@ window.regenerateImageInCarousel = function (index) {
             platform: item.platform || 'instagram',
             caption: item.prompt || item.caption,
             media_type: 'image',
-            context: context
+            context: context,
+            image_path: window.getCharacterAssetPath(window.activePipeline)
         }),
         success: function (mediaRes) {
             if (mediaRes.success && mediaRes.url) {
@@ -2473,7 +2633,8 @@ window.regenerateModalImage = function (pipelineId, index, event) {
             platform: item.platform || 'instagram',
             caption: item.prompt || item.caption,
             media_type: 'image',
-            context: context
+            context: context,
+            image_path: window.getCharacterAssetPath(pipeline)
         }),
         success: function (mediaRes) {
             if (mediaRes.success && mediaRes.url) {
