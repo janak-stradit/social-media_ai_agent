@@ -408,6 +408,86 @@ $(document).ready(function () {
 
     window.loadSuggestedCollections();
 
+    // ==========================================
+    // FESTIVE STORYLINES (upcoming US holidays / Indian festivals)
+    // ==========================================
+    window.festiveStorylines = [];
+
+    window.loadFestiveStorylines = function () {
+        $('#festiveStorylinesLoader').removeClass('d-none');
+        $.ajax({
+            url: '/api/festive-storylines?days_ahead=60',
+            type: 'GET',
+            success: function (r) {
+                $('#festiveStorylinesLoader').addClass('d-none');
+                window.festiveStorylines = (r.success && r.festivals) || [];
+                renderFestiveStorylines();
+            },
+            error: function () {
+                $('#festiveStorylinesLoader').addClass('d-none');
+            }
+        });
+    };
+
+    function renderFestiveStorylines() {
+        const list = $('#festiveStorylinesList');
+        if (window.festiveStorylines.length === 0) {
+            list.html('<p class="text-muted small m-0">No upcoming holidays or festivals in the next 60 days.</p>');
+            return;
+        }
+
+        const regionClass = {
+            USA: 'bg-primary-subtle text-primary',
+            India: 'bg-warning-subtle text-warning'
+        };
+
+        let html = '';
+        window.festiveStorylines.forEach((f, idx) => {
+            const badgeClass = regionClass[f.region] || 'bg-secondary-subtle text-secondary';
+            const dateLabel = new Date(f.date).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+            const daysLabel = f.days_until === 0 ? 'Today' : (f.days_until === 1 ? 'Tomorrow' : `In ${f.days_until} days`);
+
+            html += `
+                <div class="border rounded-4 p-3 flex-shrink-0 d-flex flex-column gap-2" style="min-width: 220px; max-width: 240px; background: #fffbeb;">
+                    <div class="d-flex align-items-center justify-content-between">
+                        <span class="badge rounded-pill ${badgeClass}" style="font-size: 0.65rem;">${escapeHtml(f.region)}</span>
+                        <span class="text-muted small">${daysLabel}</span>
+                    </div>
+                    <h6 class="fw-bold text-dark mb-0" style="font-size: 0.9rem;"><i class="fas fa-champagne-glasses text-warning me-1"></i>${escapeHtml(f.name)}</h6>
+                    <p class="text-muted small mb-0" style="font-size: 0.78rem;">${dateLabel}</p>
+                    <button class="btn btn-sm btn-warning fw-bold rounded-pill mt-auto" onclick="useFestiveStoryline(${idx})">
+                        <i class="fas fa-wand-magic-sparkles me-1"></i>Create Festive Post
+                    </button>
+                </div>
+            `;
+        });
+        list.html(html);
+    }
+
+    // Seeds the context buffer with a festive greeting brief (no competitor
+    // posts) and opens the Synthesis panel, reusing the same Generate
+    // Counter-Strategy -> images/video pipeline as competitor-based
+    // storylines. StoryAgent recognizes the "--- FESTIVE GREETING ---" marker
+    // and skips the strict project-matching gate for this content.
+    window.useFestiveStoryline = function (idx) {
+        const festival = window.festiveStorylines[idx];
+        if (!festival) return;
+
+        $('.comp-master-checkbox').prop('checked', false);
+        $('.competitor-post-card').removeClass('selected-card');
+        $('#selectedPostCount').text(0);
+        $('#selectedPostCountBadge').text('0 Selected');
+
+        const context = `--- FESTIVE GREETING ---\nFestival: ${festival.name}\nDate: ${festival.date}\nRegion: ${festival.region}\n\nCreate a warm, professional festive greeting/social media post for this occasion, reflecting StradIT's brand voice.`;
+        $('#storyContextInput').val(context);
+        $('#generateStoryBtn').prop('disabled', false);
+        openSynthesisPanel();
+
+        showToast(`Ready to create a ${festival.name} post - click Generate Counter-Strategy.`, 'success');
+    };
+
+    window.loadFestiveStorylines();
+
     // Selects every post belonging to a suggested collection and opens the
     // Synthesis panel, reusing the existing manual-selection pipeline as-is.
     // A collection can span competitors/platforms outside the current feed

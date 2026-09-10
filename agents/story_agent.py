@@ -41,6 +41,13 @@ class StoryAgent:
         if not character_config:
             character_config = {"mode": "auto", "details": ""}
 
+        # Festive/seasonal greeting content (see services/festival_service.py)
+        # isn't meant to promote a specific product/service, so it skips the
+        # strict project-matching gate entirely instead of being blocked as
+        # "No Strong Match" for not connecting to any StradIT capability.
+        if "--- FESTIVE GREETING ---" in posts_text:
+            return self._generate_festive_storyline(posts_text, character_config, return_usage)
+
         mode = character_config.get("mode", "without_character")
 
         char_rules_prompt = ""
@@ -214,30 +221,38 @@ Extract:
 
 Do not generate the image or video prompt yet.
 
-### STEP 2 — PROJECT MATCHING (STRICT)
+### STEP 2 — PROJECT / SERVICE MATCHING (STRICT)
 
-<OUR_PROJECT_CONTEXT> lists the ONLY real StradIT projects/products that exist. Each project's
-context is introduced by a "=== PROJECT: <NAME> ===" heading - those exact names are the complete
-set of valid selections.
+<OUR_PROJECT_CONTEXT> lists the ONLY real StradIT offerings that exist - both specific software
+products (each introduced by a "=== PROJECT: <NAME> ===" heading) and consulting/engineering
+service lines (each introduced by a "=== SERVICE: <NAME> ===" heading, e.g. Applied AI, Data
+Analytics, Cyber Security, Cloud & Infrastructure, Automated AI Testing, Digital Assets &
+Blockchain, Global Capability Center). A "=== COMPANY OVERVIEW ===" section lists the industries
+and regions StradIT actually operates in - use it to judge plausibility, not as a selectable item
+itself. Together, the named projects and named services are the complete set of valid selections.
 
-Compare the storyline's actual topic/business problem against what each project's documentation
-says it genuinely does. Select the ONE project whose real, documented capabilities most directly
-address the storyline's topic.
+Compare the storyline's actual topic/business problem against what each project or service's
+documentation says it genuinely does. Select the ONE project or service whose real, documented
+capabilities most directly address the storyline's topic - a broad consulting service (e.g. "Cyber
+Security" or "Data Analytics") is just as valid a selection as a named product when it's the
+better fit.
 
-If NONE of the projects genuinely address the storyline's topic - do not force a connection just
-because the topic is in the same broad industry (e.g. "finance"). A tax-advisory or wealth-management
-storyline is NOT automatically about AML risk assessment, fund screening, or alternative-investment
-due diligence just because they're all financial-services topics - only select a project if its
-documented capabilities would let StradIT credibly speak to this specific problem.
+If NONE of them genuinely address the storyline's topic - do not force a connection just because
+the topic is in the same broad industry (e.g. "finance"). A tax-advisory or wealth-management
+storyline is NOT automatically about AML risk assessment, fund screening, alternative-investment
+due diligence, or any listed service just because they're all financial-services topics - only
+select something if its documented capabilities would let StradIT credibly speak to this specific
+problem.
 
 Set:
-* selected_project = the exact project name from <OUR_PROJECT_CONTEXT>, OR the literal string
-  "No Strong Match" if no project's real capabilities genuinely fit.
+* selected_project = the exact project or service name from <OUR_PROJECT_CONTEXT>, OR the literal
+  string "No Strong Match" if nothing genuinely fits.
 * connection_strength = "Strong", "Moderate", or "No Strong Match" (matching selected_project when
   there's no fit).
 
 If selected_project is "No Strong Match", the caption instructions (Step 3) MUST say so explicitly
-and MUST NOT invent a connection to any project - downstream generation blocks entirely in that case.
+and MUST NOT invent a connection to any project or service - downstream generation blocks entirely
+in that case.
 
 {char_rules_prompt}
 
@@ -262,9 +277,9 @@ CAPTION PROMPT
 Provide a detailed prompt instructing the social media writer on exactly what to write.
 If connection_strength is "No Strong Match", the caption prompt must be exactly:
 "No Strong Match was identified between this competitor topic and the available projects." -
-nothing else, and do not proceed to describe a topic or product angle.
-Otherwise, explicitly name selected_project by its real project name and state its actual
-documented capability being highlighted (pulled from <OUR_PROJECT_CONTEXT>, not invented) -
+nothing else, and do not proceed to describe a topic or product/service angle.
+Otherwise, explicitly name selected_project by its real project or service name and state its
+actual documented capability being highlighted (pulled from <OUR_PROJECT_CONTEXT>, not invented) -
 along with the specific hook, core strategic topic, and tone.
 Do NOT write the actual caption here. Only provide the instructions/context for the writer.
 If characters are selected, characters may be referenced when naturally relevant.
@@ -278,14 +293,14 @@ Storyline Alignment
 * Does the image represent the actual storyline?
 * Does the video represent the actual storyline?
 * Does the caption communicate the actual storyline?
-* Is the selected project used accurately?
+* Is the selected project or service used accurately?
 
 Character Consistency
 {validation_prompt}
 
-Product Accuracy
-* Do not invent product capabilities.
-* Do not show functionality that the project does not provide.
+Capability Accuracy
+* Do not invent product or service capabilities.
+* Do not show functionality that the selected project or service does not provide.
 * Do not make unsupported claims.
 
 Final Validation
@@ -303,12 +318,12 @@ If any answer is NO, regenerate the affected output internally.
 
 Perform Step 1 and Step 4 internally - do not include that reasoning in the final JSON.
 Step 2's outcome (selected_project, connection_strength) MUST be reported explicitly in the JSON below,
-since it's what downstream generation uses to block output when there's no real project fit.
+since it's what downstream generation uses to block output when there's no real fit.
 
 Respond with exactly this JSON structure and nothing else:
 
 {{
-  "selected_project": "The exact project name from OUR_PROJECT_CONTEXT, or \\"No Strong Match\\"",
+  "selected_project": "The exact project or service name from OUR_PROJECT_CONTEXT, or \\"No Strong Match\\"",
   "connection_strength": "Strong, Moderate, or No Strong Match",
   "observed_facts": ["concise fact 1", "concise fact 2"],
   "caption": "The instructions for the social media writer here (do NOT write the actual caption)...",
@@ -324,6 +339,48 @@ Respond with exactly this JSON structure and nothing else:
         if result and "prompt" in result:
             result["prompt"] = result["prompt"].strip()
 
+        if return_usage:
+            return result, usage
+        return result
+
+    def _generate_festive_storyline(self, posts_text, character_config, return_usage=False):
+        """Warm, on-brand seasonal/festive greeting content - deliberately
+        does not promote any StradIT product/service or reference
+        competitors, and is never gated by "No Strong Match" the way
+        counter-strategy content is, since a holiday greeting isn't meant to
+        sell a specific capability."""
+        mode = character_config.get("mode", "without_character") if character_config else "without_character"
+        character_line = (
+            "You may include a warm, appropriately dressed character celebrating the occasion if it suits the visual "
+            "- do not describe them performing any product-related or work task."
+            if mode == "with_character"
+            else "Do not include human characters; use festive visual motifs, colors, and StradIT branding instead."
+        )
+
+        system = f"""You are a Content Generation Agent creating a warm, professional seasonal/festive greeting post.
+
+This is a HOLIDAY OR FESTIVAL GREETING, not a competitive counter-strategy. Do NOT reference any
+StradIT product, service, or competitor, and do not force a product pitch into a greeting - the
+whole point is that it's warm and human, not an ad.
+
+{character_line}
+
+BRANDING RULE: If there is a visual of StradIT, the text "Strad" must be strictly ORANGE and "IT"
+must be strictly WHITE. The tagline "Automate.Elevate.Accelerate." may appear subtly in WHITE, but
+only if it doesn't make the greeting feel like an advertisement.
+
+Respond with exactly this JSON structure and nothing else:
+{{
+  "selected_project": "N/A (Festive Greeting)",
+  "connection_strength": "N/A",
+  "observed_facts": ["the festival/holiday name and date, and its cultural/business significance"],
+  "caption": "Instructions for the social media writer: warm, culturally appropriate greeting tone, mention the occasion by name, genuine and not promotional, no CTA or sales language.",
+  "image_prompt": "One rich, festive scene description - colors, motifs, setting appropriate to the occasion - with a small STRAD IT wordmark. No product UI, dashboards, or office/work environments.",
+  "video_prompt": "A short 8-10 second warm festive video script - no product pitch, no work environment."
+}}
+"""
+
+        result, usage = self.llm.generate_json(system, posts_text, temperature=0.6, max_tokens=2000, return_usage=True)
         if return_usage:
             return result, usage
         return result

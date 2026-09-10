@@ -1799,6 +1799,23 @@ def generate_suggested_collections():
         return jsonify({"error": str(e)}), 500
 
 
+@api_bp.route("/festive-storylines", methods=["GET"])
+@login_required_api
+def festive_storylines():
+    """Upcoming US holidays / Indian festivals as a distinct "Festive"
+    Suggested Storyline category - seasonal/greeting content ideas that don't
+    depend on competitor posts. Computed live (deterministic calendar math),
+    not persisted."""
+    try:
+        from services.festival_service import get_upcoming_festivals
+
+        days_ahead = int(request.args.get("days_ahead", 60))
+        festivals = get_upcoming_festivals(days_ahead=days_ahead)
+        return jsonify({"success": True, "festivals": festivals})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @api_bp.route("/stradit-projects", methods=["GET"])
 def get_stradit_projects():
     try:
