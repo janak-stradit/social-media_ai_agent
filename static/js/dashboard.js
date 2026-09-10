@@ -336,10 +336,14 @@ $(document).ready(function () {
             low: 'bg-secondary-subtle text-secondary'
         };
 
+        let usedColls = [];
+        try { usedColls = JSON.parse(localStorage.getItem('usedSuggestedCollections') || '[]'); } catch (e) { usedColls = []; }
+
         let html = '';
         window.suggestedCollections.forEach((c, idx) => {
             const badgeClass = relevanceClass[c.relevance] || relevanceClass.medium;
             const isNew = window.newSuggestedCollectionHashes.has(c.post_urls_hash);
+            const isUsed = usedColls.includes(c.label);
             const tags = [...(c.competitors || []), ...(c.platforms || []).map(p => p.toUpperCase())]
                 .map(t => `<span class="badge bg-light text-dark border" style="font-size: 0.65rem;">${escapeHtml(t)}</span>`)
                 .join(' ');
@@ -354,17 +358,20 @@ $(document).ready(function () {
             }
 
             html += `
-                <div class="border rounded-4 p-3 flex-shrink-0 d-flex flex-column gap-2 position-relative" style="min-width: 260px; max-width: 280px; background: #f8fafc;">
+                <div class="border rounded-4 p-2 flex-shrink-0 d-flex flex-column gap-1 position-relative mt-2" style="min-width: 260px; max-width: 280px; background: #f8fafc;">
                     ${isNew ? '<span class="badge rounded-pill bg-success position-absolute" style="top: -8px; right: 10px; font-size: 0.6rem;">New</span>' : ''}
-                    <div class="d-flex align-items-center justify-content-between">
-                        <span class="badge rounded-pill ${badgeClass} text-uppercase" style="font-size: 0.65rem;">${escapeHtml(c.relevance)}</span>
+                    <div class="d-flex align-items-center justify-content-between badge-row">
+                        <div>
+                            <span class="badge rounded-pill ${badgeClass} text-uppercase" style="font-size: 0.65rem;">${escapeHtml(c.relevance)}</span>
+                            ${isUsed ? '<span class="badge rounded-pill bg-secondary text-white used-tag ms-1" style="font-size: 0.65rem;"><i class="fas fa-check-double me-1"></i>Used</span>' : ''}
+                        </div>
                         <span class="text-muted small">${c.post_count} posts</span>
                     </div>
                     <h6 class="fw-bold text-dark mb-0" style="font-size: 0.9rem;">${escapeHtml(c.label)}</h6>
                     <p class="text-muted small mb-1" style="font-size: 0.78rem; line-height: 1.4;">${escapeHtml(c.description)}</p>
                     <div class="d-flex flex-wrap gap-1">${tags}</div>
                     ${generatedDate ? `<small class="text-muted" style="font-size: 0.68rem;"><i class="fas fa-clock me-1"></i>Generated ${generatedDate}</small>` : ''}
-                    <button class="btn btn-sm btn-primary fw-bold rounded-pill mt-auto" onclick="useSuggestedCollection(${idx})">
+                    <button class="btn btn-sm btn-primary fw-bold rounded-pill mt-auto suggested-collection-btn" onclick="useSuggestedCollection(${idx}, this)">
                         <i class="fas fa-check me-1"></i>Use This Collection
                     </button>
                 </div>
@@ -377,12 +384,27 @@ $(document).ready(function () {
 
     // Selects every post belonging to a suggested collection and opens the
     // Synthesis panel, reusing the existing manual-selection pipeline as-is.
-    // A collection can span competitors/platforms outside the current feed
-    // filter, so the filters are switched to "all" and the feed reloaded
-    // before matching checkboxes by data-post-url.
-    window.useSuggestedCollection = function (idx) {
+    window.useSuggestedCollection = function (idx, btn) {
         const collection = window.suggestedCollections[idx];
         if (!collection) return;
+
+        // If the button was provided, add a professional "Used" tag to the card without disabling the button.
+        if (btn) {
+            const $card = $(btn).closest('.position-relative');
+            const $badgeRow = $card.find('.badge-row > div').first();
+            // Prevent duplicate tags if clicked multiple times
+            if ($card.find('.used-tag').length === 0 && $badgeRow.length) {
+                $badgeRow.append('<span class="badge rounded-pill bg-secondary text-white used-tag ms-1" style="font-size: 0.65rem;"><i class="fas fa-check-double me-1"></i>Used</span>');
+            }
+            
+            // Persist the state
+            let usedColls = [];
+            try { usedColls = JSON.parse(localStorage.getItem('usedSuggestedCollections') || '[]'); } catch (e) { usedColls = []; }
+            if (!usedColls.includes(collection.label)) {
+                usedColls.push(collection.label);
+                localStorage.setItem('usedSuggestedCollections', JSON.stringify(usedColls));
+            }
+        }
 
         const targetUrls = new Set(collection.post_urls || []);
 

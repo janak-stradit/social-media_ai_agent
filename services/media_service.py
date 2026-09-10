@@ -923,6 +923,13 @@ class MediaGenerationService:
                 "error": str(e),
             }
 
+        if "url" in result and result["url"]:
+            import os
+            local_name = result["url"].split("/")[-1]
+            local_path = os.path.join(self.upload_folder, local_name)
+            if os.path.exists(local_path):
+                self._apply_image_watermark(local_path)
+
         return {
             "success": True,
             "type": "image",
@@ -1173,6 +1180,12 @@ class MediaGenerationService:
                 print(
                     "[Media Service] Single-pass native video+audio generated successfully. Skipping separate TTS audio merging."
                 )
+                import os
+                local_name = result["url"].split("/")[-1]
+                local_path = os.path.join(self.upload_folder, local_name)
+                if os.path.exists(local_path):
+                    self._apply_video_watermark(local_path)
+                
                 return {
                     "success": True,
                     "type": "video",
@@ -1314,6 +1327,10 @@ class MediaGenerationService:
                             print(
                                 f"[Media Service] Video successfully cropped/resized to 1080x1420 px at {silent_video_path}"
                             )
+                    
+                    # Apply watermark after processing/saving
+                    self._apply_video_watermark(silent_video_path)
+                    
                 except Exception as merge_err:
                     print(f"[Media Service] Video post-processing failed: {merge_err}")
 
@@ -1383,6 +1400,121 @@ Return JSON with keys:
                 "platform": platform,
                 "error": str(e),
             }
+
+    def _apply_image_watermark(self, image_path: str) -> None:
+        """Overlays Logo.png on the top-right corner of the image."""
+        try:
+            from PIL import Image
+            import os
+            
+            # Use absolute path based on this file's location (services/media_service.py -> ../Logo.png)
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            logo_path = os.path.join(base_dir, "Logo.png")
+            if not os.path.exists(logo_path):
+                print(f"[Media Service] Logo.png not found at {logo_path}, skipping watermark.")
+                return
+
+            with Image.open(image_path) as img:
+                with Image.open(logo_path) as logo:
+                    target_logo_width = int(img.width * (250 / 1080))
+                    aspect = logo.height / logo.width
+                    target_logo_height = int(target_logo_width * aspect)
+                    
+                    logo = logo.resize((target_logo_width, target_logo_height), Image.Resampling.LANCZOS)
+                    if logo.mode != 'RGBA':
+                        logo = logo.convert('RGBA')
+                    
+                    pad_x = int(img.width * (45 / 1080))
+                    pad_y = int(img.height * (45 / 1080))
+                    
+                    pos_x = img.width - target_logo_width - pad_x
+                    pos_y = pad_y
+                    
+                    if img.mode != 'RGBA':
+                        img = img.convert('RGBA')
+                        
+                    overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
+                    overlay.paste(logo, (pos_x, pos_y), mask=logo)
+                    
+                    final_img = Image.alpha_composite(img, overlay)
+                    final_img = final_img.convert('RGB')
+                    final_img.save(image_path)
+                    print(f"[Media Service] Successfully watermarked image: {image_path}")
+        except Exception as e:
+            print(f"[Media Service] Failed to watermark image: {e}")
+
+    def _apply_video_watermark(self, video_path: str) -> None:
+        """Overlays Logo.png at the end of the video."""
+        try:
+            import os
+            
+            # Use absolute path based on this file's location
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            logo_path = os.path.join(base_dir, "Logo.png")
+            if not os.path.exists(logo_path):
+                print(f"[Media Service] Logo.png not found at {logo_path}, skipping video watermark.")
+                return
+
+            try:
+                # MoviePy v1.x imports
+                from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
+            except ImportError:
+                # MoviePy v2.x fallback
+                from moviepy.video.io.VideoFileClip import VideoFileClip
+                from moviepy.video.VideoClip import ImageClip
+                from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
+
+            with VideoFileClip(video_path) as video:
+                duration = video.duration
+                start_time = max(0, duration - 2.0)
+                
+                logo_clip = ImageClip(logo_path)
+                
+                target_logo_width = int(video.w * 0.3)
+                aspect = logo_clip.h / logo_clip.w
+                target_logo_height = int(target_logo_width * aspect)
+                
+                if hasattr(logo_clip, "resized"):
+                    logo_clip = logo_clip.resized((target_logo_width, target_logo_height))
+                else:
+                    logo_clip = logo_clip.resize((target_logo_width, target_logo_height))
+                
+                pos_x = (video.w - target_logo_width) // 2
+                pos_y = (video.h - target_logo_height) // 2
+                
+                if hasattr(logo_clip, "with_start"):
+                    # Moviepy v2
+                    logo_clip = (logo_clip
+                                 .with_start(start_time)
+                                 .with_duration(duration - start_time)
+                                 .with_position((pos_x, pos_y)))
+                    try:
+                        from moviepy.video.fx import CrossFadeIn
+                        logo_clip = logo_clip.with_effects([CrossFadeIn(0.5)])
+                    except ImportError:
+                        pass
+                else:
+                    # Moviepy v1
+                    logo_clip = (logo_clip
+                                 .set_start(start_time)
+                                 .set_duration(duration - start_time)
+                                 .set_position((pos_x, pos_y))
+                                 .crossfadein(0.5))
+                             
+                final_video = CompositeVideoClip([video, logo_clip])
+                
+                temp_path = video_path.replace(".mp4", "_wm.mp4")
+                final_video.write_videofile(
+                    temp_path,
+                    codec="libx264",
+                    audio_codec="aac",
+                    logger=None
+                )
+                
+            os.replace(temp_path, video_path)
+            print(f"[Media Service] Successfully watermarked video: {video_path}")
+        except Exception as e:
+            print(f"[Media Service] Failed to watermark video: {e}")
 
     def _clean_text_for_tts(self, text: str) -> str:
         if not text:

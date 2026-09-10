@@ -98,7 +98,13 @@ Slide 1 (Title/Hook): Deep navy background... [Describe character here]
 Slide 2 (Context/Problem): Split-screen layout...
 Slide 3 (Solution/Capabilities): Full-bleed dark-mode UI dashboard...
 Slide 4 (Outcome/CTA): Deep navy background...
-----------------------"""
+----------------------
+
+BRANDING RULE:
+- Aspect Ratio: Every image/carousel slide must be 1080x1080 (1:1 aspect ratio).
+- Critical Restriction: DO NOT generate any text, logos, or brand names (like "StradIT" or the tagline) anywhere in the image. The image must be completely free of text overlays, as branding will be added programmatically post-generation.
+Ensure these specific styling and positioning rules are explicitly mentioned in every slide description.
+"""
 
             video_prompt = """### VIDEO GENERATION
 Create a video narrative directly derived from the storyline.
@@ -138,7 +144,7 @@ AUDIO:
 A calm, authoritative voiceover saying: "[Voiceover script tailored to the storyline]". Subtle ambient room tone; no dialogue, no sound effects.
 
 BRANDING RULE:
-If there is a visual of StradIT, the text "Strad" must be strictly ORANGE and "IT" must be strictly WHITE. The tagline is "Automate.Elevate.Accelerate" and the tagline color must also be WHITE. Ensure this specific styling is explicitly mentioned in the prompt whenever StradIT is visualized.
+DO NOT generate any text, logos, or brand names (like "StradIT" or the tagline) in the video. The video must be completely free of text overlays, as branding will be added programmatically post-generation.
 ----------------------"""
 
             validation_prompt = """### FINAL CHARACTER VALIDATION
@@ -168,7 +174,13 @@ Slide 1 (Title/Hook): Deep navy background...
 Slide 2 (Context/Problem): Split-screen layout...
 Slide 3 (Solution/Capabilities): Full-bleed dark-mode UI dashboard...
 Slide 4 (Outcome/CTA): Deep navy background...
-----------------------"""
+----------------------
+
+BRANDING RULE:
+- Aspect Ratio: Every image/carousel slide must be 1080x1080 (1:1 aspect ratio).
+- Critical Restriction: DO NOT generate any text, logos, or brand names (like "StradIT" or the tagline) anywhere in the image. The image must be completely free of text overlays, as branding will be added programmatically post-generation.
+Ensure these specific styling and positioning rules are explicitly mentioned in every slide description.
+"""
 
             video_prompt = """### VIDEO GENERATION
 Create a video narrative directly derived from the storyline.
@@ -187,7 +199,7 @@ Follow this exact formatting style:
 Audio: A calm, authoritative voiceover saying: "[Voiceover script]".
 
 BRANDING RULE:
-If there is a visual of StradIT, the text "Strad" must be strictly ORANGE and "IT" must be strictly WHITE. The tagline is "Automate.Elevate.Accelerate" and the tagline color must also be WHITE. Ensure this specific styling is explicitly mentioned in the prompt whenever StradIT is visualized.
+DO NOT generate any text, logos, or brand names (like "StradIT" or the tagline) in the video. The video must be completely free of text overlays, as branding will be added programmatically post-generation.
 ----------------------"""
 
             validation_prompt = """### FINAL CHARACTER VALIDATION
