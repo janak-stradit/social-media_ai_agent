@@ -583,7 +583,7 @@ class MediaGenerationService:
         }
 
         model = "google/nano-banana"
-        task_input = {
+        task_input: dict[str, typing.Any] = {
             "prompt": prompt[:2000],
             "output_format": "png",
             "aspect_ratio": aspect_ratio_map.get(platform, "1:1"),
@@ -995,23 +995,27 @@ class MediaGenerationService:
         has_reference = bool(self._resolve_image_path(image_path))
 
         if has_reference:
-            platform_style = {
-                "instagram": "vibrant, modern style, portrait orientation, highly polished",
-                "facebook": "warm and inviting, polished and clean look, corporate sharing",
-                "linkedin": "corporate executive, clean design, high-end business style",
-            }.get(platform, "professional and engaging")
-            tone_hint = f", {tone} tone" if tone else ""
-            headline = self._extract_headline(caption)
-            prompt = (
-                f"Create a professional social media image for {platform.capitalize()} based on the uploaded reference image. "
-                f"Preserve the main subject's exact facial features, hair, skin tone, and visual identity from the reference image. "
-                f"Brief: {caption[:200]}. "
-                f"Style: {platform_style}{tone_hint}. "
-                f"Render the bold headline text \"{headline}\" in large clean sans-serif typography, high contrast against "
-                f"the background, positioned so it does not cover the subject's face, plus a small 'STRAD IT' wordmark in "
-                f"one corner as a subtle brand tag. Do not add any other text, captions, or watermarks. "
-                f"Premium quality, highly detailed."
-            )
+            if len(caption) > 150 or "midjourney" in caption.lower() or "prompt" in caption.lower() or "slide" in caption.lower():
+                prompt = caption
+                prompt += "\n\nCRITICAL: Use the provided reference image for the character's exact facial features, hair, skin tone, and visual identity. The character in the image MUST look exactly like the reference image."
+            else:
+                platform_style = {
+                    "instagram": "vibrant, modern style, portrait orientation, highly polished",
+                    "facebook": "warm and inviting, polished and clean look, corporate sharing",
+                    "linkedin": "corporate executive, clean design, high-end business style",
+                }.get(platform, "professional and engaging")
+                tone_hint = f", {tone} tone" if tone else ""
+                headline = self._extract_headline(caption)
+                prompt = (
+                    f"Create a professional social media image for {platform.capitalize()} based on the uploaded reference image. "
+                    f"Preserve the main subject's exact facial features, hair, skin tone, and visual identity from the reference image. "
+                    f"Brief: {caption[:200]}. "
+                    f"Style: {platform_style}{tone_hint}. "
+                    f"Render the bold headline text \"{headline}\" in large clean sans-serif typography, high contrast against "
+                    f"the background, positioned so it does not cover the subject's face, plus a small 'STRAD IT' wordmark in "
+                    f"one corner as a subtle brand tag. Do not add any other text, captions, or watermarks. "
+                    f"Premium quality, highly detailed."
+                )
         else:
             # If the user provides a detailed prompt (like a Midjourney prompt), use it directly
             if len(caption) > 150 or "midjourney" in caption.lower() or "prompt" in caption.lower():
@@ -1503,9 +1507,9 @@ class MediaGenerationService:
                             print(
                                 f"[Media Service] Video successfully cropped/resized to 1080x1420 px at {silent_video_path}"
                             )
-                    
                     # Apply watermark after processing/saving
-                    self._apply_video_watermark(silent_video_path)
+                    if silent_video_path is not None:
+                        self._apply_video_watermark(silent_video_path)
                     
                 except Exception as merge_err:
                     print(f"[Media Service] Video post-processing failed: {merge_err}")
@@ -1652,8 +1656,11 @@ Return JSON with keys:
                 
                 if hasattr(logo_clip, "resized"):
                     logo_clip = logo_clip.resized((target_logo_width, target_logo_height))
-                else:
+                elif hasattr(logo_clip, "resize"):
                     logo_clip = logo_clip.resize((target_logo_width, target_logo_height))
+                else:
+                    from moviepy.video.fx.resize import resize
+                    logo_clip = resize(logo_clip, (target_logo_width, target_logo_height))
                 
                 pos_x = (video.w - target_logo_width) // 2
                 pos_y = (video.h - target_logo_height) // 2

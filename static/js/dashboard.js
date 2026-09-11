@@ -31,12 +31,12 @@ $(document).ready(function () {
     });
 
     // Brand character assets selectable under Character Setup. "auto" has no
-    // image - the AI invents a text-described persona instead. "ada"/"logo"
+    // image - the AI invents a text-described persona instead. "aiden"/"logo"
     // use the real brand image as a reference for generated visuals. Global
     // (not closure-local) since regenerateImageInCarousel/regenerateModalImage
     // are defined outside this $(document).ready block.
     window.CHARACTER_ASSETS = {
-        ada: { path: 'static/img/brand/ada-character.png', url: '/static/img/brand/ada-character.png', label: 'Ada' },
+        aiden: { path: 'static/img/brand/aiden-character.png', url: '/static/img/brand/aiden-character.png', label: 'Aiden' },
         logo: { path: 'static/img/brand/stradit-logo.png', url: '/static/img/brand/stradit-logo.png', label: 'StradIT Logo' }
     };
 
@@ -509,7 +509,7 @@ $(document).ready(function () {
             if ($card.find('.used-tag').length === 0 && $badgeRow.length) {
                 $badgeRow.append('<span class="badge rounded-pill bg-secondary text-white used-tag ms-1" style="font-size: 0.65rem;"><i class="fas fa-check-double me-1"></i>Used</span>');
             }
-            
+
             // Persist the state
             let usedColls = [];
             try { usedColls = JSON.parse(localStorage.getItem('usedSuggestedCollections') || '[]'); } catch (e) { usedColls = []; }
@@ -766,10 +766,10 @@ $(document).ready(function () {
         `;
     }
 
-    window.copyPromptTabContent = function(btn) {
+    window.copyPromptTabContent = function (btn) {
         const pane = btn.closest('.prompt-pane');
         const text = pane.querySelector('.prompt-content').innerText;
-        
+
         function onSuccess() {
             const oldHtml = btn.innerHTML;
             btn.innerHTML = '<i class="fas fa-check text-success"></i>';
@@ -974,10 +974,10 @@ $(document).ready(function () {
             error: function (xhr) {
                 $('#generateStoryBtn').prop('disabled', false);
                 $('#generationLoader').addClass('d-none');
-                
+
                 const res = xhr.responseJSON || {};
                 const errText = res.error || 'Network Error.';
-                
+
                 $('#structuredOutput').html(`<div class="text-danger fw-bold"><i class="fas fa-exclamation-triangle me-2"></i>Generation Error: ${escapeHtml(errText)}</div>`);
                 showToast('Generation failed: ' + errText, 'danger');
                 window.activePipeline.status = 'stopped_error';
@@ -1366,7 +1366,7 @@ $(document).ready(function () {
                 </div>
             `;
         }).join('');
-        
+
         const hasImages = items.some(a => (a.type || '').toLowerCase().includes('image'));
         if (hasImages) {
             const imageUrls = items.filter(a => (a.type || '').toLowerCase().includes('image')).map(a => a.content);
@@ -2659,14 +2659,14 @@ window.regenerateModalImage = function (pipelineId, index, event) {
         }
     });
 };
-window.downloadAllAsZip = function(urls) {
+window.downloadAllAsZip = function (urls) {
     if (!urls || urls.length === 0) {
         alert("No images to download!");
         return;
     }
-    
+
     // Show a loading toast or change button state if desired
-    
+
     fetch('/api/download-zip', {
         method: 'POST',
         headers: {
@@ -2674,42 +2674,42 @@ window.downloadAllAsZip = function(urls) {
         },
         body: JSON.stringify({ urls: urls })
     })
-    .then(response => {
-        if (!response.ok) {
-            throw new Error('Network response was not ok');
-        }
-        return response.blob();
-    })
-    .then(blob => {
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.style.display = 'none';
-        a.href = url;
-        a.download = 'generated_assets.zip';
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-    })
-    .catch(error => {
-        console.error('Error downloading zip:', error);
-        alert('Failed to download ZIP file. Please try again later.');
-    });
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Network response was not ok');
+            }
+            return response.blob();
+        })
+        .then(blob => {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = 'generated_assets.zip';
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+        })
+        .catch(error => {
+            console.error('Error downloading zip:', error);
+            alert('Failed to download ZIP file. Please try again later.');
+        });
 };
 
-    // ── KPI Stat Counters Updater ─────────────────────────────────────────
-    function updateKpiMetricsFromHistoryAndDB() {
-        const historyCount = Array.isArray(window.pipelineHistory) ? window.pipelineHistory.length : 0;
-        $('#statPipelinesCount').text(`${historyCount} Runs`);
+// ── KPI Stat Counters Updater ─────────────────────────────────────────
+function updateKpiMetricsFromHistoryAndDB() {
+    const historyCount = Array.isArray(window.pipelineHistory) ? window.pipelineHistory.length : 0;
+    $('#statPipelinesCount').text(`${historyCount} Runs`);
 
-        $.ajax({
-            url: '/api/opportunity-suggestions',
-            type: 'GET',
-            success: function (r) {
-                if (r.success && Array.isArray(r.suggestions)) {
-                    $('#statOpportunitiesCount').text(`${r.suggestions.length} Found`);
-                }
+    $.ajax({
+        url: '/api/opportunity-suggestions',
+        type: 'GET',
+        success: function (r) {
+            if (r.success && Array.isArray(r.suggestions)) {
+                $('#statOpportunitiesCount').text(`${r.suggestions.length} Found`);
             }
-        });
-    }
+        }
+    });
+}
 
-    setTimeout(updateKpiMetricsFromHistoryAndDB, 800);
+setTimeout(updateKpiMetricsFromHistoryAndDB, 800);

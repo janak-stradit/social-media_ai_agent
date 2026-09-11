@@ -56,7 +56,91 @@ class StoryAgent:
         validation_prompt = ""
 
         if mode == "with_character":
-            char_rules_prompt = """### CHARACTER GENERATION
+            selected_char = character_config.get("character", "auto")
+
+            if selected_char != "auto":
+                char_rules_prompt = f"""### CHARACTER GENERATION
+The user has explicitly requested to include a specific brand character: '{selected_char}'.
+You MUST use this exact character in your visual prompts (both image and video). Do not invent a new character.
+Instead of describing a random professional (e.g., 'A 42-year-old Compliance Risk Officer'), describe the brand character '{selected_char}'.
+Ensure the character '{selected_char}' is performing a meaningful business-related action and fits logically into the storyline.
+
+#### Character Profile & Guardrails
+- Professional appearance and business-appropriate clothing (e.g., tailored suit, corporate attire)
+- Maintain the correct gender identity of the selected brand character (e.g., if the character is 'Aiden', explicitly describe him as a male professional).
+- The character should look like a credible professional working in the relevant business environment.
+- Avoid overly casual clothing (no t-shirts, sweatpants, etc.).
+- Avoid exaggerated expressions or treating the character as merely decorative."""
+
+                image_prompt = f"""### IMAGE GENERATION
+Create a highly detailed prompt for a multi-slide Carousel (e.g., 3-5 slides) that directly represents the specific storyline. Each slide must be text-oriented, deeply informative, and visually connected to the others.
+Mimic high-end, colorful, professional layouts (clean typography, data visualization, cohesive vibrant color palette).
+
+Create the image prompt using the specified brand character: '{selected_char}'. The character must be relevant to the storyline, perform a meaningful business-related action, interact naturally with the environment, technology, data, or product.
+Integrate their description directly into the relevant slide descriptions (e.g., Slide 1 or 2).
+
+For Carousels, follow this exact formatting style. Integrate the character description directly into the relevant slide descriptions:
+
+--- EXAMPLE CAROUSEL FORMAT ---
+Overall Aesthetic/Style: Premium institutional financial technology...
+Slide 1 (Title/Hook): Deep navy background... [Describe '{selected_char}' here]
+Slide 2 (Context/Problem): Split-screen layout...
+Slide 3 (Solution/Capabilities): Full-bleed dark-mode UI dashboard...
+Slide 4 (Outcome/CTA): Deep navy background...
+----------------------
+
+BRANDING RULE:
+- Aspect Ratio: Every image/carousel slide must be 1080x1080 (1:1 aspect ratio).
+- Text Overlays & Typography: Include the Slide Title and a short summary sentence directly in the image. The typography MUST be highly professional, soft, minimalist, and pleasant to the eye (mimicking refined corporate fonts like Inter or Helvetica). Keep the font size small and elegant; do NOT make the text massive or overly vibrant. The text MUST be placed carefully in empty negative space (e.g., in a clean corner or side) and MUST NOT overlap the character or key visual elements. Use a soft, sophisticated color palette that meets high-end company standards. It must look like a premium, restrained corporate slide.
+Ensure these specific styling and positioning rules are explicitly mentioned in every slide description.
+"""
+
+                video_prompt = f"""### VIDEO GENERATION
+Create a video narrative directly derived from the storyline.
+
+Use the specified brand character '{selected_char}' consistently throughout the video.
+Create a 15-second cinematic institutional-finance video script featuring the character. Ensure the scenes progress the storyline logically.
+
+Follow this exact formatting style:
+--- EXAMPLE CHARACTER VIDEO FORMAT ---
+Create a 15-second cinematic institutional-finance video based on the storyline...
+
+CHARACTER:
+{selected_char} [Include any specific actions or personality here]. Maintain the same character appearance throughout all scenes.
+
+SCENE 1 — MARKET ENVIRONMENT
+[Detailed description of '{selected_char}' observing the environment]
+
+SCENE 2 — ANALYTICAL CHALLENGE
+[Detailed description of '{selected_char}' encountering the specific problem/challenge]
+
+SCENE 3 — INTELLIGENT ANALYSIS
+[Detailed description of the solution interface and '{selected_char}' interacting with/observing it]
+
+SCENE 4 — DECISION
+[Detailed description of '{selected_char}' confidently taking action based on the insights]
+
+VISUAL STYLE:
+Premium institutional financial technology, cinematic professional lighting, sophisticated financial-data visualization, restrained and credible. Match the exact visual style (e.g., stylized 3D animation) of the provided reference character image. Do not make the character photorealistic if the reference image is stylized.
+
+CHARACTER CONSISTENCY:
+The same character '{selected_char}' must appear consistently throughout all scenes.
+
+AUDIO:
+A calm, authoritative voiceover saying: "[Voiceover script tailored to the storyline]". Subtle ambient room tone; no dialogue, no sound effects.
+
+BRANDING RULE:
+DO NOT generate any text, logos, or brand names (like "StradIT" or the tagline) in the video. The video must be completely free of text overlays, as branding will be added programmatically post-generation.
+----------------------"""
+
+                validation_prompt = f"""### FINAL CHARACTER VALIDATION
+* The specific brand character '{selected_char}' is present
+* Character performs a meaningful action
+* Character fits the business environment
+* Character is consistent across video scenes"""
+
+            else:
+                char_rules_prompt = """### CHARACTER GENERATION
 
 The user has explicitly requested to include a character.
 You MUST automatically create a suitable character based on the storyline, business context, company context, and intended audience.
@@ -89,7 +173,7 @@ Before generating the image and video prompts, internally determine:
 The character should look like a credible professional working in the relevant business environment.
 Avoid generic stock-photo people, random models, unrelated professions, overly casual clothing, exaggerated expressions, characters that do not logically interact with the storyline, or decorative characters with no meaningful purpose."""
 
-            image_prompt = """### IMAGE GENERATION
+                image_prompt = """### IMAGE GENERATION
 Create a highly detailed prompt for a multi-slide Carousel (e.g., 3-5 slides) that directly represents the specific storyline. Each slide must be text-oriented, deeply informative, and visually connected to the others.
 Mimic high-end, colorful, professional layouts (clean typography, data visualization, cohesive vibrant color palette).
 
@@ -109,11 +193,11 @@ Slide 4 (Outcome/CTA): Deep navy background...
 
 BRANDING RULE:
 - Aspect Ratio: Every image/carousel slide must be 1080x1080 (1:1 aspect ratio).
-- Critical Restriction: DO NOT generate any text, logos, or brand names (like "StradIT" or the tagline) anywhere in the image. The image must be completely free of text overlays, as branding will be added programmatically post-generation.
+- Text Overlays & Typography: Include the Slide Title and a short summary sentence directly in the image. The typography MUST be highly professional, soft, minimalist, and pleasant to the eye (mimicking refined corporate fonts like Inter or Helvetica). Keep the font size small and elegant; do NOT make the text massive or overly vibrant. The text MUST be placed carefully in empty negative space (e.g., in a clean corner or side) and MUST NOT overlap the character or key visual elements. Use a soft, sophisticated color palette that meets high-end company standards. It must look like a premium, restrained corporate slide.
 Ensure these specific styling and positioning rules are explicitly mentioned in every slide description.
 """
 
-            video_prompt = """### VIDEO GENERATION
+                video_prompt = """### VIDEO GENERATION
 Create a video narrative directly derived from the storyline.
 
 Use the same AI-generated character consistently throughout the video.
@@ -154,7 +238,7 @@ BRANDING RULE:
 DO NOT generate any text, logos, or brand names (like "StradIT" or the tagline) in the video. The video must be completely free of text overlays, as branding will be added programmatically post-generation.
 ----------------------"""
 
-            validation_prompt = """### FINAL CHARACTER VALIDATION
+                validation_prompt = """### FINAL CHARACTER VALIDATION
 * At least one relevant character is present
 * Character role matches the storyline
 * Character performs a meaningful action
@@ -185,7 +269,7 @@ Slide 4 (Outcome/CTA): Deep navy background...
 
 BRANDING RULE:
 - Aspect Ratio: Every image/carousel slide must be 1080x1080 (1:1 aspect ratio).
-- Critical Restriction: DO NOT generate any text, logos, or brand names (like "StradIT" or the tagline) anywhere in the image. The image must be completely free of text overlays, as branding will be added programmatically post-generation.
+- Text Overlays & Typography: Include the Slide Title and a short summary sentence directly in the image. The typography MUST be highly professional, sleek, and premium (mimicking modern corporate fonts like Inter, Roboto, or Helvetica). Use proper visual hierarchy: bold, clean titles with smaller, elegant subtitle text. Ensure text is perfectly aligned, uses appropriate negative space, and blends harmoniously with the color palette (e.g., crisp white or gold accents on dark navy backgrounds). Avoid basic, clumsy, or overly thick fonts. It must look like a high-end agency-designed graphic.
 Ensure these specific styling and positioning rules are explicitly mentioned in every slide description.
 """
 
