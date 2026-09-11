@@ -908,7 +908,15 @@ def generate_media():
     media_type = data.get("media_type", "image")
     tone = data.get("tone")
     run_id = data.get("run_id")
-    image_path = data.get("image_path")
+    # image_paths (plural) lets the caller supply more than one reference image
+    # (e.g. the Aiden character AND the StradIT logo together) - falls back to
+    # the older singular image_path for callers that only pass one. image_path
+    # stays a single string (used for video gen / source_image_url, which only
+    # support one reference); image_path is a str or list[str] only where
+    # generate_image's kie.ai path can use multiple references.
+    image_paths = [p for p in (data.get("image_paths") or []) if p]
+    image_path = data.get("image_path") or (image_paths[0] if image_paths else None)
+    image_path_for_gen = image_paths if len(image_paths) > 1 else image_path
     user_id = get_current_user_id()
 
     # Credit Limit Check
@@ -942,6 +950,7 @@ def generate_media():
         try:
             run = get_run_by_id(run_id, user_id=user_id)
             image_path = (run or {}).get("content", {}).get("_meta", {}).get("image_path")
+            image_path_for_gen = image_path_for_gen or image_path
         except Exception:
             image_path = None
 
@@ -960,7 +969,7 @@ def generate_media():
             if "context" in data and data["context"]:
                 tone = data["context"]
             result = media_service.generate_image(
-                caption_to_use, platform, tone, image_path=image_path, ai_model=ai_model
+                caption_to_use, platform, tone, image_path=image_path_for_gen, ai_model=ai_model
             )
 
         if image_path:
@@ -1919,7 +1928,11 @@ def download_zip():
         for url in urls:
             if not url:
                 continue
-            path = url.split("?")[0].lstrip("/")
+            # URLs are server-relative (e.g. "/static/uploads/xxx.png") - resolve
+            # against the app's root_path rather than the process cwd, which may
+            # not be the project root depending on how the app was launched.
+            rel_path = url.split("?")[0].lstrip("/").replace("/", os.sep)
+            path = os.path.join(current_app.root_path, rel_path)
             if os.path.exists(path):
                 filename = os.path.basename(path)
                 zf.write(path, arcname=filename)

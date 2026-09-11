@@ -56,14 +56,33 @@ class StoryAgent:
         validation_prompt = ""
 
         if mode == "with_character":
-            selected_char = character_config.get("character", "auto")
+            # "characters" (plural) supports selecting more than one brand asset at
+            # once (e.g. Aiden AND the StradIT logo together). Falls back to the
+            # older singular "character" field for callers that haven't switched.
+            raw_selection = character_config.get("characters")
+            if raw_selection is None:
+                legacy = character_config.get("character", "auto")
+                raw_selection = [legacy] if legacy else []
+            selected_assets = [c for c in raw_selection if c and c != "auto"]
 
-            if selected_char != "auto":
+            asset_labels = {"aiden": "Aiden", "logo": "the StradIT logo"}
+            human_assets = [a for a in selected_assets if a != "logo"]
+            include_logo = "logo" in selected_assets
+
+            if human_assets:
+                selected_char = " and ".join(asset_labels.get(a, a) for a in human_assets)
+                logo_instruction = (
+                    "\nAlso feature the StradIT logo mark naturally integrated into the composition "
+                    "(e.g. on a screen, badge, document header, or corner element) alongside the character."
+                    if include_logo
+                    else ""
+                )
                 char_rules_prompt = f"""### CHARACTER GENERATION
 The user has explicitly requested to include a specific brand character: '{selected_char}'.
 You MUST use this exact character in your visual prompts (both image and video). Do not invent a new character.
 Instead of describing a random professional (e.g., 'A 42-year-old Compliance Risk Officer'), describe the brand character '{selected_char}'.
 Ensure the character '{selected_char}' is performing a meaningful business-related action and fits logically into the storyline.
+{logo_instruction}
 
 #### Character Profile & Guardrails
 - Professional appearance and business-appropriate clothing (e.g., tailored suit, corporate attire)
@@ -78,6 +97,7 @@ Mimic high-end, colorful, professional layouts (clean typography, data visualiza
 
 Create the image prompt using the specified brand character: '{selected_char}'. The character must be relevant to the storyline, perform a meaningful business-related action, interact naturally with the environment, technology, data, or product.
 Integrate their description directly into the relevant slide descriptions (e.g., Slide 1 or 2).
+{logo_instruction}
 
 For Carousels, follow this exact formatting style. Integrate the character description directly into the relevant slide descriptions:
 
@@ -125,6 +145,7 @@ Premium institutional financial technology, cinematic professional lighting, sop
 
 CHARACTER CONSISTENCY:
 The same character '{selected_char}' must appear consistently throughout all scenes.
+{logo_instruction}
 
 AUDIO:
 A calm, authoritative voiceover saying: "[Voiceover script tailored to the storyline]". Subtle ambient room tone; no dialogue, no sound effects.
@@ -137,7 +158,61 @@ DO NOT generate any text, logos, or brand names (like "StradIT" or the tagline) 
 * The specific brand character '{selected_char}' is present
 * Character performs a meaningful action
 * Character fits the business environment
-* Character is consistent across video scenes"""
+* Character is consistent across video scenes{"" if not include_logo else chr(10) + "* The StradIT logo mark is naturally integrated into the composition"}"""
+
+            elif include_logo:
+                # Logo only - no human character selected. Feature the brand
+                # mark itself rather than inventing a decorative person.
+                char_rules_prompt = """### BRAND MARK GENERATION
+The user has requested the StradIT logo be featured as a reference visual element, without a human character.
+Do not invent or describe any human character. Integrate the StradIT logo naturally into the composition (e.g. on a screen, document header, badge, or subtle corner placement) as the visual anchor instead."""
+
+                image_prompt = """### IMAGE GENERATION
+Create a highly detailed prompt for a multi-slide Carousel (e.g., 3-5 slides) that directly represents the specific storyline. Each slide must be text-oriented, deeply informative, and visually connected to the others.
+Mimic high-end, colorful, professional layouts (clean typography, data visualization, cohesive vibrant color palette).
+
+Do not include human characters in the image. Integrate the StradIT logo naturally into the composition (e.g. on a screen, document header, badge, or corner element) as the visual anchor for the brand.
+Use appropriate: Business environments, Financial data, Technology, Market visualizations, Documents, Product interfaces, Objects, Abstract visual metaphors.
+
+For Carousels, follow this exact formatting style:
+
+--- EXAMPLE CAROUSEL FORMAT ---
+Overall Aesthetic/Style: Premium institutional financial technology...
+Slide 1 (Title/Hook): Deep navy background... [reference the StradIT logo placement here]
+Slide 2 (Context/Problem): Split-screen layout...
+Slide 3 (Solution/Capabilities): Full-bleed dark-mode UI dashboard...
+Slide 4 (Outcome/CTA): Deep navy background...
+----------------------
+
+BRANDING RULE:
+- Aspect Ratio: Every image/carousel slide must be 1080x1080 (1:1 aspect ratio).
+- Text Overlays & Typography: Include the Slide Title and a short summary sentence directly in the image. The typography MUST be highly professional, sleek, and premium (mimicking modern corporate fonts like Inter, Roboto, or Helvetica). Use proper visual hierarchy: bold, clean titles with smaller, elegant subtitle text. Ensure text is perfectly aligned, uses appropriate negative space, and blends harmoniously with the color palette. It must look like a high-end agency-designed graphic.
+Ensure these specific styling and positioning rules are explicitly mentioned in every slide description.
+"""
+
+                video_prompt = """### VIDEO GENERATION
+Create a video narrative directly derived from the storyline.
+
+Create a 10-second premium corporate technology video in a single continuous narrative flow.
+Do not introduce human characters. Integrate the StradIT logo naturally into the visual composition. Build the narrative using environments, objects, data, technology, or visual metaphors.
+
+Follow this exact formatting style:
+--- EXAMPLE NON-CHARACTER VIDEO FORMAT ---
+[Overall style description] A premium corporate technology video...
+
+0:00-0:04 [Extremely detailed shot description of a visual metaphor, referencing the StradIT logo placement...]
+0:04-0:08 [Extremely detailed shot description progressing the metaphor...]
+0:08-0:10 [Extremely detailed shot description concluding the metaphor...]
+
+Audio: A calm, authoritative voiceover saying: "[Voiceover script]".
+
+BRANDING RULE:
+DO NOT generate any additional text or brand names beyond the referenced logo mark itself. The video must be otherwise free of text overlays, as further branding will be added programmatically post-generation.
+----------------------"""
+
+                validation_prompt = """### FINAL CHARACTER VALIDATION
+* Are there absolutely no human characters?
+* Is the StradIT logo naturally integrated into the composition?"""
 
             else:
                 char_rules_prompt = """### CHARACTER GENERATION

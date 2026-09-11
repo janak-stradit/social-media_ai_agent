@@ -302,6 +302,14 @@ class MediaGenerationService:
             return candidate
         return None
 
+    def _resolve_image_paths(self, image_path: str | list[str] | None) -> list[str]:
+        """Normalizes the single-image-or-list reference param (multiple
+        brand assets, e.g. Aiden + the StradIT logo, can be combined into one
+        generation) into a list of resolved, existing local file paths."""
+        candidates = image_path if isinstance(image_path, list) else ([image_path] if image_path else [])
+        resolved = [self._resolve_image_path(p) for p in candidates]
+        return [p for p in resolved if p]
+
     def _image_to_data_uri(self, image_path: str) -> str:
         resolved = self._resolve_image_path(image_path)
         if not resolved:
@@ -558,7 +566,9 @@ class MediaGenerationService:
             print(f"[Media Service] kie.ai file upload error: {e}")
             return None
 
-    def _generate_image_kie(self, prompt: str, platform: str, size: str, image_path: str | None = None) -> dict:
+    def _generate_image_kie(
+        self, prompt: str, platform: str, size: str, image_path: str | list[str] | None = None
+    ) -> dict:
         """Generate via kie.ai's Google Nano Banana model - the base
         text-to-image model, or the "edit" variant (image-to-image) when a
         reference image is given.
@@ -589,49 +599,62 @@ class MediaGenerationService:
             "aspect_ratio": aspect_ratio_map.get(platform, "1:1"),
         }
 
-        resolved_image = self._resolve_image_path(image_path)
-        if resolved_image:
-            reference_url = self._upload_reference_to_kie(api_key, resolved_image)
-            if reference_url:
+        resolved_images = self._resolve_image_paths(image_path)
+        if resolved_images:
+            reference_urls = [
+                url for url in (self._upload_reference_to_kie(api_key, p) for p in resolved_images) if url
+            ]
+            if reference_urls:
                 model = "google/nano-banana-edit"
-                task_input["image_urls"] = [reference_url]
+                task_input["image_urls"] = reference_urls
 
-        create_resp = requests.post(
-            "https://api.kie.ai/api/v1/jobs/createTask",
-            headers=headers,
-            json={"model": model, "input": task_input},
-            timeout=30,
-        )
-        if not create_resp.ok:
-            raise RuntimeError(f"kie.ai createTask failed: {create_resp.status_code} - {create_resp.text[:300]}")
-
-        task_id = ((create_resp.json() or {}).get("data") or {}).get("taskId")
-        if not task_id:
-            raise RuntimeError(f"kie.ai createTask returned no taskId: {create_resp.text[:300]}")
-
-        # Nano Banana generations are typically fast; poll for up to ~60s.
-        result_url = None
-        for _ in range(30):
-            time.sleep(2)
-            poll_resp = requests.get(
-                "https://api.kie.ai/api/v1/jobs/recordInfo",
+        def _create_and_poll() -> str | None:
+            """Runs one createTask + poll cycle. Returns the result URL, or
+            None if the task timed out without reaching state=success (a
+            transient stall, not necessarily a real failure - kie.ai
+            occasionally never advances a task past queuing/generating)."""
+            create_resp = requests.post(
+                "https://api.kie.ai/api/v1/jobs/createTask",
                 headers=headers,
-                params={"taskId": task_id},
+                json={"model": model, "input": task_input},
                 timeout=30,
             )
-            poll_resp.raise_for_status()
-            poll_data = (poll_resp.json() or {}).get("data") or {}
-            state = poll_data.get("state")
+            if not create_resp.ok:
+                raise RuntimeError(f"kie.ai createTask failed: {create_resp.status_code} - {create_resp.text[:300]}")
 
-            if state == "success":
-                result = json.loads(poll_data.get("resultJson") or "{}")
-                urls = result.get("resultUrls") or []
-                if urls:
-                    result_url = urls[0]
-                break
-            if state == "fail":
-                raise RuntimeError(f"kie.ai generation failed: {poll_data.get('failMsg') or 'Unknown error'}")
-            # waiting / queuing / generating - keep polling
+            task_id = ((create_resp.json() or {}).get("data") or {}).get("taskId")
+            if not task_id:
+                raise RuntimeError(f"kie.ai createTask returned no taskId: {create_resp.text[:300]}")
+
+            # Nano Banana generations are typically fast; poll for up to ~60s.
+            for _ in range(30):
+                time.sleep(2)
+                poll_resp = requests.get(
+                    "https://api.kie.ai/api/v1/jobs/recordInfo",
+                    headers=headers,
+                    params={"taskId": task_id},
+                    timeout=30,
+                )
+                poll_resp.raise_for_status()
+                poll_data = (poll_resp.json() or {}).get("data") or {}
+                state = poll_data.get("state")
+
+                if state == "success":
+                    result = json.loads(poll_data.get("resultJson") or "{}")
+                    urls = result.get("resultUrls") or []
+                    return urls[0] if urls else None
+                if state == "fail":
+                    raise RuntimeError(f"kie.ai generation failed: {poll_data.get('failMsg') or 'Unknown error'}")
+                # waiting / queuing / generating - keep polling
+            return None
+
+        # A stalled task (never reaching success/fail within the poll window) is
+        # transient often enough that one retry with a brand-new task clears it,
+        # rather than surfacing "variation N failed" to the user immediately.
+        result_url = _create_and_poll()
+        if not result_url:
+            print("[Media Service] kie.ai task timed out - retrying once with a new task...")
+            result_url = _create_and_poll()
 
         if not result_url:
             raise RuntimeError("kie.ai task timed out or returned no result URL.")
@@ -966,7 +989,7 @@ class MediaGenerationService:
         caption: str,
         platform: str,
         tone: str | None = None,
-        image_path: str | None = None,
+        image_path: str | list[str] | None = None,
         ai_model: str = "kie",
     ) -> dict:
         """
@@ -992,7 +1015,10 @@ class MediaGenerationService:
         }
         size = size_map.get(platform, "1024x1024")
 
-        has_reference = bool(self._resolve_image_path(image_path))
+        resolved_references = self._resolve_image_paths(image_path)
+        has_reference = bool(resolved_references)
+        # Providers other than kie.ai only support a single reference image.
+        single_reference = resolved_references[0] if resolved_references else None
 
         if has_reference:
             if len(caption) > 150 or "midjourney" in caption.lower() or "prompt" in caption.lower() or "slide" in caption.lower():
@@ -1025,17 +1051,17 @@ class MediaGenerationService:
 
         try:
             if ai_model == "google_gemini":
-                result = self._generate_google_gemini_image(prompt, platform, size, image_path)
+                result = self._generate_google_gemini_image(prompt, platform, size, single_reference)
             elif ai_model == "openai":
                 result = self._generate_image_openai(prompt, platform, size)
             elif ai_model == "bedrock":
-                result = self._generate_image_bedrock(prompt, platform, size, image_path)
+                result = self._generate_image_bedrock(prompt, platform, size, single_reference)
             elif ai_model == "zai":
                 result = self._generate_image_zai(prompt, platform)
             elif ai_model == "openrouter":
-                result = self._generate_image_openrouter(prompt, platform, size, image_path)
+                result = self._generate_image_openrouter(prompt, platform, size, single_reference)
             elif ai_model == "kie":
-                result = self._generate_image_kie(prompt, platform, size, image_path)
+                result = self._generate_image_kie(prompt, platform, size, resolved_references)
             else:
                 # Default to pollinations
                 result = self._generate_pollinations_image(prompt, platform, size)
@@ -1046,13 +1072,6 @@ class MediaGenerationService:
                 "platform": platform,
                 "error": str(e),
             }
-
-        if "url" in result and result["url"]:
-            import os
-            local_name = result["url"].split("/")[-1]
-            local_path = os.path.join(self.upload_folder, local_name)
-            if os.path.exists(local_path):
-                self._apply_image_watermark(local_path)
 
         return {
             "success": True,
@@ -1068,7 +1087,7 @@ class MediaGenerationService:
         }
 
     def generate_carousel_images(
-        self, image_prompt: str, platform: str, reference_image_path: str | None = None
+        self, image_prompt: str, platform: str, reference_image_path: str | list[str] | None = None
     ) -> list[dict]:
         """Splits a multi-slide carousel image_prompt (as produced by
         StoryAgent.generate_channel_storyline, format: "Slide N (Title): description")
@@ -1580,48 +1599,6 @@ Return JSON with keys:
                 "platform": platform,
                 "error": str(e),
             }
-
-    def _apply_image_watermark(self, image_path: str) -> None:
-        """Overlays Logo.png on the top-right corner of the image."""
-        try:
-            from PIL import Image
-            import os
-            
-            # Use absolute path based on this file's location (services/media_service.py -> ../Logo.png)
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            logo_path = os.path.join(base_dir, "Logo.png")
-            if not os.path.exists(logo_path):
-                print(f"[Media Service] Logo.png not found at {logo_path}, skipping watermark.")
-                return
-
-            with Image.open(image_path) as img:
-                with Image.open(logo_path) as logo:
-                    target_logo_width = int(img.width * (250 / 1080))
-                    aspect = logo.height / logo.width
-                    target_logo_height = int(target_logo_width * aspect)
-                    
-                    logo = logo.resize((target_logo_width, target_logo_height), Image.Resampling.LANCZOS)
-                    if logo.mode != 'RGBA':
-                        logo = logo.convert('RGBA')
-                    
-                    pad_x = int(img.width * (45 / 1080))
-                    pad_y = int(img.height * (45 / 1080))
-                    
-                    pos_x = img.width - target_logo_width - pad_x
-                    pos_y = pad_y
-                    
-                    if img.mode != 'RGBA':
-                        img = img.convert('RGBA')
-                        
-                    overlay = Image.new('RGBA', img.size, (0, 0, 0, 0))
-                    overlay.paste(logo, (pos_x, pos_y), mask=logo)
-                    
-                    final_img = Image.alpha_composite(img, overlay)
-                    final_img = final_img.convert('RGB')
-                    final_img.save(image_path)
-                    print(f"[Media Service] Successfully watermarked image: {image_path}")
-        except Exception as e:
-            print(f"[Media Service] Failed to watermark image: {e}")
 
     def _apply_video_watermark(self, video_path: str) -> None:
         """Overlays Logo.png at the end of the video."""

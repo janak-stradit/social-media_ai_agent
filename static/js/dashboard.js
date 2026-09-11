@@ -40,19 +40,31 @@ $(document).ready(function () {
         logo: { path: 'static/img/brand/stradit-logo.png', url: '/static/img/brand/stradit-logo.png', label: 'StradIT Logo' }
     };
 
-    // Resolves a pipeline's configured brand character (if any) to the
-    // reference image path media generation should use. Returns null for
-    // "auto" (AI-invented persona, no real reference image) or no config.
+    // Resolves a pipeline's configured brand character(s) (if any) to the
+    // reference image path(s) media generation should use. Returns an empty
+    // array when "auto" / nothing selected (AI-invented persona, no real
+    // reference image).
+    window.getCharacterAssetPaths = function (pipeline) {
+        const characters = (pipeline && pipeline.characterConfig && pipeline.characterConfig.characters) || [];
+        return characters
+            .map((c) => window.CHARACTER_ASSETS[c])
+            .filter(Boolean)
+            .map((asset) => asset.path);
+    };
+
+    // Backward-compatible single-path accessor for callers that only support
+    // one reference image (e.g. non-kie.ai providers) - uses the first selected asset.
     window.getCharacterAssetPath = function (pipeline) {
-        const character = pipeline && pipeline.characterConfig && pipeline.characterConfig.character;
-        const asset = window.CHARACTER_ASSETS[character];
-        return asset ? asset.path : null;
+        const paths = window.getCharacterAssetPaths(pipeline);
+        return paths.length ? paths[0] : null;
     };
 
     function renderCharacterAssetPreview() {
-        const asset = window.CHARACTER_ASSETS[$('#characterAssetSelect').val()];
-        $('#characterAssetPreview').html(asset
-            ? `<img src="${asset.url}" alt="${asset.label}" style="width: 36px; height: 36px; object-fit: contain; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; padding: 2px;"><span class="small text-muted">${asset.label} will be used as the reference image for generated visuals.</span>`
+        const selected = $('.character-asset-checkbox:checked').map(function () { return $(this).val(); }).get();
+        const assets = selected.map((c) => window.CHARACTER_ASSETS[c]).filter(Boolean);
+        $('#characterAssetPreview').html(assets.length
+            ? assets.map((asset) => `<img src="${asset.url}" alt="${asset.label}" style="width: 36px; height: 36px; object-fit: contain; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; padding: 2px;">`).join('')
+                + `<span class="small text-muted">${assets.map((a) => a.label).join(' + ')} will be used as the reference image${assets.length > 1 ? 's' : ''} for generated visuals.</span>`
             : '');
     }
 
@@ -60,7 +72,7 @@ $(document).ready(function () {
         $('#characterAssetContainer').toggleClass('d-none', $(this).val() !== 'with_character');
     }).trigger('change');
 
-    $('#characterAssetSelect').on('change', renderCharacterAssetPreview);
+    $('.character-asset-checkbox').on('change', renderCharacterAssetPreview);
     renderCharacterAssetPreview();
 
     // Toast notification helper
@@ -604,27 +616,6 @@ $(document).ready(function () {
         $('#storyContextInput').val(combinedText);
     }
 
-    // ── Workflow Slider & User Journey Stepper Synchronizer ──────────────────
-    window.slideWorkflow = function (stepIndex) {
-        const percentages = [0, -25, -50, -75];
-        const pct = percentages[stepIndex] !== undefined ? percentages[stepIndex] : 0;
-        $('#workflowSlider').css('transform', `translateX(${pct}%)`);
-
-        // Update wizard header step badges
-        $('.wizard-step-badge').removeClass('active');
-        $(`#wizStepBadge${stepIndex}`).addClass('active');
-
-        // Update top 4-step user journey stepper
-        $('.journey-step-item').removeClass('active completed');
-        for (let i = 1; i <= 4; i++) {
-            if (i - 1 < stepIndex) {
-                $(`#journeyStep${i}`).addClass('completed');
-            } else if (i - 1 === stepIndex) {
-                $(`#journeyStep${i}`).addClass('active');
-            }
-        }
-    };
-
     // ── Feed Live Search Filtering ─────────────────────────────────────────
     window.filterFeedPosts = function () {
         const q = ($('#feedSearchInput').val() || '').toLowerCase().trim();
@@ -891,10 +882,10 @@ $(document).ready(function () {
         }).get().join(', ');
 
         const characterMode = $('#characterModeSelect').length ? $('#characterModeSelect').val() : 'without_character';
-        const characterAsset = (characterMode === 'with_character' && $('#characterAssetSelect').length)
-            ? $('#characterAssetSelect').val()
-            : 'auto';
-        const characterConfig = { mode: characterMode, character: characterAsset };
+        const characterAssets = characterMode === 'with_character'
+            ? $('.character-asset-checkbox:checked').map(function () { return $(this).val(); }).get()
+            : [];
+        const characterConfig = { mode: characterMode, characters: characterAssets };
 
         window.activePipeline = {
             id: Date.now(),
@@ -1104,25 +1095,44 @@ $(document).ready(function () {
         const translation = -(stepIndex * 25);
         $('#workflowSlider').css('transform', `translateX(${translation}%)`);
 
-        if (stepIndex === 0) {
-            if (window.activePipeline && window.activePipeline.strategy) {
-                $('#slide1NextBtn').removeClass('d-none');
+        // Update legacy wizard step badges (if any)
+        $('.wizard-step-badge').removeClass('active');
+        $(`#wizStepBadge${stepIndex}`).addClass('active');
+
+        // Update new numbered stepper dots, labels and connectors
+        for (let i = 0; i <= 3; i++) {
+            const $step = $(`#synthStep${i}`);
+            const $conn = $(`#synthConn${i}`);
+            const $dot = $(`#synthDot${i}`);
+
+            $step.removeClass('active completed');
+            if (i < stepIndex) {
+                $step.addClass('completed');
+                $dot.html('<i class="fas fa-check" style="font-size:0.7rem;"></i>');
+            } else if (i === stepIndex) {
+                $step.addClass('active');
+                $dot.text(i + 1);
             } else {
-                $('#slide1NextBtn').addClass('d-none');
+                $dot.text(i + 1);
             }
-        } else if (stepIndex === 1) {
-            if (window.activePipeline && window.activePipeline.assetContent) {
-                $('#slide2NextBtn').removeClass('d-none');
-            } else {
-                $('#slide2NextBtn').addClass('d-none');
-            }
-        } else if (stepIndex === 2) {
-            if (window.activePipeline && window.activePipeline.assetContent) {
-                $('#slide3NextBtn').removeClass('d-none');
-            } else {
-                $('#slide3NextBtn').addClass('d-none');
+
+            if ($conn.length) {
+                $conn.removeClass('done active-conn');
+                if (i < stepIndex) {
+                    $conn.addClass('done');
+                } else if (i === stepIndex) {
+                    $conn.addClass('active-conn');
+                }
             }
         }
+
+        // Update nav buttons disabled states
+        const hasStrategy = !!(window.activePipeline && window.activePipeline.strategy);
+        const hasAssets = !!(window.activePipeline && window.activePipeline.assetContent && window.activePipeline.assetContent.length);
+
+        $('#slide1NextBtn').prop('disabled', !hasStrategy);
+        $('#slide2NextBtn').prop('disabled', !hasAssets);
+        $('#slide3NextBtn').prop('disabled', !hasAssets);
     };
 
     window.approveStrategy = function () {
@@ -1296,9 +1306,30 @@ $(document).ready(function () {
         const items = Array.isArray(assetContent) ? assetContent : [assetContent];
         const html = items.map((a, index) => {
             const type = (a.type || '').toLowerCase();
+            const platform = (a.platform || 'linkedin').toLowerCase();
+
             if (type.includes('video')) {
-                return `<video controls class="w-100 rounded-3 mb-2" src="${a.content}"></video>`;
+                const caption = a.caption || (a.type !== 'Text (Caption)' && items.find(i => i.type === 'Text (Caption)')?.content) || '';
+                const captionBlock = caption ? `
+                    <div class="asset-caption-box">
+                        <div class="asset-caption-label">Caption</div>
+                        <p class="small m-0 text-dark" style="white-space: pre-wrap; line-height: 1.55;">${escapeHtml(caption)}</p>
+                    </div>
+                ` : '';
+
+                return `
+                <div class="asset-media-card rounded-3 border mb-3 overflow-hidden bg-white shadow-sm">
+                    <video controls class="d-block w-100" style="max-height: 380px; background: #000;" src="${a.content}"></video>
+                    ${captionBlock}
+                    <div class="p-2 px-3 bg-white border-top">
+                        <button class="btn btn-outline-secondary btn-sm w-100 fw-bold rounded-pill" onclick="previewPipelineAsset(${pipelineId}, ${index})">
+                            <i class="fas fa-eye me-1"></i>Preview on ${platformDisplayName(a.platform)}
+                        </button>
+                    </div>
+                </div>
+                `;
             }
+
             if (type.includes('image')) {
                 // Ensure history is initialized
                 if (!a.history) {
@@ -1308,33 +1339,55 @@ $(document).ready(function () {
                 let navHtml = '';
                 if (a.history.length > 1 && !isFinal) {
                     navHtml = `
-                        <div class="d-flex gap-2 align-items-center px-2 py-1 rounded me-2" style="background: transparent;">
-                            <i class="fas fa-chevron-left text-white" style="text-shadow: 0 2px 4px rgba(0,0,0,0.8); ${a.historyIndex === 0 ? 'opacity: 0.3; cursor: not-allowed;' : 'cursor: pointer; transition: color 0.2s;'}" ${a.historyIndex > 0 ? `onclick="navigateAssetHistory(${pipelineId}, ${index}, -1, event)"` : ''} title="Previous"></i>
-                            <span class="small text-white fw-bold" style="font-size: 0.85rem; text-shadow: 0 2px 4px rgba(0,0,0,0.8);">${a.historyIndex + 1}/${a.history.length}</span>
-                            <i class="fas fa-chevron-right text-white" style="text-shadow: 0 2px 4px rgba(0,0,0,0.8); ${a.historyIndex === a.history.length - 1 ? 'opacity: 0.3; cursor: not-allowed;' : 'cursor: pointer; transition: color 0.2s;'}" ${a.historyIndex < a.history.length - 1 ? `onclick="navigateAssetHistory(${pipelineId}, ${index}, 1, event)"` : ''} title="Next"></i>
+                        <div class="d-flex gap-2 align-items-center px-2 py-1 rounded me-2" style="background: rgba(0,0,0,0.55);">
+                            <i class="fas fa-chevron-left text-white" style="${a.historyIndex === 0 ? 'opacity: 0.3; cursor: not-allowed;' : 'cursor: pointer;'}" ${a.historyIndex > 0 ? `onclick="navigateAssetHistory(${pipelineId}, ${index}, -1, event)"` : ''} title="Previous"></i>
+                            <span class="small text-white fw-bold" style="font-size: 0.8rem;">${a.historyIndex + 1}/${a.history.length}</span>
+                            <i class="fas fa-chevron-right text-white" style="${a.historyIndex === a.history.length - 1 ? 'opacity: 0.3; cursor: not-allowed;' : 'cursor: pointer;'}" ${a.historyIndex < a.history.length - 1 ? `onclick="navigateAssetHistory(${pipelineId}, ${index}, 1, event)"` : ''} title="Next"></i>
                         </div>
                     `;
                 }
                 let regenHtml = '';
                 if (pipelineId && !isFinal) {
                     regenHtml = `
-                        <button class="btn btn-sm text-white border-0 shadow-none p-1" id="modalRegenImgBtn_${pipelineId}_${index}" onclick="regenerateModalImage(${pipelineId}, ${index}, event)" title="Regenerate with original context" style="background: transparent;">
-                            <i class="fas fa-sync-alt" style="font-size: 1.1rem; text-shadow: 0 2px 4px rgba(0,0,0,0.8);"></i>
+                        <button class="btn btn-sm text-white border-0 shadow-none p-1 asset-regen-btn" id="modalRegenImgBtn_${pipelineId}_${index}" onclick="regenerateModalImage(${pipelineId}, ${index}, event)" title="Regenerate with original context">
+                            <i class="fas fa-sync-alt"></i>
                         </button>
                     `;
                 }
 
+                const caption = a.caption || (a.type !== 'Text (Caption)' && items.find(i => i.type === 'Text (Caption)')?.content) || '';
+                const captionBlock = caption ? `
+                    <div class="asset-caption-box">
+                        <div class="asset-caption-label">Caption</div>
+                        <p class="small m-0 text-dark" style="white-space: pre-wrap; line-height: 1.55;">${escapeHtml(caption)}</p>
+                    </div>
+                ` : '';
+
+                const variationBadge = items.length > 1
+                    ? `<span class="position-absolute badge rounded-pill bg-dark bg-opacity-75 fw-semibold" style="top: 12px; left: 12px; font-size: 0.72rem; z-index: 10;">Variation ${index + 1} of ${items.length}</span>`
+                    : '';
+
                 return `
-                <div class="position-relative mb-2">
-                    <img src="${a.content}" class="w-100 rounded-3" alt="Generated asset">
-                    <div class="position-absolute d-flex gap-2 align-items-center" style="bottom: 15px; right: 15px; z-index: 10;">
-                        ${navHtml}
-                        ${regenHtml}
+                <div class="asset-media-card rounded-3 border mb-3 overflow-hidden bg-white shadow-sm">
+                    <div class="position-relative">
+                        <img src="${a.content}" class="d-block w-100" style="object-fit: cover; max-height: 380px; background: #f3f4f6;" alt="Generated asset">
+                        ${variationBadge}
+                        <div class="position-absolute d-flex gap-2 align-items-center" style="bottom: 12px; right: 12px; z-index: 10;">
+                            ${navHtml}
+                            ${regenHtml}
+                        </div>
+                    </div>
+                    ${captionBlock}
+                    <div class="p-2 px-3 bg-white border-top">
+                        <button class="btn btn-outline-secondary btn-sm w-100 fw-bold rounded-pill" onclick="previewPipelineAsset(${pipelineId}, ${index})">
+                            <i class="fas fa-eye me-1"></i>Preview on ${platformDisplayName(a.platform)}
+                        </button>
                     </div>
                 </div>
                 `;
             }
-            // Ensure history is initialized
+
+            // Text (Caption)
             if (!a.history) {
                 a.history = [a.content];
                 a.historyIndex = 0;
@@ -1342,41 +1395,45 @@ $(document).ready(function () {
 
             let navHtml = '';
             if (a.history.length > 1 && !isFinal) {
-                const pDisabled = a.historyIndex === 0 ? 'opacity: 0.3; cursor: not-allowed;' : 'cursor: pointer; transition: color 0.2s;';
-                const nDisabled = a.historyIndex === a.history.length - 1 ? 'opacity: 0.3; cursor: not-allowed;' : 'cursor: pointer; transition: color 0.2s;';
+                const pDisabled = a.historyIndex === 0 ? 'opacity: 0.3; cursor: not-allowed;' : 'cursor: pointer;';
+                const nDisabled = a.historyIndex === a.history.length - 1 ? 'opacity: 0.3; cursor: not-allowed;' : 'cursor: pointer;';
                 navHtml = `
                     <div class="d-flex gap-2 ms-3 border-start ps-3 align-items-center">
-                        <i class="fas fa-chevron-left text-muted" style="${pDisabled}" ${a.historyIndex > 0 ? `onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="navigateAssetHistory(${pipelineId}, ${index}, -1, event)"` : ''} title="Previous"></i>
+                        <i class="fas fa-chevron-left text-muted" style="${pDisabled}" ${a.historyIndex > 0 ? `onclick="navigateAssetHistory(${pipelineId}, ${index}, -1, event)"` : ''} title="Previous"></i>
                         <span class="small text-muted" style="font-size: 0.75rem;">${a.historyIndex + 1}/${a.history.length}</span>
-                        <i class="fas fa-chevron-right text-muted" style="${nDisabled}" ${a.historyIndex < a.history.length - 1 ? `onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="navigateAssetHistory(${pipelineId}, ${index}, 1, event)"` : ''} title="Next"></i>
+                        <i class="fas fa-chevron-right text-muted" style="${nDisabled}" ${a.historyIndex < a.history.length - 1 ? `onclick="navigateAssetHistory(${pipelineId}, ${index}, 1, event)"` : ''} title="Next"></i>
                     </div>
                 `;
             }
 
             return `
-                <div class="position-relative mb-2">
-                    <div class="position-absolute" style="top: 15px; right: 20px; font-size: 1.1rem; z-index: 10;">
-                        <i class="far fa-copy text-muted" style="cursor:pointer; transition: all 0.2s;" onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="copyCaptionText(this)" title="Copy Caption"></i>
+                <div class="rounded-3 border mb-3 overflow-hidden bg-white shadow-sm">
+                    <div class="d-flex justify-content-between align-items-center p-3 pb-2 border-bottom bg-light">
+                        <span class="small fw-bold text-dark"><i class="fas fa-align-left text-primary me-1"></i>Generated Caption</span>
+                        <div class="d-flex gap-2 align-items-center">
+                            <i class="far fa-copy text-muted" style="cursor:pointer;" onclick="copyCaptionText(this)" title="Copy Caption"></i>
+                            ${pipelineId && !isFinal ? `<i class="fas fa-sync-alt text-muted" style="cursor:pointer;" onclick="regenerateModalCaptionText(${pipelineId}, ${index}, event)" title="Regenerate Caption"></i>` : ''}
+                            ${navHtml}
+                        </div>
                     </div>
-                    <div class="d-flex justify-content-start gap-3 position-absolute align-items-center" style="bottom: 15px; left: 20px; font-size: 1.1rem; z-index: 10;">
-                        ${pipelineId && !isFinal ? `<i class="fas fa-sync-alt text-muted" style="cursor:pointer; transition: color 0.2s;" onmouseover="this.classList.remove('text-muted'); this.classList.add('text-primary');" onmouseout="this.classList.remove('text-primary'); this.classList.add('text-muted');" onclick="regenerateModalCaptionText(${pipelineId}, ${index}, event)" title="Regenerate Caption"></i>` : ''}
-                        ${navHtml}
+                    <div class="p-3 caption-text-content" style="white-space: pre-wrap; font-size: 0.85rem; line-height: 1.6; color: #334155; max-height: 300px; overflow-y: auto;">${a.content}</div>
+                    <div class="p-2 px-3 bg-white border-top">
+                        <button class="btn btn-outline-secondary btn-sm w-100 fw-bold rounded-pill" onclick="previewPipelineAsset(${pipelineId}, ${index})">
+                            <i class="fas fa-eye me-1"></i>Preview on ${platformDisplayName(a.platform)}
+                        </button>
                     </div>
-                    <div class="bg-light rounded-3 p-3 pb-5 caption-text-content" style="white-space: pre-wrap; font-size: 0.75rem; line-height: 1.4; color: #334155;">${a.content}</div>
                 </div>
             `;
         }).join('');
 
-        const hasImages = items.some(a => (a.type || '').toLowerCase().includes('image'));
-        if (hasImages) {
-            const imageUrls = items.filter(a => (a.type || '').toLowerCase().includes('image')).map(a => a.content);
-            const btnHtml = `
-            <button class="btn btn-sm btn-outline-primary w-100 mt-3" onclick='downloadAllAsZip(${JSON.stringify(imageUrls)})'>
-                <i class="fas fa-file-archive me-1"></i>Download All Images (ZIP)
-            </button>`;
-            return html + btnHtml;
-        }
-        return html;
+        const downloadableAssets = items.filter(a => a && (a.type || '').toLowerCase().includes('image') && a.content);
+        const zipBtnHtml = downloadableAssets.length > 1
+            ? `<button class="btn btn-sm btn-outline-primary w-100 fw-bold rounded-pill mt-2" onclick='downloadAllAsZip(${JSON.stringify(downloadableAssets.map(a => a.content))})'>
+                <i class="fas fa-file-archive me-1"></i>Download All Variations (ZIP)
+               </button>`
+            : '';
+
+        return html + zipBtnHtml;
     }
 
     // Builds a plain-text seed message summarizing a pipeline's generated
@@ -1412,9 +1469,18 @@ $(document).ready(function () {
             return;
         }
 
+        // Carry the actual generated image over too (not just its URL as text)
+        // so it shows up as a real attached image in the first chat bubble,
+        // plus every variation's URL for reference/history.
+        const assets = Array.isArray(pipeline.assetContent) ? pipeline.assetContent : [pipeline.assetContent];
+        const imageAssets = assets.filter(a => a && a.type === 'image' && a.content);
+        const primaryImagePath = imageAssets.length ? imageAssets[0].content.replace(/^\//, '') : null;
+
         try {
             localStorage.setItem('incomingStudioChatSeed', JSON.stringify({
                 text: buildStudioChatSeedText(pipeline),
+                imagePath: primaryImagePath,
+                imageUrls: imageAssets.map(a => a.content),
                 sourcePipelineId: pipeline.id,
                 createdAt: new Date().toISOString()
             }));
@@ -1430,89 +1496,228 @@ $(document).ready(function () {
     // #pipelineModalDetail, footer renders inside the fixed #pipelineModalFooter
     // bar pinned to the bottom of the panel - so Reject/Approve/Publish/etc.
     // stay reachable without scrolling, however long the content above is.
-    function getStageDetailHtml(pipeline, stageId) {
+    function buildModalStageHeader(pipeline, stageId, index, title, iconClass, titleColor = 'text-primary') {
+        const curIdx = PIPELINE_STAGES.findIndex(s => s.id === stageId);
+        const reachedIdx = getPipelineReachedIndex(pipeline);
+
+        const canGoPrev = curIdx > 0;
+        const prevStageId = canGoPrev ? PIPELINE_STAGES[curIdx - 1].id : null;
+
+        const canGoNext = curIdx < reachedIdx;
+        const nextStageId = curIdx < PIPELINE_STAGES.length - 1 ? PIPELINE_STAGES[curIdx + 1].id : null;
+
+        return `
+            <div class="synth-slide-header rounded-3 mb-3 border p-2 px-3 bg-white">
+                <button class="synth-nav-btn" ${canGoPrev ? `onclick="showPipelineStageDetail(${index}, '${prevStageId}')"` : 'disabled'}>
+                    <i class="fas fa-chevron-left" style="font-size:0.65rem;"></i> Prev
+                </button>
+                <div class="synth-slide-title">
+                    <i class="${iconClass} ${titleColor}" style="font-size:0.85rem;"></i>
+                    ${title}
+                </div>
+                <button class="synth-nav-btn primary-nav" ${canGoNext ? `onclick="showPipelineStageDetail(${index}, '${nextStageId}')"` : 'disabled'}>
+                    Next <i class="fas fa-chevron-right" style="font-size:0.65rem;"></i>
+                </button>
+            </div>
+        `;
+    }
+
+    // Returns {body, footer}: body renders inside the scrollable
+    // #pipelineModalDetail, footer renders inside the fixed #pipelineModalFooter
+    // bar pinned to the bottom of the panel - so Reject/Approve/Publish/etc.
+    // stay reachable without scrolling, however long the content above is.
+    function getStageDetailHtml(pipeline, stageId, index) {
+        if (index === undefined || index === null || index < 0) {
+            index = window.pipelineHistory.indexOf(pipeline);
+        }
+
         if (stageId === 'intel_selected') {
             const competitorsList = pipeline.competitors
                 ? [...new Set(pipeline.competitors.split(',').map(c => c.trim()).filter(Boolean))].join(', ')
                 : 'None';
             const safeContext = (pipeline.context || '').replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            const headerHtml = buildModalStageHeader(pipeline, stageId, index, '1. Captured Intel Context', 'fas fa-layer-group', 'text-primary');
+
             const body = `
-                <h6 class="fw-bold text-primary mb-3"><i class="fas fa-layer-group me-2"></i>Post Pipeline</h6>
-                <p class="small text-muted mb-2"><strong class="text-dark">Analysis:</strong> ${competitorsList}</p>
+                ${headerHtml}
+                <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+                    <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-2 py-1"><i class="fas fa-building-columns me-1"></i>Competitor: ${competitorsList}</span>
+                    <span class="badge bg-light text-secondary border px-2 py-1"><i class="fas fa-clock me-1"></i>${new Date(pipeline.timestamp).toLocaleString()}</span>
+                </div>
 
                 <div id="intelSelectedReadMode">
-                    <div class="bg-light rounded-3 p-3 small" style="white-space: pre-wrap; max-height: 320px; overflow-y: auto;">${pipeline.context || 'No context captured for this pipeline.'}</div>
-                    <div class="mt-3 d-flex gap-2">
-                        <button class="btn btn-sm btn-outline-primary fw-bold" onclick="$('#intelSelectedReadMode').addClass('d-none'); $('#intelSelectedEditMode').removeClass('d-none');"><i class="fas fa-edit me-1"></i>Edit Context</button>
+                    <div class="bg-light rounded-3 p-3 mb-3 border" style="white-space: pre-wrap; font-size: 0.85rem; line-height: 1.6; max-height: 380px; overflow-y: auto;">${pipeline.context || 'No context captured for this pipeline.'}</div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-primary rounded-pill fw-bold px-3" onclick="$('#intelSelectedReadMode').addClass('d-none'); $('#intelSelectedEditMode').removeClass('d-none');">
+                            <i class="fas fa-edit me-1"></i>Edit Context
+                        </button>
                     </div>
                 </div>
 
                 <div id="intelSelectedEditMode" class="d-none">
-                    <textarea class="form-control textarea-premium small mb-2" id="editPipelineContextArea" style="min-height: 320px;">${safeContext}</textarea>
+                    <textarea class="form-control textarea-premium small mb-3" id="editPipelineContextArea" style="min-height: 320px; font-size: 0.85rem;">${safeContext}</textarea>
                     <div class="d-flex gap-2 justify-content-end">
-                        <button class="btn btn-sm btn-light fw-bold" onclick="$('#intelSelectedEditMode').addClass('d-none'); $('#intelSelectedReadMode').removeClass('d-none');">Cancel</button>
-                        <button class="btn btn-sm btn-success fw-bold" onclick="saveAndRerunPipelineStrategy(${pipeline.id})"><i class="fas fa-save me-1"></i>Save & Rerun</button>
+                        <button class="btn btn-sm btn-light rounded-pill fw-bold px-3" onclick="$('#intelSelectedEditMode').addClass('d-none'); $('#intelSelectedReadMode').removeClass('d-none');">Cancel</button>
+                        <button class="btn btn-sm btn-success rounded-pill fw-bold px-3 shadow-sm" onclick="saveAndRerunPipelineStrategy(${pipeline.id})">
+                            <i class="fas fa-save me-1"></i>Save & Rerun
+                        </button>
                     </div>
                 </div>
             `;
-            return { body, footer: '' };
+
+            const footer = pipeline.strategy
+                ? `<button class="btn btn-primary action-btn flex-grow-1 shadow-sm" onclick="showPipelineStageDetail(${index}, 'strategy_generated')"><i class="fas fa-arrow-right me-2"></i>Proceed to Strategy Output</button>`
+                : `<button class="btn btn-primary action-btn flex-grow-1 shadow-sm" onclick="saveAndRerunPipelineStrategy(${pipeline.id})"><i class="fas fa-bolt me-2"></i>Generate Counter-Strategy</button>`;
+
+            return { body, footer };
         }
+
         if (stageId === 'strategy_generated') {
-            if (!pipeline.strategy) return { body: emptyStageState('Counter strategy has not been generated yet.'), footer: '' };
+            const headerHtml = buildModalStageHeader(pipeline, stageId, index, '2. Counter Strategy Output', 'fas fa-brain', 'text-success');
+
+            if (!pipeline.strategy) {
+                return { body: `${headerHtml}${emptyStageState('Counter strategy has not been generated yet.')}`, footer: '' };
+            }
+
             const facts = (pipeline.strategy.observed_facts || [])
-                .map(f => `<span class="badge rounded-pill bg-white text-primary border border-primary px-3 py-2 me-2 mb-2 text-wrap text-start" style="font-size: 0.8rem; font-weight: 600; line-height: 1.4;">${f}</span>`)
+                .map(f => `<span class="badge rounded-pill bg-white text-primary border border-primary px-3 py-2 me-2 mb-2 text-wrap text-start" style="font-size: 0.8rem; font-weight: 600; line-height: 1.4;"><i class="fas fa-lightbulb text-warning me-1"></i>${f}</span>`)
                 .join('');
 
             const body = `
-                <h6 class="fw-bold text-primary mb-3"><i class="fas fa-brain me-2"></i>Counter Strategy Generated</h6>
-                <div class="mb-3 d-flex flex-wrap">${facts || '<span class="text-muted small">No observed facts recorded.</span>'}</div>
+                ${headerHtml}
+                <div class="mb-3">
+                    <label class="small text-muted fw-bold text-uppercase tracking-wider mb-2 d-block">Observed Market Facts & Patterns</label>
+                    <div class="d-flex flex-wrap">${facts || '<span class="text-muted small">No observed facts recorded.</span>'}</div>
+                </div>
                 <div class="mb-3 w-100">${formatPromptTabs(pipeline.strategy, pipeline.id)}</div>
             `;
-            const footer = `
-                <button class="btn btn-outline-danger action-btn flex-grow-1" onclick="rejectPipelineStrategy(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject</button>
-                <button class="btn btn-success action-btn flex-grow-1" onclick="approvePipelineStrategy(${pipeline.id})"><i class="fas fa-check me-1"></i>Approve & Continue</button>
-            `;
+
+            const footer = pipeline.assetContent && pipeline.assetContent.length
+                ? `
+                    <button class="btn btn-outline-danger action-btn" onclick="rejectPipelineStrategy(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject</button>
+                    <button class="btn btn-primary action-btn flex-grow-1 shadow-sm" onclick="showPipelineStageDetail(${index}, 'asset_generated')"><i class="fas fa-arrow-right me-2"></i>View Generated Assets</button>
+                `
+                : `
+                    <button class="btn btn-outline-danger action-btn" onclick="rejectPipelineStrategy(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject</button>
+                    <button class="btn btn-success action-btn flex-grow-1 shadow-sm" onclick="approvePipelineStrategy(${pipeline.id})"><i class="fas fa-magic me-2"></i>Generate Content Assets</button>
+                `;
+
             return { body, footer };
         }
+
         if (stageId === 'asset_generated') {
-            if (!pipeline.assetContent) return { body: emptyStageState('Content has not been generated yet.'), footer: '' };
+            const headerHtml = buildModalStageHeader(pipeline, stageId, index, `3. Generated Content & Assets ${pipeline.assetType ? `<span class="badge bg-light text-dark border ms-1 font-monospace">${pipeline.assetType}</span>` : ''}`, 'fas fa-magic', 'text-primary');
+
+            if (!pipeline.assetContent) {
+                const wasApproved = pipeline.status === 'approved' || pipeline.status === 'published';
+                const msg = wasApproved
+                    ? 'This run was approved from an older session and its full generated content was not saved. Start a new run to regenerate.'
+                    : 'Content has not been generated yet.';
+                return { body: `${headerHtml}${emptyStageState(msg)}`, footer: '' };
+            }
+
             const body = `
-                <h6 class="fw-bold text-primary mb-3"><i class="fas fa-magic me-2"></i>Content Generated ${pipeline.assetType ? `<span class="badge bg-light text-dark border ms-1">${pipeline.assetType}</span>` : ''}</h6>
-                <div style="max-height: 75vh; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent, pipeline.id)}</div>
+                ${headerHtml}
+                <div class="mb-3">${renderAssetItems(pipeline.assetContent, pipeline.id)}</div>
             `;
+
             const footer = `
-                <button class="btn btn-outline-danger action-btn flex-grow-1" onclick="rejectPipelineAsset(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject Asset</button>
-                <button class="btn btn-success action-btn flex-grow-1" onclick="approvePipelineAsset(${pipeline.id})"><i class="fas fa-check me-1"></i>Approve Asset</button>
+                <button class="btn btn-outline-danger action-btn" onclick="rejectPipelineAsset(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject</button>
+                <button class="btn btn-success action-btn flex-grow-1 shadow-sm" onclick="approvePipelineAsset(${pipeline.id})"><i class="fas fa-check me-2"></i>Approve Asset</button>
                 <button class="btn btn-outline-primary action-btn flex-grow-1" onclick="sendPipelineToStudioChat(${pipeline.id})">
                     <i class="fas fa-comments me-1"></i>Refine in Studio Chat
                 </button>
             `;
+
             return { body, footer };
         }
+
         if (stageId === 'approved') {
-            if (pipeline.status !== 'approved' && pipeline.status !== 'published') return { body: emptyStageState('This asset has not been approved yet.'), footer: '' };
+            const headerHtml = buildModalStageHeader(pipeline, stageId, index, '4. Approved Asset Review', 'fas fa-thumbs-up', 'text-success');
+
+            if (pipeline.status !== 'approved' && pipeline.status !== 'published') {
+                return { body: `${headerHtml}${emptyStageState('This asset has not been approved yet.')}`, footer: '' };
+            }
+
             const body = `
-                <h6 class="fw-bold text-success mb-3"><i class="fas fa-thumbs-up me-2"></i>Asset Approved</h6>
-                <p class="small text-muted">This asset was reviewed and approved for publishing.</p>
-                ${pipeline.assetContent ? `<div style="max-height: 320px; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent, pipeline.id, true)}</div>` : ''}
+                ${headerHtml}
+                <div class="alert alert-success d-flex align-items-center gap-3 p-3 rounded-3 mb-3 border-0 shadow-sm" style="background:#f0fdf4;">
+                    <div class="rounded-circle d-flex align-items-center justify-content-center bg-success text-white" style="width:36px; height:36px; flex-shrink:0;">
+                        <i class="fas fa-check"></i>
+                    </div>
+                    <div>
+                        <strong class="text-success d-block">Asset Approved</strong>
+                        <small class="text-slate-600">This asset has been approved by the reviewer and is ready for live publishing.</small>
+                    </div>
+                </div>
+                ${pipeline.assetContent ? `<div class="mb-3">${renderAssetItems(pipeline.assetContent, pipeline.id, true)}</div>` : ''}
             `;
+
             const footer = pipeline.status === 'approved' ? `
-                <button class="btn btn-dark action-btn flex-grow-1" onclick="publishModalPipelineContent(${pipeline.id})" id="modalPublishBtn">
+                <button class="btn btn-dark action-btn flex-grow-1 shadow-sm" onclick="publishModalPipelineContent(${pipeline.id})" id="modalPublishBtn">
                     <i class="fas fa-paper-plane me-2"></i>Publish to Platforms
                 </button>
-            ` : '';
+                <button class="btn btn-outline-primary action-btn flex-grow-1" onclick="sendPipelineToStudioChat(${pipeline.id})">
+                    <i class="fas fa-comments me-1"></i>Refine in Studio Chat
+                </button>
+            ` : `
+                <button class="btn btn-outline-primary action-btn flex-grow-1" onclick="sendPipelineToStudioChat(${pipeline.id})">
+                    <i class="fas fa-comments me-1"></i>Refine in Studio Chat
+                </button>
+            `;
+
             return { body, footer };
         }
+
         if (stageId === 'published') {
-            if (pipeline.status !== 'published') return { body: emptyStageState('This pipeline has not been published yet.'), footer: '' };
+            const headerHtml = buildModalStageHeader(pipeline, stageId, index, '5. Live Published Asset', 'fas fa-paper-plane', 'text-dark');
+
+            if (pipeline.status !== 'published') {
+                return { body: `${headerHtml}${emptyStageState('This pipeline has not been published yet.')}`, footer: '' };
+            }
+
             const body = `
-                <h6 class="fw-bold text-dark mb-3"><i class="fas fa-paper-plane me-2"></i>Published</h6>
-                <p class="small text-muted">This content has been published live.</p>
-                ${pipeline.assetContent ? `<div style="max-height: 320px; overflow-y: auto;" class="mb-3">${renderAssetItems(pipeline.assetContent, pipeline.id, true)}</div>` : ''}
+                ${headerHtml}
+                <div class="alert alert-dark d-flex align-items-center gap-3 p-3 rounded-3 mb-3 border-0 shadow-sm" style="background:#0f172a; color:#fff;">
+                    <div class="rounded-circle d-flex align-items-center justify-content-center text-white" style="width:36px; height:36px; background:#10b981; flex-shrink:0;">
+                        <i class="fas fa-paper-plane"></i>
+                    </div>
+                    <div>
+                        <strong class="d-block" style="color:#34d399;">Live Published</strong>
+                        <small style="color:#cbd5e1;">Content was published successfully across target platform accounts.</small>
+                    </div>
+                </div>
+                ${pipeline.assetContent ? `<div class="mb-3">${renderAssetItems(pipeline.assetContent, pipeline.id, true)}</div>` : ''}
             `;
-            return { body, footer: '' };
+
+            const footer = `
+                <button class="btn btn-outline-primary action-btn flex-grow-1" onclick="sendPipelineToStudioChat(${pipeline.id})">
+                    <i class="fas fa-comments me-1"></i>Refine in Studio Chat
+                </button>
+            `;
+
+            return { body, footer };
         }
+
         return { body: emptyStageState('No details available for this stage.'), footer: '' };
+    }
+
+    // Determines the furthest PIPELINE_STAGES index a pipeline has actually
+    // reached from its real content (strategy/assetContent/status), instead
+    // of string-matching pipeline.status against stage ids - status carries
+    // transitional values (e.g. "asset_generating") and reused terminal
+    // values (e.g. "rejected"/"stopped_error" at different points in the
+    // flow) that don't map 1:1 to a stage id, which was causing "Content
+    // Generated" to look unreached (and default back to "Post Pipeline")
+    // even when assets had actually been generated.
+    function getPipelineReachedIndex(pipeline) {
+        const status = pipeline.status || 'unknown';
+        let idx = 0; // intel_selected - reached as soon as a pipeline exists
+        if (pipeline.strategy) idx = 1; // strategy_generated
+        if (pipeline.assetContent) idx = 2; // asset_generated
+        if (status === 'approved' || status === 'published') idx = 3;
+        if (status === 'published') idx = 4;
+        return idx;
     }
 
     window.openPipelineModal = function (index) {
@@ -1521,7 +1726,7 @@ $(document).ready(function () {
 
         // Default the detail view to the furthest reached stage
         const pipelineStatus = pipeline.status || 'unknown';
-        const reachedIdx = Math.max(0, PIPELINE_STAGES.findIndex(s => s.id === pipelineStatus));
+        const reachedIdx = getPipelineReachedIndex(pipeline);
 
         const hasError = pipelineStatus.startsWith('stopped') || pipelineStatus === 'rejected';
         const stageLabel = (PIPELINE_STAGES.find(s => s.id === pipelineStatus) || {}).label;
@@ -1545,55 +1750,49 @@ $(document).ready(function () {
         const pipeline = window.pipelineHistory[index];
         const pipelineStatus = pipeline.status || 'unknown';
         const hasError = pipelineStatus.startsWith('stopped') || pipelineStatus === 'rejected';
+        const reachedIdx = getPipelineReachedIndex(pipeline);
 
-        let reachedStatus = true;
-        let stepperHtml = '<div class="pipeline-timeline">';
+        let stepperHtml = '';
         PIPELINE_STAGES.forEach((step, stepIdx) => {
-            let badgeClass = 'bg-secondary';
-            let textClass = 'text-muted';
-            let stepIcon = step.icon;
-            const isReached = reachedStatus;
-
-            if (reachedStatus) {
-                badgeClass = 'bg-primary';
-                textClass = 'text-dark fw-bold';
-            }
-            if (pipelineStatus === step.id) {
-                reachedStatus = false;
-                if (hasError) {
-                    badgeClass = 'bg-danger';
-                    textClass = 'text-danger fw-bold';
-                    stepIcon = 'fa-times';
-                }
-            }
-            if (hasError && !reachedStatus && pipelineStatus !== step.id) {
-                badgeClass = 'bg-light border text-muted';
-            }
+            const isReached = stepIdx <= reachedIdx;
             const isViewing = step.id === activeStageId;
-            if (isViewing) {
-                textClass += ' text-primary';
+            const isCompleted = stepIdx < reachedIdx || (isReached && !isViewing && (pipeline.status === 'approved' || pipeline.status === 'published' || stepIdx < reachedIdx));
+
+            let stepClass = 'synth-step';
+            if (isViewing) stepClass += ' active';
+            else if (isCompleted) stepClass += ' completed';
+
+            let dotContent = stepIdx + 1;
+            if (isCompleted) {
+                dotContent = '<i class="fas fa-check" style="font-size:0.65rem;"></i>';
+            } else if (hasError && stepIdx === reachedIdx) {
+                dotContent = '<i class="fas fa-times" style="font-size:0.65rem;"></i>';
+            } else if (!isReached) {
+                dotContent = '<i class="fas fa-lock" style="font-size:0.6rem;"></i>';
             }
 
-            // Stages the pipeline hasn't reached yet aren't clickable - guides
-            // the journey step-by-step instead of letting users click ahead
-            // into an empty "not generated yet" state with no explanation.
-            const stateClass = isReached ? 'pipeline-stage-row-clickable' : 'pipeline-stage-row-locked';
-            const rowClick = isReached
+            const stepLabels = ['Intel', 'Strategy', 'Content', 'Approved', 'Published'];
+            const label = stepLabels[stepIdx] || step.label;
+
+            const clickHandler = isReached
                 ? `onclick="showPipelineStageDetail(${index}, '${step.id}')"`
                 : `onclick="showToast('Complete the previous step first.', 'info')"`;
-            const rowTitle = isReached ? '' : 'title="Complete the previous step first"';
-            const viewingClass = isViewing ? ' pipeline-stage-row-active' : '';
+            const rowTitle = isReached ? `title="View ${step.label}"` : 'title="Complete the previous step first"';
 
             stepperHtml += `
-                <div class="pipeline-stage-row ${stateClass}${viewingClass}" ${rowClick} ${rowTitle}>
-                    <span class="pipeline-step-dot rounded-circle ${badgeClass} shadow-sm">
-                        <i class="fas ${isReached ? stepIcon : 'fa-lock'} text-white"></i>
-                    </span>
-                    <div class="${textClass} pipeline-step-label">${step.label}</div>
+                <div class="${stepClass}" ${clickHandler} ${rowTitle}>
+                    <div class="synth-step-dot">${dotContent}</div>
+                    <div class="synth-step-label">${label}</div>
                 </div>
             `;
+
+            if (stepIdx < PIPELINE_STAGES.length - 1) {
+                let connClass = 'synth-step-connector';
+                if (stepIdx < reachedIdx) connClass += ' done';
+                else if (isViewing) connClass += ' active-conn';
+                stepperHtml += `<div class="${connClass}"></div>`;
+            }
         });
-        stepperHtml += '</div>';
         $('#pipelineModalStepper').html(stepperHtml);
     }
 
@@ -1604,7 +1803,7 @@ $(document).ready(function () {
         window._currentStageId = stageId;
 
         renderPipelineModalStepper(index, stageId);
-        const { body, footer } = getStageDetailHtml(pipeline, stageId);
+        const { body, footer } = getStageDetailHtml(pipeline, stageId, index);
         $('#pipelineModalDetail').html(body);
         $('#pipelineModalFooter').html(footer).toggleClass('d-none', !footer);
     };
@@ -1680,64 +1879,94 @@ $(document).ready(function () {
                     `;
                 }
 
+                const variationBadge = window.currentCarouselAssets.length > 1
+                    ? `<span class="position-absolute badge rounded-pill bg-dark bg-opacity-75 fw-semibold" style="top: 12px; left: 12px; font-size: 0.7rem; z-index: 10;">Variation ${index + 1} of ${window.currentCarouselAssets.length}</span>`
+                    : '';
+
                 outHtml = `
-                    <div class="position-relative border rounded-top">
-                        <img src="${item.content}" class="d-block w-100 rounded-top" style="object-fit: cover; max-height: 350px;">
-                        
-                        <div class="position-absolute d-flex gap-2 align-items-center" style="bottom: 15px; right: 15px; z-index: 10;">
-                            ${navHtml}
-                            <button class="btn btn-sm text-white border-0 shadow-none p-1" id="regenImgBtn_${index}" onclick="regenerateImageInCarousel(${index})" title="Regenerate with original context" style="background: transparent;">
-                                <i class="fas fa-sync-alt" style="font-size: 1.1rem; text-shadow: 0 2px 4px rgba(0,0,0,0.8);"></i>
-                            </button>
+                    <div class="asset-media-card">
+                        <div class="position-relative">
+                            <img src="${item.content}" class="d-block w-100" style="object-fit: cover; max-height: 380px; background: #f3f4f6;">
+                            ${variationBadge}
+                            <div class="position-absolute d-flex gap-2 align-items-center" style="bottom: 12px; right: 12px; z-index: 10;">
+                                ${navHtml}
+                                <button class="btn btn-sm text-white border-0 shadow-none p-1 asset-regen-btn" id="regenImgBtn_${index}" onclick="regenerateImageInCarousel(${index})" title="Regenerate with original context">
+                                    <i class="fas fa-sync-alt"></i>
+                                </button>
+                            </div>
                         </div>
-                        
-                        <div class="p-3 bg-light border-top"><p class="small text-muted m-0"><strong>Caption:</strong> ${item.caption}</p></div>
+                        <div class="asset-caption-box">
+                            <div class="asset-caption-label">Caption</div>
+                            <p class="small m-0 text-dark">${item.caption}</p>
+                        </div>
                     </div>
                 `;
             } else if (item.type === 'video') {
-                outHtml = `<video controls autoplay loop class="d-block w-100 rounded-top" style="max-height: 350px;"><source src="${item.content}" type="video/mp4"></video>
-                           <div class="p-3 bg-light border-top"><p class="small text-muted m-0"><strong>Caption:</strong> ${item.caption}</p></div>`;
+                outHtml = `
+                    <div class="asset-media-card">
+                        <video controls autoplay loop class="d-block w-100" style="max-height: 380px; background: #000;"><source src="${item.content}" type="video/mp4"></video>
+                        <div class="asset-caption-box">
+                            <div class="asset-caption-label">Caption</div>
+                            <p class="small m-0 text-dark">${item.caption}</p>
+                        </div>
+                    </div>`;
             }
 
             innerHtml += `
                 <div class="carousel-item ${activeClass}">
                     ${outHtml}
                     <div class="px-3 pt-3">
-                        <button class="btn btn-outline-primary w-100 fw-bold rounded-pill mb-2" onclick='downloadAllAsZip(${JSON.stringify(item.history.map(h => h.content))})'>
-                            <i class="fas fa-file-archive me-1"></i>Download All Variations (ZIP)
+                        <button class="btn btn-outline-secondary btn-sm w-100 fw-bold rounded-pill" onclick="previewCarouselItem(${index})">
+                            <i class="fas fa-eye me-1"></i>Preview on ${platformDisplayName(item.platform)}
                         </button>
                     </div>
-                    <div class="d-flex gap-2 mt-2 mb-2 px-3 pb-2">
-                        <button class="btn btn-outline-danger action-btn flex-grow-1" onclick="rejectPipelineContent()"><i class="fas fa-times me-1"></i>Reject</button>
-                        <button class="btn btn-success action-btn flex-grow-1 shadow-sm" onclick="approveCarouselItem(${index})"><i class="fas fa-check me-2"></i>Approve</button>
+                    <div class="d-flex gap-2 mt-2 mb-2 px-3">
+                        <button class="btn btn-outline-danger btn-sm rounded-pill flex-grow-1 fw-bold" onclick="rejectPipelineContent()"><i class="fas fa-times me-1"></i>Reject</button>
+                        <button class="btn btn-success btn-sm rounded-pill flex-grow-1 shadow-sm fw-bold" onclick="approveCarouselItem(${index})"><i class="fas fa-check me-1"></i>Approve</button>
                     </div>
                 </div>
             `;
         });
 
+        // One common ZIP button for the whole set of generated variations
+        // (not per-item) - downloads every image/video generated in this
+        // batch, not just whichever single item happens to be showing.
+        const downloadableAssets = window.currentCarouselAssets.filter(a => a && (a.type === 'image' || a.type === 'video') && a.content);
+        const zipBtnHtml = downloadableAssets.length
+            ? `<div class="px-3 pb-3">
+                    <button class="btn btn-outline-primary w-100 fw-bold rounded-pill" onclick='downloadAllAsZip(${JSON.stringify(downloadableAssets.map(a => a.content))})'>
+                        <i class="fas fa-file-archive me-1"></i>Download All Variations (ZIP)
+                    </button>
+                </div>`
+            : '';
+
         const carouselHtml = `
             <div id="generationCarousel" class="carousel slide" data-bs-ride="false">
-              <div class="carousel-indicators bg-dark rounded-pill py-1 mb-0" style="bottom: -15px;">
-                ${indicators}
-              </div>
-              <div class="carousel-inner rounded-3 border" style="background: #fff;">
+              <div class="carousel-inner" style="background: #fff;">
                 ${innerHtml}
               </div>
-              <button class="carousel-control-prev" type="button" data-bs-target="#generationCarousel" data-bs-slide="prev" style="width: 5%; background: rgba(0,0,0,0.1); margin-left: -20px; border-radius: 10px;">
+              ${window.currentCarouselAssets.length > 1 ? `
+              <div class="carousel-indicators bg-dark rounded-pill py-1 mb-0" style="bottom: 8px; z-index: 20;">
+                ${indicators}
+              </div>
+              <button class="carousel-control-prev" type="button" data-bs-target="#generationCarousel" data-bs-slide="prev" style="width: 10%; background: rgba(0,0,0,0.15); border-radius: 10px 0 0 10px; z-index: 20;">
                 <span class="carousel-control-prev-icon" aria-hidden="true" style="filter: invert(1);"></span>
                 <span class="visually-hidden">Previous</span>
               </button>
-              <button class="carousel-control-next" type="button" data-bs-target="#generationCarousel" data-bs-slide="next" style="width: 5%; background: rgba(0,0,0,0.1); margin-right: -20px; border-radius: 10px;">
+              <button class="carousel-control-next" type="button" data-bs-target="#generationCarousel" data-bs-slide="next" style="width: 10%; background: rgba(0,0,0,0.15); border-radius: 0 10px 10px 0; z-index: 20;">
                 <span class="carousel-control-next-icon" aria-hidden="true" style="filter: invert(1);"></span>
                 <span class="visually-hidden">Next</span>
               </button>
+              ` : ''}
             </div>
+            ${zipBtnHtml}
         `;
 
         $('#pipelineOutputContent').html(carouselHtml);
         $('#pipelineResultBlock').removeClass('d-none');
         $('#approvalButtons').addClass('d-none');
         $('#publishPipelineBtn').addClass('d-none');
+        $('#publishPipelineBtnWrapper').addClass('d-none');
 
         // Initialize carousel explicitly since it's dynamically added
         const carouselEl = document.getElementById('generationCarousel');
@@ -1761,6 +1990,18 @@ $(document).ready(function () {
             : [];
         const caption = item.type === 'Text (Caption)' ? item.content : (item.caption || '');
 
+        // Attach every generated image for this pipeline (all variations/slides
+        // in pipeline.assetContent), not just the single one the user happened
+        // to click Approve on - the reviewer should see the full generated set.
+        const allAssets = Array.isArray(pipeline.assetContent)
+            ? pipeline.assetContent
+            : (pipeline.assetContent ? [pipeline.assetContent] : []);
+        const imageItems = allAssets.filter(a => a && a.type === 'image' && a.content);
+        const imageUrls = imageItems.length
+            ? imageItems.map(a => a.content)
+            : (item.type === 'image' && item.content ? [item.content] : []);
+        const slideTitles = imageItems.length ? imageItems.map((a, i) => a.slide_title || `Variation ${i + 1}`) : undefined;
+
         $.ajax({
             url: '/api/send-approval-email',
             type: 'POST',
@@ -1771,7 +2012,8 @@ $(document).ready(function () {
                 competitors: competitors,
                 caption: caption,
                 asset_type: item.type || '',
-                image_url: item.type === 'image' ? item.content : null
+                image_urls: imageUrls.length ? imageUrls : undefined,
+                slide_titles: slideTitles
             }),
             success: function (res) {
                 if (res.success) {
@@ -1809,7 +2051,7 @@ $(document).ready(function () {
 
         $('#pipelineLoader').removeClass('d-none');
         $('#pipelineResultBlock').removeClass('d-none');
-        $('#pipelineOutputContent').html('<div class="text-center py-4"><div class="spinner-border text-primary mb-2"></div><p class="text-muted small m-0">Generating assets...</p></div>');
+        $('#pipelineOutputContent').html(mediaGenSkeletonHtml('Generating assets...'));
         $('#approvalButtons').addClass('d-none');
         $('#publishPipelineBtn').addClass('d-none');
 
@@ -1863,7 +2105,7 @@ $(document).ready(function () {
                         // Generate Media (3 variations)
                         let generatedCount = 0;
                         const totalToGenerate = 3;
-                        $('#pipelineOutputContent').html('<div class="text-center py-4"><div class="spinner-border text-purple mb-2"></div><p class="text-muted small m-0">Rendering media variation 1 of 3...</p></div>');
+                        $('#pipelineOutputContent').html(mediaGenSkeletonHtml('Rendering media variation 1 of 3...'));
 
                         function generateNextMedia() {
                             if (generatedCount >= totalToGenerate) {
@@ -1889,7 +2131,8 @@ $(document).ready(function () {
                                     media_type: mediaType,
                                     tone: generatedCount,
                                     context: $('#preGenImageContext').val(),
-                                    image_path: window.getCharacterAssetPath(window.activePipeline)
+                                    image_path: window.getCharacterAssetPath(window.activePipeline),
+                                    image_paths: window.getCharacterAssetPaths(window.activePipeline)
                                 }),
                                 success: function (mediaRes) {
                                     if (mediaRes.success && mediaRes.url) {
@@ -1912,13 +2155,37 @@ $(document).ready(function () {
                                             $('#pipelineLoader').addClass('d-none');
                                         }
                                     } else {
-                                        showPipelineError('Media generation failed on variation ' + (generatedCount + 1));
+                                        const reason = mediaRes && mediaRes.error ? ': ' + mediaRes.error : '';
+                                        handlePartialMediaFailure('Media generation failed on variation ' + (generatedCount + 1) + reason);
                                     }
                                 },
                                 error: function () {
-                                    showPipelineError('Media API network error on variation ' + (generatedCount + 1));
+                                    handlePartialMediaFailure('Media API network error on variation ' + (generatedCount + 1));
                                 }
                             });
+                        }
+
+                        // A variation failing partway through shouldn't discard the
+                        // variations that DID succeed (they're already rendered in
+                        // the carousel) - without this, pipeline.assetContent stays
+                        // unset and "Refine in Studio Chat"/Approve/Publish all
+                        // incorrectly report "No generated content" even though the
+                        // user has usable assets on screen.
+                        function handlePartialMediaFailure(msg) {
+                            $('#startPipelineBtn').prop('disabled', false);
+                            $('#pipelineLoader').addClass('d-none');
+
+                            if (window.currentCarouselAssets.length > 0) {
+                                showToast(msg + ' - keeping the ' + window.currentCarouselAssets.length + ' variation(s) already generated.', 'warning');
+                                if (window.activePipeline) {
+                                    window.activePipeline.status = 'asset_generated';
+                                    window.activePipeline.assetContent = window.currentCarouselAssets;
+                                    localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+                                    renderPipelineHistory();
+                                }
+                            } else {
+                                showPipelineError(msg);
+                            }
                         }
 
                         generateNextMedia();
@@ -1939,6 +2206,195 @@ $(document).ready(function () {
                 }
             }
         });
+    };
+
+    // Image-shaped shimmering/blurred placeholder shown while media generates,
+    // in place of a plain spinner floating in empty space - so it reads as
+    // "the image is forming" rather than a blank wait.
+    function mediaGenSkeletonHtml(label) {
+        return `
+            <div class="media-gen-skeleton">
+                <div class="media-gen-skeleton-content">
+                    <i class="fas fa-image fa-2x opacity-50"></i>
+                    <div class="spinner-border spinner-border-sm text-primary"></div>
+                    <p class="small fw-bold m-0">${label}</p>
+                </div>
+            </div>
+        `;
+    }
+
+    // ── Platform Post Preview Simulator ─────────────────────────────────────
+    // Shows a mock-up card of how the generated asset will look once actually
+    // posted, styled to loosely resemble the target platform's own feed UI.
+    function platformDisplayName(p) {
+        const names = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', twitter: 'Twitter / X', blog: 'Blog', youtube: 'YouTube' };
+        return names[p] || (p ? p.charAt(0).toUpperCase() + p.slice(1) : 'Social');
+    }
+
+    function styleHashtagsHtml(text) {
+        return escapeHtml(text || '')
+            .replace(/#(\w+)/g, '<span style="color:#0a66c2;font-weight:600;">#$1</span>')
+            .replace(/\n/g, '<br>');
+    }
+
+    function previewMediaBlockHtml(item, squareAspect) {
+        if (!item || !item.content) return '';
+        if (item.type === 'video') {
+            return `<video controls class="d-block w-100" style="${squareAspect ? 'aspect-ratio: 1/1; object-fit: cover;' : 'max-height: 420px; object-fit: cover;'} background:#000;"><source src="${item.content}" type="video/mp4"></video>`;
+        }
+        if (item.type === 'image') {
+            return `<img src="${item.content}" class="d-block w-100" style="${squareAspect ? 'aspect-ratio: 1/1; object-fit: cover;' : 'max-height: 420px; object-fit: cover;'} background:#f3f4f6;">`;
+        }
+        return '';
+    }
+
+    function getFullPostText(item) {
+        if (!item) return '';
+        // If the item has a dedicated caption field, use it; fallback to content
+        let text = item.caption || item.content || '';
+        // If content is media URL and no caption, check prompt
+        if (text.startsWith('http') && item.caption) {
+            text = item.caption;
+        }
+        return text;
+    }
+
+    function buildLinkedInPreviewHtml(item) {
+        const fullText = getFullPostText(item);
+        return `
+            <div style="background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.1); font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;">
+                <div style="display:flex; align-items:flex-start; gap:10px; padding:14px 16px 10px;">
+                    <div style="width:46px;height:46px;flex-shrink:0;border-radius:50%;background:linear-gradient(135deg,#0a66c2,#004182);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:1.05rem;">SI</div>
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-weight:700; font-size:0.92rem; color:#191919;">StradIT</div>
+                        <div style="font-size:0.75rem; color:#666; line-height:1.2;">Enterprise Sales Intelligence &bull; 12,483 followers</div>
+                        <div style="font-size:0.72rem; color:#8c8c8c; margin-top:2px;">Just now &middot; <i class="fas fa-earth-americas"></i></div>
+                    </div>
+                    <i class="fas fa-ellipsis" style="color:#666; cursor:pointer;"></i>
+                </div>
+                <div class="linkedin-preview-caption" style="padding:0 16px 14px; font-size:0.875rem; color:#191919; line-height:1.55; white-space:pre-wrap; word-break:break-word; max-height:280px; overflow-y:auto;">${styleHashtagsHtml(fullText)}</div>
+                ${previewMediaBlockHtml(item, false)}
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 16px; font-size:0.75rem; color:#666; border-bottom:1px solid #f0f0f0;">
+                    <span class="d-flex align-items-center gap-1"><i class="fas fa-thumbs-up" style="color:#0a66c2;"></i> 142</span>
+                    <span>28 comments &middot; 9 reposts</span>
+                </div>
+                <div style="display:flex; padding:4px 8px; border-top:1px solid #f8f8f8;">
+                    <div style="flex:1;text-align:center;padding:8px 4px;color:#666;font-weight:600;font-size:0.8rem;cursor:pointer;"><i class="far fa-thumbs-up me-1"></i>Like</div>
+                    <div style="flex:1;text-align:center;padding:8px 4px;color:#666;font-weight:600;font-size:0.8rem;cursor:pointer;"><i class="far fa-comment me-1"></i>Comment</div>
+                    <div style="flex:1;text-align:center;padding:8px 4px;color:#666;font-weight:600;font-size:0.8rem;cursor:pointer;"><i class="fas fa-retweet me-1"></i>Repost</div>
+                    <div style="flex:1;text-align:center;padding:8px 4px;color:#666;font-weight:600;font-size:0.8rem;cursor:pointer;"><i class="far fa-paper-plane me-1"></i>Send</div>
+                </div>
+            </div>
+        `;
+    }
+
+    function buildInstagramPreviewHtml(item) {
+        const fullText = getFullPostText(item);
+        return `
+            <div style="background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.1); font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;">
+                <div style="display:flex; align-items:center; gap:10px; padding:12px 14px;">
+                    <div style="width:36px;height:36px;border-radius:50%;background:linear-gradient(45deg,#f58529,#dd2a7b,#8134af,#515bd4);padding:2px;flex-shrink:0;">
+                        <div style="width:100%;height:100%;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.7rem;">SI</div>
+                    </div>
+                    <div style="font-weight:700; font-size:0.88rem;">stradit_official</div>
+                    <i class="fas fa-ellipsis ms-auto" style="color:#262626; cursor:pointer;"></i>
+                </div>
+                ${previewMediaBlockHtml(item, true)}
+                <div style="padding:10px 14px 4px; display:flex; gap:16px; font-size:1.3rem; color:#262626;">
+                    <i class="far fa-heart" style="cursor:pointer;"></i><i class="far fa-comment" style="cursor:pointer;"></i><i class="far fa-paper-plane" style="cursor:pointer;"></i>
+                    <i class="far fa-bookmark ms-auto" style="cursor:pointer;"></i>
+                </div>
+                <div style="padding:4px 14px 2px; font-size:0.8rem; font-weight:700; color:#262626;">312 likes</div>
+                <div style="padding:0 14px 14px; font-size:0.85rem; line-height:1.5; max-height:240px; overflow-y:auto;"><strong style="color:#262626;">stradit_official</strong> ${styleHashtagsHtml(fullText)}</div>
+            </div>
+        `;
+    }
+
+    function buildFacebookPreviewHtml(item) {
+        const fullText = getFullPostText(item);
+        return `
+            <div style="background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.1); font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;">
+                <div style="display:flex; align-items:flex-start; gap:10px; padding:14px 16px 10px;">
+                    <div style="width:44px;height:44px;flex-shrink:0;border-radius:50%;background:linear-gradient(135deg,#1877f2,#0d5cc9);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:1rem;">SI</div>
+                    <div style="flex:1; min-width:0;">
+                        <div style="font-weight:700; font-size:0.92rem; color:#050505;">StradIT</div>
+                        <div style="font-size:0.75rem; color:#65676b;">Just now &middot; <i class="fas fa-earth-americas"></i></div>
+                    </div>
+                    <i class="fas fa-ellipsis" style="color:#65676b; cursor:pointer;"></i>
+                </div>
+                <div style="padding:0 16px 14px; font-size:0.875rem; color:#050505; line-height:1.55; max-height:280px; overflow-y:auto;">${styleHashtagsHtml(fullText)}</div>
+                ${previewMediaBlockHtml(item, false)}
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:8px 16px; font-size:0.75rem; color:#65676b; border-bottom:1px solid #f0f2f5;">
+                    <span><i class="fas fa-thumbs-up" style="color:#1877f2;"></i> 118 &middot; <i class="fas fa-heart" style="color:#f33e58;"></i></span>
+                    <span>22 comments &middot; 8 shares</span>
+                </div>
+                <div style="display:flex; padding:4px 8px;">
+                    <div style="flex:1;text-align:center;padding:8px 4px;color:#65676b;font-weight:600;font-size:0.8rem;cursor:pointer;"><i class="far fa-thumbs-up me-1"></i>Like</div>
+                    <div style="flex:1;text-align:center;padding:8px 4px;color:#65676b;font-weight:600;font-size:0.8rem;cursor:pointer;"><i class="far fa-comment me-1"></i>Comment</div>
+                    <div style="flex:1;text-align:center;padding:8px 4px;color:#65676b;font-weight:600;font-size:0.8rem;cursor:pointer;"><i class="fas fa-share me-1"></i>Share</div>
+                </div>
+            </div>
+        `;
+    }
+
+    function buildGenericPreviewHtml(item, platform) {
+        const fullText = getFullPostText(item);
+        return `
+            <div style="background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.1); font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;">
+                <div style="display:flex; align-items:center; gap:10px; padding:14px 16px;">
+                    <div style="width:42px;height:42px;border-radius:50%;background:var(--primary,#4f46e5);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;">SI</div>
+                    <div>
+                        <div style="font-weight:700; font-size:0.92rem;">StradIT</div>
+                        <div style="font-size:0.75rem; color:#666;">${platformDisplayName(platform)} &middot; Just now</div>
+                    </div>
+                </div>
+                ${previewMediaBlockHtml(item, false)}
+                <div style="padding:14px 16px; font-size:0.875rem; line-height:1.55; max-height:280px; overflow-y:auto;">${styleHashtagsHtml(fullText)}</div>
+            </div>
+        `;
+    }
+
+    function showAssetPreviewModal(item) {
+        if (!item) return;
+        const platform = (item.platform || 'linkedin').toLowerCase();
+        $('#assetPreviewTitle').html(`<i class="fas fa-eye text-primary me-2"></i>Preview on ${platformDisplayName(platform)}`);
+
+        // If the item itself doesn't have caption set, attempt to retrieve primary caption from active pipeline
+        if (!item.caption && item.type !== 'Text (Caption)' && window.activePipeline) {
+            const assets = Array.isArray(window.activePipeline.assetContent) ? window.activePipeline.assetContent : [window.activePipeline.assetContent];
+            const textItem = assets.find(a => a && a.type === 'Text (Caption)');
+            if (textItem && textItem.content) {
+                item.caption = textItem.content;
+            }
+        }
+
+        let html;
+        if (platform === 'linkedin') html = buildLinkedInPreviewHtml(item);
+        else if (platform === 'instagram') html = buildInstagramPreviewHtml(item);
+        else if (platform === 'facebook') html = buildFacebookPreviewHtml(item);
+        else html = buildGenericPreviewHtml(item, platform);
+
+        $('#assetPreviewContent').html(html);
+        const modalEl = document.getElementById('assetPreviewModal');
+        bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    }
+
+    window.previewCarouselItem = function (index) {
+        showAssetPreviewModal(window.currentCarouselAssets[index]);
+    };
+
+    window.previewPipelineAsset = function (pipelineId, index) {
+        const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
+        if (!pipeline) return;
+        const items = Array.isArray(pipeline.assetContent) ? pipeline.assetContent : [pipeline.assetContent];
+        const item = items[index];
+        if (item && !item.caption && item.type !== 'Text (Caption)') {
+            const textItem = items.find(a => a && a.type === 'Text (Caption)');
+            if (textItem && textItem.content) {
+                item.caption = textItem.content;
+            }
+        }
+        showAssetPreviewModal(item);
     };
 
     function showPipelineError(msg) {
@@ -1971,6 +2427,7 @@ $(document).ready(function () {
             success: function (res) {
                 $('#approvalButtons').addClass('d-none');
                 $('#publishPipelineBtn').removeClass('d-none');
+                $('#publishPipelineBtnWrapper').removeClass('d-none');
                 showToast('Asset Approved and saved to database!', 'success');
 
                 if (window.activePipeline) {
@@ -2151,35 +2608,45 @@ $(document).ready(function () {
         window.activePipeline = pipeline;
 
         // Render the Generator UI inside the modal
+        const pipelineIdx = window.pipelineHistory.indexOf(pipeline);
         const generatorHtml = `
-            <h6 class="fw-bold text-primary mb-3"><i class="fas fa-magic me-2"></i>Content Generator</h6>
-            <div id="modalGenerationPipelineBlock" class="d-flex flex-column gap-3 p-4 border rounded-3 bg-light mt-2">
-                <div class="d-flex flex-column gap-2">
-                    <label class="fw-bold m-0" style="font-size: 0.9rem;"><i class="fas fa-share-nodes me-2 text-primary"></i> Target Platform:</label>
+            <div class="synth-slide-header rounded-3 mb-3 border p-2 px-3 bg-white">
+                <button class="synth-nav-btn" onclick="showPipelineStageDetail(${pipelineIdx}, 'strategy_generated')">
+                    <i class="fas fa-chevron-left" style="font-size:0.65rem;"></i> Strategy
+                </button>
+                <div class="synth-slide-title">
+                    <i class="fas fa-magic text-primary" style="font-size:0.85rem;"></i>
+                    Content Generator Settings
+                </div>
+                <div style="width: 55px;"></div>
+            </div>
+            <div id="modalGenerationPipelineBlock" class="d-flex flex-column gap-3 p-3 p-lg-4 border rounded-3 bg-white shadow-sm">
+                <div class="d-flex flex-column gap-1">
+                    <label class="fw-bold m-0" style="font-size: 0.82rem; color: #374151;">
+                        <i class="fas fa-share-nodes me-1 text-primary"></i> Target Platform
+                    </label>
                     <select class="form-select form-select-sm" id="modalPipelineTargetPlatform"
-                        title="Each platform generates images/video at its own correct size (e.g. LinkedIn landscape vs Instagram square).">
+                        title="Platform determines image/video dimensions.">
                         <option value="linkedin" selected>LinkedIn</option>
                         <option value="facebook">Facebook</option>
                         <option value="instagram">Instagram</option>
                     </select>
                 </div>
-                <div class="d-flex flex-column gap-2">
-                    <label class="fw-bold m-0" style="font-size: 0.9rem;"><i class="fas fa-photo-video me-2 text-primary"></i> Select Output Type:</label>
+                <div class="d-flex flex-column gap-1">
+                    <label class="fw-bold m-0" style="font-size: 0.82rem; color: #374151;">
+                        <i class="fas fa-photo-video me-1 text-primary"></i> Output Type
+                    </label>
                     <div class="btn-group w-100" role="group" id="modalMediaTypeGroup">
                         <input type="radio" class="btn-check" name="modalMediaType" id="modalTypeText" value="Text (Caption)" autocomplete="off" checked>
-                        <label class="btn btn-outline-primary btn-sm fw-bold" for="modalTypeText"><i class="fas fa-align-left me-2"></i>Caption</label>
+                        <label class="btn btn-outline-primary btn-sm fw-bold" for="modalTypeText"><i class="fas fa-align-left me-1"></i>Caption</label>
                         <input type="radio" class="btn-check" name="modalMediaType" id="modalTypeImage" value="image" autocomplete="off">
-                        <label class="btn btn-outline-primary btn-sm fw-bold" for="modalTypeImage"><i class="fas fa-image me-2"></i>Image</label>
+                        <label class="btn btn-outline-primary btn-sm fw-bold" for="modalTypeImage"><i class="fas fa-image me-1"></i>Image</label>
                         <input type="radio" class="btn-check" name="modalMediaType" id="modalTypeVideo" value="video" autocomplete="off">
-                        <label class="btn btn-outline-primary btn-sm fw-bold" for="modalTypeVideo"><i class="fas fa-video me-2"></i>Video</label>
+                        <label class="btn btn-outline-primary btn-sm fw-bold" for="modalTypeVideo"><i class="fas fa-video me-1"></i>Video</label>
                     </div>
                 </div>
-                <div class="position-relative mt-2">
-                    <i class="fas fa-paperclip position-absolute" style="top: 15px; left: 15px; color: #9ca3af; cursor: pointer; transition: color 0.2s;" onmouseover="this.style.color='#0d6efd'" onmouseout="this.style.color='#9ca3af'" onclick="handlePromptAttachment('modalPipelinePrompt')" title="Attach text file"></i>
-                    <textarea id="modalPipelinePrompt" class="form-control" rows="3" style="padding-left: 2.5rem; border-radius: 12px; resize: none;" placeholder="Attach an optional creative prompt (e.g. 'Use an energetic tone', 'Include branding colors')"></textarea>
-                </div>
-                <div id="modalImageContextContainer" class="mt-2 d-none">
-                    <label class="form-label small text-muted fw-bold mb-1"><i class="fas fa-paint-brush me-1"></i>Image Context/Style</label>
+                <div id="modalImageContextContainer" class="d-none d-flex flex-column gap-1">
+                    <label class="fw-bold m-0" style="font-size: 0.82rem; color: #374151;"><i class="fas fa-paint-brush me-1 text-primary"></i>Image Style</label>
                     <select class="form-select form-select-sm" id="modalPreGenImageContext">
                         <option value="Professional">Professional</option>
                         <option value="Casual">Casual</option>
@@ -2187,7 +2654,16 @@ $(document).ready(function () {
                         <option value="Abstract">Abstract</option>
                     </select>
                 </div>
-                <button class="btn btn-primary action-btn w-100 shadow-sm mt-3" onclick="startModalPipelineGeneration(${pipeline.id})" id="startModalPipelineBtn">
+                <div class="d-flex flex-column gap-1">
+                    <label class="fw-bold m-0" style="font-size: 0.82rem; color: #374151;">
+                        <i class="fas fa-comment-dots me-1 text-primary"></i>Creative Prompt <span class="text-muted fw-normal">(optional)</span>
+                    </label>
+                    <div class="position-relative">
+                        <i class="fas fa-paperclip position-absolute" style="top: 12px; left: 12px; color: #9ca3af; cursor: pointer; transition: color 0.2s;" onmouseover="this.style.color='#0d6efd'" onmouseout="this.style.color='#9ca3af'" onclick="handlePromptAttachment('modalPipelinePrompt')" title="Attach text file"></i>
+                        <textarea id="modalPipelinePrompt" class="form-control" rows="3" style="padding-left: 2.2rem; border-radius: 10px; resize: none; font-size: 0.85rem;" placeholder="e.g. 'Use an energetic tone', 'Highlight brand strengths'…"></textarea>
+                    </div>
+                </div>
+                <button class="btn btn-primary action-btn w-100 shadow-sm mt-2" onclick="startModalPipelineGeneration(${pipeline.id})" id="startModalPipelineBtn">
                     <i class="fas fa-magic me-2"></i>Generate Assets
                 </button>
             </div>
@@ -2198,6 +2674,7 @@ $(document).ready(function () {
         `;
 
         $('#pipelineModalDetail').html(generatorHtml);
+        $('#pipelineModalFooter').addClass('d-none');
     };
 
     window.startModalPipelineGeneration = function (pipelineId) {
@@ -2210,7 +2687,7 @@ $(document).ready(function () {
 
         $('#startModalPipelineBtn').prop('disabled', true);
         $('#modalPipelineLoader').removeClass('d-none');
-        $('#modalPipelineOutputContent').html('');
+        $('#modalPipelineOutputContent').html(mediaGenSkeletonHtml('Generating assets...'));
 
         const combinedStory = `STRATEGY SYNTHESIS:\n${JSON.stringify(pipeline.strategy, null, 2)}\n\nUSER INSTRUCTIONS / CHARACTERS / HOOK:\n${prompt}`;
 
@@ -2272,7 +2749,8 @@ $(document).ready(function () {
                                     media_type: mediaType,
                                     tone: generatedCount,
                                     context: $('#modalPreGenImageContext').val(),
-                                    image_path: window.getCharacterAssetPath(pipeline)
+                                    image_path: window.getCharacterAssetPath(pipeline),
+                                    image_paths: window.getCharacterAssetPaths(pipeline)
                                 }),
                                 success: function (mediaRes) {
                                     if (mediaRes.success && mediaRes.url) {
@@ -2300,17 +2778,35 @@ $(document).ready(function () {
                                             showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'asset_generated');
                                         }
                                     } else {
-                                        showToast('Media API failed on variation ' + (generatedCount + 1), 'error');
-                                        $('#startModalPipelineBtn').prop('disabled', false);
-                                        $('#modalPipelineLoader').addClass('d-none');
+                                        const reason = mediaRes && mediaRes.error ? ': ' + mediaRes.error : '';
+                                        handlePartialMediaFailure('Media API failed on variation ' + (generatedCount + 1) + reason);
                                     }
                                 },
                                 error: function () {
-                                    showToast('Network error on variation ' + (generatedCount + 1), 'error');
-                                    $('#startModalPipelineBtn').prop('disabled', false);
-                                    $('#modalPipelineLoader').addClass('d-none');
+                                    handlePartialMediaFailure('Network error on variation ' + (generatedCount + 1));
                                 }
                             });
+                        }
+
+                        // Same reasoning as the main workflow's handlePartialMediaFailure:
+                        // keep whatever variations already succeeded instead of leaving
+                        // pipeline.assetContent unset, which would break Refine in
+                        // Studio Chat / Approve / Publish even though usable assets exist.
+                        function handlePartialMediaFailure(msg) {
+                            $('#startModalPipelineBtn').prop('disabled', false);
+                            $('#modalPipelineLoader').addClass('d-none');
+
+                            if (window.currentCarouselAssets.length > 0) {
+                                showToast(msg + ' - keeping the ' + window.currentCarouselAssets.length + ' variation(s) already generated.', 'warning');
+                                pipeline.status = 'asset_generated';
+                                pipeline.assetType = mediaType;
+                                pipeline.assetContent = window.currentCarouselAssets;
+                                localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+                                renderPipelineHistory();
+                                showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'asset_generated');
+                            } else {
+                                showToast(msg, 'error');
+                            }
                         }
 
                         generateNextMedia();
@@ -2582,7 +3078,8 @@ window.regenerateImageInCarousel = function (index) {
             caption: item.prompt || item.caption,
             media_type: 'image',
             context: context,
-            image_path: window.getCharacterAssetPath(window.activePipeline)
+            image_path: window.getCharacterAssetPath(window.activePipeline),
+            image_paths: window.getCharacterAssetPaths(window.activePipeline)
         }),
         success: function (mediaRes) {
             if (mediaRes.success && mediaRes.url) {
@@ -2634,7 +3131,8 @@ window.regenerateModalImage = function (pipelineId, index, event) {
             caption: item.prompt || item.caption,
             media_type: 'image',
             context: context,
-            image_path: window.getCharacterAssetPath(pipeline)
+            image_path: window.getCharacterAssetPath(pipeline),
+            image_paths: window.getCharacterAssetPaths(pipeline)
         }),
         success: function (mediaRes) {
             if (mediaRes.success && mediaRes.url) {

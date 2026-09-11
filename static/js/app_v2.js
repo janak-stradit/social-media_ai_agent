@@ -211,7 +211,25 @@ $(document).ready(function () {
 
         startNewChat();
         storyInput.val(seed.text).trigger('input').focus();
-        showToast('Loaded content from the Analysis Dashboard - review and send to start refining.', 'info');
+
+        // If the dashboard run generated an image, attach it as the active
+        // reference image (it's already on the server, no re-upload needed)
+        // so it shows up as a real image in the chat, not just a URL in text.
+        if (seed.imagePath) {
+            uploadedImagePath = seed.imagePath;
+            threadActiveImagePath = seed.imagePath;
+            $('#previewImg').attr('src', '/' + seed.imagePath.replace(/^\//, ''));
+            $('#imagePreview').removeClass('d-none');
+            setAnalysisBadge('badge-ok', '<i class="fas fa-check me-1"></i>From Dashboard');
+        }
+
+        const extraCount = (seed.imageUrls && seed.imageUrls.length > 1) ? seed.imageUrls.length - 1 : 0;
+        showToast(
+            extraCount
+                ? `Loaded content from the Analysis Dashboard (+${extraCount} more variation${extraCount > 1 ? 's' : ''} referenced below) - review and send to start refining.`
+                : 'Loaded content from the Analysis Dashboard - review and send to start refining.',
+            'info'
+        );
     })();
 
     // ── Drag & Drop Visual Asset ───────────────────────────────────────
