@@ -6,11 +6,6 @@ $(document).ready(function () {
         return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
-    function escapeAttr(str) {
-        if (!str) return '';
-        return String(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-    }
-
     // Load current user info
     $.ajax({
         url: '/api/auth/me',
@@ -449,16 +444,6 @@ $(document).ready(function () {
             const toast = new bootstrap.Toast(toastElem, { delay: 4000 });
             toast.show();
         }
-    }
-
-    function escapeHtml(str) {
-        if (!str) return '';
-        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-    }
-
-    function escapeAttr(str) {
-        if (!str) return '';
-        return String(str).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     }
 
     // ── AI Models & Purpose Inspector Handler ─────────────────────────────

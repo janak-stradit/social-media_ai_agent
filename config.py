@@ -19,8 +19,19 @@ class Config:
     YOUTUBE_CLIENT_SECRET = os.getenv("YOUTUBE_CLIENT_SECRET")
     HF_API_TOKEN = os.getenv("HF_API_TOKEN")
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
     Z_AI_API_KEY = os.getenv("Z_AI_API_KEY")
     Z_AI_BASE_URL = os.getenv("Z_AI_BASE_URL", "https://api.z.ai/api/paas/v4/")
+    KIE_API_KEY = os.getenv("KIE_API_KEY")
+
+    # SMTP - approval-notification emails
+    SMTP_HOST = os.getenv("SMTP_HOST")
+    SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_USERNAME = os.getenv("SMTP_USERNAME")
+    SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+    SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL") or os.getenv("SMTP_USERNAME")
+    APPROVAL_NOTIFY_EMAIL = os.getenv("APPROVAL_NOTIFY_EMAIL")
+
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
     GEMINI_VIDEO_MODEL = os.getenv("GEMINI_VIDEO_MODEL", "veo-3.1-generate-preview")
     GENERATE_NATIVE_AUDIO = os.getenv("GENERATE_NATIVE_AUDIO", "true").lower() == "true"

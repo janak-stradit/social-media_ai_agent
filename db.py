@@ -4,13 +4,18 @@ Schema: social_media_agent
 Tables: users, run_history
 """
 
+# pylint: disable=not-callable,assignment-from-no-return
+# SQLAlchemy's `func` proxy (func.count/func.coalesce/func.sum/...) is dynamic;
+# pylint's static analysis can't see through it and misreports these two checks
+# throughout this file. Known false positive, not scoped per-line for readability.
+
+import hashlib
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
     Boolean,
-    Column,
     DateTime,
     Float,
     ForeignKey,
@@ -21,13 +26,19 @@ from sqlalchemy import (
     create_engine,
     text,
 )
-from sqlalchemy.orm import DeclarativeBase, Session
+from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql import func
+
+
+def _utcnow():
+    return datetime.now(timezone.utc)
+
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 if not DATABASE_URL:
     try:
-        import psycopg2  # noqa: F401 -- only used to test driver availability
+        # Only used to test driver availability.
+        import psycopg2  # noqa: F401  pylint: disable=unused-import
 
         DATABASE_URL = "postgresql+psycopg2://postgres:root@localhost:5432/postgres"
     except ImportError:
@@ -38,7 +49,7 @@ SCHEMA = "social_media_agent"
 
 engine = create_engine(
     DATABASE_URL,
-    pool_pre_ping=True if not IS_SQLITE else False,
+    pool_pre_ping=not IS_SQLITE,
     connect_args={"check_same_thread": False} if IS_SQLITE else {},
     echo=False,
 )
@@ -52,82 +63,86 @@ class User(Base):
     __tablename__ = "users"
     __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(120), nullable=False)
-    email = Column(String(255), unique=True, nullable=False, index=True)
-    password_hash = Column(String(255), nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    credit_limit = Column(Float, default=10.0, nullable=False)
-    is_admin = Column(Boolean, default=False, nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    credit_limit: Mapped[float] = mapped_column(Float, default=10.0, nullable=False)
+    is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
 class CreditRequest(Base):
     __tablename__ = "credit_requests"
     __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True
     )
-    requested_amount = Column(Float, nullable=False)
-    reason = Column(Text, nullable=True)
-    status = Column(String(32), default="pending", nullable=False)  # pending, approved, rejected
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    requested_amount: Mapped[float] = mapped_column(Float, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)  # pending, approved, rejected
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
 
 
 class RunHistory(Base):
     __tablename__ = "run_history"
     __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=True, index=True
     )
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    story = Column(Text, nullable=False)
-    tone = Column(String(64), nullable=True)
-    platforms = Column(Text, nullable=False)
-    content = Column(Text, nullable=False)
-    tokens_used = Column(Integer, default=0, nullable=True)
-    cost_usd = Column(Float, default=0.0, nullable=True)
-    is_archived = Column(Boolean, default=False, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    story: Mapped[str] = mapped_column(Text, nullable=False)
+    tone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    platforms: Mapped[str] = mapped_column(Text, nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    tokens_used: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
+    cost_usd: Mapped[float | None] = mapped_column(Float, default=0.0, nullable=True)
+    is_archived: Mapped[bool | None] = mapped_column(Boolean, default=False, nullable=True)
 
 
 class SocialAccount(Base):
     __tablename__ = "social_accounts"
     __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True
     )
-    platform = Column(String(32), nullable=False)  # facebook, instagram, linkedin, youtube
-    account_name = Column(String(120), nullable=False)
-    account_id = Column(String(120), nullable=True)  # Page ID, IG ID, Author URN, or Channel ID
-    access_token = Column(Text, nullable=True)
-    refresh_token = Column(Text, nullable=True)  # Required for YouTube offline access
-    connection_type = Column(String(32), default="direct", nullable=False)  # direct, mcp
-    mcp_endpoint = Column(Text, nullable=True)
-    mcp_token = Column(Text, nullable=True)
-    mcp_tool_name = Column(String(120), default="linkedin_publish_post", nullable=True)
-    status = Column(String(32), default="connected", nullable=False)  # connected, disconnected, expired
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)  # facebook, instagram, linkedin, youtube
+    account_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    account_id: Mapped[str | None] = mapped_column(
+        String(120), nullable=True
+    )  # Page ID, IG ID, Author URN, or Channel ID
+    access_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    refresh_token: Mapped[str | None] = mapped_column(Text, nullable=True)  # Required for YouTube offline access
+    connection_type: Mapped[str] = mapped_column(String(32), default="direct", nullable=False)  # direct, mcp
+    mcp_endpoint: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mcp_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    mcp_tool_name: Mapped[str | None] = mapped_column(String(120), default="linkedin_publish_post", nullable=True)
+    status: Mapped[str] = mapped_column(
+        String(32), default="connected", nullable=False
+    )  # connected, disconnected, expired
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
 
 
 class ApprovedAsset(Base):
     __tablename__ = "approved_assets"
     __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=True, index=True
     )
-    platform = Column(String(32), nullable=False)
-    content_type = Column(String(32), nullable=False)  # 'text', 'image', 'video'
-    content_data = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(32), nullable=False)  # 'text', 'image', 'video'
+    content_data: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
 class CompetitorPost(Base):
@@ -137,20 +152,20 @@ class CompetitorPost(Base):
         {"schema": SCHEMA} if not IS_SQLITE else {},
     )
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    competitor = Column(String(120), nullable=False, index=True)
-    platform = Column(String(32), nullable=False, index=True)
-    post_url = Column(String(500), nullable=False)
-    title = Column(Text, nullable=True)
-    text = Column(Text, nullable=True)
-    author = Column(String(120), nullable=True)
-    post_type = Column(String(32), nullable=True)
-    engagement_json = Column(Text, nullable=True)
-    media_json = Column(Text, nullable=True)
-    published_at = Column(DateTime, nullable=True)
-    scraped_at = Column(DateTime, nullable=True)
-    raw_json = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    competitor: Mapped[str] = mapped_column(String(120), nullable=False, index=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    post_url: Mapped[str] = mapped_column(String(1000), nullable=False)
+    title: Mapped[str | None] = mapped_column(Text, nullable=True)
+    text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    author: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    post_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    engagement_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    media_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    scraped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    raw_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
 class OpportunitySuggestion(Base):
@@ -160,28 +175,56 @@ class OpportunitySuggestion(Base):
         {"schema": SCHEMA} if not IS_SQLITE else {},
     )
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    category = Column(String(32), nullable=False, index=True)  # 'unserved_theme' | 'domain_expansion'
-    title = Column(String(255), nullable=False)
-    description = Column(Text, nullable=True)
-    source_accounts = Column(Text, nullable=True)  # comma-separated competitor/account names
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    category: Mapped[str] = mapped_column(
+        String(32), nullable=False, index=True
+    )  # 'unserved_theme' | 'domain_expansion'
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_accounts: Mapped[str | None] = mapped_column(Text, nullable=True)  # comma-separated competitor/account names
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class ContentCollection(Base):
+    """A "Suggested Storyline": a group of semantically-similar competitor posts
+    (see services/embedding_service.py), labeled by CollectionAgent. Deduped by
+    the exact set of posts it contains, so re-running suggestions doesn't create
+    duplicate rows for the same cluster."""
+
+    __tablename__ = "content_collections"
+    __table_args__ = (
+        UniqueConstraint("post_urls_hash", name="uq_content_collection_posts"),
+        {"schema": SCHEMA} if not IS_SQLITE else {},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    post_urls_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    label: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    relevance: Mapped[str] = mapped_column(String(16), nullable=False, default="medium")
+    competitors: Mapped[str | None] = mapped_column(Text, nullable=True)  # comma-separated
+    platforms: Mapped[str | None] = mapped_column(Text, nullable=True)  # comma-separated
+    post_urls: Mapped[str] = mapped_column(Text, nullable=False)  # JSON list
+    post_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
 class ScheduledPost(Base):
     __tablename__ = "scheduled_posts"
     __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
 
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    user_id = Column(
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True
     )
-    run_id = Column(Integer, nullable=True)
-    platforms = Column(Text, nullable=False)  # JSON or comma-separated string
-    scheduled_at = Column(DateTime, nullable=False)
-    status = Column(String(32), default="pending", nullable=False)  # pending, published, failed, cancelled
-    content_json = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    platforms: Mapped[str] = mapped_column(Text, nullable=False)  # JSON or comma-separated string
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32), default="pending", nullable=False
+    )  # pending, published, failed, cancelled
+    content_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
 def init_db():
@@ -225,6 +268,16 @@ def init_db():
             except Exception:
                 pass
 
+        # Some source URLs (e.g. Google News RSS redirects) exceed the original
+        # VARCHAR(500) post_url limit and silently fail the whole insert batch.
+        if not IS_SQLITE:
+            comp_post_tbl = f'"{SCHEMA}".competitor_posts'
+            try:
+                with engine.begin() as sub_conn:
+                    sub_conn.execute(text(f"ALTER TABLE {comp_post_tbl} ALTER COLUMN post_url TYPE VARCHAR(1000)"))
+            except Exception:
+                pass
+
         conn.commit()
 
     # Seed default admin if no admin user exists
@@ -241,8 +294,8 @@ def init_db():
                     .first()
                 )
                 if existing:
-                    existing.is_admin = True
-                    existing.credit_limit = max(existing.credit_limit or 10.0, 1000.0)
+                    existing.is_admin = True  # type: ignore[assignment]
+                    existing.credit_limit = max(existing.credit_limit or 10.0, 1000.0)  # type: ignore[assignment]
                 else:
                     new_admin = User(
                         name="System Admin",
@@ -259,7 +312,7 @@ def init_db():
 
 
 def _serialize_run(row: RunHistory, truncate_story: bool = False) -> dict:
-    story = row.story
+    story = row.story if row.story else ""
     if truncate_story and len(story) > 120:
         story = story[:120] + "..."
     return {
@@ -267,10 +320,10 @@ def _serialize_run(row: RunHistory, truncate_story: bool = False) -> dict:
         "timestamp": row.created_at.strftime("%Y-%m-%d %H:%M" if truncate_story else "%Y-%m-%d %H:%M:%S"),
         "story": story,
         "tone": row.tone,
-        "platforms": json.loads(row.platforms),
-        "content": json.loads(row.content),
+        "platforms": json.loads(row.platforms) if row.platforms else [],
+        "content": json.loads(row.content) if row.content else {},
         "tokens_used": row.tokens_used or 0,
-        "cost_usd": round(row.cost_usd or 0.0, 6),
+        "cost_usd": round(float(row.cost_usd or 0.0), 6),  # type: ignore
         "is_archived": bool(getattr(row, "is_archived", False)),
     }
 
@@ -323,7 +376,7 @@ def save_run(
         session.add(row)
         session.commit()
         session.refresh(row)
-        return row.id
+        return int(row.id)  # type: ignore
 
 
 def save_approved_asset(user_id: int, platform: str, content_type: str, content_data: str) -> int:
@@ -332,7 +385,7 @@ def save_approved_asset(user_id: int, platform: str, content_type: str, content_
         session.add(row)
         session.commit()
         session.refresh(row)
-        return row.id
+        return int(row.id)  # type: ignore
 
 
 def update_run_content(run_id: int, content: dict, user_id: int | None = None) -> bool:
@@ -342,7 +395,7 @@ def update_run_content(run_id: int, content: dict, user_id: int | None = None) -
             return False
         if user_id is not None and row.user_id != user_id:
             return False
-        row.content = json.dumps(content)
+        row.content = json.dumps(content)  # type: ignore
         session.commit()
         return True
 
@@ -354,7 +407,7 @@ def archive_run(run_id: int, user_id: int | None = None) -> bool:
             return False
         if user_id is not None and row.user_id != user_id:
             return False
-        row.is_archived = True
+        row.is_archived = True  # type: ignore
         session.commit()
         return True
 
@@ -366,7 +419,7 @@ def unarchive_run(run_id: int, user_id: int | None = None) -> bool:
             return False
         if user_id is not None and row.user_id != user_id:
             return False
-        row.is_archived = False
+        row.is_archived = False  # type: ignore
         session.commit()
         return True
 
@@ -410,8 +463,8 @@ def get_user_usage_stats(user_id: int) -> dict:
     """Return aggregated token, cost metrics, and credit details for a user."""
     with Session(engine) as session:
         user = session.get(User, user_id)
-        credit_limit = float(user.credit_limit) if user and user.credit_limit is not None else 10.0
-        is_admin = bool(user.is_admin) if user else False
+        credit_limit = user.credit_limit if user and user.credit_limit is not None else 10.0
+        is_admin = user.is_admin if user else False
 
         result = (
             session.query(
@@ -445,14 +498,16 @@ def get_user_usage_stats(user_id: int) -> dict:
             "remaining_credits": round(remaining, 4),
             "is_admin": is_admin,
             "has_pending_request": pending_req is not None,
-            "pending_request": {
-                "id": pending_req.id,
-                "requested_amount": pending_req.requested_amount,
-                "reason": pending_req.reason,
-                "created_at": pending_req.created_at.strftime("%Y-%m-%d %H:%M"),
-            }
-            if pending_req
-            else None,
+            "pending_request": (
+                {
+                    "id": pending_req.id,
+                    "requested_amount": pending_req.requested_amount,
+                    "reason": pending_req.reason,
+                    "created_at": pending_req.created_at.strftime("%Y-%m-%d %H:%M"),
+                }
+                if pending_req
+                else None
+            ),
         }
 
 
@@ -463,8 +518,9 @@ def assign_orphan_runs_to_user(email: str) -> dict:
         raise ValueError(f"No user found for email: {email}")
 
     with engine.begin() as conn:
+        # SCHEMA is a fixed module-level constant, not user input; :uid is bound separately.
         result = conn.execute(
-            text(f'UPDATE "{SCHEMA}".run_history SET user_id = :uid WHERE user_id IS NULL'),
+            text(f'UPDATE "{SCHEMA}".run_history SET user_id = :uid WHERE user_id IS NULL'),  # nosec B608
             {"uid": user.id},
         )
         updated = result.rowcount or 0
@@ -473,7 +529,7 @@ def assign_orphan_runs_to_user(email: str) -> dict:
         "email": user.email,
         "user_id": user.id,
         "assigned_runs": updated,
-        "total_runs": len(get_history(limit=1000, user_id=user.id)),
+        "total_runs": len(get_history(limit=1000, user_id=user.id)),  # type: ignore
     }
 
 
@@ -490,8 +546,8 @@ def create_credit_request(user_id: int, requested_amount: float, reason: str = "
             .first()
         )
         if existing:
-            existing.requested_amount = requested_amount
-            existing.reason = reason
+            existing.requested_amount = requested_amount  # type: ignore
+            existing.reason = reason  # type: ignore
             session.commit()
             return {
                 "id": existing.id,
@@ -595,7 +651,9 @@ def reject_credit_request(request_id: int) -> dict | None:
         return {"request_id": req.id, "status": "rejected"}
 
 
-def update_user_credit_limit(user_id: int, new_limit: float = None, add_amount: float = None) -> dict | None:
+def update_user_credit_limit(
+    user_id: int, new_limit: float | None = None, add_amount: float | None = None
+) -> dict | None:
     """Update or add to a user's credit limit (admin action)."""
     with Session(engine) as session:
         user = session.get(User, user_id)
@@ -603,9 +661,9 @@ def update_user_credit_limit(user_id: int, new_limit: float = None, add_amount: 
             return None
 
         if new_limit is not None:
-            user.credit_limit = max(0.0, float(new_limit))
+            user.credit_limit = max(0.0, new_limit)
         elif add_amount is not None:
-            user.credit_limit = max(0.0, (user.credit_limit or 10.0) + float(add_amount))
+            user.credit_limit = max(0.0, (user.credit_limit or 10.0) + add_amount)
 
         session.commit()
         return {
@@ -634,7 +692,7 @@ def get_all_users_credit_summary() -> list[dict]:
 
             used_cost = float(cost_res.used_cost) if cost_res else 0.0
             total_runs = cost_res.total_runs if cost_res else 0
-            limit = float(u.credit_limit) if u.credit_limit is not None else 10.0
+            limit = u.credit_limit if u.credit_limit is not None else 10.0
             remaining = max(0.0, limit - used_cost)
 
             # Check pending request
@@ -650,7 +708,7 @@ def get_all_users_credit_summary() -> list[dict]:
                     "id": u.id,
                     "name": u.name,
                     "email": u.email,
-                    "is_admin": bool(u.is_admin),
+                    "is_admin": u.is_admin,
                     "credit_limit": round(limit, 2),
                     "used_credits": round(used_cost, 4),
                     "remaining_credits": round(remaining, 4),
@@ -722,13 +780,13 @@ def save_social_account(
     user_id: int,
     platform: str,
     account_name: str,
-    account_id: str = None,
-    access_token: str = None,
-    refresh_token: str = None,
+    account_id: str | None = None,
+    access_token: str | None = None,
+    refresh_token: str | None = None,
     connection_type: str = "direct",
-    mcp_endpoint: str = None,
-    mcp_token: str = None,
-    mcp_tool_name: str = None,
+    mcp_endpoint: str | None = None,
+    mcp_token: str | None = None,
+    mcp_tool_name: str | None = None,
 ) -> dict:
     """Create or update a connected social media account with optional MCP support."""
     with Session(engine) as session:
@@ -770,7 +828,7 @@ def save_social_account(
             if mcp_tool_name is not None:
                 acc.mcp_tool_name = mcp_tool_name
             acc.status = "connected"
-            acc.updated_at = datetime.utcnow()
+            acc.updated_at = datetime.now(timezone.utc)
 
         session.commit()
         return {
@@ -795,14 +853,14 @@ def disconnect_social_account(user_id: int, platform: str) -> bool:
         )
         if acc:
             acc.status = "disconnected"
-            acc.updated_at = datetime.utcnow()
+            acc.updated_at = datetime.now(timezone.utc)
             session.commit()
             return True
         return False
 
 
 def create_scheduled_post(
-    user_id: int, platforms: list, scheduled_at: datetime, content_json: dict, run_id: int = None
+    user_id: int, platforms: list, scheduled_at: datetime, content_json: dict, run_id: int | None = None
 ) -> dict:
     """Schedule a post for future publishing."""
     with Session(engine) as session:
@@ -914,6 +972,7 @@ def save_competitor_posts(posts: list[dict]) -> dict:
         inserted = 0
         skipped = 0
         new_post_urls = []
+        newly_inserted_posts = []
         for p in posts:
             competitor = p.get("_source_competitor") or "Unknown"
             platform = (p.get("platform") or "").lower()
@@ -945,22 +1004,41 @@ def save_competitor_posts(posts: list[dict]) -> dict:
             )
             existing.add(key)
             new_post_urls.append(post_url)
+            newly_inserted_posts.append(p)
             inserted += 1
 
         session.commit()
+
+        # Embed newly-inserted posts now so Suggested Storyline clustering
+        # (services/embedding_service.py) doesn't have to embed them on-demand
+        # at suggestion-generation time. Best-effort - embedding is a similarity
+        # feature, never allowed to break scraping/saving.
+        if newly_inserted_posts:
+            try:
+                from services.embedding_service import EmbeddingService
+
+                EmbeddingService().index_posts(newly_inserted_posts)
+            except Exception as e:
+                print(f"[save_competitor_posts] Embedding indexing warning: {e}")
+
         return {"inserted": inserted, "skipped": skipped, "new_post_urls": new_post_urls}
 
 
-def get_competitor_posts(platform: str = None, competitor: str = None, limit: int = 300) -> list[dict]:
-    """Return previously-scraped competitor posts stored in the DB, newest first."""
+def get_competitor_posts(
+    platform: str | None = None, competitor: str | None = None, limit: int = 300, days: int = 15
+) -> list[dict]:
+    """Return competitor posts from the last `days` days, stored in the DB, newest first."""
     with Session(engine) as session:
         query = session.query(CompetitorPost)
-        if platform:
+        if platform and platform.lower() != "all":
             query = query.filter(CompetitorPost.platform == platform.lower())
         if competitor and competitor.lower() != "all":
             query = query.filter(CompetitorPost.competitor == competitor)
 
         order_col = func.coalesce(CompetitorPost.published_at, CompetitorPost.scraped_at, CompetitorPost.created_at)
+        if days:
+            cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+            query = query.filter(order_col >= cutoff)
         rows = query.order_by(order_col.desc()).limit(limit).all()
 
         return [
@@ -1031,7 +1109,7 @@ def get_opportunity_suggestions(limit: int = 200) -> dict:
     with Session(engine) as session:
         rows = session.query(OpportunitySuggestion).order_by(OpportunitySuggestion.created_at.desc()).limit(limit).all()
 
-        result = {"unserved_themes": [], "domain_expansion": []}
+        result: dict[str, list] = {"unserved_themes": [], "domain_expansion": []}
         key_map = {"unserved_theme": "unserved_themes", "domain_expansion": "domain_expansion"}
         for r in rows:
             bucket = key_map.get(r.category)
@@ -1046,6 +1124,90 @@ def get_opportunity_suggestions(limit: int = 200) -> dict:
                 }
             )
         return result
+
+
+def _post_urls_hash(post_urls: list[str]) -> str:
+    """Stable fingerprint for a cluster's exact post composition, used to
+    dedupe re-generated Suggested Storylines that group the same posts."""
+    joined = "|".join(sorted(u for u in post_urls if u))
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()
+
+
+def save_content_collections(collections: list[dict]) -> dict:
+    """
+    Persist Suggested Storyline collections, skipping any whose exact post
+    composition (post_urls_hash) is already stored. Returns
+    {"inserted": n, "skipped": n, "new_hashes": [...]}.
+    """
+    if not collections:
+        return {"inserted": 0, "skipped": 0, "new_hashes": []}
+
+    with Session(engine) as session:
+        existing = {r[0] for r in session.query(ContentCollection.post_urls_hash).all()}
+
+        inserted = 0
+        skipped = 0
+        new_hashes = []
+        for item in collections:
+            post_urls = item.get("post_urls") or []
+            if len(post_urls) < 2:
+                skipped += 1
+                continue
+
+            urls_hash = _post_urls_hash(post_urls)
+            if urls_hash in existing:
+                skipped += 1
+                continue
+
+            session.add(
+                ContentCollection(
+                    post_urls_hash=urls_hash,
+                    label=item.get("label") or "Related Storyline",
+                    description=item.get("description"),
+                    relevance=item.get("relevance") or "medium",
+                    competitors=", ".join(item.get("competitors") or []),
+                    platforms=", ".join(item.get("platforms") or []),
+                    post_urls=json.dumps(post_urls),
+                    post_count=item.get("post_count") or len(post_urls),
+                )
+            )
+            existing.add(urls_hash)
+            new_hashes.append(urls_hash)
+            inserted += 1
+
+        session.commit()
+        return {"inserted": inserted, "skipped": skipped, "new_hashes": new_hashes}
+
+
+def get_content_collections(limit: int = 50) -> list[dict]:
+    """Return all accumulated Suggested Storyline collections, newest first."""
+    with Session(engine) as session:
+        rows = session.query(ContentCollection).order_by(ContentCollection.created_at.desc()).limit(limit).all()
+
+        return [
+            {
+                "post_urls_hash": r.post_urls_hash,
+                "label": r.label,
+                "description": r.description,
+                "relevance": r.relevance,
+                "competitors": [c.strip() for c in (r.competitors or "").split(",") if c.strip()],
+                "platforms": [p.strip() for p in (r.platforms or "").split(",") if p.strip()],
+                "post_urls": json.loads(r.post_urls) if r.post_urls else [],
+                "post_count": r.post_count,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+
+
+def clear_content_collections() -> int:
+    """Delete every stored Suggested Storyline collection. Used when
+    regenerating the whole list from scratch instead of accumulating on top
+    of a stale prior batch. Returns the number of rows deleted."""
+    with Session(engine) as session:
+        deleted = session.query(ContentCollection).delete()
+        session.commit()
+        return deleted
 
 
 def update_scheduled_post_status(user_id: int, post_id: int, status: str) -> bool:

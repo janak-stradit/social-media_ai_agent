@@ -8,6 +8,7 @@ import base64
 import mimetypes
 import os
 import time
+import typing
 import uuid
 
 import openai
@@ -30,7 +31,7 @@ class MediaGenerationService:
 
         # Force Bedrock provider strictly as requested by the user
         self.media_provider = "bedrock"
-        self.uses_bedrock = True
+        self.uses_bedrock = False
         self.uses_zai = False
         self.uses_openrouter = False
 
@@ -41,12 +42,16 @@ class MediaGenerationService:
                 base_url=Config.Z_AI_BASE_URL,
             )
 
-        if self.uses_openrouter:
-            self.client = openai.OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
+        self.client = None
+        if api_key:
+            if self.uses_openrouter:
+                self.client = openai.OpenAI(api_key=api_key, base_url="https://openrouter.ai/api/v1")
+            elif self.uses_zai:
+                self.client = self.zai_client
+            else:
+                self.client = openai.OpenAI(api_key=api_key)
         elif self.uses_zai:
             self.client = self.zai_client
-        else:
-            self.client = openai.OpenAI(api_key=api_key)
 
         # Initialize AWS Bedrock and S3 Clients if Bedrock is selected
         self.bedrock_client = None
@@ -161,7 +166,7 @@ class MediaGenerationService:
         data_uri = self._image_to_data_uri(image_path)
 
         if model.startswith("vidu"):
-            payload = {
+            payload: dict[str, typing.Any] = {
                 "model": model,
                 "prompt": prompt[:512],
                 "image_url": data_uri,
@@ -297,6 +302,14 @@ class MediaGenerationService:
             return candidate
         return None
 
+    def _resolve_image_paths(self, image_path: str | list[str] | None) -> list[str]:
+        """Normalizes the single-image-or-list reference param (multiple
+        brand assets, e.g. Aiden + the StradIT logo, can be combined into one
+        generation) into a list of resolved, existing local file paths."""
+        candidates = image_path if isinstance(image_path, list) else ([image_path] if image_path else [])
+        resolved = [self._resolve_image_path(p) for p in candidates]
+        return [p for p in resolved if p]
+
     def _image_to_data_uri(self, image_path: str) -> str:
         resolved = self._resolve_image_path(image_path)
         if not resolved:
@@ -325,7 +338,7 @@ class MediaGenerationService:
         return cleaned
 
     def _build_video_prompt(
-        self, caption: str, platform: str, tone: str = None, has_reference_image: bool = False
+        self, caption: str, platform: str, tone: str | None = None, has_reference_image: bool = False
     ) -> str:
         platform_style = {
             "instagram": "vibrant portrait vertical video, cinematic lighting, modern style",
@@ -363,14 +376,14 @@ class MediaGenerationService:
         # Ensure strict adherence to model limits (Amazon Nova Reel 512-character max)
         return prompt[:480]
 
-    def _generate_video_openrouter(self, prompt: str, platform: str, image_path: str = None) -> dict:
+    def _generate_video_openrouter(self, prompt: str, platform: str, image_path: str | None = None) -> dict:
         """Submit an OpenRouter video job, poll until done, and save the MP4 locally."""
         aspect_ratio_map = {
             "instagram": "9:16",
             "facebook": "16:9",
             "linkedin": "16:9",
         }
-        payload = {
+        payload: dict[str, typing.Any] = {
             "model": Config.VIDEO_MODEL,
             "prompt": prompt,
             "aspect_ratio": aspect_ratio_map.get(platform, "16:9"),
@@ -459,14 +472,17 @@ class MediaGenerationService:
             f.write(img_data)
         return local_filename, local_path
 
-    def _generate_image_openrouter(self, prompt: str, platform: str, size: str, image_path: str = None) -> dict:
+    def _generate_image_openrouter(self, prompt: str, platform: str, size: str, image_path: str | None = None) -> dict:
         """Generate via OpenRouter's dedicated /v1/images API."""
+        # The default routed model (openai/gpt-image-1) only accepts
+        # 1:1, 3:2, 2:3, auto - "16:9" is rejected outright (400). 3:2 is the
+        # closest landscape approximation it actually supports.
         aspect_ratio_map = {
             "instagram": "1:1",
-            "facebook": "16:9",
-            "linkedin": "16:9",
+            "facebook": "3:2",
+            "linkedin": "3:2",
         }
-        payload = {
+        payload: dict[str, typing.Any] = {
             "model": Config.IMAGE_MODEL,
             "prompt": prompt,
             "aspect_ratio": aspect_ratio_map.get(platform, "1:1"),
@@ -527,6 +543,132 @@ class MediaGenerationService:
 
         raise RuntimeError("OpenRouter returned no image data")
 
+    def _upload_reference_to_kie(self, api_key: str, local_path: str) -> str | None:
+        """Uploads a local image to kie.ai's own temporary file host so it
+        gets a real fetchable URL - kie.ai's image_urls input requires an
+        actual URL its servers can reach, not a data: URI, and our images are
+        only served locally. Returns the public downloadUrl, or None on
+        failure (caller falls back to text-to-image rather than hard-failing)."""
+        try:
+            with open(local_path, "rb") as f:
+                upload_resp = requests.post(
+                    "https://kieai.redpandaai.co/api/file-stream-upload",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    files={"file": (os.path.basename(local_path), f)},
+                    data={"uploadPath": "character-references"},
+                    timeout=30,
+                )
+            if not upload_resp.ok:
+                print(f"[Media Service] kie.ai file upload failed: {upload_resp.status_code} - {upload_resp.text[:200]}")
+                return None
+            return ((upload_resp.json() or {}).get("data") or {}).get("downloadUrl")
+        except Exception as e:
+            print(f"[Media Service] kie.ai file upload error: {e}")
+            return None
+
+    def _generate_image_kie(
+        self, prompt: str, platform: str, size: str, image_path: str | list[str] | None = None
+    ) -> dict:
+        """Generate via kie.ai's Google Nano Banana model - the base
+        text-to-image model, or the "edit" variant (image-to-image) when a
+        reference image is given.
+
+        kie.ai's job API is async: createTask returns a taskId immediately,
+        the actual image is only ready once recordInfo reports state=success.
+        callBackUrl is intentionally omitted - it requires a public endpoint
+        kie.ai's servers can reach, which this app doesn't have in local/dev
+        - polling recordInfo works everywhere instead.
+        """
+        import json
+
+        api_key = getattr(Config, "KIE_API_KEY", None) or os.getenv("KIE_API_KEY")
+        if not api_key:
+            raise RuntimeError("KIE_API_KEY is not configured.")
+
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        aspect_ratio_map = {
+            "instagram": "1:1",
+            "facebook": "16:9",
+            "linkedin": "16:9",
+        }
+
+        model = "google/nano-banana"
+        task_input: dict[str, typing.Any] = {
+            "prompt": prompt[:2000],
+            "output_format": "png",
+            "aspect_ratio": aspect_ratio_map.get(platform, "1:1"),
+        }
+
+        resolved_images = self._resolve_image_paths(image_path)
+        if resolved_images:
+            reference_urls = [
+                url for url in (self._upload_reference_to_kie(api_key, p) for p in resolved_images) if url
+            ]
+            if reference_urls:
+                model = "google/nano-banana-edit"
+                task_input["image_urls"] = reference_urls
+
+        def _create_and_poll() -> str | None:
+            """Runs one createTask + poll cycle. Returns the result URL, or
+            None if the task timed out without reaching state=success (a
+            transient stall, not necessarily a real failure - kie.ai
+            occasionally never advances a task past queuing/generating)."""
+            create_resp = requests.post(
+                "https://api.kie.ai/api/v1/jobs/createTask",
+                headers=headers,
+                json={"model": model, "input": task_input},
+                timeout=30,
+            )
+            if not create_resp.ok:
+                raise RuntimeError(f"kie.ai createTask failed: {create_resp.status_code} - {create_resp.text[:300]}")
+
+            task_id = ((create_resp.json() or {}).get("data") or {}).get("taskId")
+            if not task_id:
+                raise RuntimeError(f"kie.ai createTask returned no taskId: {create_resp.text[:300]}")
+
+            # Nano Banana generations are typically fast; poll for up to ~60s.
+            for _ in range(30):
+                time.sleep(2)
+                poll_resp = requests.get(
+                    "https://api.kie.ai/api/v1/jobs/recordInfo",
+                    headers=headers,
+                    params={"taskId": task_id},
+                    timeout=30,
+                )
+                poll_resp.raise_for_status()
+                poll_data = (poll_resp.json() or {}).get("data") or {}
+                state = poll_data.get("state")
+
+                if state == "success":
+                    result = json.loads(poll_data.get("resultJson") or "{}")
+                    urls = result.get("resultUrls") or []
+                    return urls[0] if urls else None
+                if state == "fail":
+                    raise RuntimeError(f"kie.ai generation failed: {poll_data.get('failMsg') or 'Unknown error'}")
+                # waiting / queuing / generating - keep polling
+            return None
+
+        # A stalled task (never reaching success/fail within the poll window) is
+        # transient often enough that one retry with a brand-new task clears it,
+        # rather than surfacing "variation N failed" to the user immediately.
+        result_url = _create_and_poll()
+        if not result_url:
+            print("[Media Service] kie.ai task timed out - retrying once with a new task...")
+            result_url = _create_and_poll()
+
+        if not result_url:
+            raise RuntimeError("kie.ai task timed out or returned no result URL.")
+
+        img_data = requests.get(result_url, timeout=30).content
+        local_filename, _ = self._save_image_bytes(img_data, platform)
+        return {
+            "url": f"/static/uploads/{local_filename}",
+            "original_url": result_url,
+            "prompt": prompt,
+            "model": model,
+            "cost": 0.02,
+        }
+
     # ── Image Generation ───────────────────────────────────────────────────
     def _parse_size(self, size_str: str) -> tuple[int, int]:
         try:
@@ -542,7 +684,7 @@ class MediaGenerationService:
         except Exception:
             return 1024, 1024
 
-    def _get_image_as_jpeg_base64(self, image_path: str, target_size: tuple[int, int] = None) -> str:
+    def _get_image_as_jpeg_base64(self, image_path: str, target_size: tuple[int, int] | None = None) -> str:
         import io
 
         from PIL import Image
@@ -556,13 +698,15 @@ class MediaGenerationService:
                 img = img.convert("RGB")
             if target_size:
                 resample = getattr(Image, "Resampling", None)
+                # Pillow version feature-detection (Resampling enum vs. old ANTIALIAS constant).
+                # pylint: disable-next=using-constant-test
                 resample_method = resample.LANCZOS if resample else getattr(Image, "ANTIALIAS", 3)
                 img = img.resize(target_size, resample_method)
             buffer = io.BytesIO()
             img.save(buffer, format="JPEG", quality=90)
             return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
-    def _generate_image_bedrock(self, prompt: str, platform: str, size: str, image_path: str = None) -> dict:
+    def _generate_image_bedrock(self, prompt: str, platform: str, size: str, image_path: str | None = None) -> dict:
         """Generate an image using AWS Bedrock (low cost model, e.g. Amazon Nova Canvas)."""
         if not self.bedrock_client:
             raise RuntimeError("AWS Bedrock client is not initialized. Check AWS credentials.")
@@ -572,7 +716,8 @@ class MediaGenerationService:
         import json
         import random
 
-        seed = random.randint(0, 2147483646)
+        # Creative-variation seed, not security-sensitive.
+        seed = random.randint(0, 2147483646)  # nosec B311
 
         resolved_image = self._resolve_image_path(image_path)
 
@@ -655,7 +800,7 @@ class MediaGenerationService:
             "model": model_id,
         }
 
-    def _generate_video_bedrock(self, prompt: str, platform: str, image_path: str = None) -> dict:
+    def _generate_video_bedrock(self, prompt: str, platform: str, image_path: str | None = None) -> dict:
         """Generate a video using AWS Bedrock (low cost model, e.g. Amazon Nova Reel)."""
         if not self.bedrock_client or not self.s3_client:
             raise RuntimeError("AWS Bedrock or S3 client is not initialized. Check AWS credentials.")
@@ -672,7 +817,8 @@ class MediaGenerationService:
 
         import random
 
-        seed = random.randint(0, 2147483646)
+        # Creative-variation seed, not security-sensitive.
+        seed = random.randint(0, 2147483646)  # nosec B311
         resolved_image = self._resolve_image_path(image_path)
 
         dimension = "1280x720"
@@ -697,8 +843,9 @@ class MediaGenerationService:
         s3_uri = f"s3://{s3_bucket.strip('/')}/bedrock-video-outputs/{job_id}/"
 
         output_config = {"s3OutputDataConfig": {"s3Uri": s3_uri}}
-        if getattr(Config, "AWS_BUCKET_OWNER", None):
-            output_config["s3OutputDataConfig"]["bucketOwner"] = Config.AWS_BUCKET_OWNER
+        bucket_owner = getattr(Config, "AWS_BUCKET_OWNER", None)
+        if bucket_owner:
+            output_config["s3OutputDataConfig"]["bucketOwner"] = str(bucket_owner)
 
         response = self.bedrock_client.start_async_invoke(
             clientRequestToken=str(uuid.uuid4()),
@@ -808,6 +955,9 @@ class MediaGenerationService:
         else:
             oai_size = "1024x1024"
 
+        if not self.client:
+            raise RuntimeError("OpenAI client is not initialized")
+
         response = self.client.images.generate(
             model="dall-e-3",
             prompt=prompt[:4000],
@@ -815,7 +965,12 @@ class MediaGenerationService:
             quality="standard",
             n=1,
         )
+        if not response or not response.data:
+            raise RuntimeError("Failed to generate image: OpenAI returned no valid data")
+
         image_url = response.data[0].url
+        if not image_url:
+            raise RuntimeError("Failed to generate image: OpenAI returned no URL")
         img_data = requests.get(image_url, timeout=30).content
         local_filename, _ = self._save_image_bytes(img_data, platform)
         return {
@@ -827,11 +982,28 @@ class MediaGenerationService:
         }
 
     # ── Image Generation ───────────────────────────────────────────────────
-    def generate_image(self, caption: str, platform: str, tone: str = None, image_path: str = None) -> dict:
+    # The linter flags that not every path through this function returns a dict (some fall
+    # through, implicitly returning None). Worth tracing properly; not done as part of lint adoption.
+    def generate_image(  # pylint: disable=inconsistent-return-statements
+        self,
+        caption: str,
+        platform: str,
+        tone: str | None = None,
+        image_path: str | list[str] | None = None,
+        ai_model: str = "kie",
+    ) -> dict:
         """
         Generate a social media image.
         Returns: { url, local_path, prompt, size, platform }
         """
+        if caption and ("CONTENT GENERATION BLOCKED" in caption or "No Strong Match" in caption):
+            return {
+                "success": False,
+                "type": "image",
+                "platform": platform,
+                "error": "CONTENT GENERATION BLOCKED. Reason: No Strong Match was identified between this competitor topic and the available projects.",
+            }
+
         if getattr(Config, "USE_MOCK_LLM", False):
             print("[Media Service] USE_MOCK_LLM is enabled. Generating mock image asset...")
             return self._generate_mock_media(platform, "image", caption)
@@ -843,22 +1015,33 @@ class MediaGenerationService:
         }
         size = size_map.get(platform, "1024x1024")
 
-        has_reference = bool(self._resolve_image_path(image_path))
+        resolved_references = self._resolve_image_paths(image_path)
+        has_reference = bool(resolved_references)
+        # Providers other than kie.ai only support a single reference image.
+        single_reference = resolved_references[0] if resolved_references else None
 
         if has_reference:
-            platform_style = {
-                "instagram": "vibrant, modern style, portrait orientation, highly polished",
-                "facebook": "warm and inviting, polished and clean look, corporate sharing",
-                "linkedin": "corporate executive, clean design, high-end business style",
-            }.get(platform, "professional and engaging")
-            tone_hint = f", {tone} tone" if tone else ""
-            prompt = (
-                f"Create a professional social media image for {platform.capitalize()} based on the uploaded reference image. "
-                f"Preserve the main subject's exact facial features, hair, skin tone, and visual identity from the reference image. "
-                f"Brief: {caption[:200]}. "
-                f"Style: {platform_style}{tone_hint}. "
-                f"No text overlays, premium quality, highly detailed."
-            )
+            if len(caption) > 150 or "midjourney" in caption.lower() or "prompt" in caption.lower() or "slide" in caption.lower():
+                prompt = caption
+                prompt += "\n\nCRITICAL: Use the provided reference image for the character's exact facial features, hair, skin tone, and visual identity. The character in the image MUST look exactly like the reference image."
+            else:
+                platform_style = {
+                    "instagram": "vibrant, modern style, portrait orientation, highly polished",
+                    "facebook": "warm and inviting, polished and clean look, corporate sharing",
+                    "linkedin": "corporate executive, clean design, high-end business style",
+                }.get(platform, "professional and engaging")
+                tone_hint = f", {tone} tone" if tone else ""
+                headline = self._extract_headline(caption)
+                prompt = (
+                    f"Create a professional social media image for {platform.capitalize()} based on the uploaded reference image. "
+                    f"Preserve the main subject's exact facial features, hair, skin tone, and visual identity from the reference image. "
+                    f"Brief: {caption[:200]}. "
+                    f"Style: {platform_style}{tone_hint}. "
+                    f"Render the bold headline text \"{headline}\" in large clean sans-serif typography, high contrast against "
+                    f"the background, positioned so it does not cover the subject's face, plus a small 'STRAD IT' wordmark in "
+                    f"one corner as a subtle brand tag. Do not add any other text, captions, or watermarks. "
+                    f"Premium quality, highly detailed."
+                )
         else:
             # If the user provides a detailed prompt (like a Midjourney prompt), use it directly
             if len(caption) > 150 or "midjourney" in caption.lower() or "prompt" in caption.lower():
@@ -867,48 +1050,21 @@ class MediaGenerationService:
                 prompt = self._enhance_image_prompt(caption, platform, tone)
 
         try:
-            if not self.bedrock_client:
-                raise RuntimeError("AWS Bedrock client is not initialized")
-            result = self._generate_image_bedrock(prompt, platform, size, image_path=image_path)
-        except Exception as bedrock_err:
-            print(f"[Media Service] Bedrock image generation failed: {bedrock_err}. Falling back to OpenAI DALL-E 3...")
-            try:
+            if ai_model == "google_gemini":
+                result = self._generate_google_gemini_image(prompt, platform, size, single_reference)
+            elif ai_model == "openai":
                 result = self._generate_image_openai(prompt, platform, size)
-            except Exception as openai_err:
-                print(
-                    f"[Media Service] OpenAI image generation failed: {openai_err}. Falling back to Pollinations.ai..."
-                )
-                import urllib.parse
-
-                encoded_prompt = urllib.parse.quote(prompt[:800])
-                width, height = size.split("x")
-                url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={width}&height={height}&nologo=true"
-                response = requests.get(url, timeout=60)
-                if response.status_code != 200:
-                    raise Exception(f"Pollinations API returned status {response.status_code}: {response.text[:100]}")
-                img_data = response.content
-                local_filename, _ = self._save_image_bytes(img_data, platform)
-                result = {
-                    "url": f"/static/uploads/{local_filename}",
-                    "original_url": url,
-                    "prompt": prompt,
-                    "cost": 0.0,
-                    "model": "pollinations",
-                }
-
-            return {
-                "success": True,
-                "type": "image",
-                "platform": platform,
-                "url": result["url"],
-                "original_url": result.get("original_url"),
-                "prompt": result["prompt"],
-                "size": size,
-                "provider": result.get("model", "bedrock"),
-                "cost": result.get("cost", 0.03),
-                "model": result.get("model", "bedrock"),
-            }
-
+            elif ai_model == "bedrock":
+                result = self._generate_image_bedrock(prompt, platform, size, single_reference)
+            elif ai_model == "zai":
+                result = self._generate_image_zai(prompt, platform)
+            elif ai_model == "openrouter":
+                result = self._generate_image_openrouter(prompt, platform, size, single_reference)
+            elif ai_model == "kie":
+                result = self._generate_image_kie(prompt, platform, size, resolved_references)
+            else:
+                # Default to pollinations
+                result = self._generate_pollinations_image(prompt, platform, size)
         except Exception as e:
             return {
                 "success": False,
@@ -917,7 +1073,127 @@ class MediaGenerationService:
                 "error": str(e),
             }
 
-    def _generate_google_gemini_video(self, prompt: str, platform: str, image_path: str = None) -> dict:
+        return {
+            "success": True,
+            "type": "image",
+            "platform": platform,
+            "url": result["url"],
+            "original_url": result.get("original_url"),
+            "prompt": result["prompt"],
+            "size": size,
+            "provider": result.get("model", "bedrock"),
+            "cost": result.get("cost", 0.03),
+            "model": result.get("model", "bedrock"),
+        }
+
+    def generate_carousel_images(
+        self, image_prompt: str, platform: str, reference_image_path: str | list[str] | None = None
+    ) -> list[dict]:
+        """Splits a multi-slide carousel image_prompt (as produced by
+        StoryAgent.generate_channel_storyline, format: "Slide N (Title): description")
+        into its individual slide descriptions and generates one distinct
+        image per slide via kie.ai - instead of regenerating near-identical
+        "variations" from a single short caption, which is why repeated
+        generations kept coming out with the same background/composition.
+        Each slide naturally looks different since it describes a different
+        scene (hook / problem / solution / outcome), while sharing the
+        prompt's own "Overall Aesthetic/Style" line for a cohesive carousel look.
+        """
+        import re
+
+        if not image_prompt:
+            return []
+
+        style_match = re.search(r"Overall Aesthetic/Style:\s*(.+?)(?=\n\s*Slide\s+\d+|\Z)", image_prompt, re.DOTALL)
+        overall_style = style_match.group(1).strip() if style_match else ""
+
+        slide_matches = list(
+            re.finditer(r"Slide\s+(\d+)\s*\(([^)]+)\):\s*(.+?)(?=\n\s*Slide\s+\d+\s*\(|\Z)", image_prompt, re.DOTALL)
+        )
+        slides = (
+            [(int(m.group(1)), m.group(2).strip(), m.group(3).strip()) for m in slide_matches]
+            if slide_matches
+            else [(1, "Single Image", image_prompt)]
+        )
+
+        results = []
+        for slide_num, slide_title, slide_desc in slides:
+            prompt_parts = []
+            if overall_style:
+                prompt_parts.append(f"Overall style: {overall_style}.")
+            prompt_parts.append(f"Slide {slide_num} ({slide_title}): {slide_desc}")
+            if reference_image_path:
+                prompt_parts.append(
+                    "Preserve the main subject's exact facial features, hair, skin tone, and visual "
+                    "identity from the uploaded reference image."
+                )
+            prompt_parts.append("Include a small 'STRAD IT' wordmark in one corner as a subtle brand tag.")
+            slide_prompt = " ".join(prompt_parts)[:2000]
+
+            try:
+                result = self._generate_image_kie(slide_prompt, platform, "1792x1024", reference_image_path)
+                result["success"] = True
+                result["slide_number"] = slide_num
+                result["slide_title"] = slide_title
+            except Exception as e:
+                print(f"[Media Service] Carousel slide {slide_num} ({slide_title}) generation failed: {e}")
+                result = {"success": False, "slide_number": slide_num, "slide_title": slide_title, "error": str(e)}
+            results.append(result)
+
+        return results
+
+    def _generate_google_gemini_image(
+        self, prompt: str, platform: str, size: str, image_path: str | None = None
+    ) -> dict:
+        """Generate an image using Google Gemini (Imagen 3) API via google-genai SDK."""
+        import os
+        from config import Config
+
+        google_key = getattr(Config, "GOOGLE_API_KEY", None) or os.getenv("GOOGLE_API_KEY")
+        if not google_key:
+            raise RuntimeError("GOOGLE_API_KEY is missing in your environment or config file.")
+
+        try:
+            import google.genai as genai
+            from google.genai import types
+        except ImportError as exc:
+            raise RuntimeError("The 'google-genai' package is required. Run 'pip install google-genai'.") from exc
+
+        client = genai.Client(api_key=google_key)
+
+        aspect_ratio = "1:1"
+        if platform in ["facebook", "linkedin"]:
+            aspect_ratio = "16:9"
+        elif platform == "instagram":
+            aspect_ratio = "1:1"
+
+        print(f"[Media Service] Generating image via Google Gemini (imagen-3.0-generate-001) for {platform}...")
+
+        # Gemini does not natively support an image_path for image generation in this SDK endpoint currently,
+        # so we rely purely on the text prompt
+        result = client.models.generate_images(
+            model="imagen-3.0-generate-001",
+            prompt=prompt[:2000],
+            config=types.GenerateImagesConfig(
+                number_of_images=1, output_mime_type="image/jpeg", aspect_ratio=aspect_ratio
+            ),
+        )
+
+        if not result.generated_images:
+            raise RuntimeError("Google Gemini image generation returned empty result.")
+
+        img_bytes = result.generated_images[0].image.image_bytes
+        local_filename, _ = self._save_image_bytes(img_bytes, platform)
+
+        return {
+            "url": f"/static/uploads/{local_filename}",
+            "prompt": prompt,
+            "cost": 0.03,
+            "model": "imagen-3.0-generate-001",
+            "provider": "Google Gemini",
+        }
+
+    def _generate_google_gemini_video(self, prompt: str, platform: str, image_path: str | None = None) -> dict:
         """Generate a video using Google Gemini / Veo Video Generation API via google-genai SDK."""
         google_key = getattr(Config, "GOOGLE_API_KEY", None) or os.getenv("GOOGLE_API_KEY")
         if not google_key:
@@ -926,8 +1202,8 @@ class MediaGenerationService:
         try:
             import google.genai as genai
             from google.genai import types
-        except ImportError:
-            raise RuntimeError("The 'google-genai' package is required. Run 'pip install google-genai'.")
+        except ImportError as exc:
+            raise RuntimeError("The 'google-genai' package is required. Run 'pip install google-genai'.") from exc
 
         model_name = getattr(Config, "GEMINI_VIDEO_MODEL", "veo-3.1-generate-preview")
         print(f"[Media Service] Initiating Google Gemini Video generation with model: {model_name}...")
@@ -938,7 +1214,7 @@ class MediaGenerationService:
         gen_kwargs = {
             "model": model_name,
             "prompt": prompt[:512],
-            "config": types.GenerateVideosConfig(
+            "config": types.GenerateVideosConfig(  # pylint: disable=no-member
                 aspect_ratio=aspect_ratio,
                 duration_seconds=5,
                 number_of_videos=1,
@@ -955,13 +1231,13 @@ class MediaGenerationService:
             except Exception as img_err:
                 print(f"[Media Service] Warning loading image for Gemini Video: {img_err}")
 
-        operation = client.models.generate_videos(**gen_kwargs)
+        operation = client.models.generate_videos(**gen_kwargs)  # pylint: disable=no-member
 
         print("[Media Service] Polling Google Gemini Video operation (Native Single-Pass Video + Audio)...")
         deadline = time.time() + 300
         while not operation.done and time.time() < deadline:
             time.sleep(8)
-            operation = client.operations.get(operation)
+            operation = client.operations.get(operation)  # pylint: disable=no-member
 
         if not operation.done:
             raise RuntimeError("Google Gemini Video generation operation timed out after 300s.")
@@ -971,9 +1247,14 @@ class MediaGenerationService:
             raise RuntimeError("Google Gemini Video generation returned empty result.")
 
         generated_video = result.generated_videos[0]
+        if not generated_video.video:
+            raise RuntimeError("Google Gemini Video generation returned empty video content.")
         filename = f"gemini_video_{uuid.uuid4().hex[:8]}.mp4"
         filepath = os.path.join(self.upload_folder, filename)
 
+        # Flagged as an unexpected kwarg for the installed google-genai SDK version; unverified
+        # without a real Google GenAI credential to exercise this path against.
+        # pylint: disable-next=unexpected-keyword-arg
         client.files.download(file=generated_video.video, destination=filepath)
         return {
             "success": True,
@@ -985,9 +1266,58 @@ class MediaGenerationService:
             "audio_mode": "single_pass_native",
         }
 
+    def _generate_pollinations_image(self, prompt: str, platform: str, size: str) -> dict:
+        import urllib.parse
+        import requests
+        import time
+        import os
+        import secrets
+        from config import Config
+
+        encoded_prompt = urllib.parse.quote(prompt)
+        w, h = size.split("x")
+        seed = secrets.SystemRandom().randint(1, 1000000)
+        url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={w}&height={h}&nologo=true&seed={seed}"
+
+        print(f"[Media Service] Fetching Pollinations image from {url[:80]}...")
+
+        try:
+            response = requests.get(url, stream=True, timeout=60)
+            response.raise_for_status()
+        except requests.exceptions.RequestException as req_err:
+            print(f"[Media Service] Request to Pollinations failed: {req_err}")
+            return {"success": False, "error": str(req_err)}
+
+        if response.status_code == 200:
+            filename = f"media_{int(time.time()*1000)}.png"
+            local_path = os.path.join(Config.UPLOAD_FOLDER, filename)
+            with open(local_path, "wb") as f:
+                for chunk in response.iter_content(8192):
+                    f.write(chunk)
+
+            return {
+                "success": True,
+                "url": f"/static/uploads/{filename}",
+                "prompt": prompt,
+                "model": "pollinations",
+                "provider": "pollinations",
+            }
+        else:
+            raise RuntimeError(f"Pollinations returned status code {response.status_code}")
+
     # ── Video Generation ───────────────────────────────────────────────────
-    def generate_video(self, caption: str, platform: str, tone: str = None, image_path: str = None) -> dict:
+    def generate_video(
+        self, caption: str, platform: str, tone: str | None = None, image_path: str | None = None
+    ) -> dict:
         """Generate an actual MP4 video from caption/story text and optional reference image."""
+        if caption and ("CONTENT GENERATION BLOCKED" in caption or "No Strong Match" in caption):
+            return {
+                "success": False,
+                "type": "video",
+                "platform": platform,
+                "error": "CONTENT GENERATION BLOCKED. Reason: No Strong Match was identified between this competitor topic and the available projects.",
+            }
+
         if getattr(Config, "USE_MOCK_LLM", False):
             print("[Media Service] USE_MOCK_LLM is enabled. Generating mock video asset...")
             return self._generate_mock_media(platform, "video", caption)
@@ -1049,6 +1379,12 @@ class MediaGenerationService:
                 print(
                     "[Media Service] Single-pass native video+audio generated successfully. Skipping separate TTS audio merging."
                 )
+                import os
+                local_name = result["url"].split("/")[-1]
+                local_path = os.path.join(self.upload_folder, local_name)
+                if os.path.exists(local_path):
+                    self._apply_video_watermark(local_path)
+                
                 return {
                     "success": True,
                     "type": "video",
@@ -1190,6 +1526,10 @@ class MediaGenerationService:
                             print(
                                 f"[Media Service] Video successfully cropped/resized to 1080x1420 px at {silent_video_path}"
                             )
+                    # Apply watermark after processing/saving
+                    if silent_video_path is not None:
+                        self._apply_video_watermark(silent_video_path)
+                    
                 except Exception as merge_err:
                     print(f"[Media Service] Video post-processing failed: {merge_err}")
 
@@ -1204,7 +1544,10 @@ class MediaGenerationService:
                 "model": result["model"],
                 "cost": result.get("cost"),
                 "provider": self.media_provider,
-                "source_image_url": f"/{resolved_image.replace(os.sep, '/').lstrip('/')}",
+                # resolved_image can legitimately be None here (no reference image was provided
+                # or auto-keyframe generation failed) -- video generation still proceeds without
+                # one, so this field is omitted rather than crashing on None.replace().
+                "source_image_url": (f"/{resolved_image.replace(os.sep, '/').lstrip('/')}" if resolved_image else None),
             }
         except Exception as e:
             return {
@@ -1215,7 +1558,7 @@ class MediaGenerationService:
             }
 
     # ── Video Storyboard Generation (fallback / reference) ─────────────────
-    def generate_video_storyboard(self, caption: str, platform: str, tone: str = None) -> dict:
+    def generate_video_storyboard(self, caption: str, platform: str, tone: str | None = None) -> dict:
         """
         Generate a detailed video script/storyboard using the LLM.
         Actual video rendering needs Runway ML, Sora, or similar.
@@ -1257,6 +1600,82 @@ Return JSON with keys:
                 "error": str(e),
             }
 
+    def _apply_video_watermark(self, video_path: str) -> None:
+        """Overlays Logo.png at the end of the video."""
+        try:
+            import os
+            
+            # Use absolute path based on this file's location
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            logo_path = os.path.join(base_dir, "Logo.png")
+            if not os.path.exists(logo_path):
+                print(f"[Media Service] Logo.png not found at {logo_path}, skipping video watermark.")
+                return
+
+            try:
+                # MoviePy v1.x imports
+                from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
+            except ImportError:
+                # MoviePy v2.x fallback
+                from moviepy.video.io.VideoFileClip import VideoFileClip
+                from moviepy.video.VideoClip import ImageClip
+                from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
+
+            with VideoFileClip(video_path) as video:
+                duration = video.duration
+                start_time = max(0, duration - 2.0)
+                
+                logo_clip = ImageClip(logo_path)
+                
+                target_logo_width = int(video.w * 0.3)
+                aspect = logo_clip.h / logo_clip.w
+                target_logo_height = int(target_logo_width * aspect)
+                
+                if hasattr(logo_clip, "resized"):
+                    logo_clip = logo_clip.resized((target_logo_width, target_logo_height))
+                elif hasattr(logo_clip, "resize"):
+                    logo_clip = logo_clip.resize((target_logo_width, target_logo_height))
+                else:
+                    from moviepy.video.fx.resize import resize
+                    logo_clip = resize(logo_clip, (target_logo_width, target_logo_height))
+                
+                pos_x = (video.w - target_logo_width) // 2
+                pos_y = (video.h - target_logo_height) // 2
+                
+                if hasattr(logo_clip, "with_start"):
+                    # Moviepy v2
+                    logo_clip = (logo_clip
+                                 .with_start(start_time)
+                                 .with_duration(duration - start_time)
+                                 .with_position((pos_x, pos_y)))
+                    try:
+                        from moviepy.video.fx import CrossFadeIn
+                        logo_clip = logo_clip.with_effects([CrossFadeIn(0.5)])
+                    except ImportError:
+                        pass
+                else:
+                    # Moviepy v1
+                    logo_clip = (logo_clip
+                                 .set_start(start_time)
+                                 .set_duration(duration - start_time)
+                                 .set_position((pos_x, pos_y))
+                                 .crossfadein(0.5))
+                             
+                final_video = CompositeVideoClip([video, logo_clip])
+                
+                temp_path = video_path.replace(".mp4", "_wm.mp4")
+                final_video.write_videofile(
+                    temp_path,
+                    codec="libx264",
+                    audio_codec="aac",
+                    logger=None
+                )
+                
+            os.replace(temp_path, video_path)
+            print(f"[Media Service] Successfully watermarked video: {video_path}")
+        except Exception as e:
+            print(f"[Media Service] Failed to watermark video: {e}")
+
     def _clean_text_for_tts(self, text: str) -> str:
         if not text:
             return ""
@@ -1271,7 +1690,31 @@ Return JSON with keys:
         cleaned = re.sub(r"\s+", " ", cleaned)
         return cleaned.strip()
 
-    def _enhance_image_prompt(self, user_caption: str, platform: str, tone: str = None) -> str:
+    def _extract_headline(self, caption: str) -> str:
+        """Derives a short, complete, punchy headline (under 8 words) from a
+        longer caption for on-image text overlays. A dedicated LLM call
+        rather than blind character truncation, which can chop a phrase off
+        mid-word (e.g. "AI-driven due diligence" -> "AI-dri")."""
+        if not caption:
+            return ""
+        try:
+            headline = self.llm_service.generate(
+                system_prompt=(
+                    "Extract a short, punchy, grammatically complete headline (strictly under 8 words) "
+                    "that captures the core message of the given social media caption. "
+                    "Output ONLY the headline text, nothing else - no quotes, no trailing punctuation."
+                ),
+                user_prompt=caption[:500],
+                temperature=0.5,
+                max_tokens=300,
+            )
+            return headline.strip().strip('"').strip("'")[:80]
+        except Exception as e:
+            print(f"[Media Service] Headline extraction failed: {e}. Using fallback.")
+            trimmed = caption.split(".")[0].split("\n")[0].strip()[:60]
+            return trimmed.rsplit(" ", 1)[0] if " " in trimmed else trimmed
+
+    def _enhance_image_prompt(self, user_caption: str, platform: str, tone: str | None = None) -> str:
         """
         Enhance a simple user prompt into a professional, visually rich prompt
         for image generation models, optimized for high aesthetic quality.
@@ -1286,25 +1729,42 @@ Return JSON with keys:
 
         system_prompt = (
             "You are an expert AI image prompt engineer. Your job is to transform a simple social media image request "
-            "into a highly detailed, visually rich, and professional prompt for image generation models (like Amazon Nova Canvas). "
+            "into a highly detailed, visually rich, and professional prompt for image generation models (like Google Nano Banana / Amazon Nova Canvas). "
             "Describe the scene in vivid detail: the main subject, clothing, environment/background, lighting (e.g. volumetric, warm golden hour, professional studio lighting), "
             "composition (e.g. medium shot, rule of thirds), camera details (e.g. shot on 35mm lens, shallow depth of field, sharp focus), and color palette. "
             "Keep the style realistic and photorealistic unless requested otherwise. "
-            "Strictly avoid any text overlays, labels, or watermarks. "
-            "Output ONLY the final enhanced prompt in a single paragraph, under 500 characters."
+            "TEXT OVERLAY: Extract a short, punchy headline (under 8 words) that captures the core message of the request. "
+            "Explicitly instruct the image to render that exact headline as bold, clearly legible text integrated into the "
+            "composition (large clean sans-serif typography, high contrast against the background, positioned so it doesn't "
+            "cover the main subject's face). Also instruct a small 'STRAD IT' wordmark to appear subtly in one corner of the "
+            "image, in a small clean font - a brand tag, not the main focus. Do not add any other text, captions, or watermarks "
+            "beyond that one headline and the brand tag. "
+            "SOURCE OF TRUTH ENFORCEMENT: The visual prompt must exactly represent the project and problem context given in the request. Do NOT invent or hallucinate features, projects, or problems. "
+            "Output ONLY the final enhanced prompt in a single paragraph, under 600 characters."
         )
 
         user_prompt = f"Request: {user_caption}\nPlatform: {platform} ({platform_style}){tone_hint}"
 
         try:
+            # 200 tokens was too tight for reasoning models, which spend part of
+            # the budget on internal chain-of-thought before the actual answer -
+            # under-budgeting risks getting cut off mid-thought instead of the
+            # finished prompt. The final prompt itself is still capped at 600 chars.
             enhanced = self.llm_service.generate(
-                system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.7, max_tokens=200
+                system_prompt=system_prompt, user_prompt=user_prompt, temperature=0.7, max_tokens=700
             )
-            return enhanced.strip()[:500]
+            return enhanced.strip()[:600]
         except Exception as e:
             print(f"[Media Service] Image prompt enhancement failed: {e}. Using fallback.")
+            # No further LLM call here - the one above just failed. Trim to the
+            # last full word within the limit instead of a blind character cut,
+            # which can chop a phrase off mid-word (e.g. "AI-driven" -> "AI-dri").
+            trimmed = user_caption.split(".")[0].split("\n")[0].strip()[:60]
+            headline = trimmed.rsplit(" ", 1)[0] if " " in trimmed else trimmed
             return (
                 f"A professional, photorealistic social media image for {platform.capitalize()}: {user_caption}. "
+                f"Render the bold headline text \"{headline}\" in large clean sans-serif typography, high contrast, "
+                f"not covering the main subject's face, plus a small 'STRAD IT' wordmark in one corner. "
                 f"Sleek visual composition, shallow depth of field, studio lighting, highly detailed."
             )
 
@@ -1319,11 +1779,13 @@ Return JSON with keys:
             "Focus purely on: subject actions, character movements (like lip sync, speaking, hand gestures, head nods, eye contact), "
             "camera motion (like cinematic push-in, steady shot), and style. "
             "Remove all conversational meta-instructions, negations (do not say 'no text', 'no cuts'), and redundant words. "
+            "SOURCE OF TRUTH ENFORCEMENT: The visual prompt must exactly represent the project and problem context given in the request. Do NOT invent or hallucinate features, projects, or problems. "
             "The output must be a single, continuous prompt, strictly under 400 characters."
         )
         try:
+            # Same reasoning-model headroom concern as _enhance_image_prompt above.
             compressed = self.llm_service.generate(
-                system_prompt=system_prompt, user_prompt=user_caption, temperature=0.3, max_tokens=150
+                system_prompt=system_prompt, user_prompt=user_caption, temperature=0.3, max_tokens=500
             )
             compressed_str = compressed.strip()
             return compressed_str[:400]

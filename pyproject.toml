@@ -1,22 +1,83 @@
-[tool.ruff]
+[tool.black]
 line-length = 120
-target-version = "py311"
-exclude = [
-    "soical-media-ai",
-    "StradIT",
-    "chroma_db",
-    "__pycache__",
+target-version = ["py311"]
+extend-exclude = '''
+(
+    soical-media-ai
+    | StradIT
+    | chroma_db
+    | node_modules
+)
+'''
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+follow_imports = "silent"
+explicit_package_bases = true
+mypy_path = "."
+implicit_optional = true
+exclude = ["soical-media-ai", "StradIT", "chroma_db", "tests", "node_modules"]
+# This codebase currently has ~no type annotations, so mypy runs in its
+# lenient default mode (it doesn't deep-check unannotated function bodies).
+# Tightening this (check_untyped_defs, disallow_untyped_defs, etc.) is a
+# deliberate follow-up once functions start picking up type hints.
+
+[tool.bandit]
+exclude_dirs = ["tests", "soical-media-ai", "StradIT", "chroma_db", "scripts", "node_modules"]
+# B110 (try/except/pass) is skipped repo-wide: this codebase deliberately uses
+# best-effort "don't crash the whole pipeline" fallbacks in many places (LLM
+# JSON repair, media cleanup, optional API calls). Specific, more serious
+# findings (B501 verify=False, B105 false-positive, B311 non-crypto seed) are
+# suppressed individually inline with `# nosec <code>` and a reason instead.
+skips = ["B110"]
+
+[tool.pylint.main]
+ignore-paths = ["^soical-media-ai/.*", "^StradIT/.*", "^chroma_db/.*", "^tests/.*", "^node_modules/.*"]
+
+[tool.pylint.format]
+max-line-length = 120  # informational only; C0301 is disabled below since Black governs width
+
+[tool.pylint."messages control"]
+# First-adoption baseline: real bugs the checkers found are fixed or flagged inline with
+# `# pylint: disable=<code>` and a reason at the call site (see db.py, media_service.py,
+# scheduler_thread.py, api/routes.py, scripts/sync_scraper_to_rag.py). Everything disabled here
+# is either a deliberate, pervasive architectural choice in this codebase, or a subjective
+# complexity/style metric not worth gating merges on right now.
+disable = [
+    "missing-module-docstring",
+    "missing-class-docstring",
+    "missing-function-docstring",
+    "line-too-long",              # C0301 -- Black governs practical line width
+    "broad-exception-caught",     # W0718 -- deliberate best-effort fallback pattern, used pervasively
+    "broad-exception-raised",     # W0719 -- raise Exception(...) used pervasively; custom exception
+                                   #          hierarchy is a real but separate refactor
+    "import-outside-toplevel",    # C0415 -- deliberate lazy-import pattern (avoid circular imports /
+                                   #          heavy startup cost from torch/transformers/chromadb)
+    "redefined-outer-name",       # W0621 -- byproduct of the lazy-import pattern above
+    "reimported",                 # W0404 -- byproduct of the lazy-import pattern above
+    "no-else-return",             # R1705 -- style preference
+    "no-else-break",              # R1723 -- style preference
+    "duplicate-code",             # R0801 -- real signal (shared LLM-call/boto3-session boilerplate
+                                   #          across agents/services), but fixing means extracting
+                                   #          shared helpers -- a refactor, not a lint fix
+    "unused-argument",            # W0613 -- many are required by interface/dispatch signatures or
+                                   #          Flask's errorhandler(e) contract
+    "invalid-name",               # C0103 -- this codebase's naming (e.g. module-level service
+                                   #          instances) doesn't match pylint's constant heuristic
+    "ungrouped-imports",          # C0412 -- cosmetic
+    "consider-using-from-import", # R0402 -- cosmetic ("import x.y as y" vs "from x import y")
+    "too-many-arguments",
+    "too-many-positional-arguments",
+    "too-many-locals",
+    "too-many-branches",
+    "too-many-statements",
+    "too-many-return-statements",
+    "too-many-nested-blocks",
+    "too-many-instance-attributes",
+    "too-many-lines",
+    "too-few-public-methods",
 ]
-
-[tool.ruff.lint]
-# E4/E7/E9 = pycodestyle error subset, F = pyflakes, I = import sorting, UP = pyupgrade.
-# E501 (line-too-long) is intentionally left unselected: the formatter governs
-# practical line width, and this codebase has many long prompt/URL/SQL strings
-# that aren't worth force-wrapping.
-select = ["E4", "E7", "E9", "F", "I", "UP"]
-
-[tool.ruff.lint.isort]
-known-first-party = ["agents", "api", "auth", "services", "config", "db", "app", "scheduler_thread"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

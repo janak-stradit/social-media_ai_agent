@@ -191,6 +191,28 @@ $(document).ready(function () {
         showToast('Started a new conversation', 'info');
     }
 
+    // ── Incoming handoff from the Analysis Dashboard's "Refine in Studio
+    // Chat" button (see sendPipelineToStudioChat in dashboard.js). Studio
+    // Chat is a separate page, so the seed content is passed via localStorage
+    // and consumed exactly once here on load. ──────────────────────────────
+    (function hydrateIncomingStudioChatSeed() {
+        let seed = null;
+        try {
+            const raw = localStorage.getItem('incomingStudioChatSeed');
+            if (raw) seed = JSON.parse(raw);
+        } catch (e) { /* ignore malformed/inaccessible storage */ }
+
+        if (!seed || !seed.text) return;
+
+        try {
+            localStorage.removeItem('incomingStudioChatSeed');
+        } catch (e) { /* ignore storage errors */ }
+
+        startNewChat();
+        storyInput.val(seed.text).trigger('input').focus();
+        showToast('Loaded content from the Analysis Dashboard - review and send to start refining.', 'info');
+    })();
+
     // ── Drag & Drop Visual Asset ───────────────────────────────────────
     const dropZone = $('#dropZone');
     dropZone.on('dragover', function (e) { e.preventDefault(); $(this).addClass('dragover'); });
@@ -378,12 +400,13 @@ $(document).ready(function () {
             target_company: targetCompany
         };
 
-        $.ajax({
+        window.currentGenerationRequest = $.ajax({
             url: '/api/generate',
             type: 'POST',
             contentType: 'application/json',
             data: JSON.stringify(requestBody),
             success: function (r) {
+                window.currentGenerationRequest = null;
                 clearInterval(iv);
                 lastRunId = r.run_id || null;
 
@@ -402,8 +425,16 @@ $(document).ready(function () {
                 loadUserUsageMetrics();
                 scrollToBottom();
             },
-            error: function (xhr) {
+            error: function (xhr, status, error) {
+                window.currentGenerationRequest = null;
                 clearInterval(iv);
+                
+                if (status === 'abort') {
+                    assistantElem.remove();
+                    showToast('Generation cancelled', 'info');
+                    return;
+                }
+
                 const res = xhr.responseJSON || {};
                 const errText = res.error || 'Generation failed';
 
@@ -433,6 +464,13 @@ $(document).ready(function () {
                 }
             }
         });
+    };
+
+    window.cancelGeneration = function(msgId) {
+        if (window.currentGenerationRequest) {
+            window.currentGenerationRequest.abort();
+            window.currentGenerationRequest = null;
+        }
     };
 
     // ── Chat Bubble Render Helpers ─────────────────────────────────────
@@ -486,7 +524,10 @@ $(document).ready(function () {
                         <div class="assistant-title">
                             <i class="fas fa-network-wired text-primary me-1"></i>Multi-Agent Execution Pipeline
                         </div>
-                        <span class="assistant-run-tag">Active Agents</span>
+                        <div class="d-flex align-items-center">
+                            <span class="assistant-run-tag me-2">Active Agents</span>
+                            <button class="btn btn-sm btn-outline-danger py-0 px-2 cancel-generation-btn" onclick="cancelGeneration('${msgId}')" title="Cancel generation"><i class="fas fa-times me-1"></i>Cancel</button>
+                        </div>
                     </div>
                     
                     <!-- Live Agent Execution Stepper -->
@@ -609,8 +650,6 @@ $(document).ready(function () {
 
             // Strategy
             const strat = pData.strategy || {};
-            const bestTime = safeStr(strat.best_time_to_post || strat.posting_schedule || 'Peak Hours');
-            const formatRec = safeStr(strat.content_format || strat.recommended_format || 'Standard Post');
             const reach = safeReach(strat.expected_reach || strat.reach_score);
 
             const cardId = `${msgId}_caption_target_${p}`;
@@ -925,6 +964,7 @@ $(document).ready(function () {
                     <div class="history-card-header">
                         <div class="history-card-title">${escapeHtml(item.story)}</div>
                         <div class="history-card-actions">
+                            <button class="btn-history-icon btn-view-details-item" data-id="${item.id}" title="View run details"><i class="fas fa-circle-info"></i></button>
                             ${actionBtn}
                         </div>
                     </div>
@@ -945,6 +985,12 @@ $(document).ready(function () {
             if ($(e.target).closest('.history-card-actions').length) return;
             $('.history-card').removeClass('active');
             $(this).addClass('active');
+            const id = $(this).data('id');
+            loadHistoryIntoChat(id);
+        });
+
+        $('.btn-view-details-item').on('click', function (e) {
+            e.stopPropagation();
             const id = $(this).data('id');
             openHistoryDetails(id);
         });
@@ -986,6 +1032,51 @@ $(document).ready(function () {
             },
             error: function () {
                 showToast('Failed to restore conversation', 'error');
+            }
+        });
+    }
+
+    // Loads a past run into the live chat workspace as a resumable
+    // conversation (instead of the read-only Run Details modal), so the user
+    // can send a follow-up message to fine-tune it with more information.
+    function loadHistoryIntoChat(runId) {
+        $.ajax({
+            url: `/api/history/${runId}`,
+            type: 'GET',
+            success: function (r) {
+                const run = r.run;
+                if (!run) return;
+
+                const platforms = Array.isArray(run.platforms) ? run.platforms : (run.platforms ? [run.platforms] : ['linkedin']);
+                const content = run.content || {};
+
+                startNewChat();
+                $('#welcomeHero').addClass('d-none');
+
+                messageCounter++;
+                const msgId = 'msg_' + Date.now() + '_' + messageCounter;
+
+                appendUserMessage(run.story, null, platforms, run.tone, 'Text (Caption)', 'Standard Enterprise');
+                const assistantElem = appendAssistantThinking(msgId, false);
+                renderAssistantResponse(assistantElem, content, platforms, msgId, run.story, null, 'Text (Caption)', run.tone, run.id, null, null, null, []);
+
+                // Seed multi-turn context the same way a live generation does,
+                // so the next message the user sends continues refining this
+                // run instead of starting from scratch.
+                lastRunId = run.id;
+                let contextSummary = `Brief: ${run.story}\nGenerated Captions:\n`;
+                platforms.forEach(p => {
+                    if (content[p]?.caption?.primary_caption) {
+                        contextSummary += `[${p.toUpperCase()}]: ${content[p].caption.primary_caption}\n`;
+                    }
+                });
+                lastAssistantContext = contextSummary;
+
+                scrollToBottom();
+                showToast('Loaded past conversation - send a message to keep refining it.', 'info');
+            },
+            error: function () {
+                showToast('Could not load that conversation.', 'error');
             }
         });
     }
@@ -1063,17 +1154,6 @@ $(document).ready(function () {
     function capitalize(str) {
         if (!str) return '';
         return str.charAt(0).toUpperCase() + str.slice(1);
-    }
-
-    function safeStr(val) {
-        if (val == null) return '—';
-        if (typeof val === 'string') return val;
-        if (typeof val === 'number') return String(val);
-        if (Array.isArray(val)) return val.join(', ');
-        if (typeof val === 'object') {
-            return val.text || val.value || val.time || val.label || val.name || '—';
-        }
-        return String(val);
     }
 
     function safeReach(val) {

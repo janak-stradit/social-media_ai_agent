@@ -1,0 +1,16 @@
+[flake8]
+max-line-length = 120
+# E203/W503 conflict with Black's formatting choices (whitespace before ':',
+# line break before binary operator) -- both are the documented Black-compat ignores.
+# E501 (line-too-long) is off deliberately: Black governs practical line width, and this
+# codebase has many long prompt/URL/SQL strings that aren't worth force-wrapping.
+extend-ignore = E203, W503, E501
+exclude =
+    .git,
+    __pycache__,
+    soical-media-ai,
+    StradIT,
+    chroma_db,
+    .pytest_cache,
+    node_modules,
+    static/uploads

@@ -1,10 +1,15 @@
 import json
 import os
+import re
 import urllib.parse
 import uuid
+import typing
+from typing import Optional
+import io
+import zipfile
 
 import requests
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, request, send_file
 from werkzeug.utils import secure_filename
 
 from agents.caption_agent import CaptionAgent
@@ -62,7 +67,7 @@ except Exception as _media_err:
 try:
     from services.social_publisher_service import SocialPublisherService
 
-    publisher_service = SocialPublisherService()
+    publisher_service: Optional[SocialPublisherService] = SocialPublisherService()
 except Exception as _pub_err:
     publisher_service = None
     print(f"[routes] Social publisher service not available: {_pub_err}")
@@ -96,6 +101,58 @@ def _persist_generated_media(run_id: int | None, platform: str, media_type: str,
         append_run_media(run_id, platform, media_type, media_payload, user_id=user_id)
     except Exception as db_err:
         current_app.logger.warning(f"[DB] Could not save generated media: {db_err}")
+
+
+def extract_prompt_for_type(full_text: str, content_type: str) -> str:
+    """Extracts unified or individual prompts from the Counter Strategy text."""
+    if not full_text:
+        return full_text
+
+    if content_type in ("text", "caption"):
+        unified = re.search(
+            r"Unified Caption(?: Prompt)?:\s*(.*?)(?=\n\n(?:Unified Image Prompt|Unified Video Script|Theme:)|$)",
+            full_text,
+            re.DOTALL,
+        )
+        if unified:
+            return unified.group(1).strip()
+        matches = re.findall(
+            r"Caption(?: Prompt)?:\s*(.*?)(?=\n\n(?:Image Prompt|Video Script|Theme:|Reason for No Match:)|$)",
+            full_text,
+            re.DOTALL,
+        )
+        if matches:
+            return "\n\n---\n\n".join([m.strip() for m in matches])
+
+    elif content_type == "image":
+        unified = re.search(
+            r"Unified Image Prompt:\s*(.*?)(?=\n\n(?:Unified Video Script|Unified Caption|Theme:)|$)",
+            full_text,
+            re.DOTALL,
+        )
+        if unified:
+            return unified.group(1).strip()
+        matches = re.findall(
+            r"Image Prompt:\s*(.*?)(?=\n\n(?:Video Script|Caption|Theme:|Reason for No Match:)|$)", full_text, re.DOTALL
+        )
+        if matches:
+            return "\n\n---\n\n".join([m.strip() for m in matches])
+
+    elif content_type == "video":
+        unified = re.search(
+            r"Unified Video Script:\s*(.*?)(?=\n\n(?:Unified Caption|Unified Image Prompt|Theme:)|$)",
+            full_text,
+            re.DOTALL,
+        )
+        if unified:
+            return unified.group(1).strip()
+        matches = re.findall(
+            r"Video Script:\s*(.*?)(?=\n\n(?:Caption|Image Prompt|Theme:|Reason for No Match:)|$)", full_text, re.DOTALL
+        )
+        if matches:
+            return "\n\n---\n\n".join([m.strip() for m in matches])
+
+    return full_text
 
 
 def allowed_file(filename):
@@ -289,12 +346,13 @@ def upload_image():
         return jsonify({"error": "No image file provided"}), 400
 
     file = request.files["image"]
-    if file.filename == "":
+    filename = file.filename
+    if not filename:
         return jsonify({"error": "No file selected"}), 400
 
-    if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        unique_name = f"{uuid.uuid4()}_{filename}"
+    if file and allowed_file(filename):
+        secure_name = secure_filename(filename)
+        unique_name = f"{uuid.uuid4()}_{secure_name}"
         filepath = os.path.join(current_app.config["UPLOAD_FOLDER"], unique_name)
         file.save(filepath)
 
@@ -386,16 +444,19 @@ def generate_content():
             stats = get_user_usage_stats(user_id)
             if stats.get("remaining_credits", 0.0) <= 0.0:
                 limit_val = stats.get("credit_limit", 10.0)
-                return jsonify(
-                    {
-                        "error": f"Credit limit reached (${limit_val:.2f}). Please request a credit extension from admin.",
-                        "credit_limit_exceeded": True,
-                        "credit_limit": limit_val,
-                        "used_credits": stats.get("used_credits", 0.0),
-                        "remaining_credits": 0.0,
-                        "has_pending_request": stats.get("has_pending_request", False),
-                    }
-                ), 402
+                return (
+                    jsonify(
+                        {
+                            "error": f"Credit limit reached (${limit_val:.2f}). Please request a credit extension from admin.",
+                            "credit_limit_exceeded": True,
+                            "credit_limit": limit_val,
+                            "used_credits": stats.get("used_credits", 0.0),
+                            "remaining_credits": 0.0,
+                            "has_pending_request": stats.get("has_pending_request", False),
+                        }
+                    ),
+                    402,
+                )
         except Exception as _cred_err:
             current_app.logger.warning(f"[Credits] Check error: {_cred_err}")
 
@@ -424,7 +485,16 @@ def generate_content():
         mem_prompt = memory_service.format_memory_prompt(retrieved_memories)
 
         # Step 1: Analyze story
-        story_analysis, story_usage = story_agent.analyze(story_prompt, memory_context=mem_prompt, return_usage=True)
+        if "STRATEGY SYNTHESIS:" in story_prompt:
+            caption_input = story_prompt
+            story_analysis = {"themes": ["Strategy", "Industry"], "emotions": ["Professional"]}
+            story_usage = None
+        else:
+            story_analysis, story_usage = story_agent.analyze(
+                story_prompt, memory_context=mem_prompt, return_usage=True
+            )
+            caption_input = extract_prompt_for_type(story_prompt, "text")
+
         if story_usage:
             total_tokens += story_usage.get("total_tokens", 0)
             total_cost_usd += story_usage.get("cost_usd", 0.0)
@@ -455,7 +525,12 @@ def generate_content():
         captions = {}
         if generate_text:
             captions = caption_agent.generate_all_platforms(
-                story_analysis, vision_analysis, tone, memory_context=mem_prompt, brand_voice=brand_voice
+                caption_input,
+                vision_analysis,
+                tone,
+                memory_context=mem_prompt,
+                brand_voice=brand_voice,
+                platforms=platforms,
             )
             cap_usage = captions.pop("_usage", {})
             total_tokens += cap_usage.get("total_tokens", 0)
@@ -473,7 +548,9 @@ def generate_content():
         # Step 4: Generate hashtags
         hashtags = {}
         if generate_text:
-            hashtags = hashtag_agent.generate_all_platforms(story_analysis, vision_analysis, memory_context=mem_prompt)
+            hashtags = hashtag_agent.generate_all_platforms(
+                story_analysis, vision_analysis, memory_context=mem_prompt, platforms=platforms
+            )
             hash_usage = hashtags.pop("_usage", {})
             total_tokens += hash_usage.get("total_tokens", 0)
             total_cost_usd += hash_usage.get("cost_usd", 0.0)
@@ -490,7 +567,9 @@ def generate_content():
         # Step 5: Generate strategy
         strategies = {}
         if include_strategy and generate_text:
-            strategies = strategy_agent.generate_all_strategies(story_analysis, memory_context=mem_prompt)
+            strategies = strategy_agent.generate_all_strategies(
+                story_analysis, memory_context=mem_prompt, platforms=platforms
+            )
             strat_usage = strategies.pop("_usage", {})
             total_tokens += strat_usage.get("total_tokens", 0)
             total_cost_usd += strat_usage.get("cost_usd", 0.0)
@@ -589,9 +668,9 @@ def generate_content():
 
         # ── Persist to PostgreSQL ──────────────────────────────────────────
         run_id = None
-        if DB_AVAILABLE:
+        if DB_AVAILABLE and user_id is not None:
             try:
-                content_to_save = dict(response["content"])
+                content_to_save: dict[str, typing.Any] = dict(response["content"])
                 content_to_save["_agents"] = agents_executed
                 content_to_save["_quality"] = response["quality_summary"]
                 if image_path and os.path.exists(image_path):
@@ -728,6 +807,9 @@ def approve_asset():
 
     try:
         user_id = get_current_user_id()
+        if user_id is None:
+            return jsonify({"error": "User not authenticated"}), 401
+
         content_type = data.get("type", "text")
         content_data = json.dumps(data["content"]) if isinstance(data["content"], dict) else data["content"]
 
@@ -761,6 +843,9 @@ def publish_pipeline_asset():
         return jsonify({"error": "content is required"}), 400
 
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
     is_media = "image" in asset_type or "video" in asset_type
     message = (caption or content) if is_media else content
 
@@ -823,7 +908,15 @@ def generate_media():
     media_type = data.get("media_type", "image")
     tone = data.get("tone")
     run_id = data.get("run_id")
-    image_path = data.get("image_path")
+    # image_paths (plural) lets the caller supply more than one reference image
+    # (e.g. the Aiden character AND the StradIT logo together) - falls back to
+    # the older singular image_path for callers that only pass one. image_path
+    # stays a single string (used for video gen / source_image_url, which only
+    # support one reference); image_path is a str or list[str] only where
+    # generate_image's kie.ai path can use multiple references.
+    image_paths = [p for p in (data.get("image_paths") or []) if p]
+    image_path = data.get("image_path") or (image_paths[0] if image_paths else None)
+    image_path_for_gen = image_paths if len(image_paths) > 1 else image_path
     user_id = get_current_user_id()
 
     # Credit Limit Check
@@ -832,16 +925,19 @@ def generate_media():
             stats = get_user_usage_stats(user_id)
             if stats.get("remaining_credits", 0.0) <= 0.0:
                 limit_val = stats.get("credit_limit", 10.0)
-                return jsonify(
-                    {
-                        "error": f"Credit limit reached (${limit_val:.2f}). Please request a credit extension from admin.",
-                        "credit_limit_exceeded": True,
-                        "credit_limit": limit_val,
-                        "used_credits": stats.get("used_credits", 0.0),
-                        "remaining_credits": 0.0,
-                        "has_pending_request": stats.get("has_pending_request", False),
-                    }
-                ), 402
+                return (
+                    jsonify(
+                        {
+                            "error": f"Credit limit reached (${limit_val:.2f}). Please request a credit extension from admin.",
+                            "credit_limit_exceeded": True,
+                            "credit_limit": limit_val,
+                            "used_credits": stats.get("used_credits", 0.0),
+                            "remaining_credits": 0.0,
+                            "has_pending_request": stats.get("has_pending_request", False),
+                        }
+                    ),
+                    402,
+                )
         except Exception as _cred_err:
             current_app.logger.warning(f"[Credits] Check error: {_cred_err}")
 
@@ -854,6 +950,7 @@ def generate_media():
         try:
             run = get_run_by_id(run_id, user_id=user_id)
             image_path = (run or {}).get("content", {}).get("_meta", {}).get("image_path")
+            image_path_for_gen = image_path_for_gen or image_path
         except Exception:
             image_path = None
 
@@ -863,21 +960,61 @@ def generate_media():
             return jsonify({"error": "Run not found"}), 404
 
     try:
+        caption_to_use = extract_prompt_for_type(caption, media_type)
         if media_type == "video":
-            result = media_service.generate_video(caption, platform, tone, image_path=image_path)
+            result = media_service.generate_video(caption_to_use, platform, tone, image_path=image_path)
         else:
-            result = media_service.generate_image(caption, platform, tone, image_path=image_path)
+            ai_model = data.get("ai_model", "kie")
+            # If the client sent context, use it as tone to guide the style
+            if "context" in data and data["context"]:
+                tone = data["context"]
+            result = media_service.generate_image(
+                caption_to_use, platform, tone, image_path=image_path_for_gen, ai_model=ai_model
+            )
 
         if image_path:
             result["source_image_url"] = _public_upload_url(image_path)
         if run_id:
             result["run_id"] = run_id
-            _persist_generated_media(run_id, platform, media_type, result, user_id)
+            if user_id is not None:
+                _persist_generated_media(run_id, platform, media_type, result, user_id)
 
         return jsonify(result)
 
     except Exception as e:
         return jsonify({"error": str(e), "success": False}), 500
+
+
+@api_bp.route("/send-approval-email", methods=["POST"])
+@login_required_api
+def send_approval_email():
+    """Sends an HTML notification email (with the generated asset attached,
+    if it's an image) when a piece of content is approved on the Analysis
+    Dashboard. Fails soft with an error payload rather than a 500 if SMTP
+    isn't configured, since approval itself should still succeed either way."""
+    data = request.get_json(silent=True) or {}
+
+    try:
+        from services.email_service import EmailService
+
+        is_image = (data.get("asset_type") or "").lower() == "image"
+        image_urls = data.get("image_urls") if is_image else None
+        image_path = data.get("image_url") if (is_image and not image_urls) else None
+
+        email_service = EmailService()
+        result = email_service.send_approval_notification(
+            story=data.get("story"),
+            platform=data.get("platform"),
+            competitors=data.get("competitors"),
+            caption=data.get("caption"),
+            asset_type=data.get("asset_type"),
+            image_path=image_path,
+            image_paths=image_urls,
+            slide_titles=data.get("slide_titles"),
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
 
 
 # ── Credit Extension Requests Endpoints (User Side) ─────────────────────────
@@ -891,6 +1028,8 @@ def request_credit_extension():
         return jsonify({"error": "Database not available"}), 503
 
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "User not authenticated"}), 401
     data = request.get_json() or {}
 
     try:
@@ -923,6 +1062,9 @@ def get_my_credit_requests():
         return jsonify({"error": "Database not available"}), 503
 
     user_id = get_current_user_id()
+    if user_id is None:
+        return jsonify({"error": "Unauthorized"}), 401
+
     try:
         requests_list = get_user_credit_requests(user_id)
         return jsonify({"success": True, "requests": requests_list})
@@ -1150,7 +1292,7 @@ def youtube_auth_callback():
     client_secret = os.getenv("YOUTUBE_CLIENT_SECRET")
     redirect_uri = urllib.parse.urljoin(request.host_url, "api/auth/youtube/callback")
 
-    token_url = "https://oauth2.googleapis.com/token"
+    token_url = "https://oauth2.googleapis.com/token"  # nosec B105
     token_data = {
         "code": code,
         "client_id": client_id,
@@ -1160,7 +1302,7 @@ def youtube_auth_callback():
     }
 
     try:
-        response = requests.post(token_url, data=token_data)
+        response = requests.post(token_url, data=token_data, timeout=15)
         response.raise_for_status()
         tokens = response.json()
 
@@ -1170,7 +1312,7 @@ def youtube_auth_callback():
         # Get channel details
         channel_url = "https://www.googleapis.com/youtube/v3/channels?part=snippet&mine=true"
         headers = {"Authorization": f"Bearer {access_token}"}
-        channel_res = requests.get(channel_url, headers=headers)
+        channel_res = requests.get(channel_url, headers=headers, timeout=15)
         channel_res.raise_for_status()
         channel_data = channel_res.json()
 
@@ -1283,9 +1425,14 @@ def schedule_post_endpoint():
     except Exception:
         return jsonify({"error": "Invalid scheduled date/time format"}), 400
 
-    post = create_scheduled_post(
-        user_id=user_id, platforms=platforms, scheduled_at=scheduled_at, content_json=content_json, run_id=run_id
-    )
+    if run_id is not None:
+        post = create_scheduled_post(
+            user_id=user_id, platforms=platforms, scheduled_at=scheduled_at, content_json=content_json, run_id=run_id
+        )
+    else:
+        post = create_scheduled_post(
+            user_id=user_id, platforms=platforms, scheduled_at=scheduled_at, content_json=content_json
+        )
     return jsonify({"success": True, "scheduled_post": post})
 
 
@@ -1346,7 +1493,7 @@ def create_manual_scheduled_post_endpoint():
     image_url = None
     if "photo" in request.files and request.files["photo"].filename:
         file = request.files["photo"]
-        filename = secure_filename(file.filename)
+        filename = secure_filename(file.filename or "")
         unique_name = f"manual_{uuid.uuid4().hex[:8]}_{filename}"
         upload_folder = current_app.config.get(
             "UPLOAD_FOLDER", os.path.join(current_app.root_path, "static", "uploads")
@@ -1356,15 +1503,15 @@ def create_manual_scheduled_post_endpoint():
         file.save(file_path)
         image_url = f"/static/uploads/{unique_name}"
 
-    from datetime import datetime
+    from datetime import datetime, timezone
 
     if publish_now or not scheduled_at_str:
-        scheduled_at = datetime.utcnow()
+        scheduled_at = datetime.now(timezone.utc)
     else:
         try:
             scheduled_at = datetime.fromisoformat(scheduled_at_str.replace("Z", "+00:00"))
         except Exception:
-            scheduled_at = datetime.utcnow()
+            scheduled_at = datetime.now(timezone.utc)
 
     content_json = {
         "caption": caption,
@@ -1444,8 +1591,10 @@ def verify_social_account_endpoint(platform):
     elif platform == "youtube":
         import requests
 
-        # Mock token bypass for easy testing
-        if access_token == "mock_yt_token_123":
+        # Mock token bypass for easy testing. Flagged by bandit (hardcoded credential-shaped
+        # string); low risk since this route already requires login, but worth gating behind
+        # a DEBUG/env flag or removing before real users connect real YouTube accounts.
+        if access_token == "mock_yt_token_123":  # nosec B105
             return jsonify(
                 {
                     "success": True,
@@ -1508,6 +1657,16 @@ def competitor_posts():
 
         scraper = ScraperService()
         posts = scraper.get_company_store(target)
+        # --- NEW FILTERING LOGIC ---
+        from services.stradit_service import StradITService
+        from agents.story_agent import StoryAgent
+
+        stradit = StradITService()
+        project_context = stradit.get_all_projects_context()
+        story_agent_local = StoryAgent()
+        posts = story_agent_local.filter_relevant_posts(posts, project_context)
+        # ---------------------------
+
         return jsonify({"success": True, "posts": posts})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1516,7 +1675,7 @@ def competitor_posts():
 @api_bp.route("/platform-posts", methods=["GET"])
 def platform_posts():
     platform = request.args.get("platform")
-    competitor = request.args.get("competitor")
+    competitor = request.args.get("competitor") or ""
     if not platform:
         return jsonify({"error": "No platform provided"}), 400
 
@@ -1525,6 +1684,16 @@ def platform_posts():
 
         scraper = ScraperService()
         posts = scraper.get_platform_posts(platform, competitor)
+
+        # --- NEW FILTERING LOGIC ---
+        from services.stradit_service import StradITService
+        from agents.story_agent import StoryAgent
+
+        stradit = StradITService()
+        project_context = stradit.get_all_projects_context()
+        story_agent_local = StoryAgent()
+        posts = story_agent_local.filter_relevant_posts(posts, project_context)
+        # ---------------------------
 
         db_stats = {"inserted": 0, "skipped": 0}
         try:
@@ -1555,6 +1724,107 @@ def competitor_posts_db():
         return jsonify({"error": str(e)}), 500
 
 
+SUGGESTED_COLLECTIONS_DISPLAY_LIMIT = 10
+
+
+@api_bp.route("/suggested-collections", methods=["GET"])
+@login_required_api
+def suggested_collections():
+    """Return previously-generated Suggested Storyline collections from the DB
+    (no compute) - accumulated across runs, newest first, capped at 10."""
+    try:
+        from db import get_content_collections
+
+        collections = get_content_collections(limit=SUGGESTED_COLLECTIONS_DISPLAY_LIMIT)
+        return jsonify({"success": True, "collections": collections})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/generate-suggested-collections", methods=["POST"])
+@login_required_api
+def generate_suggested_collections():
+    """Group already-scraped competitor posts (last 15 days, per get_competitor_posts)
+    by semantic similarity into "storyline" suggestions, labeled with a theme and
+    relevance, then persist any newly-found ones. Clusters can span any combination
+    of competitor/platform - breadth is used only for ranking, not as a filter."""
+    data = request.get_json(silent=True) or {}
+    platform = data.get("platform") or "all"
+    competitor = data.get("competitor") or "all"
+
+    try:
+        from agents.collection_agent import CollectionAgent
+        from db import clear_content_collections, get_competitor_posts, get_content_collections, save_content_collections
+        from services.embedding_service import EmbeddingService
+        from services.stradit_service import StradITService
+
+        # "Regenerate" replaces the shown list rather than accumulating on top
+        # of it - clear whatever's stored before computing the fresh batch, so
+        # a run that finds nothing leaves an honestly-empty list instead of
+        # stale results from a previous scan.
+        clear_content_collections()
+
+        posts = get_competitor_posts(platform=platform, competitor=competitor)
+        db_stats = {"inserted": 0, "skipped": 0, "new_hashes": []}
+
+        if posts:
+            embedder = EmbeddingService()
+            clusters = embedder.cluster_posts(posts)
+
+            if clusters:
+                stradit = StradITService()
+                project_context = stradit.get_all_projects_context()
+
+                agent = CollectionAgent()
+                labeled = agent.label_clusters(clusters, project_context)
+
+                collections = []
+                for c in labeled:
+                    cluster_posts = c["posts"]
+                    competitors = sorted(
+                        {p.get("_source_competitor") or p.get("competitor") for p in cluster_posts} - {None, ""}
+                    )
+                    platforms = sorted({p.get("platform") for p in cluster_posts} - {None, ""})
+                    collections.append(
+                        {
+                            "label": c["label"],
+                            "description": c["description"],
+                            "relevance": c["relevance"],
+                            "competitors": competitors,
+                            "platforms": platforms,
+                            "post_count": len(cluster_posts),
+                            "post_urls": [p.get("post_url") for p in cluster_posts if p.get("post_url")],
+                        }
+                    )
+
+                db_stats = save_content_collections(collections)
+
+        stored = get_content_collections(limit=SUGGESTED_COLLECTIONS_DISPLAY_LIMIT)
+        return jsonify({"success": True, "collections": stored, "db": db_stats})
+    except Exception as e:
+        import traceback
+
+        print(traceback.format_exc())
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/festive-storylines", methods=["GET"])
+@login_required_api
+def festive_storylines():
+    """Upcoming US holidays / Indian festivals as a distinct "Festive"
+    Suggested Storyline category - seasonal/greeting content ideas that don't
+    depend on competitor posts. Computed live (deterministic calendar math),
+    not persisted."""
+    try:
+        from services.festival_service import get_upcoming_festivals
+
+        days_ahead = int(request.args.get("days_ahead", 60))
+        festivals = get_upcoming_festivals(days_ahead=days_ahead)
+        return jsonify({"success": True, "festivals": festivals})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @api_bp.route("/stradit-projects", methods=["GET"])
 def get_stradit_projects():
     try:
@@ -1575,6 +1845,7 @@ def generate_channel_storyline():
         return jsonify({"error": "Request body required"}), 400
 
     story = data.get("story", "")
+    character_config = data.get("characterConfig", {})
 
     if not story:
         return jsonify({"error": "Story text is required"}), 400
@@ -1587,7 +1858,7 @@ def generate_channel_storyline():
         project_context = stradit.get_all_projects_context()
 
         story_agent_local = StoryAgent()
-        result = story_agent_local.generate_channel_storyline(story, project_context)
+        result = story_agent_local.generate_channel_storyline(story, project_context, character_config=character_config)
 
         return jsonify({"success": True, "storyline": result})
     except Exception as e:
@@ -1642,3 +1913,31 @@ def generate_opportunity_suggestions():
 
         print(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/download-zip", methods=["POST"])
+@login_required_api
+def download_zip():
+    data = request.json or {}
+    urls = data.get("urls", [])
+    if not urls:
+        return jsonify({"error": "No URLs provided"}), 400
+
+    memory_file = io.BytesIO()
+    with zipfile.ZipFile(memory_file, "w", zipfile.ZIP_DEFLATED) as zf:
+        for url in urls:
+            if not url:
+                continue
+            # URLs are server-relative (e.g. "/static/uploads/xxx.png") - resolve
+            # against the app's root_path rather than the process cwd, which may
+            # not be the project root depending on how the app was launched.
+            rel_path = url.split("?")[0].lstrip("/").replace("/", os.sep)
+            path = os.path.join(current_app.root_path, rel_path)
+            if os.path.exists(path):
+                filename = os.path.basename(path)
+                zf.write(path, arcname=filename)
+            else:
+                current_app.logger.warning(f"File not found for zip: {path}")
+
+    memory_file.seek(0)
+    return send_file(memory_file, mimetype="application/zip", as_attachment=True, download_name="generated_assets.zip")
