@@ -1,5 +1,59 @@
 import os
 
+# Structured Content Guidelines default - matches what was previously hardcoded
+# directly in agents/story_agent.py's prompts (the "Strad" orange / "IT" white
+# color rule, Inter/Helvetica typography, "premium institutional" imagery
+# style, the official tagline, etc.). Editable from the Brand Configuration
+# page (/brand-configuration); this is only the fallback shown/used until a
+# user edit is saved (see db.get_setting / api/routes.py's SETTINGS_DEFAULTS).
+DEFAULT_CONTENT_GUIDELINES = {
+    "colors": {
+        "primary": "#F5821F",
+        "primary_name": "Strad Orange",
+        "secondary": "#FFFFFF",
+        "secondary_name": "IT White",
+        "accent": "",
+        "accent_name": "",
+        "usage_notes": (
+            'The text "Strad" must always render in the primary color; "IT" must always render in the '
+            "secondary color, wherever the StradIT wordmark appears."
+        ),
+    },
+    "typography": {
+        "font_family": "Inter, Helvetica, Roboto",
+        "heading_style": "Bold, clean, minimal titles",
+        "body_style": "Soft, elegant, small subtitle text",
+        "restrictions": "Avoid thick, clumsy, or overly bold/vibrant fonts.",
+    },
+    "voice_tone": {
+        "descriptors": "Confident, data-driven, professional, approachable",
+        "formality": "Professional / Enterprise",
+        "jargon_policy": "Avoid excessive jargon; explain technical concepts simply.",
+        "avoid_words": "",
+        "key_terms": "",
+    },
+    "content_rules": {
+        "caption_length": "Concise - a few short paragraphs, not a wall of text",
+        "hashtag_policy": "3-5 relevant hashtags, no hashtag stuffing",
+        "emoji_policy": "Sparingly - only where it adds warmth (e.g. festive posts)",
+        "cta_style": "Soft, consultative - no hard sell",
+    },
+    "imagery_style": {
+        "aesthetic": "Premium, institutional, minimalist, high-end agency-designed",
+        "avoid": "Stock-photo look, exaggerated expressions, cluttered layouts",
+    },
+    "persona_rules": {
+        "clothing": "Business-appropriate, tailored, no casual wear (no t-shirts/sweatpants)",
+        "demeanor": "Credible, professional, natural interaction with environment/technology",
+        "consistency": "Same character appearance (clothing, hairstyle, identity) across all scenes",
+    },
+    "messaging": {
+        "tagline": "Automate. Elevate. Accelerate.",
+        "value_props": "AI-driven precision, enterprise-grade reliability, regulatory readiness",
+        "prohibited_claims": "No unsupported guarantees, no fabricated customer quotes, no competitor disparagement",
+    },
+}
+
 # StradIT's service lines and company-level facts, from https://www.stradit.com/.
 # Unlike the per-project docs under StradIT/<PROJECT>/, these aren't tied to a
 # local markdown file - kept as a static reference here so project-matching
@@ -89,9 +143,22 @@ class StradITService:
         context instead. Project docs are still much larger overall, so they
         remain the dominant content; this only protects the compact services
         section from being drowned out entirely.
+
+        The services text itself is editable from the dashboard's "Products
+        & Service" tab (stored in the DB via services/api settings) - falls
+        back to the hardcoded SERVICES_CONTEXT above until a user edit is
+        saved.
         """
+        services_context = SERVICES_CONTEXT
+        try:
+            from db import get_setting
+
+            services_context = get_setting("products_services", default=SERVICES_CONTEXT) or SERVICES_CONTEXT
+        except Exception:
+            pass  # DB unavailable - use the hardcoded default
+
         projects = self.get_projects()
-        all_context = [SERVICES_CONTEXT]
+        all_context = [services_context]
         for project in projects:
             all_context.append(f"=== PROJECT: {project} ===")
             all_context.append(self.get_project_context(project))

@@ -207,6 +207,11 @@ Instead, return EXACTLY this text for the caption:
 Reason:
 No Strong Match was identified between this competitor topic and the available projects."
 
+EXCEPTION - this block does NOT apply when "Selected Project" is "N/A (Festive Greeting)" (or
+"Connection Strength" is "N/A"). That is a holiday/seasonal greeting, not a competitive
+counter-strategy - it is intentionally not tied to any project or service. Write the warm festive
+greeting caption normally in that case; do not treat "N/A" as a block condition.
+
 2. The characters "**" are FORBIDDEN.
    NEVER generate "**" anywhere in the response.
 
@@ -365,6 +370,10 @@ Instead, return EXACTLY this text:
 Reason:
 No Strong Match was identified between this competitor topic and the available projects."
 
+EXCEPTION - this block does NOT apply to a holiday/seasonal greeting (indicated by "N/A (Festive
+Greeting)" or "N/A" instead of "No Strong Match"). Refine that caption normally; do not treat it as
+blocked.
+
 NEVER use Markdown.
 
 NEVER use "**".
@@ -405,7 +414,7 @@ Critic Feedback:
 
 {reviewer_feedback}
 
-Brand Persona:
+Brand Persona (writing style/tone only - NOT a company name; the company is StradIT):
 
 {brand_voice or "Standard"}
 
@@ -440,7 +449,11 @@ Rewrite and return ONLY the improved plain-text caption.
         parts = [f"Story Analysis: {story_analysis}"]
 
         if brand_voice:
-            parts.append(f"Brand Voice Persona: {brand_voice}")
+            parts.append(
+                f"Brand Voice Persona: {brand_voice} - this describes the WRITING STYLE/TONE only, "
+                "it is NOT a company name. The company is StradIT; never sign off as or refer to the "
+                'company by the brand voice label (e.g. never write "From Standard Enterprise").'
+            )
 
         if vision_analysis:
             parts.append(f"Image Analysis: {vision_analysis}")

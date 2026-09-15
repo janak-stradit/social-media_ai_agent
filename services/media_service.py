@@ -559,7 +559,9 @@ class MediaGenerationService:
                     timeout=30,
                 )
             if not upload_resp.ok:
-                print(f"[Media Service] kie.ai file upload failed: {upload_resp.status_code} - {upload_resp.text[:200]}")
+                print(
+                    f"[Media Service] kie.ai file upload failed: {upload_resp.status_code} - {upload_resp.text[:200]}"
+                )
                 return None
             return ((upload_resp.json() or {}).get("data") or {}).get("downloadUrl")
         except Exception as e:
@@ -1021,7 +1023,12 @@ class MediaGenerationService:
         single_reference = resolved_references[0] if resolved_references else None
 
         if has_reference:
-            if len(caption) > 150 or "midjourney" in caption.lower() or "prompt" in caption.lower() or "slide" in caption.lower():
+            if (
+                len(caption) > 150
+                or "midjourney" in caption.lower()
+                or "prompt" in caption.lower()
+                or "slide" in caption.lower()
+            ):
                 prompt = caption
                 prompt += "\n\nCRITICAL: Use the provided reference image for the character's exact facial features, hair, skin tone, and visual identity. The character in the image MUST look exactly like the reference image."
             else:
@@ -1037,7 +1044,7 @@ class MediaGenerationService:
                     f"Preserve the main subject's exact facial features, hair, skin tone, and visual identity from the reference image. "
                     f"Brief: {caption[:200]}. "
                     f"Style: {platform_style}{tone_hint}. "
-                    f"Render the bold headline text \"{headline}\" in large clean sans-serif typography, high contrast against "
+                    f'Render the bold headline text "{headline}" in large clean sans-serif typography, high contrast against '
                     f"the background, positioned so it does not cover the subject's face, plus a small 'STRAD IT' wordmark in "
                     f"one corner as a subtle brand tag. Do not add any other text, captions, or watermarks. "
                     f"Premium quality, highly detailed."
@@ -1231,7 +1238,25 @@ class MediaGenerationService:
             except Exception as img_err:
                 print(f"[Media Service] Warning loading image for Gemini Video: {img_err}")
 
-        operation = client.models.generate_videos(**gen_kwargs)  # pylint: disable=no-member
+        native_audio_requested = gen_kwargs["config"].generate_audio
+        try:
+            operation = client.models.generate_videos(**gen_kwargs)  # pylint: disable=no-member
+        except Exception as gen_err:
+            # "generate_audio" is an Enterprise-only Veo parameter - a Developer
+            # API key rejects the call outright rather than just ignoring it,
+            # so retry once without requesting native audio instead of failing
+            # the whole video generation over an audio feature we can't use.
+            if native_audio_requested and "generate_audio" in str(gen_err):
+                print("[Media Service] generate_audio not supported on this Gemini API tier - retrying without it...")
+                native_audio_requested = False
+                gen_kwargs["config"] = types.GenerateVideosConfig(  # pylint: disable=no-member
+                    aspect_ratio=aspect_ratio,
+                    duration_seconds=5,
+                    number_of_videos=1,
+                )
+                operation = client.models.generate_videos(**gen_kwargs)  # pylint: disable=no-member
+            else:
+                raise
 
         print("[Media Service] Polling Google Gemini Video operation (Native Single-Pass Video + Audio)...")
         deadline = time.time() + 300
@@ -1262,8 +1287,8 @@ class MediaGenerationService:
             "prompt": prompt,
             "model": model_name,
             "provider": "Google Gemini (Veo)",
-            "has_native_audio": getattr(Config, "GENERATE_NATIVE_AUDIO", True),
-            "audio_mode": "single_pass_native",
+            "has_native_audio": native_audio_requested,
+            "audio_mode": "single_pass_native" if native_audio_requested else "none",
         }
 
     def _generate_pollinations_image(self, prompt: str, platform: str, size: str) -> dict:
@@ -1379,12 +1404,11 @@ class MediaGenerationService:
                 print(
                     "[Media Service] Single-pass native video+audio generated successfully. Skipping separate TTS audio merging."
                 )
-                import os
                 local_name = result["url"].split("/")[-1]
                 local_path = os.path.join(self.upload_folder, local_name)
                 if os.path.exists(local_path):
                     self._apply_video_watermark(local_path)
-                
+
                 return {
                     "success": True,
                     "type": "video",
@@ -1529,7 +1553,7 @@ class MediaGenerationService:
                     # Apply watermark after processing/saving
                     if silent_video_path is not None:
                         self._apply_video_watermark(silent_video_path)
-                    
+
                 except Exception as merge_err:
                     print(f"[Media Service] Video post-processing failed: {merge_err}")
 
@@ -1604,7 +1628,7 @@ Return JSON with keys:
         """Overlays Logo.png at the end of the video."""
         try:
             import os
-            
+
             # Use absolute path based on this file's location
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             logo_path = os.path.join(base_dir, "Logo.png")
@@ -1624,53 +1648,52 @@ Return JSON with keys:
             with VideoFileClip(video_path) as video:
                 duration = video.duration
                 start_time = max(0, duration - 2.0)
-                
+
                 logo_clip = ImageClip(logo_path)
-                
+
                 target_logo_width = int(video.w * 0.3)
                 aspect = logo_clip.h / logo_clip.w
                 target_logo_height = int(target_logo_width * aspect)
-                
+
                 if hasattr(logo_clip, "resized"):
                     logo_clip = logo_clip.resized((target_logo_width, target_logo_height))
                 elif hasattr(logo_clip, "resize"):
                     logo_clip = logo_clip.resize((target_logo_width, target_logo_height))
                 else:
                     from moviepy.video.fx.resize import resize
+
                     logo_clip = resize(logo_clip, (target_logo_width, target_logo_height))
-                
+
                 pos_x = (video.w - target_logo_width) // 2
                 pos_y = (video.h - target_logo_height) // 2
-                
+
                 if hasattr(logo_clip, "with_start"):
                     # Moviepy v2
-                    logo_clip = (logo_clip
-                                 .with_start(start_time)
-                                 .with_duration(duration - start_time)
-                                 .with_position((pos_x, pos_y)))
+                    logo_clip = (
+                        logo_clip.with_start(start_time)
+                        .with_duration(duration - start_time)
+                        .with_position((pos_x, pos_y))
+                    )
                     try:
                         from moviepy.video.fx import CrossFadeIn
+
                         logo_clip = logo_clip.with_effects([CrossFadeIn(0.5)])
                     except ImportError:
                         pass
                 else:
                     # Moviepy v1
-                    logo_clip = (logo_clip
-                                 .set_start(start_time)
-                                 .set_duration(duration - start_time)
-                                 .set_position((pos_x, pos_y))
-                                 .crossfadein(0.5))
-                             
+                    logo_clip = (
+                        logo_clip.set_start(start_time)
+                        .set_duration(duration - start_time)
+                        .set_position((pos_x, pos_y))
+                        .crossfadein(0.5)
+                    )
+
                 final_video = CompositeVideoClip([video, logo_clip])
-                
+
                 temp_path = video_path.replace(".mp4", "_wm.mp4")
-                final_video.write_videofile(
-                    temp_path,
-                    codec="libx264",
-                    audio_codec="aac",
-                    logger=None
-                )
-                
+                final_video.write_videofile(temp_path, codec="libx264", audio_codec="aac", logger=None)
+
             os.replace(temp_path, video_path)
             print(f"[Media Service] Successfully watermarked video: {video_path}")
         except Exception as e:
@@ -1763,7 +1786,7 @@ Return JSON with keys:
             headline = trimmed.rsplit(" ", 1)[0] if " " in trimmed else trimmed
             return (
                 f"A professional, photorealistic social media image for {platform.capitalize()}: {user_caption}. "
-                f"Render the bold headline text \"{headline}\" in large clean sans-serif typography, high contrast, "
+                f'Render the bold headline text "{headline}" in large clean sans-serif typography, high contrast, '
                 f"not covering the main subject's face, plus a small 'STRAD IT' wordmark in one corner. "
                 f"Sleek visual composition, shallow depth of field, studio lighting, highly detailed."
             )

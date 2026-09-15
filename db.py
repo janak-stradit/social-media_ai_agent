@@ -209,6 +209,82 @@ class ContentCollection(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
+class SuggestedStorylineSeen(Base):
+    """Every post_urls_hash ever surfaced as a Suggested Storyline, kept
+    forever (unlike ContentCollection, which is wiped and rebuilt on every
+    "Suggest Storylines" click so the displayed list doesn't accumulate
+    stale entries). Used only to detect and exclude storylines the user has
+    already been shown before, even after their post composition drifts
+    slightly (a new republish added/removed) - see
+    api/routes.py's generate_suggested_collections."""
+
+    __tablename__ = "suggested_storyline_seen"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    post_urls_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class AppSetting(Base):
+    """Generic editable-text settings the user can update from the dashboard
+    (e.g. Content Guidelines, Products & Service overview) - stored here
+    instead of hardcoded in source, and read live by generation (see
+    services/stradit_service.py, agents/story_agent.py) so edits actually
+    change what gets generated."""
+
+    __tablename__ = "app_settings"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+
+
+class BrandAsset(Base):
+    """A brand character or logo reference image, manageable from
+    /brand-configuration's "Logo & Character" tab - an extensible list
+    (add/replace/remove) rather than a fixed pair, read by dashboard.js's
+    Character Setup checkboxes and by kie.ai image generation as a reference
+    image."""
+
+    __tablename__ = "brand_assets"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    label: Mapped[str] = mapped_column(String(120), nullable=False)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class ApprovalRequest(Base):
+    """An out-of-band review request for a competitor-dashboard pipeline's
+    generated content, sent by email as a link to the dashboard (a signed-in
+    reviewer opens the link, sees the same platform preview, and accepts or
+    rejects with a comment). pipeline_client_id is the pipeline's client-side
+    id (a JS Date.now() timestamp) so the dashboard's localStorage-only
+    pipeline history can be reconciled with the persisted decision."""
+
+    __tablename__ = "approval_requests"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=True, index=True
+    )
+    pipeline_client_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    platform: Mapped[str] = mapped_column(String(32), nullable=False)
+    asset_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    caption: Mapped[str | None] = mapped_column(Text, nullable=True)
+    story_context: Mapped[str | None] = mapped_column(Text, nullable=True)
+    competitors: Mapped[str | None] = mapped_column(Text, nullable=True)  # comma-separated
+    image_urls: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")  # pending/approved/rejected
+    comments: Mapped[str | None] = mapped_column(Text, nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
 class ScheduledPost(Base):
     __tablename__ = "scheduled_posts"
     __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
@@ -1208,6 +1284,235 @@ def clear_content_collections() -> int:
         deleted = session.query(ContentCollection).delete()
         session.commit()
         return deleted
+
+
+def post_urls_hash(post_urls: list[str]) -> str:
+    """Public wrapper for the same stable fingerprint save_content_collections
+    uses internally - lets callers (e.g. the repeat-filtering in
+    generate_suggested_collections) compute a cluster's hash before deciding
+    whether to persist/display it."""
+    return _post_urls_hash(post_urls)
+
+
+def get_seen_storyline_hashes() -> set[str]:
+    """Every post_urls_hash ever surfaced as a Suggested Storyline (see
+    SuggestedStorylineSeen) - persists across "regenerate" clears, unlike
+    ContentCollection, so it can be used to filter out repeats."""
+    with Session(engine) as session:
+        rows = session.query(SuggestedStorylineSeen.post_urls_hash).all()
+        return {r[0] for r in rows}
+
+
+def mark_storylines_seen(hashes: list[str]) -> None:
+    """Records newly-surfaced storyline hashes as seen, ignoring ones already
+    recorded (a hash reappearing just means the same posts clustered again;
+    no need to update first_seen_at)."""
+    if not hashes:
+        return
+    with Session(engine) as session:
+        existing = {
+            r[0]
+            for r in session.query(SuggestedStorylineSeen.post_urls_hash)
+            .filter(SuggestedStorylineSeen.post_urls_hash.in_(hashes))
+            .all()
+        }
+        for h in hashes:
+            if h not in existing:
+                session.add(SuggestedStorylineSeen(post_urls_hash=h))
+                existing.add(h)  # guard against duplicate hashes within the same batch
+        session.commit()
+
+
+def get_setting(key: str, default: str = "") -> str:
+    """Reads an editable app setting (see AppSetting). Returns `default` if
+    never saved yet."""
+    with Session(engine) as session:
+        row = session.get(AppSetting, key)
+        return row.value if row else default
+
+
+def save_setting(key: str, value: str) -> dict:
+    """Creates or updates an editable app setting."""
+    with Session(engine) as session:
+        row = session.get(AppSetting, key)
+        if row:
+            row.value = value  # type: ignore[assignment]
+        else:
+            row = AppSetting(key=key, value=value)
+            session.add(row)
+        session.commit()
+        session.refresh(row)
+        return {
+            "key": row.key,
+            "value": row.value,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+
+
+def _brand_asset_to_dict(r: "BrandAsset") -> dict:
+    return {"key": r.key, "label": r.label, "filename": r.filename, "url": f"/static/img/brand/{r.filename}"}
+
+
+def list_brand_assets() -> list[dict]:
+    """All registered brand character/logo assets, oldest first - seeds the
+    three legacy defaults (Aiden, Ida, StradIT Logo) on first call if the table is
+    still empty, since those files already exist on disk from before this
+    feature existed."""
+    with Session(engine) as session:
+        rows = session.query(BrandAsset).order_by(BrandAsset.created_at.asc()).all()
+        if not rows:
+            defaults = [
+                BrandAsset(key="aiden", label="Aiden — Brand Mascot", filename="aiden-character.png"),
+                BrandAsset(key="ida", label="Ida — Brand Mascot", filename="Ida.jpeg"),
+                BrandAsset(key="logo", label="StradIT Logo", filename="stradit-logo.png"),
+            ]
+            session.add_all(defaults)
+            session.commit()
+            rows = defaults
+        return [_brand_asset_to_dict(r) for r in rows]
+
+
+def get_brand_asset(key: str) -> dict | None:
+    with Session(engine) as session:
+        row = session.get(BrandAsset, key)
+        return _brand_asset_to_dict(row) if row else None
+
+
+def create_brand_asset(key: str, label: str, filename: str) -> dict:
+    with Session(engine) as session:
+        row = BrandAsset(key=key, label=label, filename=filename)
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return _brand_asset_to_dict(row)
+
+
+def update_brand_asset_filename(key: str, filename: str) -> dict | None:
+    """Used when replacing an existing asset's image (filename usually stays
+    the same, but is updated here in case the new upload has a different
+    extension)."""
+    with Session(engine) as session:
+        row = session.get(BrandAsset, key)
+        if not row:
+            return None
+        row.filename = filename  # type: ignore[assignment]
+        session.commit()
+        session.refresh(row)
+        return _brand_asset_to_dict(row)
+
+
+def delete_brand_asset(key: str) -> bool:
+    with Session(engine) as session:
+        row = session.get(BrandAsset, key)
+        if not row:
+            return False
+        session.delete(row)
+        session.commit()
+        return True
+
+
+def _approval_request_to_dict(r: "ApprovalRequest") -> dict:
+    return {
+        "id": r.id,
+        "user_id": r.user_id,
+        "pipeline_client_id": r.pipeline_client_id,
+        "platform": r.platform,
+        "asset_type": r.asset_type,
+        "caption": r.caption,
+        "story_context": r.story_context,
+        "competitors": [c.strip() for c in (r.competitors or "").split(",") if c.strip()],
+        "image_urls": json.loads(r.image_urls) if r.image_urls else [],
+        "status": r.status,
+        "comments": r.comments,
+        "decided_by": r.decided_by,
+        "decided_at": r.decided_at.isoformat() if r.decided_at else None,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+def create_approval_request(
+    user_id: int | None,
+    pipeline_client_id: str,
+    platform: str,
+    asset_type: str,
+    caption: str | None = None,
+    story_context: str | None = None,
+    competitors: list[str] | None = None,
+    image_urls: list[str] | None = None,
+) -> dict:
+    """Creates a new pending approval request for a pipeline's generated
+    content, superseding any earlier pending request for the same pipeline
+    (re-sending for approval after edits shouldn't leave stale duplicates)."""
+    with Session(engine) as session:
+        session.query(ApprovalRequest).filter(
+            ApprovalRequest.pipeline_client_id == pipeline_client_id,
+            ApprovalRequest.status == "pending",
+        ).delete()
+
+        req = ApprovalRequest(
+            user_id=user_id,
+            pipeline_client_id=pipeline_client_id,
+            platform=platform,
+            asset_type=asset_type,
+            caption=caption,
+            story_context=story_context,
+            competitors=", ".join(competitors or []),
+            image_urls=json.dumps(image_urls or []),
+        )
+        session.add(req)
+        session.commit()
+        session.refresh(req)
+        return _approval_request_to_dict(req)
+
+
+def get_approval_request(request_id: int) -> dict | None:
+    with Session(engine) as session:
+        req = session.get(ApprovalRequest, request_id)
+        return _approval_request_to_dict(req) if req else None
+
+
+def get_latest_approval_request_for_pipeline(pipeline_client_id: str) -> dict | None:
+    """The most recent approval request for a pipeline (pending or decided) -
+    used by the dashboard's "Approval" pipeline stage to show current status."""
+    with Session(engine) as session:
+        req = (
+            session.query(ApprovalRequest)
+            .filter(ApprovalRequest.pipeline_client_id == pipeline_client_id)
+            .order_by(ApprovalRequest.created_at.desc())
+            .first()
+        )
+        return _approval_request_to_dict(req) if req else None
+
+
+def list_approval_requests(status: str | None = None, limit: int = 200) -> list[dict]:
+    """All approval requests (past and current), newest first - powers the
+    /approve dashboard. Optionally filtered to a single status."""
+    with Session(engine) as session:
+        query = session.query(ApprovalRequest)
+        if status:
+            query = query.filter(ApprovalRequest.status == status)
+        rows = query.order_by(ApprovalRequest.created_at.desc()).limit(limit).all()
+        return [_approval_request_to_dict(r) for r in rows]
+
+
+def decide_approval_request(
+    request_id: int, decision: str, comments: str | None, decided_by: str | None
+) -> dict | None:
+    """Records an accept/reject decision. decision must be 'approved' or 'rejected'."""
+    if decision not in ("approved", "rejected"):
+        raise ValueError("decision must be 'approved' or 'rejected'")
+
+    with Session(engine) as session:
+        req = session.get(ApprovalRequest, request_id)
+        if not req:
+            return None
+        req.status = decision  # type: ignore[assignment]
+        req.comments = comments  # type: ignore[assignment]
+        req.decided_by = decided_by  # type: ignore[assignment]
+        req.decided_at = _utcnow()  # type: ignore[assignment]
+        session.commit()
+        session.refresh(req)
+        return _approval_request_to_dict(req)
 
 
 def update_scheduled_post_status(user_id: int, post_id: int, status: str) -> bool:

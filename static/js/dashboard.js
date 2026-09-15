@@ -17,28 +17,65 @@ $(document).ready(function () {
     $('input[name="mediaType"]').on('change', function () {
         if ($(this).val() === 'image') {
             $('#imageContextContainer').removeClass('d-none');
+            $('#imageCountContainer').removeClass('d-none');
         } else {
             $('#imageContextContainer').addClass('d-none');
+            $('#imageCountContainer').addClass('d-none');
         }
     });
 
     $(document).on('change', 'input[name="modalMediaType"]', function () {
         if ($(this).val() === 'image') {
             $('#modalImageContextContainer').removeClass('d-none');
+            $('#modalImageCountContainer').removeClass('d-none');
         } else {
+            $('#modalImageCountContainer').addClass('d-none');
             $('#modalImageContextContainer').addClass('d-none');
         }
     });
 
-    // Brand character assets selectable under Character Setup. "auto" has no
-    // image - the AI invents a text-described persona instead. "aiden"/"logo"
-    // use the real brand image as a reference for generated visuals. Global
-    // (not closure-local) since regenerateImageInCarousel/regenerateModalImage
-    // are defined outside this $(document).ready block.
-    window.CHARACTER_ASSETS = {
-        aiden: { path: 'static/img/brand/aiden-character.png', url: '/static/img/brand/aiden-character.png', label: 'Aiden' },
-        logo: { path: 'static/img/brand/stradit-logo.png', url: '/static/img/brand/stradit-logo.png', label: 'StradIT Logo' }
-    };
+    // Brand character/logo assets selectable under Character Setup. "auto" has
+    // no image - the AI invents a text-described persona instead. Registered
+    // assets use their real brand image as a reference for generated visuals.
+    // Fetched from /api/brand-assets (manageable at /brand-configuration's
+    // "Logo & Character" tab) rather than a fixed pair, so anything
+    // added/removed there shows up here automatically. Global (not
+    // closure-local) since regenerateImageInCarousel/regenerateModalImage are
+    // defined outside this $(document).ready block.
+    window.CHARACTER_ASSETS = {};
+
+    function renderCharacterAssetCheckboxes() {
+        const keys = Object.keys(window.CHARACTER_ASSETS);
+        $('#characterAssetCheckboxes').html(
+            keys.length
+                ? keys.map((key) => {
+                    const asset = window.CHARACTER_ASSETS[key];
+                    return `
+                        <div class="form-check">
+                            <input class="form-check-input character-asset-checkbox" type="checkbox" value="${key}" id="charAsset_${key}">
+                            <label class="form-check-label small" for="charAsset_${key}">${asset.label}</label>
+                        </div>
+                    `;
+                }).join('')
+                : '<p class="text-muted small m-0">No characters/logos configured yet - add one in Brand Configuration.</p>'
+        );
+    }
+
+    function loadCharacterAssets() {
+        $.ajax({
+            url: '/api/brand-assets',
+            type: 'GET',
+            success: function (r) {
+                if (r.success) {
+                    window.CHARACTER_ASSETS = {};
+                    (r.assets || []).forEach((a) => {
+                        window.CHARACTER_ASSETS[a.key] = { path: a.url.replace(/^\//, ''), url: a.url, label: a.label };
+                    });
+                    renderCharacterAssetCheckboxes();
+                }
+            }
+        });
+    }
 
     // Resolves a pipeline's configured brand character(s) (if any) to the
     // reference image path(s) media generation should use. Returns an empty
@@ -72,8 +109,10 @@ $(document).ready(function () {
         $('#characterAssetContainer').toggleClass('d-none', $(this).val() !== 'with_character');
     }).trigger('change');
 
-    $('.character-asset-checkbox').on('change', renderCharacterAssetPreview);
-    renderCharacterAssetPreview();
+    // Delegated since the checkboxes are rendered dynamically (see
+    // renderCharacterAssetCheckboxes) and don't exist yet at bind time.
+    $(document).on('change', '.character-asset-checkbox', renderCharacterAssetPreview);
+    loadCharacterAssets();
 
     // Toast notification helper
     window.showToast = function (message, type = 'info') {
@@ -349,12 +388,20 @@ $(document).ready(function () {
                 if (r.success) {
                     window.suggestedCollections = r.collections || [];
                     window.newSuggestedCollectionHashes = new Set((r.db && r.db.new_hashes) || []);
+                    window.repeatedStorylinesFiltered = (r.db && r.db.repeated_filtered) || 0;
                     renderSuggestedCollections();
 
+                    const repeated = window.repeatedStorylinesFiltered;
                     if (r.db && r.db.inserted > 0) {
-                        showToast(`Found ${r.db.inserted} new storyline${r.db.inserted === 1 ? '' : 's'}.`, 'success');
+                        showToast(
+                            `Found ${r.db.inserted} new storyline${r.db.inserted === 1 ? '' : 's'}` +
+                            (repeated ? ` (${repeated} repeat${repeated === 1 ? '' : 's'} of earlier suggestions skipped).` : '.'),
+                            'success'
+                        );
+                    } else if (repeated > 0) {
+                        showToast(`No new storylines - the ${repeated} found were already suggested in an earlier run.`, 'info');
                     } else {
-                        showToast('No new related storylines found this run.', 'info');
+                        showToast('No related storylines found this run.', 'info');
                     }
                 } else {
                     showToast('Failed to generate suggestions.', 'danger');
@@ -371,7 +418,13 @@ $(document).ready(function () {
     function renderSuggestedCollections() {
         const list = $('#suggestedCollectionsList');
         if (window.suggestedCollections.length === 0) {
-            list.html('<p class="text-muted small m-0">No storylines suggested yet - click "Suggest Storylines" to scan for related posts.</p>');
+            // Distinguish "never run yet" from "everything found was already
+            // suggested before" - otherwise a fully-repeat-filtered result
+            // looks identical to a broken/empty response.
+            const msg = window.repeatedStorylinesFiltered
+                ? `No new storylines - ${window.repeatedStorylinesFiltered} related post group${window.repeatedStorylinesFiltered === 1 ? '' : 's'} found but already suggested in an earlier run.`
+                : 'No storylines suggested yet - click "Suggest Storylines" to scan for related posts.';
+            list.html(`<p class="text-muted small m-0">${msg}</p>`);
             return;
         }
 
@@ -449,6 +502,19 @@ $(document).ready(function () {
     };
 
     function renderFestiveStorylines() {
+        // Surface upcoming festivals on the tab itself (count + urgency pulse
+        // if one is within a week) so they can't be missed just because the
+        // Suggested Storylines tab happens to be the one open.
+        const badge = $('#festiveTabBadge');
+        if (window.festiveStorylines.length === 0) {
+            badge.addClass('d-none');
+        } else {
+            const soonest = Math.min(...window.festiveStorylines.map(f => f.days_until));
+            badge.text(window.festiveStorylines.length)
+                .toggleClass('badge-urgent', soonest <= 7)
+                .removeClass('d-none');
+        }
+
         const list = $('#festiveStorylinesList');
         if (window.festiveStorylines.length === 0) {
             list.html('<p class="text-muted small m-0">No upcoming holidays or festivals in the next 60 days.</p>');
@@ -581,6 +647,48 @@ $(document).ready(function () {
             window.toggleHistoryPanel(false);
         }
     })();
+
+    // Switches between the "Suggested Storylines" and "Festive Storylines"
+    // panes in the Quick Start tabs above the feed (previously both were
+    // shown stacked full-width, pushing the actual post feed further down).
+    window.switchQuickStartTab = function (tab) {
+        $('.quick-start-tab').removeClass('active');
+        $(`.quick-start-tab[data-tab="${tab}"]`).addClass('active');
+        $('.quick-start-pane').addClass('d-none');
+        $(`#quickStartPane${tab.charAt(0).toUpperCase() + tab.slice(1)}`).removeClass('d-none');
+        try {
+            localStorage.setItem('quickStartActiveTab', tab);
+        } catch (e) { /* ignore storage errors */ }
+    };
+
+    // Collapses/expands the Quick Start body, keeping the tab bar itself
+    // visible so re-expanding stays discoverable.
+    window.toggleQuickStartSection = function () {
+        const collapsed = $('#quickStartBody').hasClass('d-none');
+        $('#quickStartBody').toggleClass('d-none', !collapsed);
+        $('#quickStartCollapseBtn i').toggleClass('fa-chevron-up', collapsed).toggleClass('fa-chevron-down', !collapsed);
+        $('#quickStartCollapseBtn').attr('title', collapsed ? 'Hide' : 'Show');
+        try {
+            localStorage.setItem('quickStartCollapsed', collapsed ? '0' : '1');
+        } catch (e) { /* ignore storage errors */ }
+    };
+
+    // Restore last-used Quick Start tab + collapsed state
+    (function initQuickStartState() {
+        let tab = 'suggested';
+        let collapsed = false;
+        try {
+            tab = localStorage.getItem('quickStartActiveTab') || 'suggested';
+            collapsed = localStorage.getItem('quickStartCollapsed') === '1';
+        } catch (e) { /* ignore storage errors */ }
+        if (tab !== 'suggested') {
+            window.switchQuickStartTab(tab);
+        }
+        if (collapsed) {
+            window.toggleQuickStartSection();
+        }
+    })();
+
 
     function updateSelection() {
         const checked = $('.comp-master-checkbox:checked');
@@ -1147,11 +1255,15 @@ $(document).ready(function () {
     // Store history in memory/localStorage
     window.pipelineHistory = JSON.parse(localStorage.getItem('straditPipelineHistory') || '[]');
 
+    // 'approved' keeps its historical stage id (so old localStorage pipeline
+    // records still resolve to the right stage) but is now the "Approval"
+    // stage: content is sent for external review instead of approved directly
+    // in-app, and this stage shows the pending/accepted/rejected outcome.
     const PIPELINE_STAGES = [
         { id: 'intel_selected', label: 'Post Pipeline', icon: 'fa-check' },
         { id: 'strategy_generated', label: 'Counter Strategy Generated', icon: 'fa-brain' },
         { id: 'asset_generated', label: 'Content Generated', icon: 'fa-magic' },
-        { id: 'approved', label: 'Asset Approved', icon: 'fa-thumbs-up' },
+        { id: 'approved', label: 'Approval', icon: 'fa-user-check' },
         { id: 'published', label: 'Published', icon: 'fa-paper-plane' }
     ];
 
@@ -1306,7 +1418,6 @@ $(document).ready(function () {
         const items = Array.isArray(assetContent) ? assetContent : [assetContent];
         const html = items.map((a, index) => {
             const type = (a.type || '').toLowerCase();
-            const platform = (a.platform || 'linkedin').toLowerCase();
 
             if (type.includes('video')) {
                 const caption = a.caption || (a.type !== 'Text (Caption)' && items.find(i => i.type === 'Text (Caption)')?.content) || '';
@@ -1322,9 +1433,7 @@ $(document).ready(function () {
                     <video controls class="d-block w-100" style="max-height: 380px; background: #000;" src="${a.content}"></video>
                     ${captionBlock}
                     <div class="p-2 px-3 bg-white border-top">
-                        <button class="btn btn-outline-secondary btn-sm w-100 fw-bold rounded-pill" onclick="previewPipelineAsset(${pipelineId}, ${index})">
-                            <i class="fas fa-eye me-1"></i>Preview on ${platformDisplayName(a.platform)}
-                        </button>
+                        ${platformPreviewButtonsRow(`previewPipelineAsset(${pipelineId}, ${index}`)}
                     </div>
                 </div>
                 `;
@@ -1379,9 +1488,7 @@ $(document).ready(function () {
                     </div>
                     ${captionBlock}
                     <div class="p-2 px-3 bg-white border-top">
-                        <button class="btn btn-outline-secondary btn-sm w-100 fw-bold rounded-pill" onclick="previewPipelineAsset(${pipelineId}, ${index})">
-                            <i class="fas fa-eye me-1"></i>Preview on ${platformDisplayName(a.platform)}
-                        </button>
+                        ${platformPreviewButtonsRow(`previewPipelineAsset(${pipelineId}, ${index}`)}
                     </div>
                 </div>
                 `;
@@ -1418,9 +1525,7 @@ $(document).ready(function () {
                     </div>
                     <div class="p-3 caption-text-content" style="white-space: pre-wrap; font-size: 0.85rem; line-height: 1.6; color: #334155; max-height: 300px; overflow-y: auto;">${a.content}</div>
                     <div class="p-2 px-3 bg-white border-top">
-                        <button class="btn btn-outline-secondary btn-sm w-100 fw-bold rounded-pill" onclick="previewPipelineAsset(${pipelineId}, ${index})">
-                            <i class="fas fa-eye me-1"></i>Preview on ${platformDisplayName(a.platform)}
-                        </button>
+                        ${platformPreviewButtonsRow(`previewPipelineAsset(${pipelineId}, ${index}`)}
                     </div>
                 </div>
             `;
@@ -1519,6 +1624,20 @@ $(document).ready(function () {
                     Next <i class="fas fa-chevron-right" style="font-size:0.65rem;"></i>
                 </button>
             </div>
+        `;
+    }
+
+    // Common "Download All (ZIP)" footer button for the pipeline modal's
+    // Content Generated / Approved / Published stages - empty string when
+    // there's nothing downloadable (text-only content).
+    function zipDownloadButtonHtml(pipeline) {
+        const assets = Array.isArray(pipeline.assetContent) ? pipeline.assetContent : (pipeline.assetContent ? [pipeline.assetContent] : []);
+        const downloadable = assets.filter(a => a && (a.type === 'image' || a.type === 'video') && a.content);
+        if (!downloadable.length) return '';
+        return `
+            <button class="btn btn-outline-secondary action-btn" onclick='downloadAllAsZip(${JSON.stringify(downloadable.map(a => a.content))})'>
+                <i class="fas fa-file-archive me-1"></i>Download ZIP
+            </button>
         `;
     }
 
@@ -1621,35 +1740,35 @@ $(document).ready(function () {
                 <div class="mb-3">${renderAssetItems(pipeline.assetContent, pipeline.id)}</div>
             `;
 
+            const alreadySent = ['pending_approval', 'approved', 'content_rejected', 'published'].includes(pipeline.status);
             const footer = `
-                <button class="btn btn-outline-danger action-btn" onclick="rejectPipelineAsset(${pipeline.id})"><i class="fas fa-times me-1"></i>Reject</button>
-                <button class="btn btn-success action-btn flex-grow-1 shadow-sm" onclick="approvePipelineAsset(${pipeline.id})"><i class="fas fa-check me-2"></i>Approve Asset</button>
+                ${alreadySent
+                    ? `<button class="btn btn-outline-secondary action-btn flex-grow-1" onclick="showPipelineStageDetail(${index}, 'approved')"><i class="fas fa-user-check me-1"></i>View Approval Status</button>`
+                    : `<button class="btn btn-primary action-btn flex-grow-1 shadow-sm" onclick="sendModalAssetForApproval(${pipeline.id})"><i class="fas fa-paper-plane me-2"></i>Send for Approval</button>`
+                }
                 <button class="btn btn-outline-primary action-btn flex-grow-1" onclick="sendPipelineToStudioChat(${pipeline.id})">
                     <i class="fas fa-comments me-1"></i>Refine in Studio Chat
                 </button>
+                ${zipDownloadButtonHtml(pipeline)}
             `;
 
             return { body, footer };
         }
 
         if (stageId === 'approved') {
-            const headerHtml = buildModalStageHeader(pipeline, stageId, index, '4. Approved Asset Review', 'fas fa-thumbs-up', 'text-success');
+            const headerHtml = buildModalStageHeader(pipeline, stageId, index, '4. Approval', 'fas fa-user-check', 'text-success');
 
-            if (pipeline.status !== 'approved' && pipeline.status !== 'published') {
-                return { body: `${headerHtml}${emptyStageState('This asset has not been approved yet.')}`, footer: '' };
+            if (!['pending_approval', 'approved', 'content_rejected', 'published'].includes(pipeline.status)) {
+                return { body: `${headerHtml}${emptyStageState('Not sent for approval yet. Use "Send for Approval" on the Content Generated stage.')}`, footer: '' };
             }
 
+            // Renders a loading placeholder synchronously; showPipelineStageDetail
+            // fires the actual DB lookup (fetchApprovalStageStatus) right after,
+            // since the real accepted/rejected/comments status is persisted
+            // server-side, not in this localStorage-only pipeline object.
             const body = `
                 ${headerHtml}
-                <div class="alert alert-success d-flex align-items-center gap-3 p-3 rounded-3 mb-3 border-0 shadow-sm" style="background:#f0fdf4;">
-                    <div class="rounded-circle d-flex align-items-center justify-content-center bg-success text-white" style="width:36px; height:36px; flex-shrink:0;">
-                        <i class="fas fa-check"></i>
-                    </div>
-                    <div>
-                        <strong class="text-success d-block">Asset Approved</strong>
-                        <small class="text-slate-600">This asset has been approved by the reviewer and is ready for live publishing.</small>
-                    </div>
-                </div>
+                <div id="approvalStageStatusBody" class="text-center text-muted py-4"><i class="fas fa-spinner fa-spin me-2"></i>Loading approval status...</div>
                 ${pipeline.assetContent ? `<div class="mb-3">${renderAssetItems(pipeline.assetContent, pipeline.id, true)}</div>` : ''}
             `;
 
@@ -1660,10 +1779,12 @@ $(document).ready(function () {
                 <button class="btn btn-outline-primary action-btn flex-grow-1" onclick="sendPipelineToStudioChat(${pipeline.id})">
                     <i class="fas fa-comments me-1"></i>Refine in Studio Chat
                 </button>
+                ${zipDownloadButtonHtml(pipeline)}
             ` : `
                 <button class="btn btn-outline-primary action-btn flex-grow-1" onclick="sendPipelineToStudioChat(${pipeline.id})">
                     <i class="fas fa-comments me-1"></i>Refine in Studio Chat
                 </button>
+                ${zipDownloadButtonHtml(pipeline)}
             `;
 
             return { body, footer };
@@ -1694,6 +1815,7 @@ $(document).ready(function () {
                 <button class="btn btn-outline-primary action-btn flex-grow-1" onclick="sendPipelineToStudioChat(${pipeline.id})">
                     <i class="fas fa-comments me-1"></i>Refine in Studio Chat
                 </button>
+                ${zipDownloadButtonHtml(pipeline)}
             `;
 
             return { body, footer };
@@ -1715,7 +1837,12 @@ $(document).ready(function () {
         let idx = 0; // intel_selected - reached as soon as a pipeline exists
         if (pipeline.strategy) idx = 1; // strategy_generated
         if (pipeline.assetContent) idx = 2; // asset_generated
-        if (status === 'approved' || status === 'published') idx = 3;
+        // Reaching the Approval stage means content was SENT for approval,
+        // not necessarily decided yet. "content_rejected" (a reviewer
+        // rejecting via the emailed approval link) is a distinct value from
+        // the plain "rejected" status used elsewhere (rejecting a strategy or
+        // discarding a variation in-app), which maps to an earlier stage.
+        if (['pending_approval', 'approved', 'content_rejected', 'published'].includes(status)) idx = 3;
         if (status === 'published') idx = 4;
         return idx;
     }
@@ -1806,7 +1933,68 @@ $(document).ready(function () {
         const { body, footer } = getStageDetailHtml(pipeline, stageId, index);
         $('#pipelineModalDetail').html(body);
         $('#pipelineModalFooter').html(footer).toggleClass('d-none', !footer);
+
+        if (stageId === 'approved' && ['pending_approval', 'approved', 'content_rejected', 'published'].includes(pipeline.status)) {
+            fetchApprovalStageStatus(pipeline);
+        }
     };
+
+    // Fetches the real accepted/rejected/comments status for a pipeline's
+    // approval request (persisted server-side, since decisions can be made
+    // by a reviewer in a different browser session) and fills in the
+    // #approvalStageStatusBody placeholder rendered by getStageDetailHtml.
+    function fetchApprovalStageStatus(pipeline) {
+        $.ajax({
+            url: `/api/approval-requests/by-pipeline/${pipeline.id}`,
+            type: 'GET',
+            success: function (r) {
+                const req = r.request;
+                if (!req) {
+                    $('#approvalStageStatusBody').html(emptyStageState('No approval request found for this run.'));
+                    return;
+                }
+
+                let html;
+                if (req.status === 'pending') {
+                    html = `
+                        <div class="alert alert-warning d-flex align-items-center gap-3 p-3 rounded-3 border-0 shadow-sm mb-3">
+                            <i class="fas fa-hourglass-half fs-4"></i>
+                            <div><strong class="d-block">Awaiting Approval</strong><small>Sent for review &mdash; waiting on the reviewer's decision.</small></div>
+                        </div>
+                    `;
+                } else {
+                    const isApproved = req.status === 'approved';
+                    html = `
+                        <div class="alert ${isApproved ? 'alert-success' : 'alert-danger'} d-flex align-items-center gap-3 p-3 rounded-3 border-0 shadow-sm mb-3">
+                            <i class="fas ${isApproved ? 'fa-check-circle' : 'fa-times-circle'} fs-4"></i>
+                            <div>
+                                <strong class="d-block">${isApproved ? 'Accepted' : 'Rejected'}${req.decided_by ? ' by ' + escapeHtml(req.decided_by) : ''}</strong>
+                                <small>${req.decided_at ? new Date(req.decided_at).toLocaleString() : ''}</small>
+                                ${req.comments ? `<div class="mt-2 small"><strong>Comments:</strong> ${escapeHtml(req.comments)}</div>` : ''}
+                            </div>
+                        </div>
+                    `;
+
+                    // Keep the local pipeline record in sync with the reviewer's
+                    // actual decision so the stepper/footer buttons update too.
+                    const localStatus = isApproved ? 'approved' : 'content_rejected';
+                    if (pipeline.status !== localStatus) {
+                        pipeline.status = localStatus;
+                        localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+                        renderPipelineHistory();
+                        if (window._currentStageId === 'approved') {
+                            showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'approved');
+                        }
+                        return;
+                    }
+                }
+                $('#approvalStageStatusBody').replaceWith(html);
+            },
+            error: function () {
+                $('#approvalStageStatusBody').html(emptyStageState('Could not load approval status.'));
+            }
+        });
+    }
 
     renderPipelineHistory();
 
@@ -1916,13 +2104,10 @@ $(document).ready(function () {
                 <div class="carousel-item ${activeClass}">
                     ${outHtml}
                     <div class="px-3 pt-3">
-                        <button class="btn btn-outline-secondary btn-sm w-100 fw-bold rounded-pill" onclick="previewCarouselItem(${index})">
-                            <i class="fas fa-eye me-1"></i>Preview on ${platformDisplayName(item.platform)}
-                        </button>
+                        ${platformPreviewButtonsRow(`previewCarouselItem(${index}`)}
                     </div>
-                    <div class="d-flex gap-2 mt-2 mb-2 px-3">
-                        <button class="btn btn-outline-danger btn-sm rounded-pill flex-grow-1 fw-bold" onclick="rejectPipelineContent()"><i class="fas fa-times me-1"></i>Reject</button>
-                        <button class="btn btn-success btn-sm rounded-pill flex-grow-1 shadow-sm fw-bold" onclick="approveCarouselItem(${index})"><i class="fas fa-check me-1"></i>Approve</button>
+                    <div class="px-3 mt-2 mb-2">
+                        <button class="btn btn-primary w-100 rounded-pill shadow-sm fw-bold" onclick="sendCarouselItemForApproval(${index})"><i class="fas fa-paper-plane me-2"></i>Send for Approval</button>
                     </div>
                 </div>
             `;
@@ -2028,6 +2213,91 @@ $(document).ready(function () {
         });
     }
 
+    // Creates a persisted approval request + emails the reviewer a link, then
+    // updates the local pipeline record to reflect "sent for approval".
+    // Shared by both the live workflow (one carousel variation) and the
+    // pipeline modal (the whole generated set).
+    function submitApprovalRequest(pipeline, platform, assetType, caption, imageUrls, onDone) {
+        const competitors = pipeline.competitors
+            ? [...new Set(pipeline.competitors.split(',').map(c => c.trim()).filter(Boolean))]
+            : [];
+
+        $.ajax({
+            url: '/api/approval-requests',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                pipeline_client_id: String(pipeline.id),
+                platform: platform || '',
+                asset_type: assetType || '',
+                caption: caption || '',
+                story: pipeline.context || '',
+                competitors: competitors,
+                image_urls: imageUrls || []
+            }),
+            success: function (r) {
+                if (r.success) {
+                    pipeline.status = 'pending_approval';
+                    localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+                    renderPipelineHistory();
+                    const emailOk = r.email && r.email.success;
+                    showToast(
+                        emailOk
+                            ? 'Sent for approval — the reviewer has been emailed a link to accept or reject.'
+                            : 'Approval request created, but the notification email failed to send.',
+                        emailOk ? 'success' : 'warning'
+                    );
+                } else {
+                    showToast(r.error || 'Failed to send for approval.', 'danger');
+                }
+                if (onDone) onDone(r);
+            },
+            error: function (xhr) {
+                showToast(xhr.responseJSON?.error || 'Network error sending for approval.', 'danger');
+            }
+        });
+    }
+
+    window.sendCarouselItemForApproval = function (index) {
+        const item = window.currentCarouselAssets[index];
+        const pipeline = window.activePipeline;
+        if (!item || !pipeline) return;
+
+        // Send every generated variation together (not just whichever one is
+        // currently showing in the carousel) - if the user generated multiple
+        // images, the reviewer should see and decide on the whole set in one
+        // request, not just the last one clicked.
+        const imageItems = window.currentCarouselAssets.filter(a => a && a.type === 'image' && a.content);
+        const caption = item.type === 'Text (Caption)' ? item.content : (item.caption || '');
+        const imageUrls = imageItems.length ? imageItems.map(a => a.content) : (item.type === 'image' && item.content ? [item.content] : []);
+
+        submitApprovalRequest(pipeline, item.platform, item.type, caption, imageUrls, function (r) {
+            if (r.success) {
+                // Replace the Send-for-Approval action with a confirmation -
+                // the decision now happens on the reviewer's approval page.
+                $('#pipelineResultBlock').find('button[onclick^="sendCarouselItemForApproval"]').closest('.px-3').replaceWith(
+                    '<div class="alert alert-info d-flex align-items-center gap-2 mx-3 mt-2 mb-2 py-2"><i class="fas fa-paper-plane"></i><span class="small">Sent for approval &mdash; awaiting reviewer decision.</span></div>'
+                );
+            }
+        });
+    };
+
+    window.sendModalAssetForApproval = function (pipelineId) {
+        const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
+        if (!pipeline || !pipeline.assetContent) return;
+
+        const assets = Array.isArray(pipeline.assetContent) ? pipeline.assetContent : [pipeline.assetContent];
+        const imageItems = assets.filter(a => a && a.type === 'image' && a.content);
+        const primary = imageItems[0] || assets[0];
+        const caption = primary.type === 'Text (Caption)' ? primary.content : (primary.caption || '');
+
+        submitApprovalRequest(pipeline, primary.platform, pipeline.assetType || primary.type, caption, imageItems.map(a => a.content), function (r) {
+            if (r.success) {
+                showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'approved');
+            }
+        });
+    };
+
     window.approveCarouselItem = function (index) {
         const item = window.currentCarouselAssets[index];
         window.lastGeneratedPipeline = item;
@@ -2102,10 +2372,10 @@ $(document).ready(function () {
                             renderPipelineHistory();
                         }
                     } else {
-                        // Generate Media (3 variations)
+                        // Generate Media (N variations, per the Number of Images field)
                         let generatedCount = 0;
-                        const totalToGenerate = 3;
-                        $('#pipelineOutputContent').html(mediaGenSkeletonHtml('Rendering media variation 1 of 3...'));
+                        const totalToGenerate = mediaType === 'image' ? (parseInt($('#pipelineImageCount').val(), 10) || 1) : 3;
+                        $('#pipelineOutputContent').html(mediaGenSkeletonHtml(`Rendering media variation 1 of ${totalToGenerate}...`));
 
                         function generateNextMedia() {
                             if (generatedCount >= totalToGenerate) {
@@ -2132,7 +2402,9 @@ $(document).ready(function () {
                                     tone: generatedCount,
                                     context: $('#preGenImageContext').val(),
                                     image_path: window.getCharacterAssetPath(window.activePipeline),
-                                    image_paths: window.getCharacterAssetPaths(window.activePipeline)
+                                    image_paths: window.getCharacterAssetPaths(window.activePipeline),
+                                    image_prompt: window.lastStrategyData && window.lastStrategyData.image_prompt,
+                                    video_prompt: window.lastStrategyData && window.lastStrategyData.video_prompt
                                 }),
                                 success: function (mediaRes) {
                                     if (mediaRes.success && mediaRes.url) {
@@ -2148,11 +2420,26 @@ $(document).ready(function () {
 
                                         generatedCount++;
                                         if (generatedCount < totalToGenerate) {
-                                            $('#pipelineLoader').text(`Rendering media variation ${generatedCount + 1} of 3...`);
+                                            $('#pipelineLoader').text(`Rendering media variation ${generatedCount + 1} of ${totalToGenerate}...`);
                                             generateNextMedia();
                                         } else {
                                             $('#startPipelineBtn').prop('disabled', false);
                                             $('#pipelineLoader').addClass('d-none');
+
+                                            // The last variation just succeeded here, so
+                                            // generateNextMedia() never runs again and its
+                                            // own "all done" persistence block (below)
+                                            // never fires - without this, assetContent
+                                            // never gets saved onto the pipeline even
+                                            // though generation fully succeeded, so the
+                                            // Content Generated stage looks empty as soon
+                                            // as the page reloads or history is reopened.
+                                            if (window.activePipeline) {
+                                                window.activePipeline.status = 'asset_generated';
+                                                window.activePipeline.assetContent = window.currentCarouselAssets;
+                                                localStorage.setItem('straditPipelineHistory', JSON.stringify(window.pipelineHistory));
+                                                renderPipelineHistory();
+                                            }
                                         }
                                     } else {
                                         const reason = mediaRes && mediaRes.error ? ': ' + mediaRes.error : '';
@@ -2354,9 +2641,9 @@ $(document).ready(function () {
         `;
     }
 
-    function showAssetPreviewModal(item) {
+    function showAssetPreviewModal(item, platformOverride) {
         if (!item) return;
-        const platform = (item.platform || 'linkedin').toLowerCase();
+        const platform = (platformOverride || item.platform || 'linkedin').toLowerCase();
         $('#assetPreviewTitle').html(`<i class="fas fa-eye text-primary me-2"></i>Preview on ${platformDisplayName(platform)}`);
 
         // If the item itself doesn't have caption set, attempt to retrieve primary caption from active pipeline
@@ -2379,11 +2666,11 @@ $(document).ready(function () {
         bootstrap.Modal.getOrCreateInstance(modalEl).show();
     }
 
-    window.previewCarouselItem = function (index) {
-        showAssetPreviewModal(window.currentCarouselAssets[index]);
+    window.previewCarouselItem = function (index, platformOverride) {
+        showAssetPreviewModal(window.currentCarouselAssets[index], platformOverride);
     };
 
-    window.previewPipelineAsset = function (pipelineId, index) {
+    window.previewPipelineAsset = function (pipelineId, index, platformOverride) {
         const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
         if (!pipeline) return;
         const items = Array.isArray(pipeline.assetContent) ? pipeline.assetContent : [pipeline.assetContent];
@@ -2394,8 +2681,21 @@ $(document).ready(function () {
                 item.caption = textItem.content;
             }
         }
-        showAssetPreviewModal(item);
+        showAssetPreviewModal(item, platformOverride);
     };
+
+    // Renders LinkedIn/Facebook/Instagram preview buttons as a row - lets the
+    // user check how the same content would look across all three platforms,
+    // not just the one it was actually generated for.
+    function platformPreviewButtonsRow(callPrefix) {
+        return `
+            <div class="d-flex gap-2">
+                <button class="btn btn-outline-secondary btn-sm flex-grow-1 fw-bold rounded-pill" onclick="${callPrefix}, 'linkedin')"><i class="fab fa-linkedin me-1"></i>LinkedIn</button>
+                <button class="btn btn-outline-secondary btn-sm flex-grow-1 fw-bold rounded-pill" onclick="${callPrefix}, 'facebook')"><i class="fab fa-facebook me-1"></i>Facebook</button>
+                <button class="btn btn-outline-secondary btn-sm flex-grow-1 fw-bold rounded-pill" onclick="${callPrefix}, 'instagram')"><i class="fab fa-instagram me-1"></i>Instagram</button>
+            </div>
+        `;
+    }
 
     function showPipelineError(msg) {
         $('#startPipelineBtn').prop('disabled', false);
@@ -2654,6 +2954,17 @@ $(document).ready(function () {
                         <option value="Abstract">Abstract</option>
                     </select>
                 </div>
+                <div id="modalImageCountContainer" class="d-none d-flex flex-column gap-1">
+                    <label class="fw-bold m-0" style="font-size: 0.82rem; color: #374151;"><i class="fas fa-clone me-1 text-primary"></i>Number of Images</label>
+                    <select class="form-select form-select-sm" id="modalPipelineImageCount"
+                        title="How many image variations to generate for this post.">
+                        <option value="1" selected>1</option>
+                        <option value="2">2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                    </select>
+                </div>
                 <div class="d-flex flex-column gap-1">
                     <label class="fw-bold m-0" style="font-size: 0.82rem; color: #374151;">
                         <i class="fas fa-comment-dots me-1 text-primary"></i>Creative Prompt <span class="text-muted fw-normal">(optional)</span>
@@ -2721,9 +3032,9 @@ $(document).ready(function () {
                         showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'asset_generated');
                     } else {
                         // For image/video, just simulate or trigger generation like in main workflow
-                        $('#modalPipelineLoader').html('<i class="fas fa-spinner fa-spin me-2"></i>Rendering media variation 1 of 3...');
                         let generatedCount = 0;
-                        const totalToGenerate = 3;
+                        const totalToGenerate = mediaType === 'image' ? (parseInt($('#modalPipelineImageCount').val(), 10) || 1) : 3;
+                        $('#modalPipelineLoader').html(`<i class="fas fa-spinner fa-spin me-2"></i>Rendering media variation 1 of ${totalToGenerate}...`);
 
                         function generateNextMedia() {
                             if (generatedCount >= totalToGenerate) {
@@ -2750,7 +3061,9 @@ $(document).ready(function () {
                                     tone: generatedCount,
                                     context: $('#modalPreGenImageContext').val(),
                                     image_path: window.getCharacterAssetPath(pipeline),
-                                    image_paths: window.getCharacterAssetPaths(pipeline)
+                                    image_paths: window.getCharacterAssetPaths(pipeline),
+                                    image_prompt: pipeline.strategy && pipeline.strategy.image_prompt,
+                                    video_prompt: pipeline.strategy && pipeline.strategy.video_prompt
                                 }),
                                 success: function (mediaRes) {
                                     if (mediaRes.success && mediaRes.url) {
@@ -2764,7 +3077,7 @@ $(document).ready(function () {
                                         });
                                         generatedCount++;
                                         if (generatedCount < totalToGenerate) {
-                                            $('#modalPipelineLoader').html(`<i class="fas fa-spinner fa-spin me-2"></i>Rendering media variation ${generatedCount + 1} of 3...`);
+                                            $('#modalPipelineLoader').html(`<i class="fas fa-spinner fa-spin me-2"></i>Rendering media variation ${generatedCount + 1} of ${totalToGenerate}...`);
                                             generateNextMedia();
                                         } else {
                                             $('#startModalPipelineBtn').prop('disabled', false);
@@ -3079,7 +3392,11 @@ window.regenerateImageInCarousel = function (index) {
             media_type: 'image',
             context: context,
             image_path: window.getCharacterAssetPath(window.activePipeline),
-            image_paths: window.getCharacterAssetPaths(window.activePipeline)
+            image_paths: window.getCharacterAssetPaths(window.activePipeline),
+            // Only pass the strategy's rich image_prompt when the user hasn't
+            // typed their own override into item.prompt - an explicit
+            // regenerate note should win over the original art direction.
+            image_prompt: !item.prompt ? (window.lastStrategyData && window.lastStrategyData.image_prompt) : undefined
         }),
         success: function (mediaRes) {
             if (mediaRes.success && mediaRes.url) {
@@ -3132,7 +3449,8 @@ window.regenerateModalImage = function (pipelineId, index, event) {
             media_type: 'image',
             context: context,
             image_path: window.getCharacterAssetPath(pipeline),
-            image_paths: window.getCharacterAssetPaths(pipeline)
+            image_paths: window.getCharacterAssetPaths(pipeline),
+            image_prompt: !item.prompt ? (pipeline.strategy && pipeline.strategy.image_prompt) : undefined
         }),
         success: function (mediaRes) {
             if (mediaRes.success && mediaRes.url) {
