@@ -584,6 +584,9 @@
                         </div>
                     </div>
 
+                    <!-- Scrollable Content Wrapper -->
+                    <div class="flex-grow-1 overflow-auto d-flex flex-column" style="min-height: 0;">
+
                     <!-- Suggested Storylines: optional accelerator above the manual feed. Groups
                          already-scraped posts by semantic similarity (any competitor/platform
                          combination) so the user can jump straight to Generate Storyline instead
@@ -619,7 +622,7 @@
                         <div id="festiveStorylinesList" class="d-flex gap-3 overflow-x-auto pb-1"></div>
                     </div>
 
-                    <div class="p-4 bg-gray-50 flex-grow-1 overflow-auto" style="min-height: 0;">
+                    <div class="p-4 bg-gray-50 flex-grow-1 d-flex flex-column">
 
                         <!-- Loader -->
                         <div id="postsLoader" class="d-none empty-state">
@@ -640,6 +643,7 @@
                             </div>
                         </div>
                     </div>
+                    </div> <!-- End Scrollable Content Wrapper -->
                 </div>
             </div>
 

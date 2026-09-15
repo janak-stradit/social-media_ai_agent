@@ -73,7 +73,8 @@ class StoryAgent:
                 selected_char = " and ".join(asset_labels.get(a, a) for a in human_assets)
                 logo_instruction = (
                     "\nAlso feature the StradIT logo mark naturally integrated into the composition "
-                    "(e.g. on a screen, badge, document header, or corner element) alongside the character."
+                    "(e.g. on a screen, badge, document header, or corner element) alongside the character. "
+                    "Match the exact colors from the attached StradIT logo reference image. Specifically, the text 'Strad' MUST be vibrant orange, and the text 'IT' MUST be white. Do not literally write out any color codes."
                     if include_logo
                     else ""
                 )
@@ -165,13 +166,13 @@ DO NOT generate any text, logos, or brand names (like "StradIT" or the tagline) 
                 # mark itself rather than inventing a decorative person.
                 char_rules_prompt = """### BRAND MARK GENERATION
 The user has requested the StradIT logo be featured as a reference visual element, without a human character.
-Do not invent or describe any human character. Integrate the StradIT logo naturally into the composition (e.g. on a screen, document header, badge, or subtle corner placement) as the visual anchor instead."""
+Do not invent or describe any human character. Integrate the StradIT logo naturally into the composition (e.g. on a screen, document header, badge, or subtle corner placement) as the visual anchor instead. Match the exact colors from the attached StradIT logo reference image. Specifically, the text 'Strad' MUST be vibrant orange, and the text 'IT' MUST be white. Do not literally write out any color codes."""
 
                 image_prompt = """### IMAGE GENERATION
 Create a highly detailed prompt for a multi-slide Carousel (e.g., 3-5 slides) that directly represents the specific storyline. Each slide must be text-oriented, deeply informative, and visually connected to the others.
 Mimic high-end, colorful, professional layouts (clean typography, data visualization, cohesive vibrant color palette).
 
-Do not include human characters in the image. Integrate the StradIT logo naturally into the composition (e.g. on a screen, document header, badge, or corner element) as the visual anchor for the brand.
+Do not include human characters in the image. Integrate the StradIT logo naturally into the composition (e.g. on a screen, document header, badge, or corner element) as the visual anchor for the brand. Match the exact colors from the attached StradIT logo reference image. Specifically, the text 'Strad' MUST be vibrant orange, and the text 'IT' MUST be white. Do not literally write out any color codes.
 Use appropriate: Business environments, Financial data, Technology, Market visualizations, Documents, Product interfaces, Objects, Abstract visual metaphors.
 
 For Carousels, follow this exact formatting style:
@@ -194,7 +195,7 @@ Ensure these specific styling and positioning rules are explicitly mentioned in 
 Create a video narrative directly derived from the storyline.
 
 Create a 10-second premium corporate technology video in a single continuous narrative flow.
-Do not introduce human characters. Integrate the StradIT logo naturally into the visual composition. Build the narrative using environments, objects, data, technology, or visual metaphors.
+Do not introduce human characters. Integrate the StradIT logo naturally into the visual composition. Match the exact colors from the attached StradIT logo reference image. Specifically, the text 'Strad' MUST be vibrant orange, and the text 'IT' MUST be white. Do not literally write out any color codes. Build the narrative using environments, objects, data, technology, or visual metaphors.
 
 Follow this exact formatting style:
 --- EXAMPLE NON-CHARACTER VIDEO FORMAT ---

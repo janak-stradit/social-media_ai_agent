@@ -388,7 +388,7 @@ $(document).ready(function () {
         window.suggestedCollections.forEach((c, idx) => {
             const badgeClass = relevanceClass[c.relevance] || relevanceClass.medium;
             const isNew = window.newSuggestedCollectionHashes.has(c.post_urls_hash);
-            const isUsed = usedColls.includes(c.label);
+            const isUsed = usedColls.includes(c.post_urls_hash);
             const tags = [...(c.competitors || []), ...(c.platforms || []).map(p => p.toUpperCase())]
                 .map(t => `<span class="badge bg-light text-dark border" style="font-size: 0.65rem;">${escapeHtml(t)}</span>`)
                 .join(' ');
@@ -525,8 +525,8 @@ $(document).ready(function () {
             // Persist the state
             let usedColls = [];
             try { usedColls = JSON.parse(localStorage.getItem('usedSuggestedCollections') || '[]'); } catch (e) { usedColls = []; }
-            if (!usedColls.includes(collection.label)) {
-                usedColls.push(collection.label);
+            if (!usedColls.includes(collection.post_urls_hash)) {
+                usedColls.push(collection.post_urls_hash);
                 localStorage.setItem('usedSuggestedCollections', JSON.stringify(usedColls));
             }
         }
