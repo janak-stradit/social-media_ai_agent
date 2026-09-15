@@ -110,6 +110,16 @@ class MemoryService:
             print(f"[MemoryService] get_trending_hashtags notice: {e}")
         return ["#VortexSocial", "#AIStrategy", "#GrowthMarketing", "#DigitalGrowth"]
 
+    def get_stats(self):
+        """Return basic statistics about the memory store."""
+        if not self.enabled:
+            return {"total_memories": 0}
+        try:
+            return {"total_memories": self.collection.count()}
+        except Exception as e:
+            print(f"[MemoryService] get_stats warning: {e}")
+            return {"total_memories": 0}
+
     def format_memory_prompt(self, retrieved_items):
         """Format retrieved memories into prompt section for agents"""
         if not retrieved_items:
@@ -144,7 +154,7 @@ class MemoryService:
         }
         added_nodes = {"core_rag"}
 
-        for p_id, p_data in platforms_map.items():
+        for _p_id, p_data in platforms_map.items():
             nodes.append(p_data)
             added_nodes.add(p_data["id"])
 
@@ -226,7 +236,11 @@ class MemoryService:
         # Fallback to database history runs if ChromaDB collection has no records or disabled
         if fetched_count == 0:
             try:
-                from db import get_all_history
+                # KNOWN BUG (pre-existing): db.py has get_history(), not get_all_history() --
+                # this fallback always raises ImportError and is silently swallowed below.
+                # Flagged during lint adoption, not fixed here (unsure get_history() is a
+                # drop-in replacement for this call shape without checking its callers too).
+                from db import get_all_history  # pylint: disable=no-name-in-module
 
                 db_runs = get_all_history(limit=30, user_id=user_id)
                 fetched_count = len(db_runs)

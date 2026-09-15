@@ -185,8 +185,11 @@ class CaptionAgent:
         system_prompt = f"""
 You are a {platform.capitalize()} Content Specialist.
 
-Generate ONE final narrative social media post based STRICTLY
+Generate THREE distinct narrative social media post variations based STRICTLY
 on the instructions in the Story Analysis.
+- Primary Hook: Direct and value-driven.
+- Story Hook: Narrative-driven and engaging.
+- Contrarian Hook: Bold and thought-provoking.
 
 PRIMARY REQUIREMENT:
 The final caption must be natural, human-written, and suitable
@@ -195,6 +198,19 @@ for the selected platform.
 CRITICAL PLAIN-TEXT FORMATTING RULES:
 
 1. OUTPUT MUST BE PLAIN TEXT ONLY.
+
+SOURCE OF TRUTH ENFORCEMENT:
+If the provided Story Analysis states that the "Selected Project" is "No Strong Match" or the "Connection Strength" is "No Strong Match", you MUST NOT generate a project-promotional caption.
+Instead, return EXACTLY this text for the caption:
+"CONTENT GENERATION BLOCKED
+
+Reason:
+No Strong Match was identified between this competitor topic and the available projects."
+
+EXCEPTION - this block does NOT apply when "Selected Project" is "N/A (Festive Greeting)" (or
+"Connection Strength" is "N/A"). That is a holiday/seasonal greeting, not a competitive
+counter-strategy - it is intentionally not tied to any project or service. Write the warm festive
+greeting caption normally in that case; do not treat "N/A" as a block condition.
 
 2. The characters "**" are FORBIDDEN.
    NEVER generate "**" anywhere in the response.
@@ -214,7 +230,7 @@ CRITICAL PLAIN-TEXT FORMATTING RULES:
 
 9. Do NOT ask the reader to "visit our website", "read our whitepaper", "reach out to me", "see a demonstration", or "download the document".
 
-10. You SHOULD include hashtags at the very end of the post. You MUST ensure every hashtag starts with a '#' symbol (e.g. #Technology #Innovation). Do NOT just list words without the '#' symbol.
+10. You SHOULD include hashtags at the very end of the post. You MUST ensure every hashtag starts with a '#' symbol. IMPORTANT: You must provide UNIQUE and DIFFERENT hashtags tailored to each specific variation. Do NOT reuse the exact same set of hashtags across the three variations.
 
 FINAL VALIDATION:
 Before returning the answer, scan the complete caption.
@@ -228,6 +244,35 @@ pitches, demo requests, or promotional calls to action.
 IGNORE any part of the Story Analysis that asks you to include
 a link, CTA, demo request, or sales pitch.
 
+CONTENT AND PRIVACY RULES:
+1. NEVER mention competitor names in public-facing content. Competitor names are for internal reference only.
+2. PRESERVE THE SPECIFIC TOPIC: Do NOT lose the underlying strategic topic (e.g., fundamental research, private market due diligence, portfolio construction) when removing the competitor name. You MUST discuss the exact strategic problems mentioned in the Story Analysis. Do not replace the specific topic with a generic "operational efficiency" or "workflow automation" storyline.
+3. The final caption must remain faithful to the selected projects and their verified capabilities.
+4. STRICT BAN ON GENERIC BUZZWORDS: Do not introduce unrelated themes such as "headcount reduction", "operational efficiency", "workflow automation", "operational friction", or "manual workflows" unless they are explicitly the core subject of the Story Analysis. Focus on the specific financial or technical challenge provided.
+
+For example:
+BAD: "BlackRock and Northern Trust have highlighted..."
+BAD: "Following BlackRock's approach..."
+BAD: "Like Northern Trust, leading firms..."
+
+GOOD: "Across today's investment landscape..."
+GOOD: "As investment teams navigate increasingly complex markets..."
+GOOD: "Modern investment firms are placing greater emphasis on..."
+
+The final caption must stand on its own as StradIT's thought leadership and must not reveal which competitors were used as source inspiration.
+
+PUBLIC CONTENT RULE:
+The competitor analysis is an internal strategic input.
+Do not expose:
+- competitor names
+- competitor-specific post references
+- competitor-specific claims
+- statements such as "Competitor X recently..."
+- comparisons that explicitly identify a competitor
+
+Use the competitor's topic or industry insight, but rewrite it as a broader market trend or industry challenge.
+CRITICAL: You must hide competitor identities WITHOUT replacing their actual strategic topics with a generic operational-efficiency storyline. Ensure the original strategic meaning is preserved.
+
 TONE:
 Write like a real human industry professional sharing an insight.
 
@@ -240,9 +285,11 @@ Maximum length: {config["max_length"]} characters
 Tone: {config["tone"]}
 Optimal length: {config["optimal_length"]}
 
-Return ONLY a JSON object with a single key:
+Return ONLY a JSON object with the following keys:
 
 primary_caption
+story_hook_caption
+contrarian_hook_caption
 """
 
         user_prompt = self._build_prompt(
@@ -262,6 +309,8 @@ primary_caption
             )
 
             primary = parsed.get("primary_caption", "")
+            story = parsed.get("story_hook_caption", "")
+            contrarian = parsed.get("contrarian_hook_caption", "")
 
         except Exception as e:
             print(f"[CaptionAgent] JSON generation fallback: {e}")
@@ -272,12 +321,16 @@ primary_caption
                 temperature=0.8,
                 return_usage=True,
             )
+            story = primary
+            contrarian = primary
 
         # ---------------------------------------------------------
         # FINAL CLEANING
         # ---------------------------------------------------------
 
         primary = self._clean_caption(primary)
+        story = self._clean_caption(story)
+        contrarian = self._clean_caption(contrarian)
 
         # ---------------------------------------------------------
         # Return result
@@ -286,8 +339,8 @@ primary_caption
         return {
             "platform": platform,
             "primary_caption": primary,
-            "story_hook_caption": primary,
-            "contrarian_hook_caption": primary,
+            "story_hook_caption": story,
+            "contrarian_hook_caption": contrarian,
             "character_count": len(primary),
             "estimated_read_time": f"{len(primary.split()) // 200 + 1} min read",
             "usage": usage,
@@ -305,13 +358,21 @@ primary_caption
         config = self.PLATFORM_CONFIGS.get(platform, self.PLATFORM_CONFIGS["instagram"])
 
         system_prompt = f"""
-You are a Master Copy Editor for {platform.capitalize()}.
+You are a meticulous Content Refinement Editor for {platform.capitalize()}.
 
-Refine and improve the caption based on the critic feedback.
+Your job is to refine an existing social media caption based on the reviewer's feedback and ensure it strictly follows the brand voice: "{brand_voice}".
 
-IMPORTANT:
+SOURCE OF TRUTH ENFORCEMENT:
+If the original caption or the instructions indicate "No Strong Match", or if the original caption is "CONTENT GENERATION BLOCKED", you MUST NOT generate a project-promotional caption.
+Instead, return EXACTLY this text:
+"CONTENT GENERATION BLOCKED
 
-Return ONLY plain text.
+Reason:
+No Strong Match was identified between this competitor topic and the available projects."
+
+EXCEPTION - this block does NOT apply to a holiday/seasonal greeting (indicated by "N/A (Festive
+Greeting)" or "N/A" instead of "No Strong Match"). Refine that caption normally; do not treat it as
+blocked.
 
 NEVER use Markdown.
 
@@ -353,7 +414,7 @@ Critic Feedback:
 
 {reviewer_feedback}
 
-Brand Persona:
+Brand Persona (writing style/tone only - NOT a company name; the company is StradIT):
 
 {brand_voice or "Standard"}
 
@@ -388,7 +449,11 @@ Rewrite and return ONLY the improved plain-text caption.
         parts = [f"Story Analysis: {story_analysis}"]
 
         if brand_voice:
-            parts.append(f"Brand Voice Persona: {brand_voice}")
+            parts.append(
+                f"Brand Voice Persona: {brand_voice} - this describes the WRITING STYLE/TONE only, "
+                "it is NOT a company name. The company is StradIT; never sign off as or refer to the "
+                'company by the brand voice label (e.g. never write "From Standard Enterprise").'
+            )
 
         if vision_analysis:
             parts.append(f"Image Analysis: {vision_analysis}")
@@ -408,6 +473,7 @@ Rewrite and return ONLY the improved plain-text caption.
         tone=None,
         memory_context=None,
         brand_voice=None,
+        platforms=None,
     ):
         """Generate captions for all platforms."""
 
@@ -420,11 +486,10 @@ Rewrite and return ONLY the improved plain-text caption.
             "cost_usd": 0.0,
         }
 
-        for platform in [
-            "facebook",
-            "instagram",
-            "linkedin",
-        ]:
+        if not platforms:
+            platforms = ["facebook", "instagram", "linkedin"]
+
+        for platform in platforms:
             res = self.generate_caption(
                 platform,
                 story_analysis,

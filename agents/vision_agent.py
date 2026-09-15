@@ -12,7 +12,7 @@ class VisionAgent:
     4. Composition notes
     5. Storytelling angles (3 different narrative approaches)
     6. Best platform fit assessment
-    
+
     Return as JSON with keys: rich_description, mood, colors, composition, story_angles, platform_fit"""
 
     def __init__(self):
@@ -30,7 +30,7 @@ class VisionAgent:
         # Step 3: Enrich with LLM
         user_prompt = f"""Image Caption: {caption}
         Visual Features: {features}
-        
+
         Create a comprehensive analysis for social media content creation."""
 
         analysis = self.llm.generate_json(self.SYSTEM_PROMPT, user_prompt)

@@ -1,0 +1,14 @@
+{
+  "name": "social-media-ai-agent",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Frontend lint tooling for static/js and templates (no build step -- plain jQuery/Bootstrap loaded from CDN).",
+  "scripts": {
+    "lint:js": "eslint static/js",
+    "lint:html": "htmlhint templates/*.html"
+  },
+  "devDependencies": {
+    "eslint": "^10.9.1",
+    "htmlhint": "^1.9.2"
+  }
+}

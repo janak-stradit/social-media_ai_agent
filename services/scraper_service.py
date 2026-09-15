@@ -38,8 +38,13 @@ class ScraperService:
             company_key = company_map.get(company_name, company_name.lower().replace(" ", "_"))
 
             # Attempt to fetch from the scraper's REST API
+            # Known issue, tracked in COMPETITOR_DASHBOARD_ENHANCEMENTS.md: this disables TLS
+            # cert verification against a self-signed scraper endpoint.
             response = requests.get(
-                f"{self.base_url}/accounts/{company_key}", headers=self.headers, timeout=8, verify=False
+                f"{self.base_url}/accounts/{company_key}",
+                headers=self.headers,
+                timeout=8,
+                verify=False,  # nosec B501
             )
             response.raise_for_status()
             data = response.json()
@@ -93,8 +98,13 @@ class ScraperService:
             }
             company_key = company_map.get(company_name, company_name.lower().replace(" ", "_"))
 
+            # Known issue, tracked in COMPETITOR_DASHBOARD_ENHANCEMENTS.md: this disables TLS
+            # cert verification against a self-signed scraper endpoint.
             response = requests.get(
-                f"{self.base_url}/accounts/{company_key}", headers=self.headers, timeout=8, verify=False
+                f"{self.base_url}/accounts/{company_key}",
+                headers=self.headers,
+                timeout=8,
+                verify=False,  # nosec B501
             )
             response.raise_for_status()
             data = response.json()
@@ -103,7 +113,7 @@ class ScraperService:
             store_data = store.get("data", {})
 
             all_posts = []
-            for platform, platform_data in store_data.items():
+            for _platform, platform_data in store_data.items():
                 if isinstance(platform_data, dict):
                     posts = platform_data.get("posts", [])
                     all_posts.extend(posts)
@@ -144,15 +154,15 @@ class ScraperService:
             competitors = [c for c in competitors if c.lower() == competitor.lower()]
         combined_posts = []
 
+        platform_lower = platform_name.lower()
         for comp in competitors:
             # Reusing the underlying fetch logic. A bit inefficient for multiple calls,
             # but works since we only have 4 competitors.
             comp_store = self.get_company_store(comp)
-            # Filter posts for the specific platform
+            # Filter posts for the specific platform (or include every platform when "all")
             # Note: platform_name should match the key in the JSON, e.g., 'linkedin', 'blog'
-            platform_lower = platform_name.lower()
             for post in comp_store:
-                if post.get("platform", "").lower() == platform_lower:
+                if platform_lower == "all" or post.get("platform", "").lower() == platform_lower:
                     # Tag the post with its source competitor
                     post["_source_competitor"] = comp
                     combined_posts.append(post)

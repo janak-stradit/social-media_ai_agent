@@ -35,6 +35,10 @@ env/
 ENV/
 soical-media-ai/
 
+# ── Node / frontend tooling ────────────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+
 # ── Flask / app runtime ───────────────────────────────────────────────────────
 instance/
 .webassets-cache

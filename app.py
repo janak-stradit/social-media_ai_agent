@@ -1,12 +1,23 @@
 import os
+import sys
 
-from flask import Flask, jsonify, redirect, render_template, session, url_for
+from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 from flask_cors import CORS
 
 from api.routes import api_bp
 from auth.routes import auth_bp
 from auth.utils import get_current_user_id, login_required_page
 from config import config_map
+
+# LLM responses (captions, image/video prompts, error messages) can contain
+# Unicode punctuation the Windows console's default cp1252 stdout can't encode
+# (e.g. non-breaking hyphens) - print() would then raise UnicodeEncodeError and
+# abort whatever was mid-execution, including provider fallback loops meant to
+# recover from exactly this kind of failure. Force UTF-8 stdout/stderr so
+# logging output never crashes the process it's trying to report on.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
 
 
 def create_app(config_name="development"):
@@ -51,10 +62,39 @@ def create_app(config_name="development"):
     def settings_route():
         return render_template("settings.html")
 
+    @app.route("/brand-configuration")
+    @login_required_page
+    def brand_configuration_page():
+        """Editable Content Guidelines + Products & Service text (see
+        AppSetting in db.py) read live by generation, so edits here actually
+        change what gets generated without touching code."""
+        return render_template("brand_configuration.html")
+
     @app.route("/competitor-dashboard")
     @login_required_page
     def competitor_dashboard():
+        # Backward compatibility: approval-request emails sent before the
+        # dedicated /approve/<id> page existed link here as ?approve=<id>.
+        approve_id = request.args.get("approve")
+        if approve_id and approve_id.isdigit():
+            return redirect(url_for("approval_review_page", request_id=int(approve_id)))
         return render_template("competitor_dashboard.html")
+
+    @app.route("/approve")
+    @login_required_page
+    def approval_list_page():
+        """Dashboard of every approval request (past and current) with its
+        status - pending/accepted/rejected - for reviewers who want an
+        overview instead of following a one-off email link."""
+        return render_template("approval_list.html")
+
+    @app.route("/approve/<int:request_id>")
+    @login_required_page
+    def approval_review_page(request_id):
+        """Standalone page opened from an approval-request email's "Review &
+        Decide" link - a focused preview + accept/reject/comments view,
+        rather than dropping the reviewer into the full dashboard."""
+        return render_template("approval_review.html", request_id=request_id)
 
     @app.route("/login")
     def login_route():
@@ -84,5 +124,7 @@ def create_app(config_name="development"):
 
 
 if __name__ == "__main__":
+    # Local dev entrypoint only -- production runs via gunicorn (see Dockerfile), which never
+    # executes this block. B201 (debug=True) and B104 (bind-all) are both dev-only here.
     app = create_app()
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True)  # nosec B201 B104

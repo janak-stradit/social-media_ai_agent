@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Approvals - VortexSocial AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            color: #1f2937;
+            overflow: hidden;
+        }
+
+        .ap-main {
+            margin-top: var(--header-h);
+            height: calc(100vh - var(--header-h));
+            overflow-y: auto;
+            background: #f9fafb;
+        }
+
+        .ap-shell {
+            max-width: 1080px;
+            margin: 0 auto;
+            padding: 2rem 1.5rem 4rem;
+        }
+
+        .status-filter-tab {
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            padding: 0.5rem 0.9rem;
+            font-weight: 700;
+            font-size: 0.85rem;
+            color: #6b7280;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .status-filter-tab:hover {
+            color: #4f46e5;
+        }
+
+        .status-filter-tab.active {
+            color: #4f46e5;
+            border-bottom-color: #4f46e5;
+        }
+
+        .approval-row {
+            background: #ffffff;
+            border-radius: 12px;
+            border: 1px solid rgba(229, 231, 235, 0.8);
+            padding: 1.1rem 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            text-decoration: none;
+            color: inherit;
+            transition: all 0.2s ease;
+        }
+
+        .approval-row:hover {
+            border-color: #c7d2fe;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.05);
+            color: inherit;
+        }
+
+        .approval-thumb {
+            width: 56px;
+            height: 56px;
+            border-radius: 8px;
+            object-fit: cover;
+            background: #f3f4f6;
+            flex-shrink: 0;
+        }
+
+        .approval-thumb-placeholder {
+            width: 56px;
+            height: 56px;
+            border-radius: 8px;
+            background: #eef2ff;
+            color: #4f46e5;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            font-size: 1.2rem;
+        }
+    </style>
+</head>
+
+<body>
+    <header class="app-header">
+        <div class="header-brand">
+            <div class="brand-logo"><i class="fas fa-robot"></i></div>
+            <div class="brand-text">
+                <span class="brand-name">VortexSocial AI</span>
+                <span class="brand-tagline">Enterprise Sales Intelligence Command Center</span>
+            </div>
+        </div>
+        <nav class="header-nav">
+            <a href="/" class="header-nav-item"><i class="fas fa-comments me-2"></i>Studio Chat</a>
+            <a href="/competitor-dashboard" class="header-nav-item"><i class="fas fa-chart-line me-1"></i>Analysis Dashboard</a>
+        </nav>
+        <div class="header-actions">
+            <a href="{{ url_for('competitor_dashboard') }}" class="btn-secondary-ent text-decoration-none me-2">
+                <i class="fas fa-arrow-left me-1"></i>Back to Dashboard
+            </a>
+        </div>
+    </header>
+
+    <main class="ap-main">
+        <div class="ap-shell">
+            <h4 class="fw-bold text-dark mb-1"><i class="fas fa-user-check text-primary me-2"></i>Content Approvals</h4>
+            <p class="text-muted small mb-3">Every review request sent so far, with its current status.</p>
+
+            <div class="d-flex gap-1 mb-3 border-bottom" id="approvalStatusTabs">
+                <button type="button" class="status-filter-tab active" data-status="">All</button>
+                <button type="button" class="status-filter-tab" data-status="pending">Pending</button>
+                <button type="button" class="status-filter-tab" data-status="approved">Accepted</button>
+                <button type="button" class="status-filter-tab" data-status="rejected">Rejected</button>
+            </div>
+
+            <div class="d-flex flex-column gap-2" id="approvalListBody">
+                <div class="text-center text-muted py-5"><i class="fas fa-spinner fa-spin me-2"></i>Loading approval requests...</div>
+            </div>
+        </div>
+    </main>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="{{ url_for('static', filename='js/approval_list.js') }}"></script>
+</body>
+
+</html>
