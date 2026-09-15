@@ -618,6 +618,7 @@ since it's what downstream generation uses to block output when there's no real 
 Respond with exactly this JSON structure and nothing else:
 
 {{
+  "storyline_title": "A short, 4-5 word descriptive title summarizing the overall topic/angle (e.g. 'Financial Data Security Solutions')",
   "selected_project": "The exact project or service name from OUR_PROJECT_CONTEXT, or \\"No Strong Match\\"",
   "connection_strength": "Strong, Moderate, or No Strong Match",
   "observed_facts": ["concise fact 1", "concise fact 2"],
@@ -690,6 +691,7 @@ only if it doesn't make the greeting feel like an advertisement.
 
 Respond with exactly this JSON structure and nothing else:
 {{
+  "storyline_title": "A short, 4-5 word descriptive title for the greeting (e.g. 'Diwali Festival Greeting')",
   "selected_project": "N/A (Festive Greeting)",
   "connection_strength": "N/A",
   "observed_facts": ["the festival/holiday name and date, and its cultural/business significance"],

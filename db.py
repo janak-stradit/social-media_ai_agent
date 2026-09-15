@@ -1255,8 +1255,19 @@ def save_content_collections(collections: list[dict]) -> dict:
         return {"inserted": inserted, "skipped": skipped, "new_hashes": new_hashes}
 
 
+def delete_old_content_collections(days: int = 15) -> int:
+    """Delete Suggested Storyline collections older than a specified number of days.
+    Returns the number of rows deleted."""
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days)
+    with Session(engine) as session:
+        deleted = session.query(ContentCollection).filter(ContentCollection.created_at < cutoff).delete()
+        session.commit()
+        return deleted
+
+
 def get_content_collections(limit: int = 50) -> list[dict]:
     """Return all accumulated Suggested Storyline collections, newest first."""
+    delete_old_content_collections(days=15)
     with Session(engine) as session:
         rows = session.query(ContentCollection).order_by(ContentCollection.created_at.desc()).limit(limit).all()
 

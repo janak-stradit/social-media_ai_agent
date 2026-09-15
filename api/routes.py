@@ -2064,19 +2064,13 @@ def generate_suggested_collections():
             clear_content_collections,
             get_competitor_posts,
             get_content_collections,
-            get_seen_storyline_hashes,
-            mark_storylines_seen,
-            post_urls_hash,
             save_content_collections,
         )
         from services.embedding_service import EmbeddingService
         from services.stradit_service import StradITService
 
-        # "Regenerate" replaces the shown list rather than accumulating on top
-        # of it - clear whatever's stored before computing the fresh batch, so
-        # a run that finds nothing leaves an honestly-empty list instead of
-        # stale results from a previous scan.
-        clear_content_collections()
+        # We no longer clear unconditionally at the beginning. 
+        # We only clear the old list if the new run actually found new valid storylines.
 
         posts = get_competitor_posts(platform=platform, competitor=competitor)
         db_stats = {"inserted": 0, "skipped": 0, "new_hashes": []}
@@ -2094,21 +2088,10 @@ def generate_suggested_collections():
                 labeled = agent.label_clusters(clusters, project_context)
 
                 collections = []
-                fresh_hashes = []
-                already_seen = get_seen_storyline_hashes()
                 for c in labeled:
                     cluster_posts = c["posts"]
                     post_urls = [p.get("post_url") for p in cluster_posts if p.get("post_url")]
-                    cluster_hash = post_urls_hash(post_urls)
-
-                    # A storyline whose exact post composition was already
-                    # surfaced in a past run is the literal repeat this filter
-                    # exists for - skip it so "Suggest Storylines" doesn't keep
-                    # recycling the same wire story as if it were new.
-                    if cluster_hash in already_seen:
-                        repeated_count += 1
-                        continue
-
+                    
                     competitors = sorted(
                         {p.get("_source_competitor") or p.get("competitor") for p in cluster_posts} - {None, ""}
                     )
@@ -2124,10 +2107,8 @@ def generate_suggested_collections():
                             "post_urls": post_urls,
                         }
                     )
-                    fresh_hashes.append(cluster_hash)
-
-                db_stats = save_content_collections(collections)
-                mark_storylines_seen(fresh_hashes)
+                if collections:
+                    db_stats = save_content_collections(collections)
 
         stored = get_content_collections(limit=SUGGESTED_COLLECTIONS_DISPLAY_LIMIT)
         db_stats["repeated_filtered"] = repeated_count

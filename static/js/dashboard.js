@@ -344,6 +344,7 @@ $(document).ready(function () {
         $('#postsContainer').html(html);
 
         $('.comp-master-checkbox').on('change', function () {
+            window.pendingUsedCollectionHash = null;
             updateSelection();
         });
     }
@@ -418,13 +419,7 @@ $(document).ready(function () {
     function renderSuggestedCollections() {
         const list = $('#suggestedCollectionsList');
         if (window.suggestedCollections.length === 0) {
-            // Distinguish "never run yet" from "everything found was already
-            // suggested before" - otherwise a fully-repeat-filtered result
-            // looks identical to a broken/empty response.
-            const msg = window.repeatedStorylinesFiltered
-                ? `No new storylines - ${window.repeatedStorylinesFiltered} related post group${window.repeatedStorylinesFiltered === 1 ? '' : 's'} found but already suggested in an earlier run.`
-                : 'No storylines suggested yet - click "Suggest Storylines" to scan for related posts.';
-            list.html(`<p class="text-muted small m-0">${msg}</p>`);
+            list.html('<p class="text-muted small m-0">No storylines suggested yet - click "Suggest Storylines" to scan for related posts.</p>');
             return;
         }
 
@@ -579,22 +574,16 @@ $(document).ready(function () {
         const collection = window.suggestedCollections[idx];
         if (!collection) return;
 
-        // If the button was provided, add a professional "Used" tag to the card without disabling the button.
+        // Give visual feedback that the button was clicked without permanently marking it as used yet.
+        // It will be permanently marked 'Used' only if they actually generate a pipeline from it.
         if (btn) {
-            const $card = $(btn).closest('.position-relative');
-            const $badgeRow = $card.find('.badge-row > div').first();
-            // Prevent duplicate tags if clicked multiple times
-            if ($card.find('.used-tag').length === 0 && $badgeRow.length) {
-                $badgeRow.append('<span class="badge rounded-pill bg-secondary text-white used-tag ms-1" style="font-size: 0.65rem;"><i class="fas fa-check-double me-1"></i>Used</span>');
-            }
-
-            // Persist the state
-            let usedColls = [];
-            try { usedColls = JSON.parse(localStorage.getItem('usedSuggestedCollections') || '[]'); } catch (e) { usedColls = []; }
-            if (!usedColls.includes(collection.post_urls_hash)) {
-                usedColls.push(collection.post_urls_hash);
-                localStorage.setItem('usedSuggestedCollections', JSON.stringify(usedColls));
-            }
+            $(btn).html('<i class="fas fa-check-double me-1"></i>Using...').addClass('btn-secondary').removeClass('btn-primary');
+            setTimeout(() => {
+                $(btn).html('<i class="fas fa-check me-1"></i>Use Again').addClass('btn-outline-primary').removeClass('btn-secondary text-white');
+            }, 1000);
+            
+            // Queue this collection to be marked used only upon successful pipeline generation
+            window.pendingUsedCollectionHash = collection.post_urls_hash;
         }
 
         const targetUrls = new Set(collection.post_urls || []);
@@ -744,6 +733,7 @@ $(document).ready(function () {
 
     window.clearAllPostSelections = function () {
         $('.comp-master-checkbox').prop('checked', false);
+        window.pendingUsedCollectionHash = null;
         updateSelection();
     };
 
@@ -1030,6 +1020,17 @@ $(document).ready(function () {
                 if (r.success && r.storyline) {
                     const data = r.storyline;
                     window.lastStrategyData = data;
+                    
+                    if (window.pendingUsedCollectionHash) {
+                        let usedColls = [];
+                        try { usedColls = JSON.parse(localStorage.getItem('usedSuggestedCollections') || '[]'); } catch (e) { usedColls = []; }
+                        if (!usedColls.includes(window.pendingUsedCollectionHash)) {
+                            usedColls.push(window.pendingUsedCollectionHash);
+                            localStorage.setItem('usedSuggestedCollections', JSON.stringify(usedColls));
+                            renderSuggestedCollections(); // Update the UI to show the Used badge
+                        }
+                        window.pendingUsedCollectionHash = null; // Clear it so it doesn't mistakenly apply to future generations
+                    }
 
                     // Render facts pills
                     let factsHtml = '';
@@ -1260,10 +1261,10 @@ $(document).ready(function () {
     // stage: content is sent for external review instead of approved directly
     // in-app, and this stage shows the pending/accepted/rejected outcome.
     const PIPELINE_STAGES = [
-        { id: 'intel_selected', label: 'Post Pipeline', icon: 'fa-check' },
-        { id: 'strategy_generated', label: 'Counter Strategy Generated', icon: 'fa-brain' },
-        { id: 'asset_generated', label: 'Content Generated', icon: 'fa-magic' },
-        { id: 'approved', label: 'Approval', icon: 'fa-user-check' },
+        { id: 'intel_selected', label: 'Context', icon: 'fa-check' },
+        { id: 'strategy_generated', label: 'Strategy', icon: 'fa-brain' },
+        { id: 'asset_generated', label: 'Generator', icon: 'fa-magic' },
+        { id: 'approved', label: 'Review', icon: 'fa-user-check' },
         { id: 'published', label: 'Published', icon: 'fa-paper-plane' }
     ];
 
@@ -1299,6 +1300,33 @@ $(document).ready(function () {
         rail.html(html);
     }
 
+    function getPipelineTitle(pipeline) {
+        if (pipeline.strategy && pipeline.strategy.storyline_title) {
+            return pipeline.strategy.storyline_title;
+        }
+        if (!pipeline.context) return 'Pipeline #' + String(pipeline.id).slice(-4);
+        if (pipeline.context.includes('--- FESTIVE GREETING ---')) {
+            const match = pipeline.context.match(/Festival:\s*(.+)/);
+            if (match) return `Festive: ${match[1].trim()}`;
+            return 'Festive Greeting';
+        }
+        if (pipeline.context.includes('--- SELECTED COMPETITOR POSTS ---')) {
+            const splitCtx = pipeline.context.split('--- SELECTED COMPETITOR POSTS ---');
+            const customContext = splitCtx[0].trim();
+            if (customContext) {
+                 const firstLine = customContext.split('\n')[0].trim();
+                 return firstLine.substring(0, 40) + (firstLine.length > 40 ? '...' : '');
+            }
+            return 'Competitor Analysis Pipeline';
+        }
+        
+        const cleaned = pipeline.context.replace(/^---\s*.*?\s*---\n/, '').trim();
+        if (cleaned) {
+             return cleaned.substring(0, 30) + (cleaned.length > 30 ? '...' : '');
+        }
+        return 'Pipeline #' + String(pipeline.id).slice(-4);
+    }
+
     function renderPipelineHistory() {
         renderCollapsedHistoryRail();
 
@@ -1318,9 +1346,9 @@ $(document).ready(function () {
             const date = new Date(pipeline.timestamp).toLocaleString();
 
             let timelineHtml = `<div class="pipeline-timeline mt-3" onclick="openPipelineModal(${index})" title="Click to view stage details">`;
-            let reachedStatus = true;
+            const reachedIdx = getPipelineReachedIndex(pipeline);
             let pipelineStatus = pipeline.status || 'unknown';
-            let hasError = pipelineStatus.startsWith('stopped') || pipelineStatus === 'rejected';
+            let hasError = pipelineStatus.startsWith('stopped') || pipelineStatus === 'rejected' || pipelineStatus === 'content_rejected';
 
             PIPELINE_STAGES.forEach((step, stepIdx) => {
                 let badgeClass = 'bg-secondary';
@@ -1328,23 +1356,15 @@ $(document).ready(function () {
                 let stepIcon = step.icon;
                 const isLast = stepIdx === PIPELINE_STAGES.length - 1;
 
-                if (reachedStatus) {
+                if (stepIdx <= reachedIdx) {
                     badgeClass = 'bg-primary';
                     textClass = 'text-dark fw-bold';
-                }
-
-                if (pipelineStatus === step.id) {
-                    reachedStatus = false;
-                    if (hasError) {
+                    
+                    if (stepIdx === reachedIdx && hasError) {
                         badgeClass = 'bg-danger';
                         textClass = 'text-danger fw-bold';
                         stepIcon = 'fa-times';
                     }
-                }
-
-                if (hasError && !reachedStatus && pipelineStatus !== step.id) {
-                    // skip remaining
-                    badgeClass = 'bg-light border text-muted';
                 }
 
                 timelineHtml += `
@@ -1368,7 +1388,7 @@ $(document).ready(function () {
             html += `
                 <div class="list-group-item list-group-item-action p-3 border-bottom bg-light bg-opacity-50">
                     <div class="mb-2">
-                        <h6 class="mb-0 fw-bold text-dark text-truncate" style="font-size: 0.85rem;" title="Pipeline ID: ${pipeline.id}"><i class="fas fa-layer-group me-2 text-primary"></i>ID: ${pipeline.id}</h6>
+                        <h6 class="mb-0 fw-bold text-dark text-truncate" style="font-size: 0.85rem;" title="${escapeHtml(pipeline.context || 'Pipeline ID: ' + pipeline.id)}"><i class="fas fa-layer-group me-2 text-primary"></i>${escapeHtml(getPipelineTitle(pipeline))}</h6>
                         <small class="text-muted" style="font-size: 0.7rem;">${date}</small>
                     </div>
                     <p class="mb-1 text-muted small"><strong>Analysis:</strong> ${competitorsList}</p>
@@ -1898,8 +1918,7 @@ $(document).ready(function () {
                 dotContent = '<i class="fas fa-lock" style="font-size:0.6rem;"></i>';
             }
 
-            const stepLabels = ['Intel', 'Strategy', 'Content', 'Approved', 'Published'];
-            const label = stepLabels[stepIdx] || step.label;
+            const label = step.label;
 
             const clickHandler = isReached
                 ? `onclick="showPipelineStageDetail(${index}, '${step.id}')"`

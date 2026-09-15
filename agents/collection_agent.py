@@ -43,7 +43,7 @@ sometimes from multiple competitors).
 For each group, provide:
 - "label": a short punchy theme name (under 8 words), e.g. "ESG & Sustainable Investing Push"
 - "description": 1-2 sentences summarizing the shared story/theme and why it's worth a counter-strategy or storyline
-- "relevance": "high", "medium", or "low" - how relevant this theme is to OUR company's projects/capabilities
+- "relevance": "high", "medium", or "No Strong Match". YOU MUST strictly evaluate alignment against <OUR_PROJECT_CONTEXT>. If the theme does NOT directly map to a specific project, capability, or strategic goal explicitly mentioned in OUR_PROJECT_CONTEXT, you MUST output "No Strong Match". Do not output "medium" for generic industry topics unless we have a specific capability to address it.
 
 Return ONLY a valid JSON object with this schema:
 {"clusters": [{"cluster_index": 0, "label": "...", "description": "...", "relevance": "high"}, ...]}
@@ -77,6 +77,12 @@ One entry per group, in the same order given, using the exact cluster_index show
         annotated = []
         for idx, cluster in enumerate(clusters):
             meta = labels_by_index.get(idx, {})
+            relevance = str(meta.get("relevance") or "medium").lower()
+            
+            # Filter out clusters that do not align with any StradIT project
+            if relevance in ["low", "no strong match", "none"]:
+                continue
+                
             annotated.append(
                 {
                     "label": meta.get("label") or f"Related Storyline ({len(cluster)} posts)",
