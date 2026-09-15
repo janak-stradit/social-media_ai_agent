@@ -1,5 +1,10 @@
 from services.llm_service import LLMService
 
+try:
+    from db import get_brand_asset
+except Exception:  # pragma: no cover - DB optional in some test contexts
+    get_brand_asset = None
+
 
 class StoryAgent:
     """Agent that analyzes story text and extracts key themes, emotions, and hooks"""
@@ -17,6 +22,21 @@ class StoryAgent:
     def __init__(self):
         self.llm = LLMService()
 
+    @staticmethod
+    def _resolve_asset_label(key: str) -> str:
+        """Looks up a brand asset's display label (e.g. 'aden' -> 'Aden') from
+        the brand_assets table so any character added in Brand Configuration
+        gets named correctly here, instead of relying on a hardcoded map that
+        only knew about the original 'aiden'/'logo' pair."""
+        if get_brand_asset:
+            try:
+                asset = get_brand_asset(key)
+                if asset and asset.get("label"):
+                    return asset["label"]
+            except Exception:
+                pass
+        return key.capitalize()
+
     def analyze(self, story_text, memory_context=None, return_usage=False):
         """Analyze story and return structured insights + usage"""
         user_prompt = f"Analyze this story and return structured insights:\n\n{story_text}"
@@ -27,6 +47,116 @@ class StoryAgent:
         if return_usage:
             return result, usage
         return result
+
+    def _build_guidelines_block(self):
+        """Reads the structured Content Guidelines (Colors/Typography/Voice &
+        Tone/Content Rules/Imagery Style/Persona Rules/Messaging - editable at
+        /brand-configuration, see db.AppSetting) and formats them into a
+        prompt section. Falls back to treating the stored value as legacy
+        freeform text if it isn't valid JSON (e.g. saved before this
+        structured format existed), and returns "" if nothing is configured
+        so callers can skip the section entirely."""
+        import json
+
+        try:
+            from db import get_setting
+            from services.stradit_service import DEFAULT_CONTENT_GUIDELINES
+
+            raw = get_setting("content_guidelines", default=json.dumps(DEFAULT_CONTENT_GUIDELINES))
+        except Exception:
+            return ""
+
+        if not raw or not raw.strip():
+            return ""
+
+        try:
+            g = json.loads(raw)
+        except (ValueError, TypeError):
+            # Legacy freeform text saved before the structured format existed.
+            return f"\n## CONTENT GUIDELINES (from the dashboard's Guidelines tab - follow these strictly)\n{raw}\n"
+
+        colors = g.get("colors", {})
+        typography = g.get("typography", {})
+        voice_tone = g.get("voice_tone", {})
+        content_rules = g.get("content_rules", {})
+        imagery_style = g.get("imagery_style", {})
+        persona_rules = g.get("persona_rules", {})
+        messaging = g.get("messaging", {})
+
+        lines = ["\n## CONTENT GUIDELINES (from the dashboard's Brand Configuration - follow these strictly)"]
+
+        if any(colors.get(k) for k in ("primary", "secondary", "accent", "usage_notes")):
+            lines.append("### Colors")
+            if colors.get("primary"):
+                lines.append(f"- Primary: {colors['primary']} ({colors.get('primary_name', '')})")
+            if colors.get("secondary"):
+                lines.append(f"- Secondary: {colors['secondary']} ({colors.get('secondary_name', '')})")
+            if colors.get("accent"):
+                lines.append(f"- Accent: {colors['accent']} ({colors.get('accent_name', '')})")
+            if colors.get("usage_notes"):
+                lines.append(f"- Usage: {colors['usage_notes']}")
+
+        if any(typography.values()):
+            lines.append("### Typography")
+            if typography.get("font_family"):
+                lines.append(f"- Font family: {typography['font_family']}")
+            if typography.get("heading_style"):
+                lines.append(f"- Headings: {typography['heading_style']}")
+            if typography.get("body_style"):
+                lines.append(f"- Body text: {typography['body_style']}")
+            if typography.get("restrictions"):
+                lines.append(f"- Restrictions: {typography['restrictions']}")
+
+        if any(voice_tone.values()):
+            lines.append("### Voice & Tone")
+            if voice_tone.get("descriptors"):
+                lines.append(f"- Tone: {voice_tone['descriptors']}")
+            if voice_tone.get("formality"):
+                lines.append(f"- Formality: {voice_tone['formality']}")
+            if voice_tone.get("jargon_policy"):
+                lines.append(f"- Jargon policy: {voice_tone['jargon_policy']}")
+            if voice_tone.get("avoid_words"):
+                lines.append(f"- Avoid these words/phrases: {voice_tone['avoid_words']}")
+            if voice_tone.get("key_terms"):
+                lines.append(f"- Prefer these terms: {voice_tone['key_terms']}")
+
+        if any(content_rules.values()):
+            lines.append("### Content Rules")
+            if content_rules.get("caption_length"):
+                lines.append(f"- Caption length: {content_rules['caption_length']}")
+            if content_rules.get("hashtag_policy"):
+                lines.append(f"- Hashtags: {content_rules['hashtag_policy']}")
+            if content_rules.get("emoji_policy"):
+                lines.append(f"- Emoji: {content_rules['emoji_policy']}")
+            if content_rules.get("cta_style"):
+                lines.append(f"- Call-to-action style: {content_rules['cta_style']}")
+
+        if any(imagery_style.values()):
+            lines.append("### Imagery Style")
+            if imagery_style.get("aesthetic"):
+                lines.append(f"- Aesthetic: {imagery_style['aesthetic']}")
+            if imagery_style.get("avoid"):
+                lines.append(f"- Avoid: {imagery_style['avoid']}")
+
+        if any(persona_rules.values()):
+            lines.append("### Character/Persona Rules")
+            if persona_rules.get("clothing"):
+                lines.append(f"- Clothing: {persona_rules['clothing']}")
+            if persona_rules.get("demeanor"):
+                lines.append(f"- Demeanor: {persona_rules['demeanor']}")
+            if persona_rules.get("consistency"):
+                lines.append(f"- Consistency: {persona_rules['consistency']}")
+
+        if any(messaging.values()):
+            lines.append("### Messaging")
+            if messaging.get("tagline"):
+                lines.append(f"- Official tagline: {messaging['tagline']}")
+            if messaging.get("value_props"):
+                lines.append(f"- Key value props: {messaging['value_props']}")
+            if messaging.get("prohibited_claims"):
+                lines.append(f"- Prohibited: {messaging['prohibited_claims']}")
+
+        return "\n".join(lines) + "\n" if len(lines) > 1 else ""
 
     def extract_key_points(self, story_text, max_points=5):
         """Extract key narrative points for social media adaptation"""
@@ -65,12 +195,11 @@ class StoryAgent:
                 raw_selection = [legacy] if legacy else []
             selected_assets = [c for c in raw_selection if c and c != "auto"]
 
-            asset_labels = {"aiden": "Aiden", "logo": "the StradIT logo"}
             human_assets = [a for a in selected_assets if a != "logo"]
             include_logo = "logo" in selected_assets
 
             if human_assets:
-                selected_char = " and ".join(asset_labels.get(a, a) for a in human_assets)
+                selected_char = " and ".join(self._resolve_asset_label(a) for a in human_assets)
                 logo_instruction = (
                     "\nAlso feature the StradIT logo mark naturally integrated into the composition "
                     "(e.g. on a screen, badge, document header, or corner element) alongside the character."
@@ -82,37 +211,38 @@ The user has explicitly requested to include a specific brand character: '{selec
 You MUST use this exact character in your visual prompts (both image and video). Do not invent a new character.
 Instead of describing a random professional (e.g., 'A 42-year-old Compliance Risk Officer'), describe the brand character '{selected_char}'.
 Ensure the character '{selected_char}' is performing a meaningful business-related action and fits logically into the storyline.
+A reference photo of '{selected_char}' is supplied separately alongside this prompt and is what actually determines
+their face, gender, hair, and build during image generation - you have NOT seen this photo, so NEVER state or imply
+a specific gender, ethnicity, age, or facial description for '{selected_char}' in the prompt text (e.g. do not write
+"a male professional" or "a South Asian woman"). Refer to them only by name and describe their clothing, pose, and
+action - appearance itself is inherited entirely from the reference photo.
 {logo_instruction}
 
 #### Character Profile & Guardrails
 - Professional appearance and business-appropriate clothing (e.g., tailored suit, corporate attire)
-- Maintain the correct gender identity of the selected brand character (e.g., if the character is 'Aiden', explicitly describe him as a male professional).
 - The character should look like a credible professional working in the relevant business environment.
 - Avoid overly casual clothing (no t-shirts, sweatpants, etc.).
 - Avoid exaggerated expressions or treating the character as merely decorative."""
 
                 image_prompt = f"""### IMAGE GENERATION
-Create a highly detailed prompt for a multi-slide Carousel (e.g., 3-5 slides) that directly represents the specific storyline. Each slide must be text-oriented, deeply informative, and visually connected to the others.
+Create a highly detailed prompt for a SINGLE image (not a multi-slide carousel) that directly represents the specific storyline in one cohesive, information-dense composition.
 Mimic high-end, colorful, professional layouts (clean typography, data visualization, cohesive vibrant color palette).
 
 Create the image prompt using the specified brand character: '{selected_char}'. The character must be relevant to the storyline, perform a meaningful business-related action, interact naturally with the environment, technology, data, or product.
-Integrate their description directly into the relevant slide descriptions (e.g., Slide 1 or 2).
+Integrate their description directly into the single image description.
 {logo_instruction}
 
-For Carousels, follow this exact formatting style. Integrate the character description directly into the relevant slide descriptions:
+Follow this exact formatting style:
 
---- EXAMPLE CAROUSEL FORMAT ---
+--- EXAMPLE SINGLE IMAGE FORMAT ---
 Overall Aesthetic/Style: Premium institutional financial technology...
-Slide 1 (Title/Hook): Deep navy background... [Describe '{selected_char}' here]
-Slide 2 (Context/Problem): Split-screen layout...
-Slide 3 (Solution/Capabilities): Full-bleed dark-mode UI dashboard...
-Slide 4 (Outcome/CTA): Deep navy background...
+Image: Deep navy background... [Describe '{selected_char}' here, plus the key message/data points the storyline needs to communicate]
 ----------------------
 
 BRANDING RULE:
-- Aspect Ratio: Every image/carousel slide must be 1080x1080 (1:1 aspect ratio).
-- Text Overlays & Typography: Include the Slide Title and a short summary sentence directly in the image. The typography MUST be highly professional, soft, minimalist, and pleasant to the eye (mimicking refined corporate fonts like Inter or Helvetica). Keep the font size small and elegant; do NOT make the text massive or overly vibrant. The text MUST be placed carefully in empty negative space (e.g., in a clean corner or side) and MUST NOT overlap the character or key visual elements. Use a soft, sophisticated color palette that meets high-end company standards. It must look like a premium, restrained corporate slide.
-Ensure these specific styling and positioning rules are explicitly mentioned in every slide description.
+- Aspect Ratio: 1080x1080 (1:1 aspect ratio).
+- Text Overlays & Typography: Include a short headline and a brief summary sentence directly in the image, plus a small 'STRAD IT' wordmark in one corner as a subtle brand tag. The typography MUST be highly professional, soft, minimalist, and pleasant to the eye (mimicking refined corporate fonts like Inter or Helvetica). Keep the font size small and elegant; do NOT make the text massive or overly vibrant. The text MUST be placed carefully in empty negative space (e.g., in a clean corner or side) and MUST NOT overlap the character or key visual elements. Use a soft, sophisticated color palette that meets high-end company standards. It must look like a premium, restrained corporate graphic.
+Ensure these specific styling and positioning rules are explicitly mentioned.
 """
 
                 video_prompt = f"""### VIDEO GENERATION
@@ -168,26 +298,23 @@ The user has requested the StradIT logo be featured as a reference visual elemen
 Do not invent or describe any human character. Integrate the StradIT logo naturally into the composition (e.g. on a screen, document header, badge, or subtle corner placement) as the visual anchor instead."""
 
                 image_prompt = """### IMAGE GENERATION
-Create a highly detailed prompt for a multi-slide Carousel (e.g., 3-5 slides) that directly represents the specific storyline. Each slide must be text-oriented, deeply informative, and visually connected to the others.
+Create a highly detailed prompt for a SINGLE image (not a multi-slide carousel) that directly represents the specific storyline in one cohesive, information-dense composition.
 Mimic high-end, colorful, professional layouts (clean typography, data visualization, cohesive vibrant color palette).
 
 Do not include human characters in the image. Integrate the StradIT logo naturally into the composition (e.g. on a screen, document header, badge, or corner element) as the visual anchor for the brand.
 Use appropriate: Business environments, Financial data, Technology, Market visualizations, Documents, Product interfaces, Objects, Abstract visual metaphors.
 
-For Carousels, follow this exact formatting style:
+Follow this exact formatting style:
 
---- EXAMPLE CAROUSEL FORMAT ---
+--- EXAMPLE SINGLE IMAGE FORMAT ---
 Overall Aesthetic/Style: Premium institutional financial technology...
-Slide 1 (Title/Hook): Deep navy background... [reference the StradIT logo placement here]
-Slide 2 (Context/Problem): Split-screen layout...
-Slide 3 (Solution/Capabilities): Full-bleed dark-mode UI dashboard...
-Slide 4 (Outcome/CTA): Deep navy background...
+Image: Deep navy background... [reference the StradIT logo placement here, plus the key message/data points the storyline needs to communicate]
 ----------------------
 
 BRANDING RULE:
-- Aspect Ratio: Every image/carousel slide must be 1080x1080 (1:1 aspect ratio).
-- Text Overlays & Typography: Include the Slide Title and a short summary sentence directly in the image. The typography MUST be highly professional, sleek, and premium (mimicking modern corporate fonts like Inter, Roboto, or Helvetica). Use proper visual hierarchy: bold, clean titles with smaller, elegant subtitle text. Ensure text is perfectly aligned, uses appropriate negative space, and blends harmoniously with the color palette. It must look like a high-end agency-designed graphic.
-Ensure these specific styling and positioning rules are explicitly mentioned in every slide description.
+- Aspect Ratio: 1080x1080 (1:1 aspect ratio).
+- Text Overlays & Typography: Include a short headline and a brief summary sentence directly in the image, plus a small 'STRAD IT' wordmark in one corner as a subtle brand tag. The typography MUST be highly professional, sleek, and premium (mimicking modern corporate fonts like Inter, Roboto, or Helvetica). Use proper visual hierarchy: bold, clean titles with smaller, elegant subtitle text. Ensure text is perfectly aligned, uses appropriate negative space, and blends harmoniously with the color palette. It must look like a high-end agency-designed graphic.
+Ensure these specific styling and positioning rules are explicitly mentioned.
 """
 
                 video_prompt = """### VIDEO GENERATION
@@ -249,27 +376,24 @@ The character should look like a credible professional working in the relevant b
 Avoid generic stock-photo people, random models, unrelated professions, overly casual clothing, exaggerated expressions, characters that do not logically interact with the storyline, or decorative characters with no meaningful purpose."""
 
                 image_prompt = """### IMAGE GENERATION
-Create a highly detailed prompt for a multi-slide Carousel (e.g., 3-5 slides) that directly represents the specific storyline. Each slide must be text-oriented, deeply informative, and visually connected to the others.
+Create a highly detailed prompt for a SINGLE image (not a multi-slide carousel) that directly represents the specific storyline in one cohesive, information-dense composition.
 Mimic high-end, colorful, professional layouts (clean typography, data visualization, cohesive vibrant color palette).
 
 Create the image prompt using the automatically generated character profile. The character must be relevant to the storyline, perform a meaningful business-related action, interact naturally with the environment, technology, data, or product, and look credible for the company/business context.
 Do not simply place a person next to a dashboard. The character should help communicate the business problem, solution, or outcome.
-Integrate their description directly into the relevant slide descriptions (e.g., Slide 1 or 2).
+Integrate their description directly into the single image description.
 
-For Carousels, follow this exact formatting style. Integrate the character description (e.g. "A 35-year-old Institutional Investment Analyst wearing a charcoal-grey tailored suit...") directly into the relevant slide descriptions:
+Follow this exact formatting style. Integrate the character description (e.g. "A 35-year-old Institutional Investment Analyst wearing a charcoal-grey tailored suit...") directly into the image description:
 
---- EXAMPLE CAROUSEL FORMAT ---
+--- EXAMPLE SINGLE IMAGE FORMAT ---
 Overall Aesthetic/Style: Premium institutional financial technology...
-Slide 1 (Title/Hook): Deep navy background... [Describe character here]
-Slide 2 (Context/Problem): Split-screen layout...
-Slide 3 (Solution/Capabilities): Full-bleed dark-mode UI dashboard...
-Slide 4 (Outcome/CTA): Deep navy background...
+Image: Deep navy background... [Describe character here, plus the key message/data points the storyline needs to communicate]
 ----------------------
 
 BRANDING RULE:
-- Aspect Ratio: Every image/carousel slide must be 1080x1080 (1:1 aspect ratio).
-- Text Overlays & Typography: Include the Slide Title and a short summary sentence directly in the image. The typography MUST be highly professional, soft, minimalist, and pleasant to the eye (mimicking refined corporate fonts like Inter or Helvetica). Keep the font size small and elegant; do NOT make the text massive or overly vibrant. The text MUST be placed carefully in empty negative space (e.g., in a clean corner or side) and MUST NOT overlap the character or key visual elements. Use a soft, sophisticated color palette that meets high-end company standards. It must look like a premium, restrained corporate slide.
-Ensure these specific styling and positioning rules are explicitly mentioned in every slide description.
+- Aspect Ratio: 1080x1080 (1:1 aspect ratio).
+- Text Overlays & Typography: Include a short headline and a brief summary sentence directly in the image, plus a small 'STRAD IT' wordmark in one corner as a subtle brand tag. The typography MUST be highly professional, soft, minimalist, and pleasant to the eye (mimicking refined corporate fonts like Inter or Helvetica). Keep the font size small and elegant; do NOT make the text massive or overly vibrant. The text MUST be placed carefully in empty negative space (e.g., in a clean corner or side) and MUST NOT overlap the character or key visual elements. Use a soft, sophisticated color palette that meets high-end company standards. It must look like a premium, restrained corporate graphic.
+Ensure these specific styling and positioning rules are explicitly mentioned.
 """
 
                 video_prompt = """### VIDEO GENERATION
@@ -326,26 +450,23 @@ DO NOT generate any text, logos, or brand names (like "StradIT" or the tagline) 
 The user has explicitly requested WITHOUT CHARACTER. Do not generate or define any characters."""
 
             image_prompt = """### IMAGE GENERATION
-Create a highly detailed prompt for a multi-slide Carousel (e.g., 3-5 slides) that directly represents the specific storyline. Each slide must be text-oriented, deeply informative, and visually connected to the others.
+Create a highly detailed prompt for a SINGLE image (not a multi-slide carousel) that directly represents the specific storyline in one cohesive, information-dense composition.
 Mimic high-end, colorful, professional layouts (clean typography, data visualization, cohesive vibrant color palette).
 
 Do not include human characters in the image.
 Use appropriate: Business environments, Financial data, Technology, Market visualizations, Documents, Product interfaces, Objects, Abstract visual metaphors.
 
-For Carousels, follow this exact formatting style:
+Follow this exact formatting style:
 
---- EXAMPLE CAROUSEL FORMAT ---
+--- EXAMPLE SINGLE IMAGE FORMAT ---
 Overall Aesthetic/Style: Premium institutional financial technology...
-Slide 1 (Title/Hook): Deep navy background...
-Slide 2 (Context/Problem): Split-screen layout...
-Slide 3 (Solution/Capabilities): Full-bleed dark-mode UI dashboard...
-Slide 4 (Outcome/CTA): Deep navy background...
+Image: Deep navy background... [describe the key message/data points the storyline needs to communicate]
 ----------------------
 
 BRANDING RULE:
-- Aspect Ratio: Every image/carousel slide must be 1080x1080 (1:1 aspect ratio).
-- Text Overlays & Typography: Include the Slide Title and a short summary sentence directly in the image. The typography MUST be highly professional, sleek, and premium (mimicking modern corporate fonts like Inter, Roboto, or Helvetica). Use proper visual hierarchy: bold, clean titles with smaller, elegant subtitle text. Ensure text is perfectly aligned, uses appropriate negative space, and blends harmoniously with the color palette (e.g., crisp white or gold accents on dark navy backgrounds). Avoid basic, clumsy, or overly thick fonts. It must look like a high-end agency-designed graphic.
-Ensure these specific styling and positioning rules are explicitly mentioned in every slide description.
+- Aspect Ratio: 1080x1080 (1:1 aspect ratio).
+- Text Overlays & Typography: Include a short headline and a brief summary sentence directly in the image, plus a small 'STRAD IT' wordmark in one corner as a subtle brand tag. The typography MUST be highly professional, sleek, and premium (mimicking modern corporate fonts like Inter, Roboto, or Helvetica). Use proper visual hierarchy: bold, clean titles with smaller, elegant subtitle text. Ensure text is perfectly aligned, uses appropriate negative space, and blends harmoniously with the color palette (e.g., crisp white or gold accents on dark navy backgrounds). Avoid basic, clumsy, or overly thick fonts. It must look like a high-end agency-designed graphic.
+Ensure these specific styling and positioning rules are explicitly mentioned.
 """
 
             video_prompt = """### VIDEO GENERATION
@@ -371,9 +492,11 @@ DO NOT generate any text, logos, or brand names (like "StradIT" or the tagline) 
             validation_prompt = """### FINAL CHARACTER VALIDATION
 * Are there absolutely no human characters?"""
 
+        guidelines_block = self._build_guidelines_block()
+
         system = f"""You are an expert strategic analyst and Content Generation Agent.
 You will be provided with a Storyline or Context (in <COMPETITOR_POSTS>) and a list of StradIT projects (in <OUR_PROJECT_CONTEXT>).
-
+{guidelines_block}
 ## CONTENT GENERATION FLOW
 
 Follow this sequence strictly:
@@ -498,7 +621,7 @@ Respond with exactly this JSON structure and nothing else:
   "connection_strength": "Strong, Moderate, or No Strong Match",
   "observed_facts": ["concise fact 1", "concise fact 2"],
   "caption": "The instructions for the social media writer here (do NOT write the actual caption)...",
-  "image_prompt": "The highly detailed multi-slide carousel prompt here...",
+  "image_prompt": "The highly detailed single-image prompt here...",
   "video_prompt": "The highly detailed 10-second cinematic video script here..."
 }}
 """
@@ -521,12 +644,33 @@ Respond with exactly this JSON structure and nothing else:
         counter-strategy content is, since a holiday greeting isn't meant to
         sell a specific capability."""
         mode = character_config.get("mode", "without_character") if character_config else "without_character"
-        character_line = (
-            "You may include a warm, appropriately dressed character celebrating the occasion if it suits the visual "
-            "- do not describe them performing any product-related or work task."
-            if mode == "with_character"
-            else "Do not include human characters; use festive visual motifs, colors, and StradIT branding instead."
-        )
+
+        selected_chars = []
+        if mode == "with_character" and character_config:
+            raw_selection = character_config.get("characters")
+            if raw_selection is None:
+                legacy = character_config.get("character", "auto")
+                raw_selection = [legacy] if legacy else []
+            selected_chars = [c for c in raw_selection if c and c != "auto" and c != "logo"]
+
+        if selected_chars:
+            selected_char = " and ".join(self._resolve_asset_label(a) for a in selected_chars)
+            character_line = (
+                f"You MUST include the specific brand character '{selected_char}' in the scene, warmly and "
+                "appropriately dressed for the occasion, genuinely celebrating/participating in the festivity "
+                "(e.g. lighting a diya, holding a gift, waving a greeting) - do not invent a different character "
+                "and do not describe them performing any product-related or work task. Explicitly name and "
+                "describe this character's appearance in the image_prompt so the reference image can be matched."
+            )
+        elif mode == "with_character":
+            character_line = (
+                "You may include a warm, appropriately dressed character celebrating the occasion if it suits the visual "
+                "- do not describe them performing any product-related or work task."
+            )
+        else:
+            character_line = "Do not include human characters; use festive visual motifs, colors, and StradIT branding instead."
+
+        guidelines_block = self._build_guidelines_block()
 
         system = f"""You are a Content Generation Agent creating a warm, professional seasonal/festive greeting post.
 
@@ -535,6 +679,7 @@ StradIT product, service, or competitor, and do not force a product pitch into a
 whole point is that it's warm and human, not an ad.
 
 {character_line}
+{guidelines_block}
 
 BRANDING RULE: If there is a visual of StradIT, the text "Strad" must be strictly ORANGE and "IT"
 must be strictly WHITE. The tagline "Automate.Elevate.Accelerate." may appear subtly in WHITE, but

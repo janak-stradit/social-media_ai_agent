@@ -24,6 +24,7 @@ module.exports = [
         FormData: "readonly",
         FileReader: "readonly",
         URL: "readonly",
+        URLSearchParams: "readonly",
         alert: "readonly",
         confirm: "readonly",
         prompt: "readonly",

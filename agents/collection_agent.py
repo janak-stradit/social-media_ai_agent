@@ -10,6 +10,25 @@ class CollectionAgent:
     def __init__(self):
         self.llm = LLMService()
 
+    @staticmethod
+    def _diverse_sample(cluster: list, n: int) -> list:
+        """Picks up to n posts favoring distinct competitor/platform
+        combinations first, instead of just cluster[:n] - a cluster's first
+        few posts are often near-identical republishes of the same wire story
+        (same competitor, same platform, back-to-back in scrape order), which
+        gave the LLM a repetitive, low-signal sample to label from instead of
+        seeing the actual breadth of the story."""
+        seen_keys = set()
+        diverse, rest = [], []
+        for p in cluster:
+            key = (p.get("_source_competitor") or p.get("competitor"), p.get("platform"))
+            if key not in seen_keys:
+                seen_keys.add(key)
+                diverse.append(p)
+            else:
+                rest.append(p)
+        return (diverse + rest)[:n]
+
     def label_clusters(self, clusters: list, project_context: str) -> list:
         """clusters: list of lists of post dicts (already grouped by similarity).
         Returns clusters annotated with label/description/relevance, in the
@@ -33,7 +52,7 @@ One entry per group, in the same order given, using the exact cluster_index show
         clusters_text = ""
         for idx, cluster in enumerate(clusters):
             clusters_text += f"\n=== GROUP {idx} ({len(cluster)} posts) ===\n"
-            for p in cluster[:4]:  # cap sample size per cluster to keep the prompt bounded
+            for p in self._diverse_sample(cluster, 4):
                 comp = p.get("_source_competitor") or p.get("competitor") or "Unknown"
                 text = (p.get("text") or p.get("title") or "")[:300]
                 clusters_text += f"[{comp} / {p.get('platform', '')}] {text}\n---\n"

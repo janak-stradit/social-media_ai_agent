@@ -1231,7 +1231,25 @@ class MediaGenerationService:
             except Exception as img_err:
                 print(f"[Media Service] Warning loading image for Gemini Video: {img_err}")
 
-        operation = client.models.generate_videos(**gen_kwargs)  # pylint: disable=no-member
+        native_audio_requested = gen_kwargs["config"].generate_audio
+        try:
+            operation = client.models.generate_videos(**gen_kwargs)  # pylint: disable=no-member
+        except Exception as gen_err:
+            # "generate_audio" is an Enterprise-only Veo parameter - a Developer
+            # API key rejects the call outright rather than just ignoring it,
+            # so retry once without requesting native audio instead of failing
+            # the whole video generation over an audio feature we can't use.
+            if native_audio_requested and "generate_audio" in str(gen_err):
+                print("[Media Service] generate_audio not supported on this Gemini API tier - retrying without it...")
+                native_audio_requested = False
+                gen_kwargs["config"] = types.GenerateVideosConfig(  # pylint: disable=no-member
+                    aspect_ratio=aspect_ratio,
+                    duration_seconds=5,
+                    number_of_videos=1,
+                )
+                operation = client.models.generate_videos(**gen_kwargs)  # pylint: disable=no-member
+            else:
+                raise
 
         print("[Media Service] Polling Google Gemini Video operation (Native Single-Pass Video + Audio)...")
         deadline = time.time() + 300
@@ -1262,8 +1280,8 @@ class MediaGenerationService:
             "prompt": prompt,
             "model": model_name,
             "provider": "Google Gemini (Veo)",
-            "has_native_audio": getattr(Config, "GENERATE_NATIVE_AUDIO", True),
-            "audio_mode": "single_pass_native",
+            "has_native_audio": native_audio_requested,
+            "audio_mode": "single_pass_native" if native_audio_requested else "none",
         }
 
     def _generate_pollinations_image(self, prompt: str, platform: str, size: str) -> dict:
@@ -1379,7 +1397,6 @@ class MediaGenerationService:
                 print(
                     "[Media Service] Single-pass native video+audio generated successfully. Skipping separate TTS audio merging."
                 )
-                import os
                 local_name = result["url"].split("/")[-1]
                 local_path = os.path.join(self.upload_folder, local_name)
                 if os.path.exists(local_path):

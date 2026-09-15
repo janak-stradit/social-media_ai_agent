@@ -31,6 +31,10 @@ class Config:
     SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
     SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL") or os.getenv("SMTP_USERNAME")
     APPROVAL_NOTIFY_EMAIL = os.getenv("APPROVAL_NOTIFY_EMAIL")
+    # Optional override for absolute links in emails (e.g. approval request
+    # links) when the app isn't reachable at the request's own host (behind a
+    # reverse proxy, etc). Falls back to the incoming request's own host.
+    APP_BASE_URL = os.getenv("APP_BASE_URL")
 
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
     GEMINI_VIDEO_MODEL = os.getenv("GEMINI_VIDEO_MODEL", "veo-3.1-generate-preview")

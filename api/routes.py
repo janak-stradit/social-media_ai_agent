@@ -29,23 +29,36 @@ try:
         approve_credit_request,
         archive_run,
         cancel_scheduled_post,
+        create_approval_request,
+        create_brand_asset,
         create_credit_request,
         create_scheduled_post,
+        decide_approval_request,
+        delete_brand_asset,
         disconnect_social_account,
         get_all_credit_requests,
         get_all_users_credit_summary,
+        get_approval_request,
+        get_brand_asset,
         get_global_cost_history,
         get_history,
+        get_latest_approval_request_for_pipeline,
         get_run_by_id,
+        get_user_by_id,
         get_user_credit_requests,
         get_user_scheduled_posts,
+        get_setting,
         get_user_social_accounts,
         get_user_usage_stats,
+        list_approval_requests,
+        list_brand_assets,
         reject_credit_request,
         save_approved_asset,
         save_run,
+        save_setting,
         save_social_account,
         unarchive_run,
+        update_brand_asset_filename,
         update_scheduled_post_status,
         update_user_credit_limit,
     )
@@ -959,15 +972,28 @@ def generate_media():
         if not run:
             return jsonify({"error": "Run not found"}), 404
 
+    # The strategy step's own image_prompt/video_prompt (art direction, scene
+    # breakdown, "no office/dashboard" rules for festive content, etc.) is
+    # the actual authoritative description - when the caller has it, use it
+    # instead of the much shorter social caption, which was never meant to
+    # double as a media-generation prompt and was silently dropping all of
+    # that direction.
+    image_prompt = (data.get("image_prompt") or "").strip()
+    video_prompt = (data.get("video_prompt") or "").strip()
+
     try:
         caption_to_use = extract_prompt_for_type(caption, media_type)
         if media_type == "video":
+            if video_prompt:
+                caption_to_use = video_prompt
             result = media_service.generate_video(caption_to_use, platform, tone, image_path=image_path)
         else:
             ai_model = data.get("ai_model", "kie")
             # If the client sent context, use it as tone to guide the style
             if "context" in data and data["context"]:
                 tone = data["context"]
+            if image_prompt:
+                caption_to_use = image_prompt
             result = media_service.generate_image(
                 caption_to_use, platform, tone, image_path=image_path_for_gen, ai_model=ai_model
             )
@@ -1015,6 +1041,282 @@ def send_approval_email():
         return jsonify(result)
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_bp.route("/approval-requests", methods=["GET"])
+@login_required_api
+def list_approval_requests_route():
+    """All approval requests (past and current) - powers the /approve list
+    dashboard. Optional ?status=pending|approved|rejected filter."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    status = request.args.get("status")
+    requests_list = list_approval_requests(status=status)
+    return jsonify({"success": True, "requests": requests_list})
+
+
+@api_bp.route("/approval-requests", methods=["POST"])
+@login_required_api
+def create_approval_request_route():
+    """Creates a review request for a pipeline's generated content and emails
+    the reviewer a link to open it in the dashboard (sign-in required) - this
+    replaces approving directly in-app for the live Asset Review stage, so an
+    external reviewer's decision + comments become the record of truth."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+
+    data = request.get_json(silent=True) or {}
+    pipeline_client_id = str(data.get("pipeline_client_id") or "").strip()
+    if not pipeline_client_id:
+        return jsonify({"error": "pipeline_client_id is required"}), 400
+
+    user_id = get_current_user_id()
+    is_image = (data.get("asset_type") or "").lower() == "image"
+    image_urls = [u for u in (data.get("image_urls") or []) if u] if is_image else []
+
+    try:
+        req = create_approval_request(
+            user_id=user_id,
+            pipeline_client_id=pipeline_client_id,
+            platform=data.get("platform") or "",
+            asset_type=data.get("asset_type") or "",
+            caption=data.get("caption"),
+            story_context=data.get("story"),
+            competitors=data.get("competitors"),
+            image_urls=image_urls,
+        )
+
+        base_url = Config.APP_BASE_URL or request.host_url.rstrip("/")
+        approval_url = f"{base_url}/approve/{req['id']}"
+
+        email_result = {"success": False, "error": "SMTP not configured"}
+        try:
+            from services.email_service import EmailService
+
+            email_service = EmailService()
+            email_result = email_service.send_approval_request(
+                approval_url=approval_url,
+                story=req["story_context"],
+                platform=req["platform"],
+                competitors=req["competitors"],
+                caption=req["caption"],
+                asset_type=req["asset_type"],
+                image_paths=req["image_urls"],
+            )
+        except Exception as email_err:
+            email_result = {"success": False, "error": str(email_err)}
+
+        return jsonify({"success": True, "request": req, "approval_url": approval_url, "email": email_result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+@api_bp.route("/approval-requests/<int:request_id>", methods=["GET"])
+@login_required_api
+def get_approval_request_route(request_id):
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    req = get_approval_request(request_id)
+    if not req:
+        return jsonify({"error": "Approval request not found"}), 404
+    return jsonify({"success": True, "request": req})
+
+
+@api_bp.route("/approval-requests/by-pipeline/<pipeline_client_id>", methods=["GET"])
+@login_required_api
+def get_approval_request_by_pipeline_route(pipeline_client_id):
+    """Latest approval request for a pipeline - used by the dashboard's
+    "Approval" pipeline stage to show pending/accepted/rejected + comments."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    req = get_latest_approval_request_for_pipeline(pipeline_client_id)
+    return jsonify({"success": True, "request": req})
+
+
+@api_bp.route("/approval-requests/<int:request_id>/decide", methods=["POST"])
+@login_required_api
+def decide_approval_request_route(request_id):
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+
+    data = request.get_json(silent=True) or {}
+    decision = (data.get("decision") or "").lower()
+    if decision not in ("approved", "rejected"):
+        return jsonify({"error": "decision must be 'approved' or 'rejected'"}), 400
+
+    user_id = get_current_user_id()
+    user = get_user_by_id(user_id) if user_id else None
+    decided_by = (user.name or user.email) if user else None
+
+    try:
+        req = decide_approval_request(
+            request_id=request_id, decision=decision, comments=data.get("comments"), decided_by=decided_by
+        )
+        if not req:
+            return jsonify({"error": "Approval request not found"}), 404
+        return jsonify({"success": True, "request": req})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ── Editable App Settings (Content Guidelines, Products & Service) ─────────
+# User-editable text stored in the DB (see AppSetting) and read live by
+# generation, instead of being hardcoded in source. Restricted to a known
+# allowlist of keys rather than accepting an arbitrary settings key.
+SETTINGS_DEFAULTS = {
+    "content_guidelines": None,  # None = fall back to DEFAULT_CONTENT_GUIDELINES (structured JSON, as a string)
+    "products_services": None,  # None = fall back to StradITService's built-in SERVICES_CONTEXT
+}
+
+
+@api_bp.route("/settings/<key>", methods=["GET"])
+@login_required_api
+def get_app_setting_route(key):
+    if key not in SETTINGS_DEFAULTS:
+        return jsonify({"error": f"Unknown setting '{key}'"}), 404
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+
+    default = SETTINGS_DEFAULTS[key]
+    if default is None and key == "products_services":
+        from services.stradit_service import SERVICES_CONTEXT
+
+        default = SERVICES_CONTEXT
+    elif default is None and key == "content_guidelines":
+        from services.stradit_service import DEFAULT_CONTENT_GUIDELINES
+
+        default = json.dumps(DEFAULT_CONTENT_GUIDELINES)
+
+    # An explicitly-saved blank value falls back to the default too - for these
+    # settings a blank string isn't a meaningful "cleared" state, it's just
+    # nothing to render, so treat it the same as never having been saved.
+    value = get_setting(key, default=default) or default
+    return jsonify({"success": True, "key": key, "value": value})
+
+
+@api_bp.route("/settings/<key>", methods=["POST"])
+@login_required_api
+def save_app_setting_route(key):
+    if key not in SETTINGS_DEFAULTS:
+        return jsonify({"error": f"Unknown setting '{key}'"}), 404
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+
+    data = request.get_json(silent=True) or {}
+    value = data.get("value", "")
+    try:
+        result = save_setting(key, value)
+        return jsonify({"success": True, "setting": result})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+
+# ── Brand Assets (Logo / Character reference images) ───────────────────────
+# An extensible list (see db.BrandAsset), not a fixed pair - dashboard.js's
+# Character Setup checkboxes are populated from GET /api/brand-assets, so
+# anything added/removed here shows up there automatically.
+def _brand_asset_key_from_label(label: str) -> str:
+    base_key = re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or uuid.uuid4().hex[:8]
+    key = base_key
+    suffix = 1
+    while get_brand_asset(key):
+        suffix += 1
+        key = f"{base_key}-{suffix}"
+    return key
+
+
+@api_bp.route("/brand-assets", methods=["GET"])
+@login_required_api
+def list_brand_assets_route():
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    return jsonify({"success": True, "assets": list_brand_assets()})
+
+
+@api_bp.route("/brand-assets", methods=["POST"])
+@login_required_api
+def create_brand_asset_route():
+    """Registers a brand new character/logo asset (label + image) - distinct
+    from POST /brand-assets/<key> below, which replaces an existing one."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+
+    label = (request.form.get("label") or "").strip()
+    if not label:
+        return jsonify({"error": "Label is required"}), 400
+    if "image" not in request.files:
+        return jsonify({"error": "No image file provided"}), 400
+    file = request.files["image"]
+    if not file.filename:
+        return jsonify({"error": "No file selected"}), 400
+    if not allowed_file(file.filename):
+        return jsonify({"error": "Invalid file type"}), 400
+
+    key = _brand_asset_key_from_label(label)
+    ext = file.filename.rsplit(".", 1)[1].lower()
+    filename = f"{key}.{ext}"
+
+    brand_dir = os.path.join(current_app.root_path, "static", "img", "brand")
+    os.makedirs(brand_dir, exist_ok=True)
+    file.save(os.path.join(brand_dir, filename))
+
+    asset = create_brand_asset(key=key, label=label, filename=filename)
+    return jsonify({"success": True, "asset": asset})
+
+
+@api_bp.route("/brand-assets/<key>", methods=["POST"])
+@login_required_api
+def upload_brand_asset_route(key):
+    """Replaces an existing asset's image (label/key unchanged)."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+
+    asset = get_brand_asset(key)
+    if not asset:
+        return jsonify({"error": f"Unknown brand asset '{key}'"}), 404
+
+    if "image" not in request.files:
+        return jsonify({"error": "No image file provided"}), 400
+    file = request.files["image"]
+    if not file.filename:
+        return jsonify({"error": "No file selected"}), 400
+    if not allowed_file(file.filename):
+        return jsonify({"error": "Invalid file type"}), 400
+
+    ext = file.filename.rsplit(".", 1)[1].lower()
+    filename = f"{key}.{ext}"
+    brand_dir = os.path.join(current_app.root_path, "static", "img", "brand")
+    os.makedirs(brand_dir, exist_ok=True)
+    file.save(os.path.join(brand_dir, filename))
+
+    # Clean up an old file left behind if the extension changed.
+    if filename != asset["filename"]:
+        try:
+            os.remove(os.path.join(brand_dir, asset["filename"]))
+        except OSError:
+            pass
+
+    updated = update_brand_asset_filename(key, filename)
+    return jsonify({"success": True, "asset": updated, "url": f"{updated['url']}?v={uuid.uuid4().hex[:8]}"})
+
+
+@api_bp.route("/brand-assets/<key>", methods=["DELETE"])
+@login_required_api
+def delete_brand_asset_route(key):
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+
+    asset = get_brand_asset(key)
+    if not asset:
+        return jsonify({"error": f"Unknown brand asset '{key}'"}), 404
+
+    delete_brand_asset(key)
+    try:
+        os.remove(os.path.join(current_app.root_path, "static", "img", "brand", asset["filename"]))
+    except OSError:
+        pass
+
+    return jsonify({"success": True})
 
 
 # ── Credit Extension Requests Endpoints (User Side) ─────────────────────────
@@ -1754,7 +2056,15 @@ def generate_suggested_collections():
 
     try:
         from agents.collection_agent import CollectionAgent
-        from db import clear_content_collections, get_competitor_posts, get_content_collections, save_content_collections
+        from db import (
+            clear_content_collections,
+            get_competitor_posts,
+            get_content_collections,
+            get_seen_storyline_hashes,
+            mark_storylines_seen,
+            post_urls_hash,
+            save_content_collections,
+        )
         from services.embedding_service import EmbeddingService
         from services.stradit_service import StradITService
 
@@ -1766,6 +2076,7 @@ def generate_suggested_collections():
 
         posts = get_competitor_posts(platform=platform, competitor=competitor)
         db_stats = {"inserted": 0, "skipped": 0, "new_hashes": []}
+        repeated_count = 0
 
         if posts:
             embedder = EmbeddingService()
@@ -1779,8 +2090,21 @@ def generate_suggested_collections():
                 labeled = agent.label_clusters(clusters, project_context)
 
                 collections = []
+                fresh_hashes = []
+                already_seen = get_seen_storyline_hashes()
                 for c in labeled:
                     cluster_posts = c["posts"]
+                    post_urls = [p.get("post_url") for p in cluster_posts if p.get("post_url")]
+                    cluster_hash = post_urls_hash(post_urls)
+
+                    # A storyline whose exact post composition was already
+                    # surfaced in a past run is the literal repeat this filter
+                    # exists for - skip it so "Suggest Storylines" doesn't keep
+                    # recycling the same wire story as if it were new.
+                    if cluster_hash in already_seen:
+                        repeated_count += 1
+                        continue
+
                     competitors = sorted(
                         {p.get("_source_competitor") or p.get("competitor") for p in cluster_posts} - {None, ""}
                     )
@@ -1793,13 +2117,16 @@ def generate_suggested_collections():
                             "competitors": competitors,
                             "platforms": platforms,
                             "post_count": len(cluster_posts),
-                            "post_urls": [p.get("post_url") for p in cluster_posts if p.get("post_url")],
+                            "post_urls": post_urls,
                         }
                     )
+                    fresh_hashes.append(cluster_hash)
 
                 db_stats = save_content_collections(collections)
+                mark_storylines_seen(fresh_hashes)
 
         stored = get_content_collections(limit=SUGGESTED_COLLECTIONS_DISPLAY_LIMIT)
+        db_stats["repeated_filtered"] = repeated_count
         return jsonify({"success": True, "collections": stored, "db": db_stats})
     except Exception as e:
         import traceback

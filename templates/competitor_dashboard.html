@@ -98,6 +98,47 @@
             flex-shrink: 0;
         }
 
+        /* Quick Start tabs (Suggested / Festive Storylines) above the feed */
+        .quick-start-tab {
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            padding: 0.5rem 0.75rem;
+            font-weight: 700;
+            font-size: 0.82rem;
+            color: #6b7280;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .quick-start-tab:hover {
+            color: var(--primary);
+        }
+
+        .quick-start-tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+
+        /* Notification badge on the Festive Storylines tab, so an upcoming
+           festival/holiday can't be silently missed just because that tab
+           isn't the one currently open. */
+        .quick-start-tab .badge {
+            font-size: 0.65rem;
+            margin-left: 0.35rem;
+            background: #9ca3af;
+        }
+
+        .quick-start-tab .badge.badge-urgent {
+            background: #f59e0b;
+            animation: festive-badge-pulse 1.6s ease-in-out infinite;
+        }
+
+        @keyframes festive-badge-pulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.55); }
+            50% { box-shadow: 0 0 0 4px rgba(245, 158, 11, 0); }
+        }
+
         .custom-select-wrapper {
             position: relative;
             display: flex;
@@ -390,6 +431,8 @@
             <a href="/" class="header-nav-item"><i class="fas fa-comments me-2"></i>Studio Chat</a>
             <a href="/competitor-dashboard" class="header-nav-item active"><i
                     class="fas fa-chart-line me-1"></i>Analysis Dashboard</a>
+            <a href="/approve" class="header-nav-item"><i class="fas fa-user-check me-1"></i>Approvals</a>
+            <a href="/brand-configuration" class="header-nav-item"><i class="fas fa-swatchbook me-1"></i>Brand Configuration</a>
         </nav>
         <div class="header-actions">
             <a href="/" class="btn-secondary-ent text-decoration-none me-2">
@@ -584,39 +627,57 @@
                         </div>
                     </div>
 
-                    <!-- Suggested Storylines: optional accelerator above the manual feed. Groups
-                         already-scraped posts by semantic similarity (any competitor/platform
-                         combination) so the user can jump straight to Generate Storyline instead
-                         of hand-picking posts. Manual selection below is unaffected. -->
-                    <div class="p-2 border-bottom bg-white flex-shrink-0" id="suggestedCollectionsSection">
-                        <div class="d-flex align-items-center justify-content-between mb-2 flex-wrap gap-2">
-                            <h6 class="fw-bold text-gray-700 m-0 d-flex align-items-center gap-2">
-                                <i class="fas fa-wand-magic-sparkles text-primary"></i>Suggested Storylines
-                            </h6>
-                            <button class="btn btn-sm btn-outline-primary fw-bold rounded-pill px-3"
-                                id="suggestCollectionsBtn" onclick="generateSuggestedCollections()">
-                                <i class="fas fa-sparkles me-1"></i>Suggest Storylines
+                    <!-- Quick Start: Suggested Storylines + Festive Storylines, tabbed
+                         instead of stacked full-width sections - previously both were
+                         always shown one after another, pushing the actual post feed
+                         further down before the user saw any real content. Collapsible
+                         so it can be tucked away entirely once picked from. -->
+                    <div class="border-bottom bg-white flex-shrink-0" id="quickStartSection">
+                        <div class="d-flex align-items-center justify-content-between px-2 pt-2">
+                            <div class="d-flex gap-1" id="quickStartTabs">
+                                <button type="button" class="quick-start-tab active" data-tab="suggested" onclick="switchQuickStartTab('suggested')">
+                                    <i class="fas fa-wand-magic-sparkles me-1"></i>Suggested Storylines
+                                </button>
+                                <button type="button" class="quick-start-tab" data-tab="festive" onclick="switchQuickStartTab('festive')">
+                                    <i class="fas fa-champagne-glasses me-1"></i>Festive Storylines
+                                    <span class="badge rounded-pill d-none" id="festiveTabBadge"></span>
+                                </button>
+                            </div>
+                            <button type="button" class="btn btn-sm btn-light border-0 icon-toggle-btn" id="quickStartCollapseBtn"
+                                title="Hide" onclick="toggleQuickStartSection()">
+                                <i class="fas fa-chevron-up text-muted small"></i>
                             </button>
                         </div>
-                        <div id="suggestedCollectionsLoader" class="d-none text-primary small fw-bold py-2">
-                            <i class="fas fa-spinner fa-spin me-2"></i>Finding related storylines across competitor
-                            posts...
-                        </div>
-                        <div id="suggestedCollectionsList" class="d-flex gap-3 overflow-x-auto pb-1 pt-2 px-1"></div>
-                    </div>
+                        <div id="quickStartBody" class="px-1 pb-2">
+                            <!-- Suggested Storylines: groups already-scraped posts by semantic
+                                 similarity (any competitor/platform combination) so the user
+                                 can jump straight to Generate Storyline instead of hand-picking
+                                 posts. Manual selection below is unaffected. -->
+                            <div id="quickStartPaneSuggested" class="quick-start-pane p-2">
+                                <div class="d-flex align-items-center justify-content-end mb-2">
+                                    <button class="btn btn-sm btn-outline-primary fw-bold rounded-pill px-3"
+                                        id="suggestCollectionsBtn" onclick="generateSuggestedCollections()">
+                                        <i class="fas fa-sparkles me-1"></i>Suggest Storylines
+                                    </button>
+                                </div>
+                                <div id="suggestedCollectionsLoader" class="d-none text-primary small fw-bold py-2">
+                                    <i class="fas fa-spinner fa-spin me-2"></i>Finding related storylines across competitor
+                                    posts...
+                                </div>
+                                <div id="suggestedCollectionsList" class="d-flex gap-3 overflow-x-auto pb-1"></div>
+                            </div>
 
-                    <!-- Festive Storylines: upcoming US holidays / Indian festivals as
-                         seasonal/greeting content ideas, independent of competitor posts.
-                         "Create Festive Post" seeds the context buffer and reuses the same
-                         Generate Counter-Strategy -> images/video pipeline as everything else. -->
-                    <div class="p-3 p-lg-4 border-bottom bg-white flex-shrink-0" id="festiveStorylinesSection">
-                        <h6 class="fw-bold text-gray-700 m-0 mb-2 d-flex align-items-center gap-2">
-                            <i class="fas fa-champagne-glasses text-warning"></i>Festive Storylines
-                        </h6>
-                        <div id="festiveStorylinesLoader" class="d-none text-primary small fw-bold py-2">
-                            <i class="fas fa-spinner fa-spin me-2"></i>Checking upcoming holidays &amp; festivals...
+                            <!-- Festive Storylines: upcoming US holidays / Indian festivals as
+                                 seasonal/greeting content ideas, independent of competitor posts.
+                                 "Create Festive Post" seeds the context buffer and reuses the same
+                                 Generate Counter-Strategy -> images/video pipeline as everything else. -->
+                            <div id="quickStartPaneFestive" class="quick-start-pane p-2 d-none">
+                                <div id="festiveStorylinesLoader" class="d-none text-primary small fw-bold py-2">
+                                    <i class="fas fa-spinner fa-spin me-2"></i>Checking upcoming holidays &amp; festivals...
+                                </div>
+                                <div id="festiveStorylinesList" class="d-flex gap-3 overflow-x-auto pb-1"></div>
+                            </div>
                         </div>
-                        <div id="festiveStorylinesList" class="d-flex gap-3 overflow-x-auto pb-1"></div>
                     </div>
 
                     <div class="p-4 bg-gray-50 flex-grow-1 overflow-auto" style="min-height: 0;">
@@ -706,9 +767,14 @@
                                         style="resize: none; min-height: 0; font-size:0.8rem;"></textarea>
                                     <!-- Character Setup -->
                                     <div class="mt-3 pt-3 border-top flex-shrink-0">
-                                        <label class="form-label fw-bold text-gray-700 m-0 small">
-                                            <i class="fas fa-user-tie me-1 text-primary"></i>Character Setup
-                                        </label>
+                                        <div class="d-flex align-items-center justify-content-between">
+                                            <label class="form-label fw-bold text-gray-700 m-0 small">
+                                                <i class="fas fa-user-tie me-1 text-primary"></i>Character Setup
+                                            </label>
+                                            <a href="/brand-configuration" target="_blank" class="small text-muted text-decoration-none" title="Add or manage characters/logos">
+                                                <i class="fas fa-plus-circle"></i> Manage
+                                            </a>
+                                        </div>
                                         <select class="form-select form-select-sm mb-2 mt-1" id="characterModeSelect">
                                             <option value="with_character">With Character</option>
                                             <option value="without_character">Without Character</option>
@@ -718,17 +784,9 @@
                                                 Character(s) <span class="text-muted" style="font-weight:400;">(select any)</span>
                                             </label>
                                             <div class="d-flex flex-column gap-1" id="characterAssetCheckboxes"
-                                                title="Leave unchecked for AI auto-generated persona. Aiden/Logo use the real brand image as reference.">
-                                                <div class="form-check">
-                                                    <input class="form-check-input character-asset-checkbox" type="checkbox"
-                                                        value="aiden" id="charAssetAiden">
-                                                    <label class="form-check-label small" for="charAssetAiden">Aiden &mdash; Brand Mascot</label>
-                                                </div>
-                                                <div class="form-check">
-                                                    <input class="form-check-input character-asset-checkbox" type="checkbox"
-                                                        value="logo" id="charAssetLogo">
-                                                    <label class="form-check-label small" for="charAssetLogo">StradIT Logo</label>
-                                                </div>
+                                                title="Leave unchecked for AI auto-generated persona. Registered characters/logos use their real brand image as reference.">
+                                                <!-- Populated dynamically from /api/brand-assets (see dashboard.js's
+                                                     loadCharacterAssets) - manage the list at /brand-configuration. -->
                                             </div>
                                             <div class="d-flex align-items-center gap-2 mt-2 flex-wrap" id="characterAssetPreview"></div>
                                         </div>
@@ -842,6 +900,19 @@
                                             <option value="Casual">Casual</option>
                                             <option value="Cinematic">Cinematic</option>
                                             <option value="Abstract">Abstract</option>
+                                        </select>
+                                    </div>
+                                    <div id="imageCountContainer" class="d-none d-flex flex-column gap-1">
+                                        <label class="fw-bold m-0" style="font-size:0.8rem; color:#374151;">
+                                            <i class="fas fa-clone me-1 text-primary"></i>Number of Images
+                                        </label>
+                                        <select class="form-select form-select-sm" id="pipelineImageCount"
+                                            title="How many image variations to generate for this post.">
+                                            <option value="1" selected>1</option>
+                                            <option value="2">2</option>
+                                            <option value="3">3</option>
+                                            <option value="4">4</option>
+                                            <option value="5">5</option>
                                         </select>
                                     </div>
                                     <div class="d-flex flex-column gap-1 flex-grow-1" style="min-height:80px;">

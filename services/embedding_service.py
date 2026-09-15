@@ -61,11 +61,29 @@ class EmbeddingService:
         except Exception as e:
             print(f"[EmbeddingService] index_posts warning: {e}")
 
-    def cluster_posts(self, posts: list, similarity_threshold: float = 0.78, min_cluster_size: int = 2) -> list:
+    def cluster_posts(
+        self,
+        posts: list,
+        similarity_threshold: float = 0.78,
+        min_cluster_size: int = 2,
+        near_duplicate_threshold: float = 0.94,
+    ) -> list:
         """Group posts by semantic similarity (connected components over a
         cosine-similarity threshold graph). Returns a list of clusters, each a
         list of the original post dicts. No competitor/platform gating -
-        clusters can span any combination of the two."""
+        clusters can span any combination of the two.
+
+        Near-duplicate posts (the same underlying news item republished
+        near-verbatim across multiple RSS/aggregator sources - very common
+        for wire-service stories) are collapsed to a single representative
+        before clustering, at a much tighter threshold than the "same theme"
+        one above. Without this, 4-5 near-identical headlines about one event
+        would inflate a single cluster's apparent size/breadth and crowd out
+        genuine post diversity in what CollectionAgent sees when labeling it -
+        the actual root cause of "Suggested Storylines" feeling repetitive:
+        the same wire story kept resurfacing as its own "storyline" every time
+        a new outlet republished it within the 15-day window.
+        """
         candidates = [p for p in posts if p.get("post_url")]
         if not self.enabled or len(candidates) < min_cluster_size:
             return []
@@ -105,33 +123,65 @@ class EmbeddingService:
         sim_matrix = normalized @ normalized.T
 
         n = len(got_ids)
-        parent = list(range(n))
 
-        def find(x):
-            while parent[x] != x:
-                parent[x] = parent[parent[x]]
-                x = parent[x]
-            return x
+        def make_union_find(size):
+            parent = list(range(size))
 
-        def union(a, b):
-            ra, rb = find(a), find(b)
-            if ra != rb:
-                parent[ra] = rb
+            def find(x):
+                while parent[x] != x:
+                    parent[x] = parent[parent[x]]
+                    x = parent[x]
+                return x
 
+            def union(a, b):
+                ra, rb = find(a), find(b)
+                if ra != rb:
+                    parent[ra] = rb
+
+            return find, union
+
+        # Pass 1 (tight threshold): collapse near-duplicate/republished posts
+        # to one representative each before thematic clustering, so a wire
+        # story picked up by several aggregators doesn't count as several
+        # distinct posts.
+        dup_find, dup_union = make_union_find(n)
         for i in range(n):
             for j in range(i + 1, n):
-                if sim_matrix[i, j] >= similarity_threshold:
-                    union(i, j)
+                if sim_matrix[i, j] >= near_duplicate_threshold:
+                    dup_union(i, j)
+
+        dup_groups: dict[int, list[int]] = {}
+        for i in range(n):
+            dup_groups.setdefault(dup_find(i), []).append(i)
+
+        # One representative index per near-duplicate group - prefer whichever
+        # post has the longest text (most complete/informative version).
+        representatives = [
+            max(idxs, key=lambda i: len(url_to_post[got_ids[i]].get("text") or ""))
+            for idxs in dup_groups.values()
+        ]
+
+        # Pass 2 (theme threshold): cluster the deduplicated representatives.
+        rep_count = len(representatives)
+        find, union = make_union_find(rep_count)
+        for a in range(rep_count):
+            for b in range(a + 1, rep_count):
+                if sim_matrix[representatives[a], representatives[b]] >= similarity_threshold:
+                    union(a, b)
 
         groups: dict[int, list[int]] = {}
-        for i in range(n):
-            groups.setdefault(find(i), []).append(i)
+        for a in range(rep_count):
+            groups.setdefault(find(a), []).append(a)
 
         clusters = []
         for idxs in groups.values():
-            if len(idxs) < min_cluster_size:
+            # Expand each surviving representative back to every post in its
+            # near-duplicate group, so the cluster still reflects the true
+            # post_count/competitor breadth for ranking and display.
+            expanded = [i for a in idxs for i in dup_groups[dup_find(representatives[a])]]
+            if len(expanded) < min_cluster_size:
                 continue
-            cluster_posts = [url_to_post[got_ids[i]] for i in idxs if got_ids[i] in url_to_post]
+            cluster_posts = [url_to_post[got_ids[i]] for i in expanded if got_ids[i] in url_to_post]
             if len(cluster_posts) >= min_cluster_size:
                 clusters.append(cluster_posts)
 
