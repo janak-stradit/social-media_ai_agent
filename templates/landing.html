@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enterprise Social Media AI | VortexSocial AI</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet">
+    <style>
+        /* Base & Reset */
+        :root {
+            --brand-gradient: linear-gradient(135deg, #4F46E5 0%, #2563EB 100%);
+            --brand-gradient-hover: linear-gradient(135deg, #4338CA 0%, #1D4ED8 100%);
+            --bg-light: #F8FAFC;
+            --text-main: #0F172A;
+            --text-muted: #64748B;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'Inter', sans-serif; background-color: var(--bg-light); color: var(--text-main); overflow-x: hidden; line-height: 1.6; }
+        a { text-decoration: none; color: inherit; }
+
+        /* Typography */
+        .text-gradient { background: var(--brand-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .text-shimmer {
+            background: linear-gradient(90deg, #fff 0%, rgba(255,255,255,0.4) 50%, #fff 100%);
+            background-size: 200% auto;
+            color: transparent;
+            -webkit-background-clip: text;
+            background-clip: text;
+            animation: shimmer 3s linear infinite;
+        }
+
+        /* Animations */
+        @keyframes float { 0% { transform: translateY(0px) rotate(0deg); } 50% { transform: translateY(-20px) rotate(1deg); } 100% { transform: translateY(0px) rotate(0deg); } }
+        @keyframes float-reverse { 0% { transform: translateY(0px) rotate(0deg); } 50% { transform: translateY(15px) rotate(-1deg); } 100% { transform: translateY(0px) rotate(0deg); } }
+        @keyframes pulse-glow { 0% { box-shadow: 0 0 0 0 rgba(79, 70, 229, 0.4); } 70% { box-shadow: 0 0 0 20px rgba(79, 70, 229, 0); } 100% { box-shadow: 0 0 0 0 rgba(79, 70, 229, 0); } }
+        @keyframes blob-bounce { 0% { transform: translate(0, 0) scale(1); } 33% { transform: translate(30px, -50px) scale(1.1); } 66% { transform: translate(-20px, 20px) scale(0.9); } 100% { transform: translate(0, 0) scale(1); } }
+        @keyframes shimmer { to { background-position: 200% center; } }
+        @keyframes spin-slow { 100% { transform: rotate(360deg); } }
+        @keyframes typing { from { width: 0; } to { width: 100%; } }
+
+        /* Navigation */
+        .navbar { position: fixed; top: 0; left: 0; right: 0; display: flex; justify-content: space-between; align-items: center; padding: 16px 48px; background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); z-index: 100; border-bottom: 1px solid rgba(255, 255, 255, 0.3); box-shadow: 0 4px 30px rgba(0, 0, 0, 0.03); transition: all 0.3s ease; }
+        .nav-brand { font-size: 20px; font-weight: 800; display: flex; align-items: center; gap: 10px; letter-spacing: -0.02em; }
+        .nav-brand i { background: var(--brand-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .btn-nav { padding: 10px 24px; font-weight: 600; font-size: 14px; border-radius: 99px; transition: all 0.3s ease; }
+        .btn-nav-outline { color: var(--text-main); margin-right: 12px; }
+        .btn-nav-outline:hover { color: #2563EB; }
+        .btn-nav-primary { background: var(--brand-gradient); color: #fff; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.25); }
+        .btn-nav-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4); }
+
+        /* CREATIVE HERO SECTION */
+        .hero { position: relative; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 120px 24px 60px; text-align: center; overflow: hidden; }
+        .hero-bg-mesh { position: absolute; top: -20%; left: -10%; width: 120%; height: 120%; z-index: -1; background-image: radial-gradient(at 40% 20%, hsla(228,100%,74%,1) 0px, transparent 50%), radial-gradient(at 80% 0%, hsla(189,100%,56%,1) 0px, transparent 50%), radial-gradient(at 0% 50%, hsla(355,100%,93%,1) 0px, transparent 50%); filter: blur(80px); opacity: 0.5; animation: blob-bounce 20s infinite alternate; }
+        
+        .hero-title { font-size: clamp(3.5rem, 6vw, 5.5rem); font-weight: 900; line-height: 1.05; letter-spacing: -0.04em; margin-bottom: 24px; max-width: 1000px; z-index: 1; }
+        .hero-subtitle { font-size: clamp(1.1rem, 2vw, 1.3rem); color: var(--text-muted); max-width: 650px; margin-bottom: 40px; font-weight: 400; z-index: 1; }
+        
+        .hero-cta-wrapper { position: relative; z-index: 1; display: inline-block; margin-bottom: 60px; }
+        .hero-cta { display: inline-flex; align-items: center; justify-content: center; padding: 18px 48px; font-size: 18px; font-weight: 700; color: #fff; background: var(--brand-gradient); border-radius: 99px; transition: all 0.3s ease; box-shadow: 0 10px 30px rgba(79, 70, 229, 0.3); animation: pulse-glow 3s infinite; position: relative; overflow: hidden; }
+        .hero-cta::before { content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 100%; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent); transition: 0.5s; }
+        .hero-cta:hover::before { left: 100%; }
+        .hero-cta:hover { transform: translateY(-3px) scale(1.05); box-shadow: 0 15px 40px rgba(79, 70, 229, 0.5); }
+        
+        /* Interactive Mockup Scene */
+        .hero-scene { position: relative; width: 100%; max-width: 1000px; height: 400px; z-index: 1; margin-top: 20px; perspective: 1200px; }
+        
+        .hero-orbit { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 110%; height: 110%; border-radius: 50%; border: 1px dashed rgba(79, 70, 229, 0.2); animation: spin-slow 30s linear infinite; z-index: 0; }
+        .hero-orbit::after, .hero-orbit::before { content: ''; position: absolute; width: 20px; height: 20px; border-radius: 50%; background: var(--brand-gradient); box-shadow: 0 0 20px rgba(79, 70, 229, 0.8); }
+        .hero-orbit::before { top: 0; left: 50%; transform: translate(-50%, -50%); }
+        .hero-orbit::after { bottom: 0; left: 50%; transform: translate(-50%, 50%); background: linear-gradient(135deg, #10B981, #3B82F6); }
+        
+        .hero-main-dashboard { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%) rotateX(5deg); width: 80%; height: 100%; background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(24px); border: 1px solid rgba(255, 255, 255, 0.9); border-radius: 24px; box-shadow: 0 30px 60px rgba(0, 0, 0, 0.1), inset 0 0 0 1px rgba(255,255,255,1); padding: 32px; animation: float 6s ease-in-out infinite; z-index: 2; display: flex; flex-direction: column; }
+        
+        .hero-floating-card { position: absolute; background: #fff; border-radius: 16px; padding: 16px; box-shadow: 0 20px 40px rgba(0,0,0,0.1); border: 1px solid rgba(255,255,255,0.8); z-index: 3; display: flex; align-items: center; gap: 12px; }
+        .hero-card-1 { top: 10%; left: -5%; animation: float-reverse 7s ease-in-out infinite; }
+        .hero-card-2 { bottom: 20%; right: -5%; animation: float-reverse 5s ease-in-out infinite 1s; }
+        
+        .mock-avatar-group { display: flex; align-items: center; }
+        .mock-avatar { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; margin-left: -10px; background: var(--brand-gradient); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 12px; font-weight: bold; }
+        
+        .typewriter-text { overflow: hidden; white-space: nowrap; border-right: 2px solid #4F46E5; animation: typing 4s steps(40, end) infinite, blink-caret .75s step-end infinite; display: inline-block; font-family: monospace; font-size: 14px; color: #4F46E5; font-weight: 600; }
+        @keyframes blink-caret { from, to { border-color: transparent } 50% { border-color: #4F46E5; } }
+
+        /* CREATIVE NARRATIVE WORKFLOW */
+        .workflow-section { padding: 120px 24px; background: #FFFFFF; position: relative; color: #0F172A; overflow: hidden; }
+        .workflow-section::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: radial-gradient(circle at 50% 50%, #F8FAFC 0%, #FFFFFF 100%); z-index: 0; }
+        .workflow-header { text-align: center; margin-bottom: 120px; position: relative; z-index: 1; }
+        .workflow-header h2 { font-size: clamp(2.5rem, 5vw, 4rem); font-weight: 900; letter-spacing: -0.02em; margin-bottom: 24px; color: #0F172A; }
+        
+        .workflow-container { max-width: 1200px; margin: 0 auto; position: relative; z-index: 1; }
+        
+        /* The magical glowing central line */
+        .workflow-line { position: absolute; left: 50%; top: 0; bottom: 0; width: 4px; background: #E2E8F0; transform: translateX(-50%); z-index: 0; border-radius: 4px; }
+        .workflow-line-fill { position: absolute; top: 0; left: 0; width: 100%; background: linear-gradient(to bottom, #38BDF8, #818CF8, #C084FC, #F472B6); height: 0%; transition: height 0.3s ease-out; box-shadow: 0 0 20px rgba(129, 140, 248, 0.3); border-radius: 4px; }
+        
+        .step-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 160px; position: relative; z-index: 1; }
+        .step-row:nth-child(odd) { flex-direction: row; }
+        .step-row:nth-child(even) { flex-direction: row-reverse; }
+
+        /* Step Node with ripple effect */
+        .step-node { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(0); width: 64px; height: 64px; background: #FFFFFF; border: 2px solid #E2E8F0; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 24px; color: #94A3B8; transition: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1); z-index: 2; opacity: 0; }
+        .step-node::before { content: ''; position: absolute; inset: -10px; border-radius: 50%; border: 2px solid transparent; transition: all 0.6s ease; }
+        
+        /* Step specific colors */
+        .step-row:nth-child(1).is-visible .step-node { border-color: #38BDF8; color: #38BDF8; box-shadow: 0 0 30px rgba(56, 189, 248, 0.3); }
+        .step-row:nth-child(1).is-visible .step-node::before { border-color: rgba(56, 189, 248, 0.2); transform: scale(1.2); }
+        
+        .step-row:nth-child(2).is-visible .step-node { border-color: #818CF8; color: #818CF8; box-shadow: 0 0 30px rgba(129, 140, 248, 0.3); }
+        .step-row:nth-child(2).is-visible .step-node::before { border-color: rgba(129, 140, 248, 0.2); transform: scale(1.2); }
+        
+        .step-row:nth-child(3).is-visible .step-node { border-color: #C084FC; color: #C084FC; box-shadow: 0 0 30px rgba(192, 132, 252, 0.3); }
+        .step-row:nth-child(3).is-visible .step-node::before { border-color: rgba(192, 132, 252, 0.2); transform: scale(1.2); }
+        
+        .step-row:nth-child(4).is-visible .step-node { border-color: #F472B6; color: #F472B6; box-shadow: 0 0 30px rgba(244, 114, 182, 0.3); }
+        .step-row:nth-child(4).is-visible .step-node::before { border-color: rgba(244, 114, 182, 0.2); transform: scale(1.2); }
+        
+        .step-row.is-visible .step-node { transform: translate(-50%, -50%) scale(1); opacity: 1; background: #FFFFFF; }
+        
+        .step-text { width: 40%; opacity: 0; transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.1s; }
+        .step-text h3 { font-size: 2.5rem; font-weight: 800; margin-bottom: 16px; letter-spacing: -0.02em; color: #0F172A; }
+        .step-text p { font-size: 1.2rem; color: #64748B; line-height: 1.7; }
+
+        .step-visual-wrap { width: 45%; perspective: 1200px; opacity: 0; transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.2s; }
+        
+        .step-row:nth-child(odd) .step-text { transform: translateX(-50px); }
+        .step-row:nth-child(odd) .step-visual-wrap { transform: translateX(50px); }
+        .step-row:nth-child(even) .step-text { transform: translateX(50px); }
+        .step-row:nth-child(even) .step-visual-wrap { transform: translateX(-50px); }
+        
+        .step-row.is-visible .step-text, .step-row.is-visible .step-visual-wrap { opacity: 1; transform: translateX(0); }
+        
+        /* 3D Glass Cards - Light Mode */
+        .interactive-card-3d { background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.9); border-radius: 24px; padding: 40px; box-shadow: 0 20px 40px rgba(0, 0, 0, 0.05); position: relative; overflow: hidden; transition: transform 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275); cursor: pointer; transform-style: preserve-3d; }
+        .step-row:nth-child(odd) .interactive-card-3d { transform: rotateY(-5deg); }
+        .step-row:nth-child(even) .interactive-card-3d { transform: rotateY(5deg); }
+        .interactive-card-3d:hover { transform: translateY(-10px) rotateY(0deg) scale(1.05) !important; border-color: rgba(79, 70, 229, 0.3); z-index: 10; box-shadow: 0 30px 60px rgba(79, 70, 229, 0.1); }
+        
+        .card-glow-3d { position: absolute; width: 200px; height: 200px; filter: blur(80px); border-radius: 50%; z-index: -1; opacity: 0.25; transition: all 0.5s ease; top: -50px; right: -50px; }
+        .interactive-card-3d:hover .card-glow-3d { opacity: 0.5; transform: scale(1.3); }
+
+        /* Light Theme Mocks */
+        .mock-line-light { height: 12px; background: #F1F5F9; border-radius: 6px; overflow: hidden; position: relative; margin-bottom: 12px; }
+        .mock-fill-gradient { position: absolute; left: 0; top: 0; height: 100%; width: 0; transition: width 2s cubic-bezier(0.16, 1, 0.3, 1); }
+        .step-row.is-visible .mock-fill-gradient { width: 100%; }
+        
+        /* CREATIVE BOTTOM CTA (PORTAL EFFECT) */
+        .cta-section { background: #020617; padding: 160px 24px; text-align: center; color: #fff; position: relative; overflow: hidden; min-height: 80vh; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        
+        /* Grid and Radial Glow Background */
+        .cta-bg { position: absolute; inset: 0; background-image: linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px); background-size: 50px 50px; background-position: center center; perspective: 1000px; transform-origin: center; animation: gridMove 20s linear infinite; z-index: 0; }
+        @keyframes gridMove { 0% { transform: translateY(0); } 100% { transform: translateY(50px); } }
+        
+        .cta-portal-glow { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 80vw; max-width: 800px; height: 80vw; max-height: 800px; background: radial-gradient(circle, rgba(79, 70, 229, 0.4) 0%, rgba(2, 6, 23, 0) 70%); z-index: 1; filter: blur(40px); }
+        
+        .cta-content { position: relative; z-index: 2; max-width: 800px; }
+        .cta-title { font-size: clamp(3rem, 6vw, 5rem); font-weight: 900; margin-bottom: 32px; letter-spacing: -0.03em; line-height: 1.1; }
+        .cta-subtitle { color: #94A3B8; font-size: clamp(1.1rem, 2vw, 1.5rem); margin-bottom: 60px; line-height: 1.6; }
+        
+        /* Halo Button */
+        .halo-btn-wrapper { position: relative; display: inline-block; }
+        .halo-btn-glow { position: absolute; inset: -10px; background: linear-gradient(90deg, #38BDF8, #818CF8, #F472B6); filter: blur(20px); opacity: 0.7; border-radius: 99px; animation: pulse-glow 3s infinite alternate; }
+        .halo-btn { position: relative; display: inline-flex; align-items: center; justify-content: center; padding: 20px 56px; font-size: 20px; font-weight: 800; color: #020617; background: #fff; border-radius: 99px; transition: all 0.3s ease; text-transform: uppercase; letter-spacing: 0.05em; }
+        .halo-btn:hover { transform: translateY(-4px) scale(1.05); color: #4F46E5; }
+        
+        /* Floating Social Icons around CTA */
+        .cta-floating-icon { position: absolute; width: 60px; height: 60px; background: rgba(255,255,255,0.05); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; display: flex; align-items: center; justify-content: center; font-size: 24px; color: #fff; z-index: 2; animation: float 6s infinite; }
+        
+        @media (max-width: 992px) {
+            .step-row, .step-row:nth-child(odd), .step-row:nth-child(even) { flex-direction: column; text-align: center; margin-bottom: 100px; }
+            .workflow-line { left: 32px; }
+            .step-node { left: 32px; top: 0; transform: translate(-50%, 0) scale(0); }
+            .step-row.is-visible .step-node { transform: translate(-50%, 0) scale(1); }
+            .step-text, .step-visual-wrap { width: 100%; padding-left: 80px; text-align: left; }
+            .step-visual-wrap { margin-top: 40px; }
+            .interactive-card-3d { transform: none !important; padding: 24px; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Sleek Glass Navbar -->
+    <nav class="navbar">
+        <div class="nav-brand">
+            <span class="text-gradient">VortexSocial</span> AI
+        </div>
+        <div>
+            <a href="/login" class="btn-nav btn-nav-outline">Sign In</a>
+            <a href="/login" class="btn-nav btn-nav-primary">Get Started</a>
+        </div>
+    </nav>
+
+    <!-- CREATIVE INTERACTIVE HERO -->
+    <header class="hero">
+        <div class="hero-bg-mesh"></div>
+        
+        <h1 class="hero-title">
+            Put Your Social Strategy<br>
+            <span class="text-gradient">On Autopilot</span>
+        </h1>
+        
+        <p class="hero-subtitle">
+            Deploy intelligent agents that analyze your business, predict market trends, and execute full-funnel content campaigns entirely on their own.
+        </p>
+        
+        <div class="hero-cta-wrapper">
+            <a href="/login" class="hero-cta">
+                Deploy Your AI Agent
+            </a>
+        </div>
+
+        <!-- Advanced Mockup Scene -->
+        <div class="hero-scene">
+            <div class="hero-orbit"></div>
+            
+            <div class="hero-main-dashboard">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; border-bottom: 1px solid rgba(0,0,0,0.05); padding-bottom: 16px;">
+                    <div style="display: flex; gap: 8px;">
+                        <div class="mock-dot red"></div><div class="mock-dot yellow"></div><div class="mock-dot green"></div>
+                    </div>
+                    <div class="mock-avatar-group">
+                        <div class="mock-avatar" style="z-index: 3;">AI</div>
+                        <div class="mock-avatar" style="z-index: 2; background: #3B82F6;">UI</div>
+                        <div class="mock-avatar" style="z-index: 1; background: #10B981;">PR</div>
+                    </div>
+                </div>
+                
+                <div style="display: flex; gap: 32px; height: 100%;">
+                    <div style="flex: 1; display: flex; flex-direction: column; gap: 16px;">
+                        <div style="font-weight: 700; color: #0F172A; display: flex; align-items: center; gap: 8px;">
+                            <i class="fas fa-terminal" style="color: #4F46E5;"></i> Live Agent Stream
+                        </div>
+                        <div style="padding: 16px; background: #F8FAFC; border-radius: 12px; border-left: 3px solid #4F46E5; height: 100%;">
+                            <div class="typewriter-text">> Analyzing competitor trends...</div>
+                            <div style="margin-top: 12px; color: #64748B; font-size: 13px; opacity: 0; animation: fadeIn 0.5s forwards 2s;">✓ Identified gap in "AI Tutorials"</div>
+                            <div style="margin-top: 8px; color: #64748B; font-size: 13px; opacity: 0; animation: fadeIn 0.5s forwards 4s;">> Generating 3-part campaign...</div>
+                            <style>@keyframes fadeIn { to { opacity: 1; } }</style>
+                        </div>
+                    </div>
+                    <div style="flex: 1; border-radius: 16px; background: linear-gradient(135deg, #EEF2FF, #E0E7FF); position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center;">
+                        <div style="width: 100px; height: 100px; background: rgba(79, 70, 229, 0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; animation: pulse-glow 2s infinite;">
+                            <i class="fas fa-robot" style="font-size: 40px; color: #4F46E5;"></i>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="hero-floating-card hero-card-1">
+                <div style="width: 40px; height: 40px; background: #D1FAE5; color: #10B981; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px;">
+                    <i class="fas fa-chart-line"></i>
+                </div>
+                <div>
+                    <div style="font-weight: 700; font-size: 14px;">Engagement</div>
+                    <div style="color: #10B981; font-weight: 600; font-size: 12px;">+342% This Week</div>
+                </div>
+            </div>
+            
+            <div class="hero-floating-card hero-card-2">
+                <div style="width: 40px; height: 40px; background: #DBEAFE; color: #3B82F6; border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 18px;">
+                    <i class="fab fa-linkedin-in"></i>
+                </div>
+                <div>
+                    <div style="font-weight: 700; font-size: 14px;">Post Scheduled</div>
+                    <div style="color: #64748B; font-size: 12px;">For Tomorrow, 9AM</div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- CREATIVE NARRATIVE WORKFLOW SECTION -->
+    <section class="workflow-section">
+        <div class="workflow-header">
+            <h2>The Autonomous Journey</h2>
+            <p style="color: #64748B; font-size: 1.2rem; max-width: 600px; margin: 0 auto;">Watch how our agents transform raw brand data into a viral social media presence in four intelligent steps.</p>
+        </div>
+
+        <div class="workflow-container" id="workflowContainer">
+            <div class="workflow-line"><div class="workflow-line-fill" id="progressFill"></div></div>
+
+            <!-- Step 1 -->
+            <div class="step-row">
+                <div class="step-node">1</div>
+                <div class="step-text">
+                    <h3>Deep Context Ingestion</h3>
+                    <p>The journey begins with our RAG Memory Engine. It securely digests your websites, PDFs, and brand guidelines to create a foundational understanding of your unique voice and value proposition.</p>
+                </div>
+                <div class="step-visual-wrap">
+                    <div class="interactive-card-3d">
+                        <div class="card-glow-3d" style="background: #38BDF8;"></div>
+                        <h4 style="font-size: 18px; margin-bottom: 16px; color: #0F172A;"><i class="fas fa-brain me-2" style="color: #38BDF8; margin-right: 8px;"></i> Memory Vectorization</h4>
+                        <div class="mock-line-light"><div class="mock-fill-gradient" style="background: linear-gradient(90deg, #0284C7, #38BDF8); transition-delay: 0.1s;"></div></div>
+                        <div class="mock-line-light"><div class="mock-fill-gradient" style="background: linear-gradient(90deg, #0284C7, #38BDF8); transition-delay: 0.3s; width: 85%;"></div></div>
+                        <div class="mock-line-light"><div class="mock-fill-gradient" style="background: linear-gradient(90deg, #0284C7, #38BDF8); transition-delay: 0.5s; width: 95%;"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2 -->
+            <div class="step-row">
+                <div class="step-node">2</div>
+                <div class="step-text">
+                    <h3>Market Trend Analysis</h3>
+                    <p>While you sleep, our agents scrape the web for emerging trends, competitor performance, and audience sentiment to pinpoint exact content gaps ready to be filled.</p>
+                </div>
+                <div class="step-visual-wrap">
+                    <div class="interactive-card-3d">
+                        <div class="card-glow-3d" style="background: #818CF8;"></div>
+                        <div style="display: flex; gap: 16px; align-items: center; margin-bottom: 24px;">
+                            <div style="width: 56px; height: 56px; border-radius: 16px; background: rgba(129, 140, 248, 0.1); color: #818CF8; display: flex; align-items: center; justify-content: center; font-size: 24px; border: 1px solid rgba(129, 140, 248, 0.2);">
+                                <i class="fas fa-radar"></i>
+                            </div>
+                            <div>
+                                <div style="font-weight: 800; font-size: 18px; color: #0F172A;">Signal Detected</div>
+                                <div style="color: #818CF8; font-size: 14px;">High intent keyword surge</div>
+                            </div>
+                        </div>
+                        <div style="padding: 16px; background: rgba(129, 140, 248, 0.05); border-radius: 12px; border-left: 4px solid #818CF8;">
+                            <div style="font-size: 14px; color: #334155;">"Competitors are ignoring video tutorials for this feature."</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3 -->
+            <div class="step-row">
+                <div class="step-node">3</div>
+                <div class="step-text">
+                    <h3>Multi-Modal Generation</h3>
+                    <p>Text, images, and video scripts are instantly generated. The platform tailors the exact same core message into platform-native formats for LinkedIn, Twitter, and Instagram.</p>
+                </div>
+                <div class="step-visual-wrap">
+                    <div class="interactive-card-3d">
+                        <div class="card-glow-3d" style="background: #C084FC;"></div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+                            <span style="background: rgba(192, 132, 252, 0.1); color: #C084FC; padding: 6px 12px; border-radius: 8px; font-size: 12px; font-weight: 700;">Thread Generated</span>
+                            <i class="fab fa-twitter" style="color: #C084FC; font-size: 20px;"></i>
+                        </div>
+                        <p style="color: #0F172A; font-size: 15px; margin-bottom: 16px; line-height: 1.5;">1/5 The old way of doing content is dead. Here's how autonomous agents are changing the game 👇</p>
+                        <div style="width: 100%; height: 80px; background: rgba(192, 132, 252, 0.05); border-radius: 12px; display: flex; align-items: center; justify-content: center; border: 1px dashed rgba(192, 132, 252, 0.4); color: #C084FC;">
+                            <i class="fas fa-image me-2" style="margin-right: 8px;"></i> Attached Graphic
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4 -->
+            <div class="step-row">
+                <div class="step-node">4</div>
+                <div class="step-text">
+                    <h3>Autonomous Publishing</h3>
+                    <p>No more manual posting. Once approved, the AI calculates the optimal engagement window for your specific audience and automatically dispatches the content.</p>
+                </div>
+                <div class="step-visual-wrap">
+                    <div class="interactive-card-3d" style="text-align: center;">
+                        <div class="card-glow-3d" style="background: #F472B6;"></div>
+                        <div style="width: 80px; height: 80px; margin: 0 auto 24px; border-radius: 50%; background: rgba(244, 114, 182, 0.1); display: flex; align-items: center; justify-content: center; font-size: 32px; color: #F472B6; box-shadow: 0 0 30px rgba(244, 114, 182, 0.15);">
+                            <i class="fas fa-paper-plane"></i>
+                        </div>
+                        <h4 style="font-size: 22px; color: #0F172A; margin-bottom: 8px;">Campaign Live</h4>
+                        <p style="color: #64748B; font-size: 14px;">Successfully dispatched across 3 platforms.</p>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- CREATIVE BOTTOM CTA -->
+    <section class="cta-section">
+        <div class="cta-bg"></div>
+        <div class="cta-portal-glow"></div>
+        
+        <!-- Floating Icons -->
+        <div class="cta-floating-icon" style="top: 20%; left: 15%; animation-delay: 0s;"><i class="fab fa-linkedin-in" style="color: #0077b5;"></i></div>
+        <div class="cta-floating-icon" style="top: 60%; left: 25%; animation-delay: 1s;"><i class="fab fa-twitter" style="color: #1DA1F2;"></i></div>
+        <div class="cta-floating-icon" style="top: 30%; right: 20%; animation-delay: 2.5s;"><i class="fab fa-instagram" style="color: #E1306C;"></i></div>
+        <div class="cta-floating-icon" style="top: 70%; right: 15%; animation-delay: 0.5s;"><i class="fas fa-chart-line" style="color: #10B981;"></i></div>
+
+        <div class="cta-content">
+            <h2 class="cta-title">
+                Ready to unleash <br>
+                <span class="text-shimmer">your AI team?</span>
+            </h2>
+            <p class="cta-subtitle">Join forward-thinking enterprises scaling their organic reach 10x faster with autonomous AI agents.</p>
+            
+            <div class="halo-btn-wrapper">
+                <div class="halo-btn-glow"></div>
+                <a href="/login" class="halo-btn">
+                    Create Free Account
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <footer style="background: #020617; padding: 40px 24px; text-align: center; color: #475569; font-size: 14px; position: relative; z-index: 10;">
+        &copy; 2026 VortexSocial AI. All rights reserved.
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Intersection Observer for Step Reveal
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('is-visible');
+                    }
+                });
+            }, { threshold: 0.2, rootMargin: "0px 0px -50px 0px" });
+
+            const steps = document.querySelectorAll('.step-row');
+            steps.forEach(step => observer.observe(step));
+
+            // Scroll listener for the center timeline progress
+            const lineFill = document.getElementById('progressFill');
+            const container = document.getElementById('workflowContainer');
+            
+            window.addEventListener('scroll', () => {
+                if(!container) return;
+                const rect = container.getBoundingClientRect();
+                const windowHeight = window.innerHeight;
+                
+                // Calculate how far we've scrolled through the container
+                if (rect.top < windowHeight / 2) {
+                    let progress = ((windowHeight / 2 - rect.top) / (rect.height - 200)) * 100;
+                    progress = Math.max(0, Math.min(progress, 100));
+                    lineFill.style.height = `${progress}%`;
+                } else {
+                    lineFill.style.height = '0%';
+                }
+            });
+        });
+    </script>
+</body>
+</html>

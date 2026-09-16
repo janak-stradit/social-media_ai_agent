@@ -2508,3 +2508,37 @@ body {
 /* Legacy wizard badges — replaced by synth-stepper */
 .wizard-header-stepper { display: none !important; }
 .wizard-step-badge { display: none !important; }
+/* -- Landing & Login Screen Enhancements -- */
+.auth-split-layout { display: flex; height: 100vh; overflow: hidden; background: #FFFFFF; font-family: 'Inter', system-ui, sans-serif; }
+.auth-left-pane { flex: 0 0 500px; padding: 40px 60px; display: flex; flex-direction: column; }
+.auth-right-pane { flex: 1; background: #F8FAFC; position: relative; overflow: hidden; }
+.auth-right-pane img.illustration { width: 100%; height: 100%; object-fit: cover; object-position: center; }
+.auth-brand-logo { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 18px; color: #111827; margin-bottom: 60px; }
+.auth-brand-logo i { color: #111827; font-size: 20px; }
+.auth-heading { font-size: 32px; font-weight: 700; color: #111827; margin-bottom: 8px; letter-spacing: -0.02em; }
+.auth-subheading { font-size: 16px; font-weight: 500; color: #111827; margin-bottom: 32px; }
+.auth-form-group { margin-bottom: 20px; }
+.auth-form-label { display: block; font-size: 13px; font-weight: 600; color: #111827; margin-bottom: 8px; }
+.auth-form-input { width: 100%; height: 44px; padding: 0 16px; border: 1px solid #E5E7EB; border-radius: 8px; font-size: 14px; outline: none; transition: border-color 0.2s; }
+.auth-form-input:focus { border-color: #2E68FF; box-shadow: 0 0 0 3px rgba(46,104,255,0.1); }
+.btn-primary-blue { width: 100%; height: 44px; background: #2E68FF; color: #FFFFFF; border: none; border-radius: 22px; font-size: 14px; font-weight: 600; cursor: pointer; transition: background 0.2s, transform 0.1s; margin-top: 8px; }
+.btn-primary-blue:hover { background: #255ce6; }
+.btn-primary-blue:active { transform: scale(0.98); }
+.auth-footer-links { margin-top: 40px; display: flex; flex-direction: column; gap: 16px; font-size: 13px; }
+.auth-footer-row { display: flex; justify-content: space-between; }
+.auth-link { color: #6B7280; text-decoration: none; font-weight: 600; transition: color 0.2s; }
+.auth-link:hover { color: #111827; }
+.auth-link-bold { color: #111827; text-decoration: none; font-weight: 600; }
+.auth-link-bold:hover { text-decoration: underline; }
+.landing-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 40px; background: #FFFFFF; border-bottom: 1px solid #E5E7EB; }
+.landing-hero { text-align: center; padding: 80px 20px; background: #F8FAFC; }
+.landing-hero h1 { font-size: 48px; font-weight: 800; color: #111827; margin-bottom: 16px; letter-spacing: -0.02em; }
+.landing-hero p { font-size: 18px; color: #6B7280; max-width: 600px; margin: 0 auto 32px auto; line-height: 1.6; }
+.landing-features { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 32px; padding: 80px 40px; max-width: 1200px; margin: 0 auto; }
+.feature-card { background: #FFFFFF; padding: 32px; border-radius: 12px; border: 1px solid #E5E7EB; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); }
+.feature-icon { font-size: 32px; color: #2E68FF; margin-bottom: 20px; }
+.feature-title { font-size: 20px; font-weight: 700; color: #111827; margin-bottom: 12px; }
+.feature-desc { font-size: 15px; color: #6B7280; line-height: 1.6; }
+.btn-landing-cta { display: inline-flex; align-items: center; justify-content: center; height: 48px; padding: 0 32px; background: #2E68FF; color: #FFFFFF; font-weight: 600; font-size: 16px; border-radius: 24px; text-decoration: none; transition: transform 0.2s, background 0.2s; }
+.btn-landing-cta:hover { background: #255ce6; transform: translateY(-2px); color: #fff; }
+

@@ -4,77 +4,223 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sign In — VortexSocial AI</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
 </head>
-<body class="auth-body-light">
-<div class="auth-bg-overlay"></div>
-<div class="auth-shell">
+<body>
 
-    <!-- Floating Concept Badges -->
-    <div class="auth-floating-badge badge-top-left">
-        <i class="fab fa-facebook color-fb me-2"></i>Multi-Channel Publishing
-    </div>
-    <div class="auth-floating-badge badge-top-right">
-        <i class="fas fa-brain text-purple me-2"></i>RAG Memory Engine
-    </div>
-
-    <div class="auth-card-light">
-        <!-- Brand Header -->
-        <div class="auth-brand">
-            <div class="brand-logo"><i class="fas fa-robot"></i></div>
-            <div>
-                <h1 class="auth-title">VortexSocial AI</h1>
-                <p class="auth-subtitle">Enterprise Autonomous Social Media Studio</p>
-            </div>
-        </div>
-
-        <!-- Auth Mode Tabs -->
-        <div class="auth-tabs">
-            <button type="button" class="auth-tab active" data-mode="login"><i class="fas fa-right-to-bracket me-1"></i>Sign In</button>
-            <button type="button" class="auth-tab" data-mode="register"><i class="fas fa-user-plus me-1"></i>Create Account</button>
-        </div>
-
-        <!-- Form -->
-        <form id="authForm" class="auth-form">
-            <div id="nameField" class="d-none">
-                <label class="auth-label" for="authName">Full Name</label>
-                <div class="auth-input-group">
-                    <i class="fas fa-user auth-input-icon"></i>
-                    <input id="authName" type="text" class="auth-input" placeholder="e.g. Alex Morgan">
-                </div>
-            </div>
+<div class="auth-split-layout">
+    <div class="auth-left-pane">
+        <div class="auth-brand-logo">
             
-            <div>
-                <label class="auth-label" for="authEmail">Work Email</label>
-                <div class="auth-input-group">
-                    <i class="fas fa-envelope auth-input-icon"></i>
-                    <input id="authEmail" type="email" class="auth-input" placeholder="name@company.com" required>
-                </div>
+            VortexSocial AI
+        </div>
+
+        <h1 class="auth-heading">Hi there!</h1>
+        <p class="auth-subheading">Have we met before?</p>
+
+        <form id="authForm" style="width: 100%; max-width: 360px;">
+            <div id="nameField" class="auth-form-group d-none" style="display: none;">
+                <label class="auth-form-label" for="authName">Full Name</label>
+                <input id="authName" type="text" class="auth-form-input" placeholder="e.g. Alex Morgan">
             </div>
 
-            <div>
-                <label class="auth-label" for="authPassword">Password</label>
-                <div class="auth-input-group">
-                    <i class="fas fa-lock auth-input-icon"></i>
-                    <input id="authPassword" type="password" class="auth-input" placeholder="••••••••" required>
-                </div>
+            <div class="auth-form-group">
+                <label class="auth-form-label" for="authEmail">Email</label>
+                <input id="authEmail" type="email" class="auth-form-input" placeholder="name@email.com" required>
             </div>
 
-            <div id="authError" class="auth-error d-none"></div>
+            <div class="auth-form-group">
+                <label class="auth-form-label" for="authPassword">Password</label>
+                <input id="authPassword" type="password" class="auth-form-input" placeholder="••••••••" required>
+            </div>
 
-            <button id="authSubmit" type="submit" class="btn-auth-submit">
-                <i class="fas fa-arrow-right-to-bracket me-2"></i>Sign In to Workspace
+            <div id="authError" style="color: #EF4444; font-size: 13px; margin-bottom: 12px; display: none;"></div>
+
+            <button id="authSubmit" type="submit" class="btn-primary-blue">
+                Log in
             </button>
         </form>
 
+        <div class="auth-footer-links" style="max-width: 360px;">
+            <a href="#" class="auth-link-bold" style="text-decoration: underline; font-size: 12px;">Forgot my password</a>
+            
+            <div class="auth-footer-row">
+                <span style="color: #6B7280; font-size: 12px;">Don't have an account? <a href="#" class="auth-link-bold" id="toggleModeBtn">Sign up</a></span>
+            </div>
+        </div>
+    </div>
 
+    <div class="auth-right-pane" id="sceneContainer">
+        <div style="position: absolute; inset: 0; background: linear-gradient(135deg, #F8FAFC 0%, #EEF2FF 50%, #E0E7FF 100%); display: flex; align-items: center; justify-content: center; overflow: hidden; perspective: 1000px;">
+            <div style="position: absolute; width: 150%; height: 150%; background: radial-gradient(circle at center, rgba(255,255,255,0.9) 0%, transparent 60%); z-index: 1; pointer-events: none;"></div>
+            
+            <!-- Animated 3D Scene Wrapper -->
+            <div id="interactiveScene" style="position: relative; width: 100%; height: 100%; z-index: 2; transform-style: preserve-3d; transition: transform 0.1s ease-out;">
+                
+                <!-- Central AI Core -->
+                <div class="shape" data-speed="0.02" style="position: absolute; top: 40%; left: 40%; width: 120px; height: 120px; background: radial-gradient(circle, #4F46E5, #312E81); border-radius: 50%; box-shadow: 0 0 50px rgba(79, 70, 229, 0.6); display: flex; align-items: center; justify-content: center; animation: pulse-glow 3s infinite;">
+                    <i class="fas fa-network-wired" style="color: #fff; font-size: 40px;"></i>
+                </div>
+
+                <!-- Floating Social Post Mockup -->
+                <div class="shape" data-speed="0.06" style="position: absolute; top: 15%; left: 10%; width: 220px; padding: 16px; background: rgba(255,255,255,0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.9); border-radius: 16px; transform: rotate(-5deg); box-shadow: 0 20px 40px rgba(0,0,0,0.05); animation: float 6s infinite;">
+                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 12px;">
+                        <div style="width: 30px; height: 30px; border-radius: 50%; background: #E2E8F0;"></div>
+                        <div>
+                            <div style="width: 80px; height: 8px; background: #CBD5E1; border-radius: 4px; margin-bottom: 4px;"></div>
+                            <div style="width: 40px; height: 6px; background: #E2E8F0; border-radius: 3px;"></div>
+                        </div>
+                        <i class="fab fa-twitter" style="margin-left: auto; color: #1DA1F2;"></i>
+                    </div>
+                    <div style="width: 100%; height: 6px; background: #E2E8F0; border-radius: 3px; margin-bottom: 6px;"></div>
+                    <div style="width: 90%; height: 6px; background: #E2E8F0; border-radius: 3px; margin-bottom: 12px;"></div>
+                    <div style="width: 100%; height: 80px; background: #DBEAFE; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #60A5FA;"><i class="fas fa-image"></i></div>
+                </div>
+
+                <!-- Floating Analytics Card -->
+                <div class="shape" data-speed="-0.04" style="position: absolute; bottom: 15%; right: 10%; width: 200px; padding: 16px; background: rgba(255,255,255,0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.9); border-radius: 16px; transform: rotate(5deg); box-shadow: 0 20px 40px rgba(0,0,0,0.05); animation: float-reverse 5s infinite;">
+                    <div style="font-weight: 700; font-size: 12px; color: #64748B; margin-bottom: 12px;">Engagement Growth</div>
+                    <div style="display: flex; align-items: flex-end; gap: 8px; height: 60px; margin-bottom: 12px;">
+                        <div style="width: 24px; height: 30%; background: #93C5FD; border-radius: 4px 4px 0 0;"></div>
+                        <div style="width: 24px; height: 50%; background: #60A5FA; border-radius: 4px 4px 0 0;"></div>
+                        <div style="width: 24px; height: 80%; background: #3B82F6; border-radius: 4px 4px 0 0;"></div>
+                        <div style="width: 24px; height: 100%; background: #2563EB; border-radius: 4px 4px 0 0;"></div>
+                    </div>
+                    <div style="color: #10B981; font-weight: 700; font-size: 14px;"><i class="fas fa-arrow-up"></i> +124%</div>
+                </div>
+
+                <!-- Floating Platform Icons -->
+                <div class="shape" data-speed="-0.08" style="position: absolute; top: 25%; right: 20%; width: 50px; height: 50px; background: #fff; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; color: #0A66C2; box-shadow: 0 10px 20px rgba(0,0,0,0.05); animation: float 4s infinite 1s;"><i class="fab fa-linkedin-in"></i></div>
+                <div class="shape" data-speed="0.05" style="position: absolute; bottom: 30%; left: 20%; width: 50px; height: 50px; background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; color: #fff; box-shadow: 0 10px 20px rgba(0,0,0,0.05); animation: float-reverse 4.5s infinite 0.5s;"><i class="fab fa-instagram"></i></div>
+
+                <style>
+                    @keyframes float { 0%, 100% { transform: translateY(0) rotate(-5deg); } 50% { transform: translateY(-15px) rotate(-3deg); } }
+                    @keyframes float-reverse { 0%, 100% { transform: translateY(0) rotate(5deg); } 50% { transform: translateY(15px) rotate(3deg); } }
+                    @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 40px rgba(79, 70, 229, 0.4); } 50% { box-shadow: 0 0 80px rgba(79, 70, 229, 0.8); } }
+                </style>
+            </div>
+
+            <!-- Informational Overlay -->
+            <div style="position: absolute; bottom: 40px; left: 40px; right: 40px; z-index: 10; pointer-events: none; text-align: left; background: rgba(255,255,255,0.4); backdrop-filter: blur(12px); padding: 24px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.8); box-shadow: 0 20px 40px rgba(0,0,0,0.05);">
+                <h3 style="font-size: 24px; font-weight: 800; color: #0F172A; margin-bottom: 8px;">Supercharge Your Strategy</h3>
+                <p style="font-size: 14px; color: #475569; margin-bottom: 16px;">Join thousands of brands automating their entire content lifecycle. From trend discovery to multi-platform scheduling—all powered by autonomous AI.</p>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <div style="display: flex; margin-left: 8px;">
+                        <div style="width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; margin-left: -8px; background: #60A5FA;"></div>
+                        <div style="width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; margin-left: -8px; background: #F472B6;"></div>
+                        <div style="width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; margin-left: -8px; background: #34D399;"></div>
+                    </div>
+                    <div style="font-size: 13px; font-weight: 600; color: #0F172A;">Trusted by leading Marketers</div>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
-<script src="{{ url_for('static', filename='js/login.js') }}"></script>
+<script>
+    let mode = 'login';
+    
+    $('#toggleModeBtn').click(function(e) {
+        e.preventDefault();
+        if (mode === 'login') {
+            mode = 'register';
+            $('#nameField').show();
+            $('.auth-heading').text('Create account');
+            $('.auth-subheading').text('Welcome to VortexSocial AI');
+            $('#authSubmit').text('Sign up');
+            $(this).text('Log in');
+            $(this).parent().html(`Already have an account? <a href="#" class="auth-link-bold" id="toggleModeBtn">Log in</a>`);
+        } else {
+            mode = 'login';
+            $('#nameField').hide();
+            $('.auth-heading').text('Hi there!');
+            $('.auth-subheading').text('Have we met before?');
+            $('#authSubmit').text('Log in');
+            $(this).text('Sign up');
+            $(this).parent().html(`Don't have an account? <a href="#" class="auth-link-bold" id="toggleModeBtn">Sign up</a>`);
+        }
+    });
+
+    $(document).on('click', '#toggleModeBtn', function(e) {
+        e.preventDefault();
+        if (mode === 'login') {
+            mode = 'register';
+            $('#nameField').show();
+            $('.auth-heading').text('Create account');
+            $('.auth-subheading').text('Welcome to VortexSocial AI');
+            $('#authSubmit').text('Sign up');
+            $(this).parent().html(`Already have an account? <a href="#" class="auth-link-bold" id="toggleModeBtn">Log in</a>`);
+        } else {
+            mode = 'login';
+            $('#nameField').hide();
+            $('.auth-heading').text('Hi there!');
+            $('.auth-subheading').text('Have we met before?');
+            $('#authSubmit').text('Log in');
+            $(this).parent().html(`Don't have an account? <a href="#" class="auth-link-bold" id="toggleModeBtn">Sign up</a>`);
+        }
+    });
+
+    $('#authForm').on('submit', function(e) {
+        e.preventDefault();
+        $('#authError').hide();
+
+        const endpoint = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
+        const payload = {
+            email: $('#authEmail').val(),
+            password: $('#authPassword').val()
+        };
+
+        if (mode === 'register') {
+            payload.name = $('#authName').val();
+        }
+
+        $.ajax({
+            url: endpoint,
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(payload),
+            success: function(res) {
+                if (res.success) {
+                    window.location.href = '/dashboard';
+                }
+            },
+            error: function(xhr) {
+                const msg = xhr.responseJSON ? xhr.responseJSON.error : 'An error occurred';
+                $('#authError').text(msg).show();
+            }
+        });
+    });
+
+    // Parallax effect for the 3D scene
+    document.addEventListener('mousemove', function(e) {
+        const container = document.getElementById('sceneContainer');
+        if(!container) return;
+        const rect = container.getBoundingClientRect();
+        
+        // Only run if mouse is inside the right pane
+        if(e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
+
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        const xRatio = (x / rect.width) - 0.5;
+        const yRatio = (y / rect.height) - 0.5;
+
+        // Rotate the entire scene slightly
+        const scene = document.getElementById('interactiveScene');
+        scene.style.transform = `rotateY(${xRatio * 10}deg) rotateX(${-yRatio * 10}deg)`;
+
+        // Move individual shapes at different speeds
+        document.querySelectorAll('.shape').forEach(shape => {
+            const speed = parseFloat(shape.getAttribute('data-speed')) || 0.05;
+            const moveX = xRatio * rect.width * speed;
+            const moveY = yRatio * rect.height * speed;
+            shape.style.transform = `translate(${moveX}px, ${moveY}px) ${shape.style.transform.replace(/translate\([^)]+\)\s*/, '')}`;
+        });
+    });
+</script>
 </body>
 </html>

@@ -518,7 +518,7 @@ $(document).ready(function () {
 
         const html = `
             <div class="chat-message-assistant" id="${msgId}">
-                <div class="assistant-avatar"><i class="fas fa-robot"></i></div>
+                <div class="assistant-avatar"></div>
                 <div class="assistant-card">
                     <div class="assistant-header">
                         <div class="assistant-title">
@@ -592,7 +592,7 @@ $(document).ready(function () {
 
         // Build Agents Breakdown Panel
         let agentBreakdownHtml = `<div class="agent-pipeline-breakdown d-none" id="${msgId}_pipeline_panel">`;
-        agentBreakdownHtml += `<div class="fw-bold mb-1 text-primary"><i class="fas fa-robot me-1"></i>Agents Engaged in this Turn:</div>`;
+        agentBreakdownHtml += `<div class="fw-bold mb-1 text-primary">Agents Engaged in this Turn:</div>`;
         (agentsExecuted || []).forEach(a => {
             agentBreakdownHtml += `
                 <div class="d-flex align-items-center justify-content-between py-1 border-bottom border-light">
@@ -2091,7 +2091,7 @@ $(document).ready(function () {
 
                 r.models.forEach(m => {
                     const iconMeta = categoryIcons[m.category] || { icon: 'fa-microchip', class: 'cat-llm' };
-                    const agentTags = (m.agents || []).map(a => `<span class="agent-pill-tag"><i class="fas fa-robot me-1"></i>${a}</span>`).join(' ');
+                    const agentTags = (m.agents || []).map(a => `<span class="agent-pill-tag">${a}</span>`).join(' ');
 
                     const statusBadges = {
                         ACTIVE: '<span class="badge bg-success text-white"><i class="fas fa-circle me-1 fs-9"></i>ACTIVE</span>',

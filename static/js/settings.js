@@ -499,7 +499,7 @@ $(document).ready(function () {
 
                 r.models.forEach(m => {
                     const iconMeta = categoryIcons[m.category] || { icon: 'fa-microchip', class: 'cat-llm' };
-                    const agentTags = (m.agents || []).map(a => `<span class="agent-pill-tag"><i class="fas fa-robot me-1"></i>${a}</span>`).join(' ');
+                    const agentTags = (m.agents || []).map(a => `<span class="agent-pill-tag">${a}</span>`).join(' ');
 
                     const statusBadges = {
                         ACTIVE: '<span class="badge bg-success text-white"><i class="fas fa-circle me-1 fs-9"></i>ACTIVE</span>',

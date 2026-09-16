@@ -38,7 +38,7 @@ def login_required_page(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
         if not get_current_user_id():
-            return redirect(url_for("auth.login_page"))
+            return redirect(url_for("landing_page"))
         return view(*args, **kwargs)
 
     return wrapped

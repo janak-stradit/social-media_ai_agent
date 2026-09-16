@@ -52,7 +52,7 @@ def create_app(config_name="development"):
     app.register_blueprint(api_bp, url_prefix="/api")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
 
-    @app.route("/")
+    @app.route("/dashboard")
     @login_required_page
     def index():
         return render_template("index.html")
@@ -101,6 +101,12 @@ def create_app(config_name="development"):
         if get_current_user_id():
             return redirect(url_for("index"))
         return render_template("login.html")
+
+    @app.route("/")
+    def landing_page():
+        if get_current_user_id():
+            return redirect(url_for("index"))
+        return render_template("landing.html")
 
     @app.route("/logout")
     def logout_route():
