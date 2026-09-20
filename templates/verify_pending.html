@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify your email — VortexSocial AI</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        body {
+            min-height: 100vh; display: flex; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, #F8FAFC 0%, #EEF2FF 50%, #E0E7FF 100%);
+            font-family: 'Inter', system-ui, sans-serif; margin: 0;
+        }
+        .verify-card {
+            max-width: 440px; width: 100%; background: #fff; border-radius: 16px; padding: 48px 40px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.08); text-align: center; margin: 24px;
+        }
+        .verify-icon {
+            width: 64px; height: 64px; border-radius: 16px; margin: 0 auto 24px;
+            background: linear-gradient(135deg, #2563EB, #4F46E5); display: flex; align-items: center; justify-content: center;
+        }
+        .verify-icon i { color: #fff; font-size: 26px; }
+        .verify-copy { color: #6B7280; font-size: 14px; line-height: 1.6; margin-bottom: 24px; }
+        .verify-email { font-weight: 700; color: #111827; }
+        #resendMsg { font-size: 13px; margin-top: 14px; display: none; }
+    </style>
+</head>
+<body>
+    <div class="verify-card">
+        <div class="auth-brand-logo" style="justify-content: center; margin-bottom: 32px;">
+            <span class="auth-brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                    <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+                </svg>
+            </span>
+            VortexSocial AI
+        </div>
+
+        <div class="verify-icon" aria-hidden="true"><i class="fas fa-envelope-open-text"></i></div>
+
+        {% if error %}
+            <h1 class="auth-heading" style="font-size: 22px;">Link problem</h1>
+            <p class="verify-copy">{{ error }}</p>
+        {% else %}
+            <h1 class="auth-heading" style="font-size: 22px;">Check your inbox</h1>
+            <p class="verify-copy">
+                We sent a verification link to
+                {% if email %}<span class="verify-email">{{ email }}</span>{% else %}your email address{% endif %}.
+                Click it to activate your account.
+            </p>
+        {% endif %}
+
+        <div class="auth-form-group" style="text-align: left;">
+            <label class="auth-form-label" for="resendEmail">Didn't get it? Resend to:</label>
+            <input id="resendEmail" type="email" class="auth-form-input" value="{{ email or '' }}" placeholder="name@email.com" autocomplete="email">
+        </div>
+        <button id="resendBtn" type="button" class="btn-primary-blue">Resend verification email</button>
+        <div id="resendMsg" role="status"></div>
+
+        <div class="auth-footer-links" style="margin-top: 24px; align-items: center;">
+            <a href="/login" class="auth-link">Back to sign in</a>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script>
+        $('#resendBtn').on('click', function () {
+            const email = $('#resendEmail').val().trim();
+            const $msg = $('#resendMsg');
+            if (!email) {
+                $msg.css('color', '#EF4444').text('Enter your email first.').show();
+                return;
+            }
+            const $btn = $(this);
+            const originalLabel = $btn.text();
+            $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Sending...');
+            $msg.hide();
+
+            $.ajax({
+                url: '/api/auth/resend-verification',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ email: email }),
+                success: function (res) {
+                    $btn.prop('disabled', false).text(originalLabel);
+                    if (res.success) {
+                        $msg.css('color', '#10B981').text('Email sent - check your inbox.').show();
+                    } else {
+                        $msg.css('color', '#EF4444').text(res.error || 'Could not resend.').show();
+                    }
+                },
+                error: function (xhr) {
+                    $btn.prop('disabled', false).text(originalLabel);
+                    $msg.css('color', '#EF4444').text((xhr.responseJSON && xhr.responseJSON.error) || 'Could not resend.').show();
+                }
+            });
+        });
+    </script>
+</body>
+</html>

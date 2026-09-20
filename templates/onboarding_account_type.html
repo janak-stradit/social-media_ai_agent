@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tell us about you — VortexSocial AI</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        body {
+            min-height: 100vh; display: flex; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, #F8FAFC 0%, #EEF2FF 50%, #E0E7FF 100%);
+            font-family: 'Inter', system-ui, sans-serif; margin: 0; padding: 24px;
+        }
+        .onboard-card {
+            max-width: 640px; width: 100%; background: #fff; border-radius: 20px; padding: 48px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.08);
+        }
+        .onboard-heading { font-size: 26px; font-weight: 700; color: #111827; letter-spacing: -0.02em; margin-bottom: 8px; text-align: center; }
+        .onboard-subheading { font-size: 15px; color: #6B7280; text-align: center; margin-bottom: 32px; }
+
+        .account-type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        @media (max-width: 560px) { .account-type-grid { grid-template-columns: 1fr; } }
+
+        .account-type-card {
+            display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+            padding: 20px; border: 2px solid #E5E7EB; border-radius: 14px; background: #fff;
+            cursor: pointer; text-align: left; transition: border-color 0.2s, box-shadow 0.2s, transform 0.1s;
+        }
+        .account-type-card:hover { border-color: #C7D2FE; transform: translateY(-1px); }
+        .account-type-card.selected { border-color: #2E68FF; box-shadow: 0 0 0 3px rgba(46,104,255,0.12); }
+        .account-type-card i { font-size: 20px; color: #2E68FF; margin-bottom: 4px; }
+        .account-type-card .type-title { font-weight: 700; font-size: 15px; color: #111827; }
+        .account-type-card .type-desc { font-size: 12.5px; color: #6B7280; line-height: 1.4; }
+        .account-type-card:focus-visible { outline: 2px solid #2E68FF; outline-offset: 3px; }
+
+        #websiteStep { margin-top: 28px; }
+        #onboardError { color: #EF4444; font-size: 13px; margin-top: 10px; display: none; }
+        .d-none { display: none !important; }
+    </style>
+</head>
+<body>
+    <div class="onboard-card">
+        <div class="auth-brand-logo" style="justify-content: center; margin-bottom: 28px;">
+            <span class="auth-brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                    <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+                </svg>
+            </span>
+            VortexSocial AI
+        </div>
+
+        <h1 class="onboard-heading">What best describes you?</h1>
+        <p class="onboard-subheading">This helps us tailor your workspace and limits to how you'll actually use it.</p>
+
+        <div class="account-type-grid" id="accountTypeGrid" role="radiogroup" aria-label="Account type">
+            <button type="button" class="account-type-card" data-type="individual" role="radio" aria-checked="false">
+                <i class="fas fa-user" aria-hidden="true"></i>
+                <span class="type-title">Individual</span>
+                <span class="type-desc">Solo creator, freelancer, or personal brand.</span>
+            </button>
+            <button type="button" class="account-type-card" data-type="small" role="radio" aria-checked="false">
+                <i class="fas fa-store" aria-hidden="true"></i>
+                <span class="type-title">Small Industry</span>
+                <span class="type-desc">A small business or early-stage startup.</span>
+            </button>
+            <button type="button" class="account-type-card" data-type="medium" role="radio" aria-checked="false">
+                <i class="fas fa-building" aria-hidden="true"></i>
+                <span class="type-title">Medium Industry</span>
+                <span class="type-desc">A growing company or marketing team.</span>
+            </button>
+            <button type="button" class="account-type-card" data-type="enterprise" role="radio" aria-checked="false">
+                <i class="fas fa-building-columns" aria-hidden="true"></i>
+                <span class="type-title">Enterprise</span>
+                <span class="type-desc">Large organization - let's talk to our sales team.</span>
+            </button>
+        </div>
+
+        <div id="websiteStep" class="d-none">
+            <div class="auth-form-group">
+                <label class="auth-form-label" for="websiteInput">Your website</label>
+                <input id="websiteInput" type="url" class="auth-form-input" placeholder="https://yourcompany.com" autocomplete="url">
+            </div>
+            <button id="continueBtn" type="button" class="btn-primary-blue">
+                <span id="continueBtnText">Continue to dashboard</span>
+            </button>
+        </div>
+
+        <div id="onboardError" role="alert"></div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script>
+        let selectedType = null;
+
+        function submitAccountType(accountType, website) {
+            const $err = $('#onboardError').hide();
+            return $.ajax({
+                url: '/api/onboarding/account-type',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ account_type: accountType, website: website || '' })
+            }).done(function (res) {
+                if (res.success) {
+                    window.location.href = res.redirect || '/dashboard';
+                } else {
+                    $err.text(res.error || 'Something went wrong.').show();
+                }
+            }).fail(function (xhr) {
+                $err.text((xhr.responseJSON && xhr.responseJSON.error) || 'Something went wrong.').show();
+            });
+        }
+
+        $('.account-type-card').on('click', function () {
+            const type = $(this).data('type');
+            $('.account-type-card').removeClass('selected').attr('aria-checked', 'false');
+            $(this).addClass('selected').attr('aria-checked', 'true');
+            selectedType = type;
+
+            if (type === 'enterprise') {
+                $(this).prop('disabled', true);
+                submitAccountType('enterprise', null);
+                return;
+            }
+
+            $('#websiteStep').removeClass('d-none');
+            $('#websiteInput').trigger('focus');
+        });
+
+        $('#continueBtn').on('click', function () {
+            if (!selectedType) return;
+            const website = $('#websiteInput').val().trim();
+            if (!website) {
+                $('#onboardError').text('Please enter your website.').show();
+                return;
+            }
+            const $btn = $(this);
+            $btn.prop('disabled', true);
+            $('#continueBtnText').html('<i class="fas fa-spinner fa-spin"></i> Saving...');
+            submitAccountType(selectedType, website).always(function () {
+                $btn.prop('disabled', false);
+                $('#continueBtnText').text('Continue to dashboard');
+            });
+        });
+    </script>
+</body>
+</html>

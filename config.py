@@ -31,6 +31,8 @@ class Config:
     SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
     SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL") or os.getenv("SMTP_USERNAME")
     APPROVAL_NOTIFY_EMAIL = os.getenv("APPROVAL_NOTIFY_EMAIL")
+    # Inbox that receives "Contact Sales" leads from the Enterprise onboarding step
+    SALES_EMAIL = os.getenv("SALES_EMAIL", "")
     # Optional override for absolute links in emails (e.g. approval request
     # links) when the app isn't reachable at the request's own host (behind a
     # reverse proxy, etc). Falls back to the incoming request's own host.

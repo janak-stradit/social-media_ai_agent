@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contact Sales — VortexSocial AI</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        body {
+            min-height: 100vh; display: flex; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, #F8FAFC 0%, #EEF2FF 50%, #E0E7FF 100%);
+            font-family: 'Inter', system-ui, sans-serif; margin: 0; padding: 24px;
+        }
+        .sales-card {
+            max-width: 460px; width: 100%; background: #fff; border-radius: 20px; padding: 48px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.08);
+        }
+        .sales-heading { font-size: 24px; font-weight: 700; color: #111827; letter-spacing: -0.02em; margin-bottom: 8px; text-align: center; }
+        .sales-subheading { font-size: 14px; color: #6B7280; text-align: center; margin-bottom: 28px; line-height: 1.6; }
+        #salesError { color: #EF4444; font-size: 13px; margin-top: 4px; margin-bottom: 12px; display: none; }
+        .d-none { display: none !important; }
+
+        .confirm-icon {
+            width: 64px; height: 64px; border-radius: 16px; margin: 0 auto 20px;
+            background: linear-gradient(135deg, #10B981, #059669); display: flex; align-items: center; justify-content: center;
+        }
+        .confirm-icon i { color: #fff; font-size: 26px; }
+    </style>
+</head>
+<body>
+    <div class="sales-card">
+        <div class="auth-brand-logo" style="justify-content: center; margin-bottom: 28px;">
+            <span class="auth-brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                    <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+                </svg>
+            </span>
+            VortexSocial AI
+        </div>
+
+        <div id="salesFormView">
+            <h1 class="sales-heading">Let's talk</h1>
+            <p class="sales-subheading">Enterprise plans are set up with our sales team. Tell us a bit about your organization and we'll be in touch.</p>
+
+            <form id="salesForm">
+                <div class="auth-form-group">
+                    <label class="auth-form-label" for="companyName">Company name</label>
+                    <input id="companyName" type="text" class="auth-form-input" placeholder="Acme Corp" autocomplete="organization" required>
+                </div>
+                <div class="auth-form-group">
+                    <label class="auth-form-label" for="companyPhone">Phone <span style="font-weight: 400; color: #9CA3AF;">(optional)</span></label>
+                    <input id="companyPhone" type="tel" class="auth-form-input" placeholder="+1 (555) 000-0000" autocomplete="tel">
+                </div>
+                <div class="auth-form-group">
+                    <label class="auth-form-label" for="companyMessage">What are you looking for? <span style="font-weight: 400; color: #9CA3AF;">(optional)</span></label>
+                    <textarea id="companyMessage" class="auth-form-input" style="height: 90px; padding-top: 10px; resize: vertical;" placeholder="Team size, use case, timeline..."></textarea>
+                </div>
+
+                <div id="salesError" role="alert"></div>
+
+                <button id="salesSubmitBtn" type="submit" class="btn-primary-blue">
+                    <span id="salesSubmitBtnText">Request a call</span>
+                </button>
+            </form>
+        </div>
+
+        <div id="salesConfirmView" class="d-none" style="text-align: center;">
+            <div class="confirm-icon" aria-hidden="true"><i class="fas fa-check"></i></div>
+            <h1 class="sales-heading">Thanks - we'll be in touch</h1>
+            <p class="sales-subheading">Our sales team will reach out shortly to help set up your Enterprise workspace.</p>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script>
+        $('#salesForm').on('submit', function (e) {
+            e.preventDefault();
+            const $err = $('#salesError').hide();
+            const companyName = $('#companyName').val().trim();
+            if (!companyName) {
+                $err.text('Company name is required.').show();
+                return;
+            }
+
+            const $btn = $('#salesSubmitBtn');
+            $btn.prop('disabled', true);
+            $('#salesSubmitBtnText').html('<i class="fas fa-spinner fa-spin"></i> Sending...');
+
+            $.ajax({
+                url: '/api/onboarding/contact-sales',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    company_name: companyName,
+                    phone: $('#companyPhone').val().trim(),
+                    message: $('#companyMessage').val().trim()
+                }),
+                success: function (res) {
+                    if (res.success) {
+                        $('#salesFormView').addClass('d-none');
+                        $('#salesConfirmView').removeClass('d-none');
+                    } else {
+                        $err.text(res.error || 'Something went wrong.').show();
+                        $btn.prop('disabled', false);
+                        $('#salesSubmitBtnText').text('Request a call');
+                    }
+                },
+                error: function (xhr) {
+                    $err.text((xhr.responseJSON && xhr.responseJSON.error) || 'Something went wrong.').show();
+                    $btn.prop('disabled', false);
+                    $('#salesSubmitBtnText').text('Request a call');
+                }
+            });
+        });
+    </script>
+</body>
+</html>

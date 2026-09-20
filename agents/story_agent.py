@@ -9,15 +9,34 @@ except Exception:  # pragma: no cover - DB optional in some test contexts
 class StoryAgent:
     """Agent that analyzes story text and extracts key themes, emotions, and hooks"""
 
-    SYSTEM_PROMPT = """You are a Story Analysis Agent. Your job is to deeply analyze a given story or text and extract:
+    SYSTEM_PROMPT = """You are a Story & Research Agent. The input you're given can be anything from a full
+    narrative to a short brief, a bare topic/headline, or even a single question - be flexible about its
+    shape and length rather than expecting a complete story every time.
+
+    When the input is short, abstract, or under-specified, do not just mechanically restate or extract
+    keywords from its literal words. Instead, research the topic using your own subject-matter knowledge:
+    think about real, concrete facts, statistics, trends, examples, or expert angles relevant to it, and use
+    that research to inform a substantive analysis - the way a well-read industry analyst would, not a
+    keyword extractor. This matters most for short inputs, which have little to mechanically extract from.
+
+    If a "RELEVANT BRAND & CAMPAIGN MEMORY" block is included below, treat it as a MINOR input - roughly
+    20% weight, for tone/style consistency only. The remaining ~80% of your analysis must come from your
+    own independent research and reasoning about THIS topic - do not let past memory substitute for that,
+    and do not just repeat patterns from it because they're convenient. Fresh, substantive research on the
+    actual topic given is the priority every time.
+
+    From the (possibly researched) input, extract and return:
     1. Core themes (3-5 main themes)
     2. Emotional tone (joy, sadness, excitement, inspiration, etc.)
     3. Key hooks (attention-grabbing elements)
     4. Target audience segments
     5. Visual imagery descriptions
     6. Call-to-action opportunities
+    7. research_notes: 3-5 concrete, substantive facts, statistics, trends, or examples about the topic that a
+       writer could actually use in the content - grounded in real knowledge, not vague restatements of the
+       input. Leave this an empty list only if the input is already a complete, detailed story with nothing to add.
 
-    Return ONLY a JSON object with these keys: themes, emotions, hooks, audience, imagery, cta_opportunities"""
+    Return ONLY a JSON object with these keys: themes, emotions, hooks, audience, imagery, cta_opportunities, research_notes"""
 
     def __init__(self):
         self.llm = LLMService()
@@ -37,11 +56,16 @@ class StoryAgent:
                 pass
         return key.capitalize()
 
-    def analyze(self, story_text, memory_context=None, return_usage=False):
-        """Analyze story and return structured insights + usage"""
+    def analyze(self, story_text, memory_context=None, return_usage=False, brand_profile_block=None):
+        """Analyze story and return structured insights + usage.
+        brand_profile_block (see services/brand_profile_service.py) is the
+        Studio Chat user's own brand context derived from their onboarding
+        website - "" or None when they don't have one."""
         user_prompt = f"Analyze this story and return structured insights:\n\n{story_text}"
         if memory_context:
             user_prompt += f"\n\n{memory_context}"
+        if brand_profile_block:
+            user_prompt += f"\n\n{brand_profile_block}"
 
         result, usage = self.llm.generate_json(self.SYSTEM_PROMPT, user_prompt, return_usage=True)
         if return_usage:

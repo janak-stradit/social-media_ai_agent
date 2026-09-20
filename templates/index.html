@@ -86,10 +86,15 @@
                         <i class="fas fa-microchip text-info me-2"></i>AI Models &amp; Purpose Matrix
                     </button>
                 </li>
+                <li id="dropBrandProfileLi" class="d-none">
+                    <a class="dropdown-item py-2 px-3 rounded-2 font-medium" href="/brand-profile">
+                        <i class="fas fa-palette text-primary me-2"></i>My Brand Configuration
+                    </a>
+                </li>
                 <li id="dropAdminPortalLi" class="d-none">
-                    <button class="dropdown-item py-2 px-3 rounded-2 text-indigo font-medium" type="button" id="dropHeaderAdminBtn">
+                    <a class="dropdown-item py-2 px-3 rounded-2 text-indigo font-medium" href="/admin">
                         <i class="fas fa-user-shield text-indigo me-2"></i>Admin Management Portal
-                    </button>
+                    </a>
                 </li>
 
                 <li><hr class="dropdown-divider my-2"></li>
@@ -171,7 +176,6 @@
                 <a href="/competitor-dashboard" class="btn btn-sm btn-outline-primary rounded-pill fw-bold text-decoration-none" title="Open Analysis Dashboard" style="font-size: 0.75rem; padding: 4px 10px;">
                     <i class="fas fa-chart-line me-1"></i>Analysis Dashboard
                 </a>
-                <span class="badge-enterprise"><i class="fas fa-shield-halved me-1"></i>Enterprise AI</span>
                 <span class="badge-version">v2.5 Critic</span>
             </div>
         </div>
@@ -473,155 +477,6 @@
                 <button type="button" class="btn-submit-emerald" id="submitCreditReqBtn">
                     <i class="fas fa-paper-plane me-1"></i>Submit Extension Request
                 </button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- ═══════════════════════ ADMIN MANAGEMENT PORTAL MODAL ═══════════════════════ -->
-<div class="modal fade" id="adminModal" tabindex="-1" aria-labelledby="adminModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable">
-        <div class="modal-content ent-modal">
-            <div class="modal-header ent-modal-header bg-gradient-admin">
-                <div class="d-flex align-items-center gap-3">
-                    <div class="card-icon card-icon-purple"><i class="fas fa-user-shield"></i></div>
-                    <div>
-                        <h5 class="modal-title mb-0" id="adminModalLabel">Admin Control Center</h5>
-                        <small class="text-slate-300">Manage user credit limits, approve requests & audit total cost history</small>
-                    </div>
-                </div>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body ent-modal-body p-0">
-                
-                <!-- Admin Navigation Tabs -->
-                <ul class="nav nav-tabs admin-nav-tabs px-3 pt-3 border-bottom-dark" id="adminTabs" role="tablist">
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link active" id="tab-users-tab" data-bs-toggle="tab" data-bs-target="#tab-users" type="button" role="tab">
-                            <i class="fas fa-users me-2"></i>User Credits &amp; Limits
-                        </button>
-                    </li>
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link position-relative" id="tab-requests-tab" data-bs-toggle="tab" data-bs-target="#tab-requests" type="button" role="tab">
-                            <i class="fas fa-clock-rotate-left me-2"></i>Extension Requests
-                            <span class="badge bg-danger rounded-pill ms-2 d-none" id="adminPendingBadge">0</span>
-                        </button>
-                    </li>
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="tab-cost-tab" data-bs-toggle="tab" data-bs-target="#tab-cost" type="button" role="tab">
-                            <i class="fas fa-chart-line me-2"></i>Global Cost History
-                        </button>
-                    </li>
-                </ul>
-
-                <div class="tab-content p-4" id="adminTabContent">
-                    
-                    <!-- TAB 1: USER CREDITS MANAGEMENT -->
-                    <div class="tab-pane fade show active" id="tab-users" role="tabpanel">
-                        <div class="d-flex justify-content-between align-items-center mb-3">
-                            <h6 class="text-light mb-0"><i class="fas fa-users text-primary me-2"></i>Registered Users &amp; Credit Allocations</h6>
-                            <input type="text" id="adminUserSearchInput" class="form-control ent-input form-control-sm w-auto" placeholder="Search by name or email...">
-                        </div>
-                        
-                        <div class="table-responsive">
-                            <table class="table table-dark table-hover align-middle ent-admin-table" id="adminUsersTable">
-                                <thead>
-                                    <tr>
-                                        <th>ID</th>
-                                        <th>User Name</th>
-                                        <th>Email</th>
-                                        <th>Role</th>
-                                        <th>Credit Limit</th>
-                                        <th>Used Cost</th>
-                                        <th>Remaining</th>
-                                        <th>Status</th>
-                                        <th>Actions / Add Credits</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="adminUsersTbody">
-                                    <tr>
-                                        <td colspan="9" class="text-center py-4 text-slate-400">Loading user credits...</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <!-- TAB 2: CREDIT EXTENSION REQUESTS -->
-                    <div class="tab-pane fade" id="tab-requests" role="tabpanel">
-                        <div class="d-flex justify-content-between align-items-center mb-3">
-                            <h6 class="text-light mb-0"><i class="fas fa-coins text-warning me-2"></i>Credit Extension Requests</h6>
-                            <div class="btn-group btn-group-sm">
-                                <button type="button" class="btn btn-outline-secondary active" id="filterReqAll">All</button>
-                                <button type="button" class="btn btn-outline-secondary" id="filterReqPending">Pending Only</button>
-                            </div>
-                        </div>
-                        <div class="table-responsive">
-                            <table class="table table-dark table-hover align-middle ent-admin-table" id="adminReqTable">
-                                <thead>
-                                    <tr>
-                                        <th>Req ID</th>
-                                        <th>User</th>
-                                        <th>Current Limit</th>
-                                        <th>Requested Add</th>
-                                        <th>Reason / Note</th>
-                                        <th>Date</th>
-                                        <th>Status</th>
-                                        <th>Decision Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="adminReqTbody">
-                                    <tr>
-                                        <td colspan="8" class="text-center py-4 text-slate-400">Loading extension requests...</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                    <!-- TAB 3: GLOBAL COST HISTORY -->
-                    <div class="tab-pane fade" id="tab-cost" role="tabpanel">
-                        <div class="row mb-3">
-                            <div class="col-md-6">
-                                <div class="admin-stat-card">
-                                    <span class="stat-label">Total System Accumulated Cost</span>
-                                    <h3 class="stat-value text-success mb-0" id="adminTotalSystemCost">$0.0000</h3>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="admin-stat-card">
-                                    <span class="stat-label">Total LLM Tokens Consumed</span>
-                                    <h3 class="stat-value text-warning mb-0" id="adminTotalSystemTokens">0</h3>
-                                </div>
-                            </div>
-                        </div>
-
-                        <div class="table-responsive">
-                            <table class="table table-dark table-hover align-middle ent-admin-table" id="adminCostHistoryTable">
-                                <thead>
-                                    <tr>
-                                        <th>Run ID</th>
-                                        <th>User Email</th>
-                                        <th>Timestamp</th>
-                                        <th>Prompt Excerpt</th>
-                                        <th>Tone &amp; Channels</th>
-                                        <th>Tokens</th>
-                                        <th>Cost ($USD)</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="adminCostHistoryTbody">
-                                    <tr>
-                                        <td colspan="7" class="text-center py-4 text-slate-400">Loading global cost log...</td>
-                                    </tr>
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-
-                </div>
-            </div>
-            <div class="modal-footer ent-modal-footer">
-                <button type="button" class="btn-secondary-ent" data-bs-dismiss="modal">Close Dashboard</button>
             </div>
         </div>
     </div>

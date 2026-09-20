@@ -333,6 +333,113 @@ def _build_request_html(
 """
 
 
+def _build_verification_html(name: str, verify_url: str) -> str:
+    return f"""\
+<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 0; background-color: #f3f4f6; font-family: 'Segoe UI', Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f3f4f6; padding: 32px 0;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="560" cellpadding="0" cellspacing="0"
+                       style="background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.06);">
+                    <tr>
+                        <td style="background-color: #4338ca; height: 5px; line-height: 5px; font-size: 0;">&nbsp;</td>
+                    </tr>
+                    <tr>
+                        <td style="background-color: #4f46e5; background-image: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); padding: 32px; text-align: center;">
+                            <span style="color: #ffffff; font-size: 22px; font-weight: 700;">Welcome to VortexSocial AI</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 32px 32px 8px 32px; color: #1f2937; font-size: 15px; line-height: 1.6;">
+                            Hi {_escape(name)},<br><br>
+                            Thanks for creating an account. One quick step before you get started - confirm this is your email address.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td align="center" style="padding: 24px 32px 32px 32px;">
+                            <a href="{_escape(verify_url)}"
+                               style="display: inline-block; background-color: #4f46e5; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 999px;">
+                                Verify my email
+                            </a>
+                            <div style="color: #9ca3af; font-size: 12px; margin-top: 12px;">This link expires in 24 hours.</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 16px 32px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 12px;">
+                            If you didn't create this account, you can safely ignore this email.
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+
+
+def _build_sales_lead_html(user_name: str, user_email: str, company_name: str, phone: str | None, message: str | None) -> str:
+    phone_row = (
+        f"""<tr><td style="padding: 4px 0; color: #6b7280; font-size: 13px;"><strong style="color: #374151;">Phone:</strong> {_escape(phone)}</td></tr>"""
+        if phone
+        else ""
+    )
+    message_block = (
+        f"""
+                    <tr>
+                        <td style="padding: 20px 32px 32px 32px;">
+                            <div style="font-size: 13px; font-weight: 700; color: #4338ca; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 8px;">Message</div>
+                            <div style="background-color: #f9fafb; border-left: 3px solid #4f46e5; border-radius: 8px; padding: 16px; font-size: 14px; line-height: 1.6; color: #1f2937; white-space: pre-wrap;">{_escape(message)}</div>
+                        </td>
+                    </tr>
+        """
+        if message
+        else ""
+    )
+    return f"""\
+<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 0; background-color: #f3f4f6; font-family: 'Segoe UI', Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f3f4f6; padding: 32px 0;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="600" cellpadding="0" cellspacing="0"
+                       style="background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.06);">
+                    <tr>
+                        <td style="background-color: #4338ca; height: 5px; line-height: 5px; font-size: 0;">&nbsp;</td>
+                    </tr>
+                    <tr>
+                        <td style="background-color: #4f46e5; background-image: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); padding: 26px 32px;">
+                            <span style="color: #ffffff; font-size: 20px; font-weight: 700;">New Enterprise Lead</span>
+                            <div style="color: rgba(255,255,255,0.85); font-size: 13px; margin-top: 2px;">VortexSocial AI &mdash; Onboarding</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 24px 32px 8px 32px;">
+                            <table role="presentation" cellpadding="0" cellspacing="0">
+                                <tr><td style="padding: 4px 0; color: #6b7280; font-size: 13px;"><strong style="color: #374151;">Company:</strong> {_escape(company_name)}</td></tr>
+                                <tr><td style="padding: 4px 0; color: #6b7280; font-size: 13px;"><strong style="color: #374151;">Contact:</strong> {_escape(user_name)} ({_escape(user_email)})</td></tr>
+                                {phone_row}
+                            </table>
+                        </td>
+                    </tr>
+                    {message_block}
+                    <tr>
+                        <td style="padding: 16px 32px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 12px;">
+                            Submitted from the Enterprise onboarding step.
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+
+
 class EmailService:
     def __init__(self):
         self.host = Config.SMTP_HOST
@@ -419,6 +526,54 @@ class EmailService:
 
         html = _build_request_html(approval_url, story, platform, competitors, caption, asset_type, len(slides))
         _attach_slides(msg, html, slides)
+
+        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
+            server.starttls()
+            server.login(self.username, self.password)
+            server.sendmail(self.from_email, [recipient], msg.as_string())
+
+        return {"success": True, "recipient": recipient}
+
+    def send_welcome_verification_email(self, to_email: str, name: str, verify_url: str) -> dict:
+        """Sent right after registration - see auth/routes.py's register()."""
+        if not self.enabled:
+            raise RuntimeError(
+                "SMTP is not configured. Set SMTP_HOST, SMTP_USERNAME and SMTP_PASSWORD in .env."
+            )
+
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = "Verify your email - VortexSocial AI"
+        msg["From"] = self.from_email
+        msg["To"] = to_email
+        msg.attach(MIMEText(_build_verification_html(name, verify_url), "html"))
+
+        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
+            server.starttls()
+            server.login(self.username, self.password)
+            server.sendmail(self.from_email, [to_email], msg.as_string())
+
+        return {"success": True, "recipient": to_email}
+
+    def send_sales_lead_notification(self, user_name: str, user_email: str, lead: dict) -> dict:
+        """Sent when an Enterprise signup submits the Contact Sales form - see
+        api/routes.py's /api/onboarding/contact-sales."""
+        if not self.enabled:
+            raise RuntimeError(
+                "SMTP is not configured. Set SMTP_HOST, SMTP_USERNAME and SMTP_PASSWORD in .env."
+            )
+
+        recipient = Config.SALES_EMAIL
+        if not recipient:
+            raise RuntimeError("No recipient configured. Set SALES_EMAIL in .env.")
+
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = f"New Enterprise Lead: {lead.get('company_name', 'Unknown Company')}"
+        msg["From"] = self.from_email
+        msg["To"] = recipient
+        html = _build_sales_lead_html(
+            user_name, user_email, lead.get("company_name", ""), lead.get("phone"), lead.get("message")
+        )
+        msg.attach(MIMEText(html, "html"))
 
         with smtplib.SMTP(self.host, self.port, timeout=30) as server:
             server.starttls()

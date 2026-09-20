@@ -57,10 +57,12 @@ try:
         save_run,
         save_setting,
         save_social_account,
+        set_user_active,
         unarchive_run,
         update_brand_asset_filename,
         update_scheduled_post_status,
         update_user_credit_limit,
+        update_user_profile,
     )
 
     DB_AVAILABLE = True
@@ -429,6 +431,37 @@ def analyze_story():
         return jsonify({"error": str(e)}), 500
 
 
+# Brand-voice personas (e.g. "Standard Enterprise", "B2B Tech Leader") describe
+# WRITING STYLE only, but read exactly like a company name - LLMs (and, worse,
+# RAG memory replaying an old mistake as a "winning pattern") occasionally
+# self-reference the persona as if it were the company, e.g. "At Standard
+# Enterprise, we're committed to..." or "#StandardEnterpriseAI". Prompt-level
+# clarifications reduce this but can't guarantee it never happens, so this is
+# a deterministic final check - it doesn't call the LLM, just corrects a
+# narrow, high-confidence pattern (the exact persona phrase used as a company
+# self-reference) after every other agent has already run.
+COMPANY_NAME = "StradIT"
+
+
+def _scrub_brand_voice_leak(text: str, brand_voice: str | None, company_name: str = COMPANY_NAME) -> tuple[str, bool]:
+    """Returns (possibly-corrected text, whether a correction was made).
+    company_name defaults to StradIT but is overridden with the Studio Chat
+    user's own company (see services/brand_profile_service.py) when they have
+    an onboarding-derived brand profile - otherwise this would incorrectly
+    "correct" their content to reference StradIT instead of their own brand."""
+    if not text or not brand_voice or brand_voice.strip().lower() == company_name.lower():
+        return text, False
+
+    persona = re.escape(brand_voice.strip())
+    corrected = text
+    # "At/From/We at <Persona>, ..." used as a company self-reference.
+    corrected, n1 = re.subn(rf"\b(At|From|We at)\s+{persona}\b", rf"\1 {company_name}", corrected, flags=re.IGNORECASE)
+    # A hashtag built from the persona (e.g. #StandardEnterpriseAI).
+    persona_hashtag = re.escape(brand_voice.strip().replace(" ", ""))
+    corrected, n2 = re.subn(rf"#{persona_hashtag}(\w*)", rf"#{company_name}\1", corrected, flags=re.IGNORECASE)
+    return corrected, (n1 + n2) > 0
+
+
 @api_bp.route("/generate", methods=["POST"])
 @login_required_api
 def generate_content():
@@ -441,6 +474,13 @@ def generate_content():
 
     story = data.get("story", "")
     image_path = data.get("image_path")
+    # When the caller already ran /api/analyze-story (the research-first Studio
+    # Chat flow: research a brief, show it, then let the user pick platform/
+    # output before generating) it can pass that exact analysis back here so
+    # generation reuses it verbatim, instead of the Story Agent silently
+    # re-analyzing the same brief a second time and potentially landing on a
+    # different set of research notes than what the user already saw.
+    precomputed_analysis = data.get("precomputed_analysis")
     platforms = data.get("platforms", ["facebook", "instagram", "linkedin"])
     tone = data.get("tone")
     brand_voice = data.get("brand_voice", "Standard Enterprise")
@@ -448,8 +488,31 @@ def generate_content():
     previous_context = data.get("previous_context")
     target_company = data.get("target_company")
     selected_outputs = data.get("selected_outputs", ["text", "image", "video"])
-    generate_text = "text" in selected_outputs or "Text (Caption)" in selected_outputs
+    # The text pipeline (Caption/Hashtag/Strategy/Reviewer/Brand Guardrail)
+    # always runs, regardless of which output checkboxes are selected - an
+    # image/video post still needs a caption and hashtags to actually publish
+    # with. selected_outputs only controls which MEDIA (image/video) gets
+    # generated alongside it; it's no longer possible to end up with "No
+    # caption generated" just because Text wasn't checked.
+    generate_text = True
     user_id = get_current_user_id()
+
+    # Studio Chat user's own brand context, derived from their onboarding
+    # website (see services/brand_profile_service.py) - "" when they don't
+    # have one (StradIT's own internal users, Enterprise, scrape failed).
+    from services.brand_profile_service import build_brand_profile_block
+
+    brand_profile_block = build_brand_profile_block(user_id)
+    brand_company_name = COMPANY_NAME
+    if brand_profile_block:
+        try:
+            from db import get_user_brand_profile
+
+            _profile = get_user_brand_profile(user_id)
+            if _profile and _profile.get("company_name"):
+                brand_company_name = _profile["company_name"]
+        except Exception:
+            pass
 
     # Credit Limit Check
     if DB_AVAILABLE and user_id:
@@ -502,9 +565,13 @@ def generate_content():
             caption_input = story_prompt
             story_analysis = {"themes": ["Strategy", "Industry"], "emotions": ["Professional"]}
             story_usage = None
+        elif isinstance(precomputed_analysis, dict) and precomputed_analysis:
+            story_analysis = precomputed_analysis
+            caption_input = extract_prompt_for_type(story_prompt, "text")
+            story_usage = None
         else:
             story_analysis, story_usage = story_agent.analyze(
-                story_prompt, memory_context=mem_prompt, return_usage=True
+                story_prompt, memory_context=mem_prompt, return_usage=True, brand_profile_block=brand_profile_block
             )
             caption_input = extract_prompt_for_type(story_prompt, "text")
 
@@ -516,7 +583,11 @@ def generate_content():
             {
                 "agent": "StoryAgent",
                 "name": "Story & Memory Agent",
-                "role": "Analyzed narrative themes, emotional tone & retrieved brand memories",
+                "role": (
+                    "Reused the research already shown to you"
+                    if isinstance(precomputed_analysis, dict) and precomputed_analysis
+                    else "Analyzed narrative themes, emotional tone & retrieved brand memories"
+                ),
                 "status": "completed",
             }
         )
@@ -535,6 +606,11 @@ def generate_content():
             )
 
         # Step 3: Generate captions with A/B Hook Variations
+        # A brief is only treated as tied to a specific StradIT project/service
+        # when it came from a competitor Strategy Synthesis or a target company
+        # was explicitly selected - a plain Studio Chat brief with neither is
+        # general thought leadership and shouldn't be forced to pitch a product.
+        has_project_context = bool("STRATEGY SYNTHESIS:" in story_prompt or (target_company and target_company != "None"))
         captions = {}
         if generate_text:
             captions = caption_agent.generate_all_platforms(
@@ -544,6 +620,8 @@ def generate_content():
                 memory_context=mem_prompt,
                 brand_voice=brand_voice,
                 platforms=platforms,
+                has_project_context=has_project_context,
+                brand_profile_block=brand_profile_block,
             )
             cap_usage = captions.pop("_usage", {})
             total_tokens += cap_usage.get("total_tokens", 0)
@@ -562,7 +640,11 @@ def generate_content():
         hashtags = {}
         if generate_text:
             hashtags = hashtag_agent.generate_all_platforms(
-                story_analysis, vision_analysis, memory_context=mem_prompt, platforms=platforms
+                story_analysis,
+                vision_analysis,
+                memory_context=mem_prompt,
+                platforms=platforms,
+                brand_profile_block=brand_profile_block,
             )
             hash_usage = hashtags.pop("_usage", {})
             total_tokens += hash_usage.get("total_tokens", 0)
@@ -626,6 +708,7 @@ def generate_content():
                         original_caption=primary_cap,
                         reviewer_feedback=eval_res.get("reviewer_feedback"),
                         brand_voice=brand_voice,
+                        brand_profile_block=brand_profile_block,
                     )
                     captions[platform]["primary_caption"] = refined_cap
                     captions[platform]["refined_by_critic"] = True
@@ -643,6 +726,44 @@ def generate_content():
                     "agent": "ReviewerAgent",
                     "name": "Critic & Self-Correction Agent",
                     "role": f"Evaluated quality, hook strength & applied {refinements_count} self-corrections",
+                    "status": "completed",
+                }
+            )
+
+            # Step 7: Brand Guardrail - deterministic final scrub for the
+            # brand-voice-persona-used-as-company-name failure mode (see
+            # _scrub_brand_voice_leak). Runs after refinement so it also
+            # catches anything the critic's rewrite reintroduced.
+            guardrail_corrections = 0
+            for platform in platforms:
+                cap = captions.get(platform)
+                if not cap:
+                    continue
+                fixed, changed = _scrub_brand_voice_leak(cap.get("primary_caption", ""), brand_voice, brand_company_name)
+                if changed:
+                    cap["primary_caption"] = fixed
+                    guardrail_corrections += 1
+
+                tags = hashtags.get(platform)
+                if tags:
+                    fixed_list = []
+                    for tag in tags.get("hashtags", []) or []:
+                        fixed_tag, changed = _scrub_brand_voice_leak(tag, brand_voice, brand_company_name)
+                        if changed:
+                            guardrail_corrections += 1
+                        fixed_list.append(fixed_tag)
+                    tags["hashtags"] = fixed_list
+
+            agents_executed.append(
+                {
+                    "agent": "BrandGuardrailAgent",
+                    "name": "Brand Guardrail",
+                    "role": (
+                        f"Verified the brand-voice persona was never used as the company name ({guardrail_corrections} correction"
+                        f"{'s' if guardrail_corrections != 1 else ''} applied)"
+                        if guardrail_corrections
+                        else "Verified the brand-voice persona was never used as the company name"
+                    ),
                     "status": "completed",
                 }
             )
@@ -671,12 +792,32 @@ def generate_content():
             },
         }
 
+        # Image/video generation needs richer visual/factual grounding than the
+        # short social caption text alone gives it - without this, media
+        # generation was only ever told the caption, so the Research Summary's
+        # imagery descriptions and research_notes never actually reached the
+        # image/video prompt (same class of bug fixed earlier for the
+        # competitor-dashboard's Strategy Synthesis image_prompt/video_prompt).
+        media_prompt_parts = []
+        if isinstance(story_analysis, dict):
+            imagery_desc = story_analysis.get("imagery")
+            if imagery_desc:
+                media_prompt_parts.append("Visual elements to include: " + "; ".join(imagery_desc))
+            research_notes_list = story_analysis.get("research_notes")
+            if research_notes_list:
+                media_prompt_parts.append("Key facts/data to visualize where relevant: " + "; ".join(research_notes_list[:3]))
+        media_prompt_suffix = " ".join(media_prompt_parts)
+
         for platform in platforms:
+            cap = captions.get(platform, {})
+            primary_caption = cap.get("primary_caption", "")
+            media_prompt = f"{primary_caption} {media_prompt_suffix}".strip() if media_prompt_suffix else primary_caption
             response["content"][platform] = {
-                "caption": captions.get(platform, {}),
+                "caption": cap,
                 "hashtags": hashtags.get(platform, {}),
                 "strategy": strategies.get(platform, {}) if include_strategy else None,
                 "quality": quality_evaluations.get(platform, {}),
+                "media_prompt": media_prompt,
             }
 
         # ── Persist to PostgreSQL ──────────────────────────────────────────
@@ -1395,6 +1536,61 @@ def admin_get_all_users():
         return jsonify({"error": str(e), "success": False}), 500
 
 
+@api_bp.route("/admin/users/<int:target_user_id>/active", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_set_user_active(target_user_id):
+    """Activate/deactivate a user's access - see is_active on User (db.py).
+    Used both to manually activate an Enterprise account after sales sets it
+    up, and generally to deactivate any account (e.g. abuse)."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+
+    data = request.get_json() or {}
+    if "is_active" not in data:
+        return jsonify({"error": "is_active (bool) is required"}), 400
+
+    res = set_user_active(target_user_id, bool(data["is_active"]))
+    if not res:
+        return jsonify({"error": "User not found"}), 404
+    return jsonify({"success": True, "user": res})
+
+
+@api_bp.route("/admin/users/<int:target_user_id>/profile", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_update_user_profile(target_user_id):
+    """Admin endpoint to edit a user's name/email/account type/website."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+
+    data = request.get_json() or {}
+    name = (data.get("name") or "").strip()
+    email = (data.get("email") or "").strip()
+    account_type = (data.get("account_type") or "").strip().lower()
+    company_website = data.get("company_website")
+    if company_website is not None:
+        company_website = company_website.strip()
+    if not any([name, email, account_type, company_website]):
+        return jsonify({"error": "Specify at least one field to update"}), 400
+
+    try:
+        res = update_user_profile(
+            target_user_id,
+            name=name or None,
+            email=email or None,
+            account_type=account_type or None,
+            company_website=company_website,
+        )
+        if not res:
+            return jsonify({"error": "User not found"}), 404
+        return jsonify({"success": True, "user": res, "message": "User profile updated successfully."})
+    except ValueError as e:
+        return jsonify({"error": str(e), "success": False}), 400
+    except Exception as e:
+        return jsonify({"error": str(e), "success": False}), 500
+
+
 @api_bp.route("/admin/users/<int:target_user_id>/credits", methods=["POST"])
 @login_required_api
 @admin_required_api
@@ -2047,6 +2243,40 @@ def suggested_collections():
         return jsonify({"error": str(e)}), 500
 
 
+# Suggested Storylines only makes sense for content a counter-strategy piece
+# can actually be built around. Raw job listings ("linkedin_jobs") and
+# personnel-move announcements (hires, resignations, promotions, successions)
+# are operational/HR noise, not a strategic talking point, so they're
+# excluded before clustering - regardless of which platform filter was
+# selected, since a "storyline" built from a job posting is never useful.
+STORYLINE_EXCLUDED_PLATFORMS = {"linkedin_jobs"}
+# A bare "appoints"/"appointed"/"names" is too common in legitimate
+# competitor-win content (e.g. "Northern Trust appointed by a $60bn pension
+# scheme", "Gravis appointed Northern Trust to provide fund services") to
+# treat as a personnel-move signal on its own - it only counts here when
+# followed closely by an actual role/title, same as "new <role>".
+_ROLE = r"(?:ceo|cfo|coo|cio|cto|chief \w+ officer|chair(?:man|woman|person)?|president|vice[- ]president|vp|head(?: of \w+)?|director|boss(?:es)?|successor)"
+_PERSONNEL_MOVE_RE = re.compile(
+    r"\b("
+    r"resign(?:s|ed|ation)?|steps? down|stepping down|"
+    r"hires?\b|hired\b|joins? [\w\s]{0,15}\bas\b|promoted to|named successor|"
+    r"takes? over as|succeeds \w+ as|"
+    rf"(?:appoints?|appointed|names?)\s+(?:\w+\s+){{0,4}}(?:as\s+)?(?:new\s+)?{_ROLE}\b|"
+    rf"new\s+{_ROLE}\b"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+def _is_storyline_worthy(post: dict) -> bool:
+    """False for job listings and personnel-move/HR news - see
+    STORYLINE_EXCLUDED_PLATFORMS / _PERSONNEL_MOVE_RE above."""
+    if (post.get("platform") or "").lower() in STORYLINE_EXCLUDED_PLATFORMS:
+        return False
+    text = f"{post.get('title') or ''} {post.get('text') or ''}"
+    return not _PERSONNEL_MOVE_RE.search(text)
+
+
 @api_bp.route("/generate-suggested-collections", methods=["POST"])
 @login_required_api
 def generate_suggested_collections():
@@ -2061,18 +2291,21 @@ def generate_suggested_collections():
     try:
         from agents.collection_agent import CollectionAgent
         from db import (
-            clear_content_collections,
             get_competitor_posts,
             get_content_collections,
+            get_seen_storyline_hashes,
+            mark_storylines_seen,
+            post_urls_hash,
             save_content_collections,
         )
         from services.embedding_service import EmbeddingService
         from services.stradit_service import StradITService
 
-        # We no longer clear unconditionally at the beginning. 
+        # We no longer clear unconditionally at the beginning.
         # We only clear the old list if the new run actually found new valid storylines.
 
         posts = get_competitor_posts(platform=platform, competitor=competitor)
+        posts = [p for p in posts if _is_storyline_worthy(p)]
         db_stats = {"inserted": 0, "skipped": 0, "new_hashes": []}
         repeated_count = 0
 
@@ -2087,11 +2320,24 @@ def generate_suggested_collections():
                 agent = CollectionAgent()
                 labeled = agent.label_clusters(clusters, project_context)
 
+                # A cluster's post_urls_hash is a stable fingerprint of its
+                # exact post composition - once a storyline has ever been
+                # surfaced (SuggestedStorylineSeen, never cleared), skip it on
+                # every later "regenerate" instead of resurfacing the same
+                # theme again just because it's still within the 15-day window.
+                already_seen = get_seen_storyline_hashes()
+                fresh_hashes = []
+
                 collections = []
                 for c in labeled:
                     cluster_posts = c["posts"]
                     post_urls = [p.get("post_url") for p in cluster_posts if p.get("post_url")]
-                    
+
+                    cluster_hash = post_urls_hash(post_urls)
+                    if cluster_hash in already_seen:
+                        repeated_count += 1
+                        continue
+
                     competitors = sorted(
                         {p.get("_source_competitor") or p.get("competitor") for p in cluster_posts} - {None, ""}
                     )
@@ -2107,8 +2353,10 @@ def generate_suggested_collections():
                             "post_urls": post_urls,
                         }
                     )
+                    fresh_hashes.append(cluster_hash)
                 if collections:
                     db_stats = save_content_collections(collections)
+                mark_storylines_seen(fresh_hashes)
 
         stored = get_content_collections(limit=SUGGESTED_COLLECTIONS_DISPLAY_LIMIT)
         db_stats["repeated_filtered"] = repeated_count
@@ -2253,3 +2501,185 @@ def download_zip():
 
     memory_file.seek(0)
     return send_file(memory_file, mimetype="application/zip", as_attachment=True, download_name="generated_assets.zip")
+
+
+VALID_SELF_SERVE_ACCOUNT_TYPES = {"individual", "small", "medium"}
+
+
+@api_bp.route("/onboarding/account-type", methods=["POST"])
+@login_required_api
+def onboarding_account_type():
+    """Second onboarding step (after email verification) - see
+    templates/onboarding_account_type.html. Individual/Small/Medium require a
+    website and complete onboarding immediately; Enterprise records the
+    selection but does NOT complete onboarding - the frontend sends those
+    users on to /onboarding/contact-sales instead."""
+    data = request.get_json() or {}
+    account_type = (data.get("account_type") or "").strip().lower()
+    website = (data.get("website") or "").strip()
+    user_id = get_current_user_id()
+
+    if account_type not in VALID_SELF_SERVE_ACCOUNT_TYPES | {"enterprise"}:
+        return jsonify({"success": False, "error": "Invalid account type"}), 400
+
+    from db import complete_user_onboarding, set_user_account_type_enterprise
+
+    if account_type == "enterprise":
+        set_user_account_type_enterprise(user_id)
+        return jsonify({"success": True, "redirect": "/onboarding/contact-sales"})
+
+    if not website:
+        return jsonify({"success": False, "error": "Please enter your website"}), 400
+
+    complete_user_onboarding(user_id, account_type, website)
+
+    # Best-effort: scrape the homepage and derive a brand profile (industry,
+    # voice, colors) that future Studio Chat generation follows - see
+    # services/brand_profile_service.py::run_brand_analysis. Never blocks
+    # onboarding: a slow/unreachable/bot-blocking site just means no brand
+    # profile gets saved, logged and swallowed.
+    try:
+        from services.brand_profile_service import run_brand_analysis
+
+        run_brand_analysis(user_id, website)
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.warning(f"[onboarding] Website brand analysis failed for {website}: {e}")
+
+    return jsonify({"success": True, "redirect": "/dashboard"})
+
+
+@api_bp.route("/brand-profile/quick-prompts", methods=["GET"])
+@login_required_api
+def brand_profile_quick_prompts():
+    """Studio Chat's welcome screen calls this to replace the generic
+    example prompt cards with ones grounded in the user's own brand (see
+    UserBrandProfile.suggested_post_ideas, populated during onboarding).
+    Returns an empty list when the user has no brand profile - the frontend
+    falls back to the static example cards already in the template."""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({"success": True, "post_ideas": []})
+
+    from db import get_user_brand_profile
+
+    profile = get_user_brand_profile(user_id)
+    ideas = (profile or {}).get("suggested_post_ideas") or []
+    return jsonify({"success": True, "post_ideas": ideas, "company_name": (profile or {}).get("company_name")})
+
+
+@api_bp.route("/brand-profile", methods=["GET"])
+@login_required_api
+def get_brand_profile():
+    """Backs the "My Brand Configuration" page (Individual/Small/Medium
+    only - see templates/brand_profile.html) - returns what was scraped
+    from the user's website so they can review/correct it."""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({"success": True, "profile": None})
+
+    from db import get_user_brand_profile
+
+    return jsonify({"success": True, "profile": get_user_brand_profile(user_id)})
+
+
+@api_bp.route("/brand-profile", methods=["PUT"])
+@login_required_api
+def update_brand_profile():
+    """Saves user edits to their own brand profile - see
+    db.update_user_brand_profile_fields. Individual/Small/Medium only;
+    Enterprise/admin accounts have no brand profile to edit."""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({"error": "Database not available"}), 503
+
+    user = get_user_by_id(user_id)
+    if not user or user.account_type not in VALID_SELF_SERVE_ACCOUNT_TYPES:
+        return jsonify({"error": "Brand configuration is only available for Individual/Small/Medium accounts"}), 403
+
+    data = request.get_json() or {}
+    from db import update_user_brand_profile_fields
+
+    fields = {}
+    for key in ("company_name", "industry", "target_audience", "brand_voice_summary"):
+        if key in data:
+            fields[key] = (data[key] or "").strip()
+    for key in ("key_themes", "primary_colors", "content_dos", "content_donts"):
+        if key in data:
+            fields[key] = [item.strip() for item in (data[key] or []) if isinstance(item, str) and item.strip()]
+
+    try:
+        res = update_user_brand_profile_fields(user_id, **fields)
+        if not res:
+            return jsonify({"error": "No brand profile found - run a website analysis first"}), 404
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": str(e), "success": False}), 500
+
+
+@api_bp.route("/brand-profile/rescan", methods=["POST"])
+@login_required_api
+def rescan_brand_profile():
+    """Manually re-runs the website scrape + brand analysis (see
+    services/brand_profile_service.py::run_brand_analysis) - unlike
+    onboarding's best-effort call, failure here is reported to the user
+    since they explicitly asked for it."""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({"error": "Database not available"}), 503
+
+    user = get_user_by_id(user_id)
+    if not user or user.account_type not in VALID_SELF_SERVE_ACCOUNT_TYPES:
+        return jsonify({"error": "Brand configuration is only available for Individual/Small/Medium accounts"}), 403
+
+    data = request.get_json() or {}
+    website = (data.get("website") or user.company_website or "").strip()
+    if not website:
+        return jsonify({"error": "No website on file - enter one to analyze"}), 400
+
+    try:
+        from services.brand_profile_service import run_brand_analysis
+
+        ok = run_brand_analysis(user_id, website)
+        if not ok:
+            return jsonify({"error": "Could not fetch or analyze that website. Check the URL and try again."}), 502
+
+        from db import get_user_brand_profile
+
+        return jsonify({"success": True, "profile": get_user_brand_profile(user_id)})
+    except Exception as e:
+        return jsonify({"error": str(e), "success": False}), 500
+
+
+@api_bp.route("/onboarding/contact-sales", methods=["POST"])
+@login_required_api
+def onboarding_contact_sales():
+    """Final step of the Enterprise onboarding path - see
+    templates/onboarding_contact_sales.html. Saves the lead and notifies
+    Config.SALES_EMAIL; does not grant dashboard access (no self-serve tier
+    for Enterprise)."""
+    data = request.get_json() or {}
+    company_name = (data.get("company_name") or "").strip()
+    phone = (data.get("phone") or "").strip()
+    message = (data.get("message") or "").strip()
+    user_id = get_current_user_id()
+
+    if not company_name:
+        return jsonify({"success": False, "error": "Company name is required"}), 400
+
+    from db import create_sales_contact_request, get_user_by_id
+
+    create_sales_contact_request(user_id, company_name, phone, message)
+
+    user = get_user_by_id(user_id)
+    try:
+        from services.email_service import EmailService
+
+        EmailService().send_sales_lead_notification(
+            user.name, user.email, {"company_name": company_name, "phone": phone, "message": message}
+        )
+    except Exception as e:  # noqa: BLE001
+        # The lead is already saved - a notification-email failure (SMTP not
+        # configured, SALES_EMAIL unset) shouldn't block the user's submission.
+        current_app.logger.warning(f"[onboarding] Failed to send sales lead notification: {e}")
+
+    return jsonify({"success": True})

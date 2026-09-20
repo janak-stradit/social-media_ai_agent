@@ -2391,6 +2391,39 @@ $(document).ready(function () {
                             renderPipelineHistory();
                         }
                     } else {
+                        // Don't spend on the actual image/video generation call yet -
+                        // show the (cheap) generated caption first and let the user
+                        // confirm before generating media, mirroring Studio Chat's
+                        // "Want to turn this into a post?" research-first flow instead
+                        // of immediately chaining into media generation right after
+                        // picking a media type on this slide.
+                        $('#startPipelineBtn').prop('disabled', false);
+                        $('#pipelineLoader').addClass('d-none');
+
+                        const mediaLabel = mediaType === 'video' ? 'Video' : 'Image';
+                        $('#pipelineOutputContent').html(`
+                            <div class="pipeline-caption-preview">
+                                <div class="pipeline-caption-preview-label"><i class="fas fa-align-left me-1"></i>Generated Caption</div>
+                                <div class="pipeline-caption-preview-text">${escapeHtml(captions.primary_caption)}</div>
+                            </div>
+                            <div class="research-cta-block mt-3">
+                                <div class="research-cta-title"><i class="fas fa-wand-magic-sparkles me-1"></i>Want to turn this into a post?</div>
+                                <p class="small text-muted mb-2">Generate the ${mediaLabel.toLowerCase()} to go with this caption for ${platform}.</p>
+                                <button type="button" class="btn btn-primary btn-sm" id="confirmPipelineMediaBtn">
+                                    <i class="fas fa-bolt me-1"></i>Generate ${mediaLabel}
+                                </button>
+                            </div>
+                        `);
+
+                        $('#confirmPipelineMediaBtn').on('click', function () {
+                            const $btn = $(this);
+                            $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Generating...');
+                            $('#startPipelineBtn').prop('disabled', true);
+                            $('#pipelineLoader').removeClass('d-none');
+                            runPipelineMediaGeneration();
+                        });
+
+                        function runPipelineMediaGeneration() {
                         // Generate Media (N variations, per the Number of Images field)
                         let generatedCount = 0;
                         const totalToGenerate = mediaType === 'image' ? (parseInt($('#pipelineImageCount').val(), 10) || 1) : 3;
@@ -2495,6 +2528,7 @@ $(document).ready(function () {
                         }
 
                         generateNextMedia();
+                        }
                     }
                 } else {
                     showPipelineError('Caption generation failed.');
@@ -3050,10 +3084,40 @@ $(document).ready(function () {
 
                         showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'asset_generated');
                     } else {
+                        // Show the (cheap) generated caption first and let the user
+                        // confirm before generating actual media - see the matching
+                        // change in startPipelineGeneration() for the main workflow.
+                        $('#startModalPipelineBtn').prop('disabled', false);
+                        $('#modalPipelineLoader').addClass('d-none');
+
+                        const modalMediaLabel = mediaType === 'video' ? 'Video' : 'Image';
+                        $('#modalPipelineOutputContent').html(`
+                            <div class="pipeline-caption-preview">
+                                <div class="pipeline-caption-preview-label"><i class="fas fa-align-left me-1"></i>Generated Caption</div>
+                                <div class="pipeline-caption-preview-text">${escapeHtml(captions.primary_caption)}</div>
+                            </div>
+                            <div class="research-cta-block mt-3">
+                                <div class="research-cta-title"><i class="fas fa-wand-magic-sparkles me-1"></i>Want to turn this into a post?</div>
+                                <p class="small text-muted mb-2">Generate the ${modalMediaLabel.toLowerCase()} to go with this caption for ${platform}.</p>
+                                <button type="button" class="btn btn-primary btn-sm" id="confirmModalPipelineMediaBtn">
+                                    <i class="fas fa-bolt me-1"></i>Generate ${modalMediaLabel}
+                                </button>
+                            </div>
+                        `);
+
+                        $('#confirmModalPipelineMediaBtn').on('click', function () {
+                            const $btn = $(this);
+                            $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Generating...');
+                            $('#startModalPipelineBtn').prop('disabled', true);
+                            $('#modalPipelineLoader').removeClass('d-none');
+                            runModalPipelineMediaGeneration();
+                        });
+
+                        function runModalPipelineMediaGeneration() {
                         // For image/video, just simulate or trigger generation like in main workflow
                         let generatedCount = 0;
                         const totalToGenerate = mediaType === 'image' ? (parseInt($('#modalPipelineImageCount').val(), 10) || 1) : 3;
-                        $('#modalPipelineLoader').html(`<i class="fas fa-spinner fa-spin me-2"></i>Rendering media variation 1 of ${totalToGenerate}...`);
+                        $('#modalPipelineOutputContent').html(mediaGenSkeletonHtml(`Rendering media variation 1 of ${totalToGenerate}...`));
 
                         function generateNextMedia() {
                             if (generatedCount >= totalToGenerate) {
@@ -3142,6 +3206,7 @@ $(document).ready(function () {
                         }
 
                         generateNextMedia();
+                        }
                     }
                 } else {
                     $('#startModalPipelineBtn').prop('disabled', false);

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Account Pending — VortexSocial AI</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        body {
+            min-height: 100vh; display: flex; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, #F8FAFC 0%, #EEF2FF 50%, #E0E7FF 100%);
+            font-family: 'Inter', system-ui, sans-serif; margin: 0; padding: 24px;
+        }
+        .pending-card {
+            max-width: 440px; width: 100%; background: #fff; border-radius: 16px; padding: 48px 40px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.08); text-align: center;
+        }
+        .pending-icon {
+            width: 64px; height: 64px; border-radius: 16px; margin: 0 auto 24px;
+            background: linear-gradient(135deg, #F59E0B, #D97706); display: flex; align-items: center; justify-content: center;
+        }
+        .pending-icon i { color: #fff; font-size: 26px; }
+        .pending-copy { color: #6B7280; font-size: 14px; line-height: 1.6; margin-bottom: 24px; }
+    </style>
+</head>
+<body>
+    <div class="pending-card">
+        <div class="auth-brand-logo" style="justify-content: center; margin-bottom: 32px;">
+            <span class="auth-brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                    <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+                </svg>
+            </span>
+            VortexSocial AI
+        </div>
+
+        <div class="pending-icon" aria-hidden="true"><i class="fas fa-hourglass-half"></i></div>
+        <h1 class="auth-heading" style="font-size: 22px;">Your account is pending</h1>
+        <p class="pending-copy">
+            Your account isn't active yet. If you submitted an Enterprise request, our sales team is
+            setting things up and will reach out shortly. If you think this is a mistake, contact support.
+        </p>
+
+        <a href="/api/auth/logout" class="auth-link" style="font-weight: 700;">Sign out</a>
+    </div>
+</body>
+</html>

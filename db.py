@@ -71,6 +71,67 @@ class User(Base):
     credit_limit: Mapped[float] = mapped_column(Float, default=10.0, nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Post-signup onboarding journey (see docs/plan for "Post-Signup Onboarding
+    # Journey"): verify email -> pick account_type -> capture website (self-serve
+    # tiers) or route to Contact Sales (enterprise).
+    email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    verification_token: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True, index=True)
+    verification_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    account_type: Mapped[str | None] = mapped_column(String(32), nullable=True)  # individual/small/medium/enterprise
+    company_website: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Separate from onboarding_completed: an Enterprise signup finishes onboarding
+    # by submitting the Contact Sales form, but still shouldn't get self-serve
+    # dashboard access until sales manually activates them (or an admin
+    # deactivates any account later, e.g. for abuse) - login_required_page checks
+    # this after onboarding_completed. Individual/Small/Medium default active.
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class SalesContactRequest(Base):
+    """An Enterprise-tier signup's "Contact Sales" submission - see
+    api/routes.py's /api/onboarding/contact-sales."""
+
+    __tablename__ = "sales_contact_requests"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True
+    )
+    company_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    phone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class UserBrandProfile(Base):
+    """Per-user brand context derived from their onboarding website (see
+    services/website_scraper_service.py + agents/website_analysis_agent.py) -
+    the multi-tenant equivalent of the StradIT-only Content Guidelines
+    (AppSetting). Read by services/brand_profile_service.py and folded into
+    Studio Chat generation prompts."""
+
+    __tablename__ = "user_brand_profiles"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), unique=True, nullable=False, index=True
+    )
+    website: Mapped[str] = mapped_column(String(500), nullable=False)
+    company_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    target_audience: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    brand_voice_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    key_themes: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list
+    primary_colors: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of hex strings
+    content_dos: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list
+    content_donts: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list
+    suggested_post_ideas: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of {category,title,summary,prompt}
+    analyzed_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
 
 class CreditRequest(Base):
     __tablename__ = "credit_requests"
@@ -323,6 +384,24 @@ def init_db():
             f"ALTER TABLE {run_tbl} ADD COLUMN is_archived BOOLEAN DEFAULT FALSE",
             f"ALTER TABLE {usr_tbl} ADD COLUMN credit_limit DOUBLE PRECISION DEFAULT 10.0",
             f"ALTER TABLE {usr_tbl} ADD COLUMN is_admin BOOLEAN DEFAULT FALSE",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN email_verified BOOLEAN DEFAULT FALSE",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN verification_token VARCHAR(64)",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN verification_sent_at TIMESTAMP",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN account_type VARCHAR(32)",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN company_website VARCHAR(500)",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN onboarding_completed BOOLEAN DEFAULT FALSE",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN is_active BOOLEAN DEFAULT TRUE",
+        ]:
+            try:
+                with engine.begin() as sub_conn:
+                    sub_conn.execute(text(alter_cmd))
+            except Exception:
+                pass
+
+        profile_tbl = f'"{SCHEMA}".user_brand_profiles' if not IS_SQLITE else "user_brand_profiles"
+        for alter_cmd in [
+            f"ALTER TABLE {profile_tbl} ADD COLUMN company_name VARCHAR(255)",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN suggested_post_ideas TEXT",
         ]:
             try:
                 with engine.begin() as sub_conn:
@@ -433,6 +512,214 @@ def get_user_by_email(email: str) -> User | None:
 def get_user_by_id(user_id: int) -> User | None:
     with Session(engine) as session:
         return session.get(User, user_id)
+
+
+def set_user_verification_token(user_id: int, token: str) -> None:
+    """(Re)issues a verification token - used both at registration and by the
+    resend-verification endpoint."""
+    with Session(engine) as session:
+        session.query(User).filter(User.id == user_id).update(
+            {"verification_token": token, "verification_sent_at": _utcnow()}
+        )
+        session.commit()
+
+
+def get_user_by_verification_token(token: str) -> User | None:
+    with Session(engine) as session:
+        return session.query(User).filter(User.verification_token == token).first()
+
+
+def mark_user_email_verified(user_id: int) -> None:
+    with Session(engine) as session:
+        session.query(User).filter(User.id == user_id).update(
+            {"email_verified": True, "verification_token": None}
+        )
+        session.commit()
+
+
+def complete_user_onboarding(user_id: int, account_type: str, company_website: str | None = None) -> None:
+    """account_type is 'individual'/'small'/'medium': sets onboarding_completed
+    so login_required_page lets the user through to the dashboard. Enterprise is
+    NOT completed here - see complete_enterprise_contact_sales, which is what
+    actually ends that path (after they submit the sales form)."""
+    with Session(engine) as session:
+        session.query(User).filter(User.id == user_id).update(
+            {
+                "account_type": account_type,
+                "company_website": company_website,
+                "onboarding_completed": True,
+            }
+        )
+        session.commit()
+
+
+def set_user_account_type_enterprise(user_id: int) -> None:
+    """Records the Enterprise selection without completing onboarding -
+    login_required_page keeps routing the user to /onboarding/contact-sales
+    until complete_enterprise_contact_sales runs."""
+    with Session(engine) as session:
+        session.query(User).filter(User.id == user_id).update({"account_type": "enterprise"})
+        session.commit()
+
+
+def create_sales_contact_request(user_id: int, company_name: str, phone: str | None, message: str | None) -> dict:
+    """Saves the Enterprise "Contact Sales" submission and marks onboarding
+    complete, but leaves is_active False - this ends their onboarding FUNNEL,
+    not their access gate. They stay on a "pending activation" page until an
+    admin flips is_active (see set_user_active), presumably once sales has
+    manually set up their account."""
+    with Session(engine) as session:
+        row = SalesContactRequest(
+            user_id=user_id,
+            company_name=company_name.strip(),
+            phone=(phone or "").strip() or None,
+            message=(message or "").strip() or None,
+        )
+        session.add(row)
+        session.query(User).filter(User.id == user_id).update({"onboarding_completed": True, "is_active": False})
+        session.commit()
+        session.refresh(row)
+        return {"id": row.id, "company_name": row.company_name, "phone": row.phone, "message": row.message}
+
+
+def set_user_active(user_id: int, is_active: bool) -> dict | None:
+    """Admin action: activate/deactivate a user's access. See
+    api/routes.py's /api/admin/users/<id>/active."""
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if not user:
+            return None
+        user.is_active = is_active
+        session.commit()
+        return {"id": user.id, "is_active": user.is_active}
+
+
+ACCOUNT_TYPES = ("individual", "small", "medium", "enterprise")
+
+
+def update_user_profile(
+    user_id: int,
+    name: str | None = None,
+    email: str | None = None,
+    account_type: str | None = None,
+    company_website: str | None = None,
+) -> dict | None:
+    """Admin action: edit a user's name/email/account type/website. See
+    api/routes.py's /api/admin/users/<id>/profile. account_type/
+    company_website are admin overrides of what onboarding captured -
+    setting account_type here does not touch onboarding_completed/is_active
+    (unlike complete_user_onboarding/set_user_account_type_enterprise, which
+    run as part of the onboarding funnel itself)."""
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if not user:
+            return None
+        if name:
+            user.name = name.strip()
+        if email:
+            normalized_email = email.strip().lower()
+            existing = session.query(User).filter(User.email == normalized_email, User.id != user_id).first()
+            if existing:
+                raise ValueError("Another account already uses that email")
+            user.email = normalized_email
+        if account_type:
+            if account_type not in ACCOUNT_TYPES:
+                raise ValueError(f"Invalid account_type - must be one of {', '.join(ACCOUNT_TYPES)}")
+            user.account_type = account_type
+        if company_website is not None:
+            user.company_website = company_website.strip() or None
+        session.commit()
+        return {
+            "id": user.id,
+            "name": user.name,
+            "email": user.email,
+            "account_type": user.account_type,
+            "company_website": user.company_website,
+        }
+
+
+def save_user_brand_profile(
+    user_id: int,
+    website: str,
+    company_name: str | None,
+    industry: str | None,
+    target_audience: str | None,
+    brand_voice_summary: str | None,
+    key_themes: list | None,
+    primary_colors: list | None,
+    content_dos: list | None,
+    content_donts: list | None,
+    suggested_post_ideas: list | None = None,
+) -> dict:
+    """Upsert - see agents/website_analysis_agent.py for how these fields are
+    derived. One row per user (unique on user_id)."""
+    with Session(engine) as session:
+        row = session.query(UserBrandProfile).filter(UserBrandProfile.user_id == user_id).first()
+        if row is None:
+            row = UserBrandProfile(user_id=user_id, website=website)
+            session.add(row)
+
+        row.website = website
+        row.company_name = company_name
+        row.industry = industry
+        row.target_audience = target_audience
+        row.brand_voice_summary = brand_voice_summary
+        row.key_themes = json.dumps(key_themes or [])
+        row.primary_colors = json.dumps(primary_colors or [])
+        row.content_dos = json.dumps(content_dos or [])
+        row.content_donts = json.dumps(content_donts or [])
+        row.suggested_post_ideas = json.dumps(suggested_post_ideas or [])
+        row.analyzed_at = _utcnow()
+        session.commit()
+        session.refresh(row)
+        return {"id": row.id, "user_id": row.user_id, "website": row.website}
+
+
+_BRAND_PROFILE_TEXT_FIELDS = {"company_name", "website", "industry", "target_audience", "brand_voice_summary"}
+_BRAND_PROFILE_LIST_FIELDS = {"key_themes", "primary_colors", "content_dos", "content_donts"}
+
+
+def update_user_brand_profile_fields(user_id: int, **fields) -> dict | None:
+    """Partial update for the "My Brand Configuration" self-edit page (see
+    api/routes.py's PUT /api/brand-profile) - unlike save_user_brand_profile
+    (positional, used by the scrape pipeline), only touches columns
+    explicitly passed in. Returns None if the user has no profile yet (the
+    edit page requires onboarding's scrape to have created one first)."""
+    with Session(engine) as session:
+        row = session.query(UserBrandProfile).filter(UserBrandProfile.user_id == user_id).first()
+        if row is None:
+            return None
+
+        for key, value in fields.items():
+            if key in _BRAND_PROFILE_TEXT_FIELDS:
+                setattr(row, key, value)
+            elif key in _BRAND_PROFILE_LIST_FIELDS:
+                setattr(row, key, json.dumps(value or []))
+
+        row.analyzed_at = _utcnow()
+        session.commit()
+        session.refresh(row)
+        return {"id": row.id, "user_id": row.user_id}
+
+
+def get_user_brand_profile(user_id: int) -> dict | None:
+    with Session(engine) as session:
+        row = session.query(UserBrandProfile).filter(UserBrandProfile.user_id == user_id).first()
+        if not row:
+            return None
+        return {
+            "website": row.website,
+            "company_name": row.company_name,
+            "industry": row.industry,
+            "target_audience": row.target_audience,
+            "brand_voice_summary": row.brand_voice_summary,
+            "key_themes": json.loads(row.key_themes) if row.key_themes else [],
+            "primary_colors": json.loads(row.primary_colors) if row.primary_colors else [],
+            "content_dos": json.loads(row.content_dos) if row.content_dos else [],
+            "content_donts": json.loads(row.content_donts) if row.content_donts else [],
+            "suggested_post_ideas": json.loads(row.suggested_post_ideas) if row.suggested_post_ideas else [],
+            "analyzed_at": row.analyzed_at.strftime("%Y-%m-%d %H:%M:%S"),
+        }
 
 
 def save_run(
@@ -785,6 +1072,11 @@ def get_all_users_credit_summary() -> list[dict]:
                     "name": u.name,
                     "email": u.email,
                     "is_admin": u.is_admin,
+                    "is_active": bool(getattr(u, "is_active", True)),
+                    "account_type": u.account_type,
+                    "company_website": u.company_website,
+                    "onboarding_completed": bool(u.onboarding_completed),
+                    "email_verified": bool(u.email_verified),
                     "credit_limit": round(limit, 2),
                     "used_credits": round(used_cost, 4),
                     "remaining_credits": round(remaining, 4),

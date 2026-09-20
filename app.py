@@ -6,7 +6,13 @@ from flask_cors import CORS
 
 from api.routes import api_bp
 from auth.routes import auth_bp
-from auth.utils import get_current_user_id, login_required_page
+from auth.utils import (
+    admin_required_page,
+    enterprise_required_page,
+    get_current_user_id,
+    login_required_page,
+    self_serve_required_page,
+)
 from config import config_map
 
 # LLM responses (captions, image/video prompts, error messages) can contain
@@ -62,16 +68,34 @@ def create_app(config_name="development"):
     def settings_route():
         return render_template("settings.html")
 
+    @app.route("/brand-profile")
+    @login_required_page
+    @self_serve_required_page
+    def brand_profile_page():
+        """"My Brand Configuration" - shows/edits the per-user brand
+        profile scraped from an Individual/Small/Medium account's website
+        during onboarding (see db.UserBrandProfile,
+        services/brand_profile_service.py). Not to be confused with
+        /brand-configuration below, which edits StradIT's own global
+        Content Guidelines."""
+        return render_template("brand_profile.html")
+
     @app.route("/brand-configuration")
     @login_required_page
+    @enterprise_required_page
     def brand_configuration_page():
         """Editable Content Guidelines + Products & Service text (see
         AppSetting in db.py) read live by generation, so edits here actually
-        change what gets generated without touching code."""
+        change what gets generated without touching code. This is StradIT's
+        own single global brand profile (AppSetting is a global key-value
+        store, not per-user) - Enterprise/admin only. Individual/Small/Medium
+        accounts have their own per-user equivalent at /brand-profile
+        instead (see db.UserBrandProfile)."""
         return render_template("brand_configuration.html")
 
     @app.route("/competitor-dashboard")
     @login_required_page
+    @enterprise_required_page
     def competitor_dashboard():
         # Backward compatibility: approval-request emails sent before the
         # dedicated /approve/<id> page existed link here as ?approve=<id>.
@@ -79,6 +103,18 @@ def create_app(config_name="development"):
         if approve_id and approve_id.isdigit():
             return redirect(url_for("approval_review_page", request_id=int(approve_id)))
         return render_template("competitor_dashboard.html")
+
+    @app.route("/admin")
+    @login_required_page
+    @admin_required_page
+    def admin_page():
+        """Admin Control Center - user credit management, extension
+        requests, global cost history. Was previously a modal on the Studio
+        Chat page (unreachable via any button that actually existed in the
+        header, and the one working entry point - the user-menu dropdown -
+        never triggered its data-loading calls either); now a standalone,
+        admin-gated page."""
+        return render_template("admin.html")
 
     @app.route("/approve")
     @login_required_page
@@ -101,6 +137,44 @@ def create_app(config_name="development"):
         if get_current_user_id():
             return redirect(url_for("index"))
         return render_template("login.html")
+
+    @app.route("/verify-pending")
+    def verify_pending_page():
+        """Shown right after registration - reachable with no session, since
+        registration no longer logs the user in (see auth/routes.py's
+        register()). Also rendered directly (with an error/email context) by
+        auth/routes.py's verify_email() on an invalid/expired token."""
+        return render_template("verify_pending.html", email=request.args.get("email"))
+
+    @app.route("/onboarding")
+    @login_required_page
+    def onboarding_page():
+        """Account-type selection (Individual/Small/Medium/Enterprise) - the
+        first step after email verification. See
+        POST /api/onboarding/account-type."""
+        return render_template("onboarding_account_type.html")
+
+    @app.route("/onboarding/contact-sales")
+    @login_required_page
+    def onboarding_contact_sales_page():
+        """Enterprise's path instead of self-serve dashboard access. See
+        POST /api/onboarding/contact-sales."""
+        return render_template("onboarding_contact_sales.html")
+
+    @app.route("/account-pending")
+    @login_required_page
+    def account_pending_page():
+        """Shown for any onboarded-but-inactive account - Enterprise users
+        awaiting sales activation, or any account an admin has deactivated
+        (see is_active / set_user_active in db.py)."""
+        return render_template("account_pending.html")
+
+    @app.route("/upgrade-required")
+    @login_required_page
+    def upgrade_required_page():
+        """Shown when a non-Enterprise account tries to reach the Analysis
+        Dashboard (see @enterprise_required_page in auth/utils.py)."""
+        return render_template("upgrade_required.html")
 
     @app.route("/")
     def landing_page():

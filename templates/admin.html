@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Control Center — VortexSocial AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            color: #1f2937;
+            overflow: hidden;
+        }
+
+        .bc-main {
+            margin-top: var(--header-h);
+            height: calc(100vh - var(--header-h));
+            display: flex;
+        }
+
+        .bc-sidebar {
+            width: 260px;
+            flex-shrink: 0;
+            background: #ffffff;
+            border-right: 1px solid #e5e7eb;
+            padding: 1.5rem 1rem;
+            overflow-y: auto;
+        }
+
+        .bc-sidebar-header {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+            padding: 0 0.5rem;
+        }
+
+        .bc-sidebar-header i {
+            font-size: 1.3rem;
+            margin-top: 2px;
+            color: #4f46e5;
+        }
+
+        .bc-nav {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .bc-nav-item {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            background: transparent;
+            border: none;
+            border-radius: 10px;
+            padding: 0.7rem 0.85rem;
+            font-weight: 600;
+            font-size: 0.85rem;
+            color: #4b5563;
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            width: 100%;
+        }
+
+        .bc-nav-item i {
+            width: 18px;
+            text-align: center;
+            color: #9ca3af;
+        }
+
+        .bc-nav-item:hover {
+            background: #f3f4f6;
+            color: #1f2937;
+        }
+
+        .bc-nav-item.active {
+            background: #eef2ff;
+            color: #4f46e5;
+        }
+
+        .bc-nav-item.active i {
+            color: #4f46e5;
+        }
+
+        .bc-nav-item .bc-nav-badge {
+            margin-left: auto;
+            background: #ef4444;
+            color: #fff;
+            font-size: 0.68rem;
+            font-weight: 700;
+            border-radius: 999px;
+            padding: 0.05rem 0.4rem;
+        }
+
+        .bc-content {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 2rem 2.5rem 4rem;
+            background: #f9fafb;
+        }
+
+        .bc-pane-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .bc-pane-header h5 {
+            font-weight: 700;
+            margin-bottom: 0.15rem;
+        }
+
+        .bc-pane-header p {
+            font-size: 0.85rem;
+            color: #6b7280;
+            margin: 0;
+        }
+
+        .brand-config-card {
+            background: #ffffff;
+            border-radius: 14px;
+            border: 1px solid #e5e7eb;
+            padding: 1.75rem;
+        }
+
+        .admin-stat-card-light {
+            background: #ffffff;
+            border-radius: 14px;
+            border: 1px solid #e5e7eb;
+            padding: 1.25rem 1.5rem;
+        }
+
+        .admin-stat-card-light .stat-label {
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: #6b7280;
+            display: block;
+            margin-bottom: 0.35rem;
+        }
+
+        .admin-stat-card-light .stat-value {
+            font-size: 1.6rem;
+            font-weight: 800;
+            margin: 0;
+        }
+
+        .admin-table-light {
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 0;
+        }
+
+        .admin-table-light thead th {
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            color: #6b7280;
+            font-weight: 700;
+            border-bottom: 1px solid #e5e7eb;
+            padding: 0.6rem 0.75rem;
+            background: #f9fafb;
+        }
+
+        .admin-table-light tbody td {
+            padding: 0.65rem 0.75rem;
+            border-bottom: 1px solid #f1f5f9;
+            font-size: 0.85rem;
+            vertical-align: middle;
+        }
+
+        .admin-table-light tbody tr:hover {
+            background: #f9fafb;
+        }
+
+        .admin-table-wrap {
+            background: #ffffff;
+            border-radius: 14px;
+            border: 1px solid #e5e7eb;
+            overflow: hidden;
+        }
+
+        .admin-table-scroll {
+            overflow-x: auto;
+        }
+
+        /* Compact action buttons - all sized identically so rows of mixed
+           actions (credit add / set limit / edit / activate) line up. */
+        .btn-xs {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px 10px;
+            font-size: 11.5px;
+            font-weight: 600;
+            border-radius: 6px;
+            border: 1px solid transparent;
+            cursor: pointer;
+            line-height: 1.5;
+            white-space: nowrap;
+            transition: var(--tr, all 0.15s ease);
+        }
+
+        .btn-xs-credit-add { background: #dcfce7; color: #15803d; border-color: #bbf7d0; }
+        .btn-xs-credit-add:hover { background: #15803d; color: #fff; }
+
+        .btn-xs-outline-info { background: #eff6ff; color: #2563eb; border-color: #bfdbfe; }
+        .btn-xs-outline-info:hover { background: #2563eb; color: #fff; }
+
+        .btn-xs-outline-neutral { background: #f3f4f6; color: #4b5563; border-color: #e5e7eb; }
+        .btn-xs-outline-neutral:hover { background: #4b5563; color: #fff; }
+
+        .btn-xs-outline-success { background: #f0fdf4; color: #16a34a; border-color: #bbf7d0; }
+        .btn-xs-outline-success:hover { background: #16a34a; color: #fff; }
+
+        .btn-xs-outline-danger { background: #fef2f2; color: #dc2626; border-color: #fecaca; }
+        .btn-xs-outline-danger:hover { background: #dc2626; color: #fff; }
+
+        .btn-xs-solid-success { background: #16a34a; color: #fff; }
+        .btn-xs-solid-success:hover { background: #15803d; }
+
+        .btn-xs-solid-danger { background: #dc2626; color: #fff; }
+        .btn-xs-solid-danger:hover { background: #b91c1c; }
+
+        .admin-cell-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+
+        .admin-actions-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        /* Account-type badges - one distinct color per tier so the Users
+           table is scannable at a glance. */
+        .badge-acct {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.3rem;
+            padding: 2px 9px;
+            border-radius: 999px;
+            font-size: 11px;
+            font-weight: 700;
+            white-space: nowrap;
+        }
+
+        .badge-acct-individual { background: #f3f4f6; color: #4b5563; }
+        .badge-acct-small { background: #e0f2fe; color: #0369a1; }
+        .badge-acct-medium { background: #ede9fe; color: #6d28d9; }
+        .badge-acct-enterprise { background: #fef3c7; color: #b45309; }
+        .badge-acct-none { background: #f9fafb; color: #9ca3af; border: 1px dashed #d1d5db; }
+
+        .admin-account-summary {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.6rem;
+            margin-bottom: 1rem;
+        }
+
+        .admin-account-summary .summary-chip {
+            background: #ffffff;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 0.5rem 0.9rem;
+            font-size: 0.78rem;
+            font-weight: 600;
+            color: #4b5563;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            cursor: pointer;
+            transition: var(--tr, all 0.15s ease);
+        }
+
+        .admin-account-summary .summary-chip:hover,
+        .admin-account-summary .summary-chip.active {
+            border-color: #4f46e5;
+            background: #eef2ff;
+            color: #4f46e5;
+        }
+
+        .admin-account-summary .summary-chip .count {
+            font-weight: 800;
+        }
+
+        /* Edit User side panel */
+        .admin-panel-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.35);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.2s ease;
+            z-index: 1040;
+        }
+
+        .admin-panel-backdrop.open {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .admin-side-panel {
+            position: fixed;
+            top: 0;
+            right: 0;
+            height: 100%;
+            width: 380px;
+            max-width: 92vw;
+            background: #ffffff;
+            box-shadow: -12px 0 30px rgba(0, 0, 0, 0.12);
+            transform: translateX(100%);
+            transition: transform 0.25s ease;
+            z-index: 1050;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .admin-side-panel.open {
+            transform: translateX(0);
+        }
+
+        .admin-side-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 1.25rem 1.5rem;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .admin-side-panel-header h5 {
+            margin: 0;
+            font-weight: 700;
+            font-size: 1rem;
+        }
+
+        .admin-side-panel-close {
+            background: transparent;
+            border: none;
+            color: #6b7280;
+            font-size: 1.1rem;
+            cursor: pointer;
+            padding: 4px;
+            line-height: 1;
+        }
+
+        .admin-side-panel-close:hover {
+            color: #1f2937;
+        }
+
+        .admin-side-panel-body {
+            padding: 1.5rem;
+            overflow-y: auto;
+            flex-grow: 1;
+        }
+
+        .admin-side-panel-meta {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.75rem;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            border-radius: 10px;
+            padding: 0.9rem 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .admin-side-panel-meta div {
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+        }
+
+        .admin-side-panel-meta span {
+            font-size: 0.68rem;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+            color: #9ca3af;
+            font-weight: 700;
+        }
+
+        .admin-side-panel-meta strong {
+            font-size: 0.85rem;
+            color: #1f2937;
+        }
+
+        .admin-form-group {
+            margin-bottom: 1.1rem;
+        }
+
+        .admin-form-group label {
+            display: block;
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: #4b5563;
+            margin-bottom: 0.35rem;
+        }
+
+        .admin-form-error {
+            background: #fef2f2;
+            color: #b91c1c;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            padding: 0.6rem 0.8rem;
+            font-size: 0.8rem;
+        }
+
+        .admin-side-panel-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.6rem;
+            padding: 1rem 1.5rem;
+            border-top: 1px solid #e5e7eb;
+        }
+    </style>
+</head>
+<body>
+    <header class="app-header">
+        <div class="header-brand">
+            <div class="brand-logo"></div>
+            <div class="brand-text">
+                <span class="brand-name">VortexSocial AI</span>
+                <span class="brand-tagline">Admin Control Center</span>
+            </div>
+        </div>
+        <nav class="header-nav">
+            <a href="/dashboard" class="header-nav-item"><i class="fas fa-comments me-2"></i>Studio Chat</a>
+            <a href="/admin" class="header-nav-item active"><i class="fas fa-user-shield me-1"></i>Admin Control Center</a>
+        </nav>
+        <div class="header-actions">
+            <a href="/dashboard" class="btn-secondary-ent text-decoration-none me-2">
+                <i class="fas fa-arrow-left me-1"></i>Back to Studio Chat
+            </a>
+        </div>
+    </header>
+
+    <div class="bc-main">
+        <aside class="bc-sidebar">
+            <div class="bc-sidebar-header">
+                <i class="fas fa-user-shield"></i>
+                <div>
+                    <div style="font-weight:700; font-size:0.95rem;">Admin Control Center</div>
+                    <div style="font-size:0.75rem; color:#6b7280;">Users, requests &amp; cost history</div>
+                </div>
+            </div>
+            <nav class="bc-nav">
+                <button type="button" class="bc-nav-item active" data-admin-tab="users" onclick="switchAdminTab('users')">
+                    <i class="fas fa-users"></i> User Credits &amp; Limits
+                </button>
+                <button type="button" class="bc-nav-item" data-admin-tab="requests" onclick="switchAdminTab('requests')">
+                    <i class="fas fa-clock-rotate-left"></i> Extension Requests
+                    <span class="bc-nav-badge d-none" id="adminPendingBadge">0</span>
+                </button>
+                <button type="button" class="bc-nav-item" data-admin-tab="cost" onclick="switchAdminTab('cost')">
+                    <i class="fas fa-chart-line"></i> Global Cost History
+                </button>
+            </nav>
+        </aside>
+
+        <main class="bc-content">
+            <!-- PANE: USER CREDITS MANAGEMENT -->
+            <div class="admin-pane" id="adminPaneUsers">
+                <div class="bc-pane-header">
+                    <div>
+                        <h5><i class="fas fa-users text-primary me-2"></i>Registered Users &amp; Credit Allocations</h5>
+                        <p>Manage per-user credit limits and account access.</p>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <select id="adminAccountTypeFilter" class="form-select form-select-sm w-auto">
+                            <option value="">All Account Types</option>
+                            <option value="individual">Individual</option>
+                            <option value="small">Small Industry</option>
+                            <option value="medium">Medium Industry</option>
+                            <option value="enterprise">Enterprise</option>
+                            <option value="none">Not Set</option>
+                        </select>
+                        <input type="text" id="adminUserSearchInput" class="form-control form-control-sm w-auto" placeholder="Search by name or email...">
+                    </div>
+                </div>
+
+                <div class="admin-account-summary" id="adminAccountSummary"></div>
+
+                <div class="admin-table-wrap">
+                    <div class="admin-table-scroll">
+                        <table class="admin-table-light" id="adminUsersTable">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>User Name</th>
+                                    <th>Email</th>
+                                    <th>Role</th>
+                                    <th>Credit Limit</th>
+                                    <th>Used Cost</th>
+                                    <th>Remaining</th>
+                                    <th>Status</th>
+                                    <th>Account</th>
+                                    <th>Actions / Add Credits</th>
+                                </tr>
+                            </thead>
+                            <tbody id="adminUsersTbody">
+                                <tr>
+                                    <td colspan="10" class="text-center py-4 text-muted">Loading user credits...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PANE: CREDIT EXTENSION REQUESTS -->
+            <div class="admin-pane d-none" id="adminPaneRequests">
+                <div class="bc-pane-header">
+                    <div>
+                        <h5><i class="fas fa-coins text-warning me-2"></i>Credit Extension Requests</h5>
+                        <p>Review and decide on user credit extension requests.</p>
+                    </div>
+                    <div class="btn-group btn-group-sm">
+                        <button type="button" class="btn btn-outline-secondary active" id="filterReqAll">All</button>
+                        <button type="button" class="btn btn-outline-secondary" id="filterReqPending">Pending Only</button>
+                    </div>
+                </div>
+                <div class="admin-table-wrap">
+                    <div class="admin-table-scroll">
+                        <table class="admin-table-light" id="adminReqTable">
+                            <thead>
+                                <tr>
+                                    <th>Req ID</th>
+                                    <th>User</th>
+                                    <th>Current Limit</th>
+                                    <th>Requested Add</th>
+                                    <th>Reason / Note</th>
+                                    <th>Date</th>
+                                    <th>Status</th>
+                                    <th>Decision Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="adminReqTbody">
+                                <tr>
+                                    <td colspan="8" class="text-center py-4 text-muted">Loading extension requests...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PANE: GLOBAL COST HISTORY -->
+            <div class="admin-pane d-none" id="adminPaneCost">
+                <div class="bc-pane-header">
+                    <div>
+                        <h5><i class="fas fa-chart-line text-primary me-2"></i>Global Cost History</h5>
+                        <p>System-wide LLM usage and spend across all users.</p>
+                    </div>
+                </div>
+
+                <div class="row mb-3 g-3">
+                    <div class="col-md-6">
+                        <div class="admin-stat-card-light">
+                            <span class="stat-label">Total System Accumulated Cost</span>
+                            <h3 class="stat-value text-success" id="adminTotalSystemCost">$0.0000</h3>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="admin-stat-card-light">
+                            <span class="stat-label">Total LLM Tokens Consumed</span>
+                            <h3 class="stat-value text-warning" id="adminTotalSystemTokens">0</h3>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="admin-table-wrap">
+                    <div class="admin-table-scroll">
+                        <table class="admin-table-light" id="adminCostHistoryTable">
+                            <thead>
+                                <tr>
+                                    <th>Run ID</th>
+                                    <th>User Email</th>
+                                    <th>Timestamp</th>
+                                    <th>Prompt Excerpt</th>
+                                    <th>Tone &amp; Channels</th>
+                                    <th>Tokens</th>
+                                    <th>Cost ($USD)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="adminCostHistoryTbody">
+                                <tr>
+                                    <td colspan="7" class="text-center py-4 text-muted">Loading global cost log...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Edit User panel - slides in from the right -->
+    <div class="admin-panel-backdrop" id="editUserBackdrop" onclick="closeEditUserPanel()"></div>
+    <aside class="admin-side-panel" id="editUserPanel">
+        <div class="admin-side-panel-header">
+            <h5><i class="fas fa-user-pen text-primary me-2"></i>Edit User Details</h5>
+            <button type="button" class="admin-side-panel-close" onclick="closeEditUserPanel()">
+                <i class="fas fa-xmark"></i>
+            </button>
+        </div>
+        <div class="admin-side-panel-body">
+            <div class="admin-side-panel-meta">
+                <div><span>User ID</span><strong id="editUserId">—</strong></div>
+                <div><span>Account Type</span><strong id="editUserAccountType">—</strong></div>
+                <div><span>Status</span><strong id="editUserStatus">—</strong></div>
+                <div><span>Credit Limit</span><strong id="editUserCreditLimit">—</strong></div>
+            </div>
+
+            <div class="admin-form-group">
+                <label for="editUserNameInput">Full Name</label>
+                <input type="text" id="editUserNameInput" class="form-control form-control-sm">
+            </div>
+            <div class="admin-form-group">
+                <label for="editUserEmailInput">Email Address</label>
+                <input type="email" id="editUserEmailInput" class="form-control form-control-sm">
+            </div>
+            <div class="admin-form-group">
+                <label for="editUserAccountTypeSelect">Account Type</label>
+                <select id="editUserAccountTypeSelect" class="form-select form-select-sm">
+                    <option value="">Not set</option>
+                    <option value="individual">Individual</option>
+                    <option value="small">Small Industry</option>
+                    <option value="medium">Medium Industry</option>
+                    <option value="enterprise">Enterprise</option>
+                </select>
+            </div>
+            <div class="admin-form-group">
+                <label for="editUserWebsiteInput">Company Website</label>
+                <input type="text" id="editUserWebsiteInput" class="form-control form-control-sm" placeholder="https://example.com">
+            </div>
+            <div class="admin-form-error d-none" id="editUserFormError"></div>
+        </div>
+        <div class="admin-side-panel-footer">
+            <button type="button" class="btn-xs btn-xs-outline-neutral" onclick="closeEditUserPanel()">Cancel</button>
+            <button type="button" class="btn-xs btn-xs-solid-success" id="editUserSaveBtn" onclick="submitEditUserProfile()">
+                <i class="fas fa-check me-1"></i>Save Changes
+            </button>
+        </div>
+    </aside>
+
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div id="toast" class="ent-toast" role="alert">
+            <div class="ent-toast-body" id="toastBody"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script>
+        function switchAdminTab(tab) {
+            document.querySelectorAll('.bc-nav-item').forEach(function (btn) {
+                btn.classList.toggle('active', btn.getAttribute('data-admin-tab') === tab);
+            });
+            document.querySelectorAll('.admin-pane').forEach(function (pane) {
+                pane.classList.add('d-none');
+            });
+            var paneMap = { users: 'adminPaneUsers', requests: 'adminPaneRequests', cost: 'adminPaneCost' };
+            var pane = document.getElementById(paneMap[tab]);
+            if (pane) pane.classList.remove('d-none');
+        }
+    </script>
+    <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+</body>
+</html>

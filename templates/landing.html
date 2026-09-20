@@ -50,18 +50,31 @@
         .btn-nav-primary:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4); }
 
         /* CREATIVE HERO SECTION */
-        .hero { position: relative; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 120px 24px 60px; text-align: center; overflow: hidden; }
+        .hero { position: relative; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 160px 24px 60px; text-align: center; overflow: hidden; }
         .hero-bg-mesh { position: absolute; top: -20%; left: -10%; width: 120%; height: 120%; z-index: -1; background-image: radial-gradient(at 40% 20%, hsla(228,100%,74%,1) 0px, transparent 50%), radial-gradient(at 80% 0%, hsla(189,100%,56%,1) 0px, transparent 50%), radial-gradient(at 0% 50%, hsla(355,100%,93%,1) 0px, transparent 50%); filter: blur(80px); opacity: 0.5; animation: blob-bounce 20s infinite alternate; }
-        
+
         .hero-title { font-size: clamp(3.5rem, 6vw, 5.5rem); font-weight: 900; line-height: 1.05; letter-spacing: -0.04em; margin-bottom: 24px; max-width: 1000px; z-index: 1; }
         .hero-subtitle { font-size: clamp(1.1rem, 2vw, 1.3rem); color: var(--text-muted); max-width: 650px; margin-bottom: 40px; font-weight: 400; z-index: 1; }
-        
-        .hero-cta-wrapper { position: relative; z-index: 1; display: inline-block; margin-bottom: 60px; }
-        .hero-cta { display: inline-flex; align-items: center; justify-content: center; padding: 18px 48px; font-size: 18px; font-weight: 700; color: #fff; background: var(--brand-gradient); border-radius: 99px; transition: all 0.3s ease; box-shadow: 0 10px 30px rgba(79, 70, 229, 0.3); animation: pulse-glow 3s infinite; position: relative; overflow: hidden; }
+
+        .hero-cta-wrapper { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 16px; margin-bottom: 60px; }
+        .hero-cta { display: inline-flex; align-items: center; justify-content: center; gap: 10px; padding: 18px 48px; font-size: 18px; font-weight: 700; color: #fff; background: var(--brand-gradient); border-radius: 99px; transition: transform 0.3s ease, box-shadow 0.3s ease; box-shadow: 0 10px 30px rgba(79, 70, 229, 0.3); animation: pulse-glow 3s infinite; position: relative; overflow: hidden; }
+        .hero-cta i { transition: transform 0.3s ease; }
         .hero-cta::before { content: ''; position: absolute; top: 0; left: -100%; width: 100%; height: 100%; background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent); transition: 0.5s; }
         .hero-cta:hover::before { left: 100%; }
         .hero-cta:hover { transform: translateY(-3px) scale(1.05); box-shadow: 0 15px 40px rgba(79, 70, 229, 0.5); }
-        
+        .hero-cta:hover i { transform: translateX(4px); }
+        .hero-cta:focus-visible { outline: 3px solid #4F46E5; outline-offset: 4px; }
+
+        .hero-scroll-cue {
+            position: absolute; bottom: 28px; left: 50%; transform: translateX(-50%); z-index: 1;
+            display: flex; flex-direction: column; align-items: center; gap: 6px;
+            font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted);
+            opacity: 0.7; transition: opacity 0.3s ease;
+        }
+        .hero-scroll-cue:hover { opacity: 1; }
+        .hero-scroll-cue i { animation: scroll-bounce 2s ease-in-out infinite; }
+        @keyframes scroll-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
+
         /* Interactive Mockup Scene */
         .hero-scene { position: relative; width: 100%; max-width: 1000px; height: 400px; z-index: 1; margin-top: 20px; perspective: 1200px; }
         
@@ -174,6 +187,30 @@
             .step-text, .step-visual-wrap { width: 100%; padding-left: 80px; text-align: left; }
             .step-visual-wrap { margin-top: 40px; }
             .interactive-card-3d { transform: none !important; padding: 24px; }
+
+            /* The mockup scene's floating cards (left:-5%/right:-5%) and fixed
+               400px height overflowed/clipped on tablet-and-down with nothing
+               to pull them back in - anchor them inside the scene and shrink
+               to fit instead. */
+            .hero { padding-top: 140px; }
+            .hero-scene { height: 340px; }
+            .hero-card-1 { left: 0; }
+            .hero-card-2 { right: 0; }
+        }
+
+        @media (max-width: 640px) {
+            .hero { padding-top: 120px; padding-bottom: 90px; }
+            .hero-scene { height: auto; min-height: 320px; }
+            .hero-main-dashboard { position: relative; top: 0; left: 0; transform: none; width: 100%; animation: none; padding: 20px; }
+            .hero-floating-card { position: relative; top: auto; left: auto; right: auto; bottom: auto; margin-top: 16px; animation: none; }
+            .hero-orbit { display: none; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .hero-bg-mesh, .hero-orbit, .hero-main-dashboard, .hero-floating-card,
+            .hero-cta, .hero-scroll-cue i, .typewriter-text {
+                animation: none !important;
+            }
         }
     </style>
 </head>
@@ -192,27 +229,28 @@
 
     <!-- CREATIVE INTERACTIVE HERO -->
     <header class="hero">
-        <div class="hero-bg-mesh"></div>
-        
+        <div class="hero-bg-mesh" aria-hidden="true"></div>
+
         <h1 class="hero-title">
             Put Your Social Strategy<br>
             <span class="text-gradient">On Autopilot</span>
         </h1>
-        
+
         <p class="hero-subtitle">
             Deploy intelligent agents that analyze your business, predict market trends, and execute full-funnel content campaigns entirely on their own.
         </p>
-        
+
         <div class="hero-cta-wrapper">
             <a href="/login" class="hero-cta">
                 Deploy Your AI Agent
+                <i class="fas fa-arrow-right" aria-hidden="true"></i>
             </a>
         </div>
 
         <!-- Advanced Mockup Scene -->
         <div class="hero-scene">
-            <div class="hero-orbit"></div>
-            
+            <div class="hero-orbit" aria-hidden="true"></div>
+
             <div class="hero-main-dashboard">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; border-bottom: 1px solid rgba(0,0,0,0.05); padding-bottom: 16px;">
                     <div style="display: flex; gap: 8px;">
@@ -265,10 +303,15 @@
                 </div>
             </div>
         </div>
+
+        <a href="#workflow" class="hero-scroll-cue" aria-label="Scroll to see how it works">
+            See how it works
+            <i class="fas fa-chevron-down" aria-hidden="true"></i>
+        </a>
     </header>
 
     <!-- CREATIVE NARRATIVE WORKFLOW SECTION -->
-    <section class="workflow-section">
+    <section class="workflow-section" id="workflow">
         <div class="workflow-header">
             <h2>The Autonomous Journey</h2>
             <p style="color: #64748B; font-size: 1.2rem; max-width: 600px; margin: 0 auto;">Watch how our agents transform raw brand data into a viral social media presence in four intelligent steps.</p>

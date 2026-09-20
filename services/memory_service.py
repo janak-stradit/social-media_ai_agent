@@ -129,7 +129,15 @@ class MemoryService:
         for idx, item in enumerate(retrieved_items, 1):
             lines.append(f"Memory #{idx}: {item['content']}")
         lines.append(
-            "Instructions: Use the brand voice, themes, and winning patterns above for consistency.\n--- END MEMORY CONTEXT ---\n"
+            "Instructions: This memory is a MINOR input - weight it at roughly 20% of your analysis, for "
+            "tone/style/structural consistency only. The remaining ~80% MUST come from your own fresh, "
+            "independent research and reasoning about the actual topic in the current request - do not "
+            "let these past examples substitute for that research, and do not lean on them just because "
+            "they exist. Do not copy any company name or self-reference from these past examples (e.g. a "
+            "past brand-voice/tone label may have been mistakenly used as a company name) - always use "
+            "the company name given in the current request's own instructions instead; these examples "
+            "are not a source of truth for facts or the company name.\n"
+            "--- END MEMORY CONTEXT ---\n"
         )
         return "\n".join(lines)
 

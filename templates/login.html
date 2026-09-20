@@ -13,7 +13,13 @@
 <div class="auth-split-layout">
     <div class="auth-left-pane">
         <div class="auth-brand-logo">
-            
+            <span class="auth-brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                    <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+                </svg>
+            </span>
             VortexSocial AI
         </div>
 
@@ -23,23 +29,28 @@
         <form id="authForm" style="width: 100%; max-width: 360px;">
             <div id="nameField" class="auth-form-group d-none" style="display: none;">
                 <label class="auth-form-label" for="authName">Full Name</label>
-                <input id="authName" type="text" class="auth-form-input" placeholder="e.g. Alex Morgan">
+                <input id="authName" type="text" class="auth-form-input" placeholder="e.g. Alex Morgan" autocomplete="name">
             </div>
 
             <div class="auth-form-group">
                 <label class="auth-form-label" for="authEmail">Email</label>
-                <input id="authEmail" type="email" class="auth-form-input" placeholder="name@email.com" required>
+                <input id="authEmail" type="email" class="auth-form-input" placeholder="name@email.com" autocomplete="email" required>
             </div>
 
             <div class="auth-form-group">
                 <label class="auth-form-label" for="authPassword">Password</label>
-                <input id="authPassword" type="password" class="auth-form-input" placeholder="••••••••" required>
+                <div class="auth-password-wrap">
+                    <input id="authPassword" type="password" class="auth-form-input" placeholder="••••••••" autocomplete="current-password" required>
+                    <button type="button" class="auth-password-toggle" id="togglePasswordBtn" aria-label="Show password" aria-pressed="false">
+                        <i class="fas fa-eye" aria-hidden="true"></i>
+                    </button>
+                </div>
             </div>
 
-            <div id="authError" style="color: #EF4444; font-size: 13px; margin-bottom: 12px; display: none;"></div>
+            <div id="authError" style="color: #EF4444; font-size: 13px; margin-bottom: 12px; display: none;" role="alert"></div>
 
             <button id="authSubmit" type="submit" class="btn-primary-blue">
-                Log in
+                <span id="authSubmitText">Log in</span>
             </button>
         </form>
 
@@ -52,7 +63,7 @@
         </div>
     </div>
 
-    <div class="auth-right-pane" id="sceneContainer">
+    <div class="auth-right-pane" id="sceneContainer" aria-hidden="true">
         <div style="position: absolute; inset: 0; background: linear-gradient(135deg, #F8FAFC 0%, #EEF2FF 50%, #E0E7FF 100%); display: flex; align-items: center; justify-content: center; overflow: hidden; perspective: 1000px;">
             <div style="position: absolute; width: 150%; height: 150%; background: radial-gradient(circle at center, rgba(255,255,255,0.9) 0%, transparent 60%); z-index: 1; pointer-events: none;"></div>
             
@@ -122,48 +133,42 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script>
     let mode = 'login';
-    
-    $('#toggleModeBtn').click(function(e) {
+
+    // Single delegated handler - #toggleModeBtn's parent gets its innerHTML
+    // replaced on every toggle, so this must stay delegated (an element-bound
+    // .click() handler here would double-fire alongside this one on the
+    // first click, since both match the same click event, and the two
+    // branches would immediately undo each other - mode toggled to
+    // 'register' then straight back to 'login' in the same click).
+    $(document).on('click', '#toggleModeBtn', function (e) {
         e.preventDefault();
         if (mode === 'login') {
             mode = 'register';
             $('#nameField').show();
             $('.auth-heading').text('Create account');
             $('.auth-subheading').text('Welcome to VortexSocial AI');
-            $('#authSubmit').text('Sign up');
-            $(this).text('Log in');
-            $(this).parent().html(`Already have an account? <a href="#" class="auth-link-bold" id="toggleModeBtn">Log in</a>`);
+            $('#authSubmitText').text('Sign up');
+            $(this).parent().html('Already have an account? <a href="#" class="auth-link-bold" id="toggleModeBtn">Log in</a>');
         } else {
             mode = 'login';
             $('#nameField').hide();
             $('.auth-heading').text('Hi there!');
             $('.auth-subheading').text('Have we met before?');
-            $('#authSubmit').text('Log in');
-            $(this).text('Sign up');
-            $(this).parent().html(`Don't have an account? <a href="#" class="auth-link-bold" id="toggleModeBtn">Sign up</a>`);
+            $('#authSubmitText').text('Log in');
+            $(this).parent().html('Don\'t have an account? <a href="#" class="auth-link-bold" id="toggleModeBtn">Sign up</a>');
         }
     });
 
-    $(document).on('click', '#toggleModeBtn', function(e) {
-        e.preventDefault();
-        if (mode === 'login') {
-            mode = 'register';
-            $('#nameField').show();
-            $('.auth-heading').text('Create account');
-            $('.auth-subheading').text('Welcome to VortexSocial AI');
-            $('#authSubmit').text('Sign up');
-            $(this).parent().html(`Already have an account? <a href="#" class="auth-link-bold" id="toggleModeBtn">Log in</a>`);
-        } else {
-            mode = 'login';
-            $('#nameField').hide();
-            $('.auth-heading').text('Hi there!');
-            $('.auth-subheading').text('Have we met before?');
-            $('#authSubmit').text('Log in');
-            $(this).parent().html(`Don't have an account? <a href="#" class="auth-link-bold" id="toggleModeBtn">Sign up</a>`);
-        }
+    // Password show/hide toggle
+    $('#togglePasswordBtn').on('click', function () {
+        const $input = $('#authPassword');
+        const showing = $input.attr('type') === 'text';
+        $input.attr('type', showing ? 'password' : 'text');
+        $(this).attr('aria-pressed', String(!showing)).attr('aria-label', showing ? 'Show password' : 'Hide password');
+        $(this).find('i').toggleClass('fa-eye fa-eye-slash');
     });
 
-    $('#authForm').on('submit', function(e) {
+    $('#authForm').on('submit', function (e) {
         e.preventDefault();
         $('#authError').hide();
 
@@ -177,50 +182,72 @@
             payload.name = $('#authName').val();
         }
 
+        const $submitBtn = $('#authSubmit');
+        const submittingLabel = mode === 'login' ? 'Signing in...' : 'Creating account...';
+        const originalLabel = $('#authSubmitText').text();
+        $submitBtn.prop('disabled', true);
+        $('#authSubmitText').html('<i class="fas fa-spinner fa-spin"></i> ' + submittingLabel);
+
         $.ajax({
             url: endpoint,
             type: 'POST',
             contentType: 'application/json',
             data: JSON.stringify(payload),
-            success: function(res) {
+            success: function (res) {
                 if (res.success) {
-                    window.location.href = '/dashboard';
+                    if (mode === 'register') {
+                        // Registration no longer logs the user in directly -
+                        // they need to verify their email first (see
+                        // auth/routes.py's register()/verify_email()).
+                        window.location.href = '/verify-pending?email=' + encodeURIComponent(payload.email);
+                    } else {
+                        window.location.href = '/dashboard';
+                    }
+                } else {
+                    $submitBtn.prop('disabled', false);
+                    $('#authSubmitText').text(originalLabel);
                 }
             },
-            error: function(xhr) {
+            error: function (xhr) {
                 const msg = xhr.responseJSON ? xhr.responseJSON.error : 'An error occurred';
                 $('#authError').text(msg).show();
+                $submitBtn.prop('disabled', false);
+                $('#authSubmitText').text(originalLabel);
             }
         });
     });
 
-    // Parallax effect for the 3D scene
-    document.addEventListener('mousemove', function(e) {
-        const container = document.getElementById('sceneContainer');
-        if(!container) return;
-        const rect = container.getBoundingClientRect();
-        
-        // Only run if mouse is inside the right pane
-        if(e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
+    // Parallax effect for the 3D scene - skipped entirely for users who've
+    // asked the OS for reduced motion, not just visually disabled via CSS.
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!prefersReducedMotion) {
+        document.addEventListener('mousemove', function (e) {
+            const container = document.getElementById('sceneContainer');
+            if (!container) return;
+            const rect = container.getBoundingClientRect();
 
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
+            // Only run if mouse is inside the right pane
+            if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
 
-        const xRatio = (x / rect.width) - 0.5;
-        const yRatio = (y / rect.height) - 0.5;
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
 
-        // Rotate the entire scene slightly
-        const scene = document.getElementById('interactiveScene');
-        scene.style.transform = `rotateY(${xRatio * 10}deg) rotateX(${-yRatio * 10}deg)`;
+            const xRatio = (x / rect.width) - 0.5;
+            const yRatio = (y / rect.height) - 0.5;
 
-        // Move individual shapes at different speeds
-        document.querySelectorAll('.shape').forEach(shape => {
-            const speed = parseFloat(shape.getAttribute('data-speed')) || 0.05;
-            const moveX = xRatio * rect.width * speed;
-            const moveY = yRatio * rect.height * speed;
-            shape.style.transform = `translate(${moveX}px, ${moveY}px) ${shape.style.transform.replace(/translate\([^)]+\)\s*/, '')}`;
+            // Rotate the entire scene slightly
+            const scene = document.getElementById('interactiveScene');
+            scene.style.transform = `rotateY(${xRatio * 10}deg) rotateX(${-yRatio * 10}deg)`;
+
+            // Move individual shapes at different speeds
+            document.querySelectorAll('.shape').forEach(shape => {
+                const speed = parseFloat(shape.getAttribute('data-speed')) || 0.05;
+                const moveX = xRatio * rect.width * speed;
+                const moveY = yRatio * rect.height * speed;
+                shape.style.transform = `translate(${moveX}px, ${moveY}px) ${shape.style.transform.replace(/translate\([^)]+\)\s*/, '')}`;
+            });
         });
-    });
+    }
 </script>
 </body>
 </html>
