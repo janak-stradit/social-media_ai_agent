@@ -7,13 +7,13 @@
     <title>Analysis Dashboard - VortexSocial AI</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap"
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&display=swap"
         rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
         :root {
-            --primary: #4f46e5;
-            --primary-hover: #4338ca;
+            --primary: #7366ff;
+            --primary-hover: #5b4fd6;
             --bg-gradient: linear-gradient(135deg, #f3f4f6 0%, #ffffff 100%);
             --glass-bg: rgba(255, 255, 255, 0.85);
             --glass-border: rgba(255, 255, 255, 0.5);
@@ -24,7 +24,7 @@
 
         body {
             background: var(--bg-gradient);
-            font-family: 'Inter', sans-serif;
+            font-family: 'Rubik', sans-serif;
             color: #1f2937;
             min-height: 100vh;
         }
@@ -43,19 +43,19 @@
         }
 
         .premium-btn {
-            background: linear-gradient(135deg, var(--primary) 0%, #6366f1 100%);
+            background: linear-gradient(135deg, var(--primary) 0%, #7366ff 100%);
             color: white;
             border: none;
             border-radius: 999px;
             padding: 0.5rem 1.25rem;
             font-weight: 700;
             transition: var(--transition);
-            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+            box-shadow: 0 4px 12px rgba(115, 102, 255, 0.3);
         }
 
         .premium-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 6px 16px rgba(79, 70, 229, 0.4);
+            box-shadow: 0 6px 16px rgba(115, 102, 255, 0.4);
             color: white;
         }
 
@@ -130,7 +130,7 @@
         }
 
         .quick-start-tab .badge.badge-urgent {
-            background: #f59e0b;
+            background: #ffa941;
             animation: festive-badge-pulse 1.6s ease-in-out infinite;
         }
 
@@ -138,11 +138,11 @@
 
             0%,
             100% {
-                box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.55);
+                box-shadow: 0 0 0 0 rgba(255, 169, 65, 0.55);
             }
 
             50% {
-                box-shadow: 0 0 0 4px rgba(245, 158, 11, 0);
+                box-shadow: 0 0 0 4px rgba(255, 169, 65, 0);
             }
         }
 
@@ -168,7 +168,7 @@
             border-color: var(--primary);
             outline: none;
             background: white;
-            box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.1);
+            box-shadow: 0 0 0 4px rgba(115, 102, 255, 0.1);
         }
 
         .select-icon {
@@ -207,7 +207,7 @@
         }
 
         .competitor-post-card:hover {
-            border-color: #c7d2fe;
+            border-color: #c7c0ff;
             transform: translateY(-4px);
             box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
         }
@@ -246,11 +246,11 @@
             background: #ffffff;
             border-color: var(--primary);
             outline: none;
-            box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.1);
+            box-shadow: 0 0 0 4px rgba(115, 102, 255, 0.1);
         }
 
         .badge-premium {
-            background: rgba(79, 70, 229, 0.1);
+            background: rgba(115, 102, 255, 0.1);
             color: var(--primary);
             font-weight: 700;
             padding: 0.4rem 0.8rem;
@@ -337,7 +337,7 @@
         }
 
         .pipeline-stage-row-clickable:hover {
-            background: rgba(79, 70, 229, 0.05);
+            background: rgba(115, 102, 255, 0.05);
         }
 
         .pipeline-stage-row-clickable:hover .pipeline-step-dot {
@@ -353,7 +353,7 @@
            right, distinct from the muted primary-text used for reached-but-
            not-currently-viewed stages. */
         .pipeline-stage-row-active {
-            background: rgba(79, 70, 229, 0.08);
+            background: rgba(115, 102, 255, 0.08);
         }
 
         /* Pipeline Stage Detail Modal as a right-docked slide-in panel
@@ -854,7 +854,7 @@
                                     </button>
                                 </div>
                                 <div id="structuredOutput" class="flex-grow-1 p-3"
-                                    style="background:#f0fdf4; min-height:0; overflow-y:auto; overflow-x:hidden; font-size:0.82rem;">
+                                    style="background:#eaf7e8; min-height:0; overflow-y:auto; overflow-x:hidden; font-size:0.82rem;">
                                     <!-- Populated by JS -->
                                 </div>
                                 <div class="synth-action-bar flex-column gap-2 flex-shrink-0">
@@ -1044,10 +1044,10 @@
         <div class="modal-dialog modal-dialog-scrollable">
             <div class="modal-content" style="border: none;">
                 <div class="modal-header border-0 py-3 px-4"
-                    style="background: linear-gradient(135deg, rgba(79,70,229,0.06) 0%, rgba(99,102,241,0.02) 100%);">
+                    style="background: linear-gradient(135deg, rgba(115, 102, 255,0.06) 0%, rgba(115, 102, 255,0.02) 100%);">
                     <div class="d-flex align-items-center gap-3">
                         <div class="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0 shadow-sm"
-                            style="width: 40px; height: 40px; background: rgba(79, 70, 229, 0.1); color: var(--primary);">
+                            style="width: 40px; height: 40px; background: rgba(115, 102, 255, 0.1); color: var(--primary);">
                             <i class="fas fa-layer-group"></i>
                         </div>
                         <div>

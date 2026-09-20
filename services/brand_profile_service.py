@@ -34,6 +34,10 @@ def run_brand_analysis(user_id: int, website: str) -> bool:
         content_dos=profile.get("content_dos"),
         content_donts=profile.get("content_donts"),
         suggested_post_ideas=profile.get("suggested_post_ideas"),
+        tagline=profile.get("tagline"),
+        visual_style=profile.get("visual_style"),
+        fonts=profile.get("fonts"),
+        logo_url=profile.get("logo_url"),
     )
     return True
 
@@ -61,12 +65,16 @@ def build_brand_profile_block(user_id: int | None) -> str:
             f'Company name: {name} - this IS the actual company; refer to it by this name '
             f'(e.g. "At {name}, we..."), never by any brand-voice/tone label and never as StradIT.'
         )
+    if profile.get("tagline"):
+        lines.append(f'Tagline: "{profile["tagline"]}"')
     if profile.get("industry"):
         lines.append(f"Industry: {profile['industry']}")
     if profile.get("target_audience"):
         lines.append(f"Target audience: {profile['target_audience']}")
     if profile.get("brand_voice_summary"):
         lines.append(f"Brand voice: {profile['brand_voice_summary']}")
+    if profile.get("visual_style"):
+        lines.append(f"Visual style: {profile['visual_style']}")
     if profile.get("key_themes"):
         lines.append(f"Recurring themes: {', '.join(profile['key_themes'])}")
     if profile.get("primary_colors"):

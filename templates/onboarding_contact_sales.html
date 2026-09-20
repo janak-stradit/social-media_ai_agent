@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Contact Sales — VortexSocial AI</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
         body {
             min-height: 100vh; display: flex; align-items: center; justify-content: center;
-            background: linear-gradient(135deg, #F8FAFC 0%, #EEF2FF 50%, #E0E7FF 100%);
-            font-family: 'Inter', system-ui, sans-serif; margin: 0; padding: 24px;
+            background: linear-gradient(135deg, #F8FAFC 0%, #F1EFFF 50%, #F1EFFF 100%);
+            font-family: 'Rubik', system-ui, sans-serif; margin: 0; padding: 24px;
         }
         .sales-card {
             max-width: 460px; width: 100%; background: #fff; border-radius: 20px; padding: 48px;
@@ -19,12 +19,12 @@
         }
         .sales-heading { font-size: 24px; font-weight: 700; color: #111827; letter-spacing: -0.02em; margin-bottom: 8px; text-align: center; }
         .sales-subheading { font-size: 14px; color: #6B7280; text-align: center; margin-bottom: 28px; line-height: 1.6; }
-        #salesError { color: #EF4444; font-size: 13px; margin-top: 4px; margin-bottom: 12px; display: none; }
+        #salesError { margin-top: 4px; margin-bottom: 12px; display: none; }
         .d-none { display: none !important; }
 
         .confirm-icon {
             width: 64px; height: 64px; border-radius: 16px; margin: 0 auto 20px;
-            background: linear-gradient(135deg, #10B981, #059669); display: flex; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, #54BA4A, #3f9536); display: flex; align-items: center; justify-content: center;
         }
         .confirm-icon i { color: #fff; font-size: 26px; }
     </style>
@@ -60,7 +60,7 @@
                     <textarea id="companyMessage" class="auth-form-input" style="height: 90px; padding-top: 10px; resize: vertical;" placeholder="Team size, use case, timeline..."></textarea>
                 </div>
 
-                <div id="salesError" role="alert"></div>
+                <div id="salesError" class="alert-inline alert-inline-danger" role="alert"></div>
 
                 <button id="salesSubmitBtn" type="submit" class="btn-primary-blue">
                     <span id="salesSubmitBtnText">Request a call</span>

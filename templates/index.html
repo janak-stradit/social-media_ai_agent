@@ -7,7 +7,7 @@
     <meta name="description" content="Enterprise AI-powered social media content generation platform. Chat with multi-agent AI to create platform-optimized captions, hashtags, and visual assets.">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
 </head>
 <body>
@@ -82,6 +82,11 @@
                     </a>
                 </li>
                 <li>
+                    <a class="dropdown-item py-2 px-3 rounded-2 font-medium" href="/approve">
+                        <i class="fas fa-clipboard-check text-primary me-2"></i>Approval Requests
+                    </a>
+                </li>
+                <li>
                     <button class="dropdown-item py-2 px-3 rounded-2 text-navy font-medium" type="button" id="dropHeaderModelInfoBtn">
                         <i class="fas fa-microchip text-info me-2"></i>AI Models &amp; Purpose Matrix
                     </button>
@@ -89,6 +94,11 @@
                 <li id="dropBrandProfileLi" class="d-none">
                     <a class="dropdown-item py-2 px-3 rounded-2 font-medium" href="/brand-profile">
                         <i class="fas fa-palette text-primary me-2"></i>My Brand Configuration
+                    </a>
+                </li>
+                <li id="dropBrandConfigLi" class="d-none">
+                    <a class="dropdown-item py-2 px-3 rounded-2 font-medium" href="/brand-configuration">
+                        <i class="fas fa-swatchbook text-primary me-2"></i>Brand Configuration
                     </a>
                 </li>
                 <li id="dropAdminPortalLi" class="d-none">

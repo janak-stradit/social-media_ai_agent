@@ -44,12 +44,24 @@ $(document).ready(function () {
         $('#bpAnalyzedAt').text(profile.analyzed_at ? `Last analyzed ${profile.analyzed_at}` : '');
         $('#bpCompanyName').val(profile.company_name || '');
         $('#bpIndustry').val(profile.industry || '');
+        $('#bpTagline').val(profile.tagline || '');
+        $('#bpVisualStyle').val(profile.visual_style || '');
         $('#bpTargetAudience').val(profile.target_audience || '');
         $('#bpVoiceSummary').val(profile.brand_voice_summary || '');
         $('#bpKeyThemes').val((profile.key_themes || []).join('\n'));
         $('#bpPrimaryColors').val((profile.primary_colors || []).join('\n'));
+        $('#bpFonts').val((profile.fonts || []).join('\n'));
         $('#bpContentDos').val((profile.content_dos || []).join('\n'));
         $('#bpContentDonts').val((profile.content_donts || []).join('\n'));
+
+        if (profile.logo_url) {
+            $('#bpLogoPreview').attr('src', profile.logo_url).removeClass('d-none');
+            $('#bpWebsiteIcon').addClass('d-none');
+        } else {
+            $('#bpLogoPreview').addClass('d-none');
+            $('#bpWebsiteIcon').removeClass('d-none');
+        }
+
         renderColorPreview();
     }
 
@@ -88,10 +100,13 @@ $(document).ready(function () {
         const payload = {
             company_name: $('#bpCompanyName').val().trim(),
             industry: $('#bpIndustry').val().trim(),
+            tagline: $('#bpTagline').val().trim(),
+            visual_style: $('#bpVisualStyle').val().trim(),
             target_audience: $('#bpTargetAudience').val().trim(),
             brand_voice_summary: $('#bpVoiceSummary').val().trim(),
             key_themes: linesToList($('#bpKeyThemes').val()),
             primary_colors: linesToList($('#bpPrimaryColors').val()),
+            fonts: linesToList($('#bpFonts').val()),
             content_dos: linesToList($('#bpContentDos').val()),
             content_donts: linesToList($('#bpContentDonts').val())
         };

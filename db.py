@@ -129,6 +129,10 @@ class UserBrandProfile(Base):
     content_dos: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list
     content_donts: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list
     suggested_post_ideas: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of {category,title,summary,prompt}
+    tagline: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    visual_style: Mapped[str | None] = mapped_column(Text, nullable=True)
+    fonts: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of font-family names
+    logo_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     analyzed_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
@@ -402,6 +406,10 @@ def init_db():
         for alter_cmd in [
             f"ALTER TABLE {profile_tbl} ADD COLUMN company_name VARCHAR(255)",
             f"ALTER TABLE {profile_tbl} ADD COLUMN suggested_post_ideas TEXT",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN tagline VARCHAR(255)",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN visual_style TEXT",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN fonts TEXT",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN logo_url VARCHAR(1000)",
         ]:
             try:
                 with engine.begin() as sub_conn:
@@ -650,6 +658,10 @@ def save_user_brand_profile(
     content_dos: list | None,
     content_donts: list | None,
     suggested_post_ideas: list | None = None,
+    tagline: str | None = None,
+    visual_style: str | None = None,
+    fonts: list | None = None,
+    logo_url: str | None = None,
 ) -> dict:
     """Upsert - see agents/website_analysis_agent.py for how these fields are
     derived. One row per user (unique on user_id)."""
@@ -669,14 +681,27 @@ def save_user_brand_profile(
         row.content_dos = json.dumps(content_dos or [])
         row.content_donts = json.dumps(content_donts or [])
         row.suggested_post_ideas = json.dumps(suggested_post_ideas or [])
+        row.tagline = tagline
+        row.visual_style = visual_style
+        row.fonts = json.dumps(fonts or [])
+        row.logo_url = logo_url
         row.analyzed_at = _utcnow()
         session.commit()
         session.refresh(row)
         return {"id": row.id, "user_id": row.user_id, "website": row.website}
 
 
-_BRAND_PROFILE_TEXT_FIELDS = {"company_name", "website", "industry", "target_audience", "brand_voice_summary"}
-_BRAND_PROFILE_LIST_FIELDS = {"key_themes", "primary_colors", "content_dos", "content_donts"}
+_BRAND_PROFILE_TEXT_FIELDS = {
+    "company_name",
+    "website",
+    "industry",
+    "target_audience",
+    "brand_voice_summary",
+    "tagline",
+    "visual_style",
+    "logo_url",
+}
+_BRAND_PROFILE_LIST_FIELDS = {"key_themes", "primary_colors", "content_dos", "content_donts", "fonts"}
 
 
 def update_user_brand_profile_fields(user_id: int, **fields) -> dict | None:
@@ -718,6 +743,10 @@ def get_user_brand_profile(user_id: int) -> dict | None:
             "content_dos": json.loads(row.content_dos) if row.content_dos else [],
             "content_donts": json.loads(row.content_donts) if row.content_donts else [],
             "suggested_post_ideas": json.loads(row.suggested_post_ideas) if row.suggested_post_ideas else [],
+            "tagline": row.tagline,
+            "visual_style": row.visual_style,
+            "fonts": json.loads(row.fonts) if row.fonts else [],
+            "logo_url": row.logo_url,
             "analyzed_at": row.analyzed_at.strftime("%Y-%m-%d %H:%M:%S"),
         }
 

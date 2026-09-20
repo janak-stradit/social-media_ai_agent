@@ -1764,7 +1764,7 @@ $(document).ready(function () {
             const footer = `
                 ${alreadySent
                     ? `<button class="btn btn-outline-secondary action-btn flex-grow-1" onclick="showPipelineStageDetail(${index}, 'approved')"><i class="fas fa-user-check me-1"></i>View Approval Status</button>`
-                    : `<button class="btn btn-primary action-btn flex-grow-1 shadow-sm" onclick="sendModalAssetForApproval(${pipeline.id})"><i class="fas fa-paper-plane me-2"></i>Send for Approval</button>`
+                    : `<button class="btn btn-primary action-btn flex-grow-1 shadow-sm" onclick="sendModalAssetForApproval(${pipeline.id}, this)"><i class="fas fa-paper-plane me-2"></i>Send for Approval</button>`
                 }
                 <button class="btn btn-outline-primary action-btn flex-grow-1" onclick="sendPipelineToStudioChat(${pipeline.id})">
                     <i class="fas fa-comments me-1"></i>Refine in Studio Chat
@@ -2126,7 +2126,7 @@ $(document).ready(function () {
                         ${platformPreviewButtonsRow(`previewCarouselItem(${index}`)}
                     </div>
                     <div class="px-3 mt-2 mb-2">
-                        <button class="btn btn-primary w-100 rounded-pill shadow-sm fw-bold" onclick="sendCarouselItemForApproval(${index})"><i class="fas fa-paper-plane me-2"></i>Send for Approval</button>
+                        <button class="btn btn-primary w-100 rounded-pill shadow-sm fw-bold" onclick="sendCarouselItemForApproval(${index}, this)"><i class="fas fa-paper-plane me-2"></i>Send for Approval</button>
                     </div>
                 </div>
             `;
@@ -2236,10 +2236,14 @@ $(document).ready(function () {
     // updates the local pipeline record to reflect "sent for approval".
     // Shared by both the live workflow (one carousel variation) and the
     // pipeline modal (the whole generated set).
-    function submitApprovalRequest(pipeline, platform, assetType, caption, imageUrls, onDone) {
+    function submitApprovalRequest(pipeline, platform, assetType, caption, imageUrls, onDone, btnEl) {
         const competitors = pipeline.competitors
             ? [...new Set(pipeline.competitors.split(',').map(c => c.trim()).filter(Boolean))]
             : [];
+
+        const $btn = btnEl ? $(btnEl) : $();
+        const originalBtnHtml = $btn.html();
+        $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-2"></i>Sending for approval...');
 
         $.ajax({
             url: '/api/approval-requests',
@@ -2274,10 +2278,17 @@ $(document).ready(function () {
             error: function (xhr) {
                 showToast(xhr.responseJSON?.error || 'Network error sending for approval.', 'danger');
             }
+        }).always(function () {
+            // Only restore the button if the success handler didn't already
+            // replace it out of the DOM (sendCarouselItemForApproval swaps
+            // it for a "Sent for approval" confirmation on success).
+            if ($btn.length && $btn.closest('body').length) {
+                $btn.prop('disabled', false).html(originalBtnHtml);
+            }
         });
     }
 
-    window.sendCarouselItemForApproval = function (index) {
+    window.sendCarouselItemForApproval = function (index, btnEl) {
         const item = window.currentCarouselAssets[index];
         const pipeline = window.activePipeline;
         if (!item || !pipeline) return;
@@ -2298,10 +2309,10 @@ $(document).ready(function () {
                     '<div class="alert alert-info d-flex align-items-center gap-2 mx-3 mt-2 mb-2 py-2"><i class="fas fa-paper-plane"></i><span class="small">Sent for approval &mdash; awaiting reviewer decision.</span></div>'
                 );
             }
-        });
+        }, btnEl);
     };
 
-    window.sendModalAssetForApproval = function (pipelineId) {
+    window.sendModalAssetForApproval = function (pipelineId, btnEl) {
         const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
         if (!pipeline || !pipeline.assetContent) return;
 
@@ -2314,7 +2325,7 @@ $(document).ready(function () {
             if (r.success) {
                 showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'approved');
             }
-        });
+        }, btnEl);
     };
 
     window.approveCarouselItem = function (index) {
@@ -2391,37 +2402,16 @@ $(document).ready(function () {
                             renderPipelineHistory();
                         }
                     } else {
-                        // Don't spend on the actual image/video generation call yet -
-                        // show the (cheap) generated caption first and let the user
-                        // confirm before generating media, mirroring Studio Chat's
-                        // "Want to turn this into a post?" research-first flow instead
-                        // of immediately chaining into media generation right after
-                        // picking a media type on this slide.
-                        $('#startPipelineBtn').prop('disabled', false);
-                        $('#pipelineLoader').addClass('d-none');
-
+                        // Selecting Image/Video and clicking "Generate Assets"
+                        // should produce the asset directly in one step, not stop
+                        // to show the caption and wait for a second confirm click.
+                        // The caption call above still has to happen first (its
+                        // result is passed as context to the media generation
+                        // call below), but that's an internal implementation
+                        // detail now - not a separate user-facing step.
                         const mediaLabel = mediaType === 'video' ? 'Video' : 'Image';
-                        $('#pipelineOutputContent').html(`
-                            <div class="pipeline-caption-preview">
-                                <div class="pipeline-caption-preview-label"><i class="fas fa-align-left me-1"></i>Generated Caption</div>
-                                <div class="pipeline-caption-preview-text">${escapeHtml(captions.primary_caption)}</div>
-                            </div>
-                            <div class="research-cta-block mt-3">
-                                <div class="research-cta-title"><i class="fas fa-wand-magic-sparkles me-1"></i>Want to turn this into a post?</div>
-                                <p class="small text-muted mb-2">Generate the ${mediaLabel.toLowerCase()} to go with this caption for ${platform}.</p>
-                                <button type="button" class="btn btn-primary btn-sm" id="confirmPipelineMediaBtn">
-                                    <i class="fas fa-bolt me-1"></i>Generate ${mediaLabel}
-                                </button>
-                            </div>
-                        `);
-
-                        $('#confirmPipelineMediaBtn').on('click', function () {
-                            const $btn = $(this);
-                            $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Generating...');
-                            $('#startPipelineBtn').prop('disabled', true);
-                            $('#pipelineLoader').removeClass('d-none');
-                            runPipelineMediaGeneration();
-                        });
+                        $('#pipelineLoader').removeClass('d-none');
+                        $('#pipelineOutputContent').html(mediaGenSkeletonHtml(`Generating ${mediaLabel.toLowerCase()}...`));
 
                         function runPipelineMediaGeneration() {
                         // Generate Media (N variations, per the Number of Images field)
@@ -2529,6 +2519,8 @@ $(document).ready(function () {
 
                         generateNextMedia();
                         }
+
+                        runPipelineMediaGeneration();
                     }
                 } else {
                     showPipelineError('Caption generation failed.');
@@ -3084,34 +3076,11 @@ $(document).ready(function () {
 
                         showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'asset_generated');
                     } else {
-                        // Show the (cheap) generated caption first and let the user
-                        // confirm before generating actual media - see the matching
-                        // change in startPipelineGeneration() for the main workflow.
-                        $('#startModalPipelineBtn').prop('disabled', false);
-                        $('#modalPipelineLoader').addClass('d-none');
-
+                        // Chain straight into media generation once the caption
+                        // comes back - see the matching change in
+                        // startPipelineGeneration() for the main workflow.
                         const modalMediaLabel = mediaType === 'video' ? 'Video' : 'Image';
-                        $('#modalPipelineOutputContent').html(`
-                            <div class="pipeline-caption-preview">
-                                <div class="pipeline-caption-preview-label"><i class="fas fa-align-left me-1"></i>Generated Caption</div>
-                                <div class="pipeline-caption-preview-text">${escapeHtml(captions.primary_caption)}</div>
-                            </div>
-                            <div class="research-cta-block mt-3">
-                                <div class="research-cta-title"><i class="fas fa-wand-magic-sparkles me-1"></i>Want to turn this into a post?</div>
-                                <p class="small text-muted mb-2">Generate the ${modalMediaLabel.toLowerCase()} to go with this caption for ${platform}.</p>
-                                <button type="button" class="btn btn-primary btn-sm" id="confirmModalPipelineMediaBtn">
-                                    <i class="fas fa-bolt me-1"></i>Generate ${modalMediaLabel}
-                                </button>
-                            </div>
-                        `);
-
-                        $('#confirmModalPipelineMediaBtn').on('click', function () {
-                            const $btn = $(this);
-                            $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Generating...');
-                            $('#startModalPipelineBtn').prop('disabled', true);
-                            $('#modalPipelineLoader').removeClass('d-none');
-                            runModalPipelineMediaGeneration();
-                        });
+                        $('#modalPipelineOutputContent').html(mediaGenSkeletonHtml(`Generating ${modalMediaLabel.toLowerCase()}...`));
 
                         function runModalPipelineMediaGeneration() {
                         // For image/video, just simulate or trigger generation like in main workflow
@@ -3207,6 +3176,8 @@ $(document).ready(function () {
 
                         generateNextMedia();
                         }
+
+                        runModalPipelineMediaGeneration();
                     }
                 } else {
                     $('#startModalPipelineBtn').prop('disabled', false);

@@ -5,13 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tell us about you — VortexSocial AI</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
         body {
             min-height: 100vh; display: flex; align-items: center; justify-content: center;
-            background: linear-gradient(135deg, #F8FAFC 0%, #EEF2FF 50%, #E0E7FF 100%);
-            font-family: 'Inter', system-ui, sans-serif; margin: 0; padding: 24px;
+            background: linear-gradient(135deg, #F8FAFC 0%, #F1EFFF 50%, #F1EFFF 100%);
+            font-family: 'Rubik', system-ui, sans-serif; margin: 0; padding: 24px;
         }
         .onboard-card {
             max-width: 640px; width: 100%; background: #fff; border-radius: 20px; padding: 48px;
@@ -28,15 +28,15 @@
             padding: 20px; border: 2px solid #E5E7EB; border-radius: 14px; background: #fff;
             cursor: pointer; text-align: left; transition: border-color 0.2s, box-shadow 0.2s, transform 0.1s;
         }
-        .account-type-card:hover { border-color: #C7D2FE; transform: translateY(-1px); }
-        .account-type-card.selected { border-color: #2E68FF; box-shadow: 0 0 0 3px rgba(46,104,255,0.12); }
-        .account-type-card i { font-size: 20px; color: #2E68FF; margin-bottom: 4px; }
+        .account-type-card:hover { border-color: #C7C0FF; transform: translateY(-1px); }
+        .account-type-card.selected { border-color: #7366FF; box-shadow: 0 0 0 3px rgba(115, 102, 255,0.12); }
+        .account-type-card i { font-size: 20px; color: #7366FF; margin-bottom: 4px; }
         .account-type-card .type-title { font-weight: 700; font-size: 15px; color: #111827; }
         .account-type-card .type-desc { font-size: 12.5px; color: #6B7280; line-height: 1.4; }
-        .account-type-card:focus-visible { outline: 2px solid #2E68FF; outline-offset: 3px; }
+        .account-type-card:focus-visible { outline: 2px solid #7366FF; outline-offset: 3px; }
 
         #websiteStep { margin-top: 28px; }
-        #onboardError { color: #EF4444; font-size: 13px; margin-top: 10px; display: none; }
+        #onboardError { margin-top: 10px; display: none; }
         .d-none { display: none !important; }
     </style>
 </head>
@@ -89,7 +89,7 @@
             </button>
         </div>
 
-        <div id="onboardError" role="alert"></div>
+        <div id="onboardError" class="alert-inline alert-inline-danger" role="alert"></div>
     </div>
 
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>

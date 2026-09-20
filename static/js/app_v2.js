@@ -64,6 +64,15 @@ $(document).ready(function () {
                 } else {
                     $('#dropBrandProfileLi').addClass('d-none');
                 }
+
+                // "Brand Configuration" (-> /brand-configuration, StradIT's
+                // own global Content Guidelines) is Enterprise/admin only -
+                // matches the @enterprise_required_page gate on that route.
+                if (user.account_type === 'enterprise' || user.is_admin) {
+                    $('#dropBrandConfigLi').removeClass('d-none');
+                } else {
+                    $('#dropBrandConfigLi').addClass('d-none');
+                }
             },
             error: function () {
                 window.location.href = '/api/auth/login';

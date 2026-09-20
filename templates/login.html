@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sign In — VortexSocial AI</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
 </head>
 <body>
@@ -47,7 +47,7 @@
                 </div>
             </div>
 
-            <div id="authError" style="color: #EF4444; font-size: 13px; margin-bottom: 12px; display: none;" role="alert"></div>
+            <div id="authError" class="alert-inline alert-inline-danger" style="margin-bottom: 12px; display: none;" role="alert"></div>
 
             <button id="authSubmit" type="submit" class="btn-primary-blue">
                 <span id="authSubmitText">Log in</span>
@@ -64,14 +64,14 @@
     </div>
 
     <div class="auth-right-pane" id="sceneContainer" aria-hidden="true">
-        <div style="position: absolute; inset: 0; background: linear-gradient(135deg, #F8FAFC 0%, #EEF2FF 50%, #E0E7FF 100%); display: flex; align-items: center; justify-content: center; overflow: hidden; perspective: 1000px;">
+        <div style="position: absolute; inset: 0; background: linear-gradient(135deg, #F8FAFC 0%, #F1EFFF 50%, #F1EFFF 100%); display: flex; align-items: center; justify-content: center; overflow: hidden; perspective: 1000px;">
             <div style="position: absolute; width: 150%; height: 150%; background: radial-gradient(circle at center, rgba(255,255,255,0.9) 0%, transparent 60%); z-index: 1; pointer-events: none;"></div>
             
             <!-- Animated 3D Scene Wrapper -->
             <div id="interactiveScene" style="position: relative; width: 100%; height: 100%; z-index: 2; transform-style: preserve-3d; transition: transform 0.1s ease-out;">
                 
                 <!-- Central AI Core -->
-                <div class="shape" data-speed="0.02" style="position: absolute; top: 40%; left: 40%; width: 120px; height: 120px; background: radial-gradient(circle, #4F46E5, #312E81); border-radius: 50%; box-shadow: 0 0 50px rgba(79, 70, 229, 0.6); display: flex; align-items: center; justify-content: center; animation: pulse-glow 3s infinite;">
+                <div class="shape" data-speed="0.02" style="position: absolute; top: 40%; left: 40%; width: 120px; height: 120px; background: radial-gradient(circle, #7366FF, #3A2F8F); border-radius: 50%; box-shadow: 0 0 50px rgba(115, 102, 255, 0.6); display: flex; align-items: center; justify-content: center; animation: pulse-glow 3s infinite;">
                     <i class="fas fa-network-wired" style="color: #fff; font-size: 40px;"></i>
                 </div>
 
@@ -87,19 +87,19 @@
                     </div>
                     <div style="width: 100%; height: 6px; background: #E2E8F0; border-radius: 3px; margin-bottom: 6px;"></div>
                     <div style="width: 90%; height: 6px; background: #E2E8F0; border-radius: 3px; margin-bottom: 12px;"></div>
-                    <div style="width: 100%; height: 80px; background: #DBEAFE; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #60A5FA;"><i class="fas fa-image"></i></div>
+                    <div style="width: 100%; height: 80px; background: #F1EFFF; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #A89DFF;"><i class="fas fa-image"></i></div>
                 </div>
 
                 <!-- Floating Analytics Card -->
                 <div class="shape" data-speed="-0.04" style="position: absolute; bottom: 15%; right: 10%; width: 200px; padding: 16px; background: rgba(255,255,255,0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.9); border-radius: 16px; transform: rotate(5deg); box-shadow: 0 20px 40px rgba(0,0,0,0.05); animation: float-reverse 5s infinite;">
                     <div style="font-weight: 700; font-size: 12px; color: #64748B; margin-bottom: 12px;">Engagement Growth</div>
                     <div style="display: flex; align-items: flex-end; gap: 8px; height: 60px; margin-bottom: 12px;">
-                        <div style="width: 24px; height: 30%; background: #93C5FD; border-radius: 4px 4px 0 0;"></div>
-                        <div style="width: 24px; height: 50%; background: #60A5FA; border-radius: 4px 4px 0 0;"></div>
-                        <div style="width: 24px; height: 80%; background: #3B82F6; border-radius: 4px 4px 0 0;"></div>
-                        <div style="width: 24px; height: 100%; background: #2563EB; border-radius: 4px 4px 0 0;"></div>
+                        <div style="width: 24px; height: 30%; background: #C7C0FF; border-radius: 4px 4px 0 0;"></div>
+                        <div style="width: 24px; height: 50%; background: #A89DFF; border-radius: 4px 4px 0 0;"></div>
+                        <div style="width: 24px; height: 80%; background: #7366FF; border-radius: 4px 4px 0 0;"></div>
+                        <div style="width: 24px; height: 100%; background: #7366FF; border-radius: 4px 4px 0 0;"></div>
                     </div>
-                    <div style="color: #10B981; font-weight: 700; font-size: 14px;"><i class="fas fa-arrow-up"></i> +124%</div>
+                    <div style="color: #54BA4A; font-weight: 700; font-size: 14px;"><i class="fas fa-arrow-up"></i> +124%</div>
                 </div>
 
                 <!-- Floating Platform Icons -->
@@ -109,19 +109,19 @@
                 <style>
                     @keyframes float { 0%, 100% { transform: translateY(0) rotate(-5deg); } 50% { transform: translateY(-15px) rotate(-3deg); } }
                     @keyframes float-reverse { 0%, 100% { transform: translateY(0) rotate(5deg); } 50% { transform: translateY(15px) rotate(3deg); } }
-                    @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 40px rgba(79, 70, 229, 0.4); } 50% { box-shadow: 0 0 80px rgba(79, 70, 229, 0.8); } }
+                    @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 40px rgba(115, 102, 255, 0.4); } 50% { box-shadow: 0 0 80px rgba(115, 102, 255, 0.8); } }
                 </style>
             </div>
 
             <!-- Informational Overlay -->
             <div style="position: absolute; bottom: 40px; left: 40px; right: 40px; z-index: 10; pointer-events: none; text-align: left; background: rgba(255,255,255,0.4); backdrop-filter: blur(12px); padding: 24px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.8); box-shadow: 0 20px 40px rgba(0,0,0,0.05);">
-                <h3 style="font-size: 24px; font-weight: 800; color: #0F172A; margin-bottom: 8px;">Supercharge Your Strategy</h3>
+                <h3 style="font-size: 24px; font-weight: 600; color: #0F172A; margin-bottom: 8px;">Supercharge Your Strategy</h3>
                 <p style="font-size: 14px; color: #475569; margin-bottom: 16px;">Join thousands of brands automating their entire content lifecycle. From trend discovery to multi-platform scheduling—all powered by autonomous AI.</p>
                 <div style="display: flex; align-items: center; gap: 12px;">
                     <div style="display: flex; margin-left: 8px;">
-                        <div style="width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; margin-left: -8px; background: #60A5FA;"></div>
-                        <div style="width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; margin-left: -8px; background: #F472B6;"></div>
-                        <div style="width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; margin-left: -8px; background: #34D399;"></div>
+                        <div style="width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; margin-left: -8px; background: #A89DFF;"></div>
+                        <div style="width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; margin-left: -8px; background: #FF8FA8;"></div>
+                        <div style="width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; margin-left: -8px; background: #7ECB70;"></div>
                     </div>
                     <div style="font-size: 13px; font-weight: 600; color: #0F172A;">Trusted by leading Marketers</div>
                 </div>

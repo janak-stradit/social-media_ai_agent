@@ -2600,10 +2600,10 @@ def update_brand_profile():
     from db import update_user_brand_profile_fields
 
     fields = {}
-    for key in ("company_name", "industry", "target_audience", "brand_voice_summary"):
+    for key in ("company_name", "industry", "target_audience", "brand_voice_summary", "tagline", "visual_style"):
         if key in data:
             fields[key] = (data[key] or "").strip()
-    for key in ("key_themes", "primary_colors", "content_dos", "content_donts"):
+    for key in ("key_themes", "primary_colors", "content_dos", "content_donts", "fonts"):
         if key in data:
             fields[key] = [item.strip() for item in (data[key] or []) if isinstance(item, str) and item.strip()]
 
