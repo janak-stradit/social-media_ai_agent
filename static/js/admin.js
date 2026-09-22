@@ -153,6 +153,7 @@ $(document).ready(function () {
                                 <button type="button" class="btn-xs btn-xs-credit-add" onclick="adminAddCredits(${u.id}, 50)">+$50</button>
                                 <button type="button" class="btn-xs btn-xs-outline-info" onclick="adminSetCustomCredit(${u.id}, ${u.credit_limit})">Set Limit</button>
                                 <button type="button" class="btn-xs btn-xs-outline-neutral" onclick="adminEditUserProfile(${u.id})">Edit Profile</button>
+                                ${u.is_admin ? '' : `<button type="button" class="btn-xs btn-xs-solid-danger" onclick="adminOpenDeleteUser(${u.id})"><i class="fas fa-trash-can me-1"></i>Delete</button>`}
                             </div>
                         </td>
                     </tr>
@@ -303,6 +304,70 @@ $(document).ready(function () {
             error: function (xhr) {
                 $saveBtn.prop('disabled', false);
                 $error.text((xhr.responseJSON && xhr.responseJSON.error) || 'Failed to update profile.').removeClass('d-none');
+            }
+        });
+    };
+
+    window.adminOpenDeleteUser = function (userId) {
+        const user = (window._allAdminUsers || []).find(u => u.id === userId);
+        if (!user) return;
+
+        window._deleteUserId = userId;
+        window._deleteUserEmail = user.email;
+        $('#deleteUserFormError').addClass('d-none').text('');
+        $('#deleteUserId').text('#' + user.id);
+        $('#deleteUserAccountType').html(accountTypeBadge(user));
+        $('#deleteUserName').text(user.name);
+        $('#deleteUserEmailTarget').text(user.email);
+        $('#deleteUserConfirmInput').val('');
+        $('#deleteUserConfirmBtn').prop('disabled', true);
+
+        $('#deleteUserBackdrop').addClass('open');
+        $('#deleteUserPanel').addClass('open');
+        $('#deleteUserConfirmInput').trigger('focus');
+    };
+
+    window.closeDeleteUserPanel = function () {
+        $('#deleteUserBackdrop').removeClass('open');
+        $('#deleteUserPanel').removeClass('open');
+        window._deleteUserId = null;
+        window._deleteUserEmail = null;
+    };
+
+    $(document).on('input', '#deleteUserConfirmInput', function () {
+        const typed = $(this).val().trim().toLowerCase();
+        const target = (window._deleteUserEmail || '').toLowerCase();
+        $('#deleteUserConfirmBtn').prop('disabled', !target || typed !== target);
+    });
+
+    window.submitDeleteUser = function () {
+        const userId = window._deleteUserId;
+        const typedEmail = ($('#deleteUserConfirmInput').val() || '').trim();
+        if (!userId || !typedEmail) return;
+
+        const $btn = $('#deleteUserConfirmBtn');
+        const $error = $('#deleteUserFormError');
+        $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Deleting...');
+        $error.addClass('d-none').text('');
+
+        $.ajax({
+            url: `/api/admin/users/${userId}`,
+            type: 'DELETE',
+            contentType: 'application/json',
+            data: JSON.stringify({ confirm_email: typedEmail }),
+            success: function (r) {
+                if (r.success) {
+                    showToast('User and all their data permanently deleted.', 'success');
+                    closeDeleteUserPanel();
+                    loadAdminUsers();
+                } else {
+                    $btn.prop('disabled', false).html('<i class="fas fa-trash-can me-1"></i>Permanently Delete');
+                    $error.text(r.error || 'Failed to delete user.').removeClass('d-none');
+                }
+            },
+            error: function (xhr) {
+                $btn.prop('disabled', false).html('<i class="fas fa-trash-can me-1"></i>Permanently Delete');
+                $error.text((xhr.responseJSON && xhr.responseJSON.error) || 'Failed to delete user.').removeClass('d-none');
             }
         });
     };

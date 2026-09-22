@@ -37,10 +37,10 @@ From this, infer:
    guessing if nothing plausible is available.
 9. content_dos: 2-4 concrete things future social content for this brand SHOULD do
 10. content_donts: 2-4 concrete things future social content for this brand should AVOID
-11. suggested_post_ideas: exactly 4 concrete, ready-to-use post ideas for THIS specific brand
-    (not generic marketing advice) - each one a distinct angle (e.g. a product/service highlight,
-    a thought-leadership/industry-insight angle, a customer story or social proof angle, and a
-    promotional/seasonal/announcement angle). Each idea has:
+11. suggested_post_ideas: exactly 8 concrete, ready-to-use post ideas for THIS specific brand
+    (not generic marketing advice) - a genuinely varied set covering different angles across the
+    6 categories below (not 8 variations on the same angle), so the user has real variety to pick
+    from and regenerate through, not near-duplicates. Each idea has:
     - category: one of "product", "thought_leadership", "story", "promo", "event", "tips" (pick
       whichever fits each idea best)
     - title: a short 2-4 word label (e.g. "Product Highlight")
@@ -82,7 +82,21 @@ Fonts detected in the site's CSS: {scraped.get("fonts") or []}
 Website text excerpt{pages_note}:
 {scraped.get("text_excerpt") or "N/A"}
 """
-        result = self.llm.generate_json(self.SYSTEM_PROMPT, user_prompt, temperature=0.3)
+        # Default generate_json() budget (1200 tokens) isn't enough for this
+        # response shape - 11 fields including 4 detailed suggested_post_ideas
+        # objects. content_dos/content_donts/suggested_post_ideas are the
+        # LAST fields in the schema, so when the budget runs out mid-response
+        # they're exactly the ones that get truncated and dropped, while
+        # earlier fields (company_name, industry, ...) still come through -
+        # confirmed by hitting the 1200-token ceiling exactly on a real site.
+        # Bumped again after the scraper started reading up to 7 pages
+        # instead of 1 - richer input tends to produce longer, more specific
+        # answers across every field, so the same truncation risk reappears
+        # at 2200 (seen losing the 4th suggested_post_ideas entry). Bumped
+        # once more (3000 -> 4500) for the switch from 4 to 8
+        # suggested_post_ideas - the biggest field by far, so it scales
+        # roughly with the count.
+        result = self.llm.generate_json(self.SYSTEM_PROMPT, user_prompt, temperature=0.3, max_tokens=4500)
         if not isinstance(result, dict):
             result = {}
 
@@ -121,7 +135,7 @@ Website text excerpt{pages_note}:
             "primary_colors": primary_colors,
             "content_dos": result.get("content_dos") if isinstance(result.get("content_dos"), list) else [],
             "content_donts": result.get("content_donts") if isinstance(result.get("content_donts"), list) else [],
-            "suggested_post_ideas": post_ideas[:4],
+            "suggested_post_ideas": post_ideas[:8],
             "fonts": scraped.get("fonts") or [],
             "logo_url": scraped.get("og_image") or scraped.get("favicon") or None,
         }

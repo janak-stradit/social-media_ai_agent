@@ -10,10 +10,37 @@
     <style>
         body {
             min-height: 100vh; display: flex; align-items: center; justify-content: center;
-            background: linear-gradient(135deg, #F8FAFC 0%, #F1EFFF 50%, #F1EFFF 100%);
-            font-family: 'Rubik', system-ui, sans-serif; margin: 0; padding: 24px;
+            background: #F8FAFC; font-family: 'Rubik', system-ui, sans-serif; margin: 0; padding: 24px;
+            position: relative; overflow: hidden;
         }
+        .bg-mesh {
+            position: absolute; top: -20%; left: -10%; width: 120%; height: 120%; z-index: 0;
+            background-image: radial-gradient(at 40% 20%, hsla(255,100%,85%,1) 0px, transparent 50%),
+                               radial-gradient(at 80% 0%, hsla(189,100%,88%,1) 0px, transparent 50%),
+                               radial-gradient(at 0% 50%, hsla(340,100%,93%,1) 0px, transparent 50%);
+            filter: blur(80px); opacity: 0.6; animation: blob-bounce 22s infinite alternate;
+        }
+        @keyframes blob-bounce {
+            0% { transform: translate(0, 0) scale(1); }
+            33% { transform: translate(30px, -40px) scale(1.08); }
+            66% { transform: translate(-20px, 20px) scale(0.94); }
+            100% { transform: translate(0, 0) scale(1); }
+        }
+        @media (prefers-reduced-motion: reduce) { .bg-mesh { animation: none; } }
+
+        .onboard-steps { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 20px; }
+        .onboard-step-dot { width: 8px; height: 8px; border-radius: 50%; background: #E5E7EB; transition: all 0.2s ease; }
+        .onboard-step-dot.active { background: #7366FF; width: 22px; border-radius: 4px; }
+        .onboard-step-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #9CA3AF; margin-bottom: 8px; text-align: center; }
+
+        .sales-back-link {
+            display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;
+            color: #6B7280; text-decoration: none; margin-bottom: 20px; transition: color 0.15s ease;
+        }
+        .sales-back-link:hover { color: #111827; }
+
         .sales-card {
+            position: relative; z-index: 1;
             max-width: 460px; width: 100%; background: #fff; border-radius: 20px; padding: 48px;
             box-shadow: 0 20px 40px rgba(0,0,0,0.08);
         }
@@ -30,7 +57,13 @@
     </style>
 </head>
 <body>
+    <div class="bg-mesh" aria-hidden="true"></div>
     <div class="sales-card">
+        <div class="onboard-step-label">Step 2 of 2</div>
+        <div class="onboard-steps" aria-hidden="true">
+            <span class="onboard-step-dot active"></span>
+            <span class="onboard-step-dot active"></span>
+        </div>
         <div class="auth-brand-logo" style="justify-content: center; margin-bottom: 28px;">
             <span class="auth-brand-mark" aria-hidden="true">
                 <svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -43,6 +76,7 @@
         </div>
 
         <div id="salesFormView">
+            <a href="/onboarding" class="sales-back-link"><i class="fas fa-arrow-left" aria-hidden="true"></i>Back to account type</a>
             <h1 class="sales-heading">Let's talk</h1>
             <p class="sales-subheading">Enterprise plans are set up with our sales team. Tell us a bit about your organization and we'll be in touch.</p>
 

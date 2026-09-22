@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Up — VortexSocial AI</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        .field-error {
+            font-size: 12px; color: #FC4438; margin-top: 5px; display: none;
+        }
+        .auth-form-input.field-invalid { border-color: #FC4438; }
+        .auth-form-input.field-valid { border-color: #7ecb70; }
+        .password-strength { display: flex; gap: 4px; margin-top: 8px; }
+        .password-strength-bar { height: 3px; flex: 1; border-radius: 2px; background: #E5E7EB; transition: background 0.2s ease; }
+        .password-strength-label { font-size: 11px; color: #9CA3AF; margin-top: 4px; display: block; }
+    </style>
+</head>
+<body>
+
+<div class="auth-split-layout">
+    <div class="auth-left-pane">
+        <div class="auth-brand-logo">
+            <span class="auth-brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                    <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+                </svg>
+            </span>
+            VortexSocial AI
+        </div>
+
+        <h1 class="auth-heading">Create account</h1>
+        <p class="auth-subheading">Welcome to VortexSocial AI</p>
+
+        <form id="signupForm" style="width: 100%; max-width: 360px;" novalidate>
+            <div class="auth-form-group">
+                <label class="auth-form-label" for="signupName">Full Name</label>
+                <input id="signupName" type="text" class="auth-form-input" placeholder="e.g. Alex Morgan" autocomplete="name" required>
+                <div class="field-error" id="nameError"></div>
+            </div>
+
+            <div class="auth-form-group">
+                <label class="auth-form-label" for="signupEmail">Email</label>
+                <input id="signupEmail" type="email" class="auth-form-input" placeholder="name@email.com" autocomplete="email" required>
+                <div class="field-error" id="emailError"></div>
+            </div>
+
+            <div class="auth-form-group">
+                <label class="auth-form-label" for="signupPassword">Password</label>
+                <div class="auth-password-wrap">
+                    <input id="signupPassword" type="password" class="auth-form-input" placeholder="At least 6 characters" autocomplete="new-password" required>
+                    <button type="button" class="auth-password-toggle" id="togglePasswordBtn" aria-label="Show password" aria-pressed="false">
+                        <i class="fas fa-eye" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <div class="password-strength" id="passwordStrength" aria-hidden="true">
+                    <div class="password-strength-bar"></div>
+                    <div class="password-strength-bar"></div>
+                    <div class="password-strength-bar"></div>
+                </div>
+                <span class="password-strength-label" id="passwordStrengthLabel"></span>
+                <div class="field-error" id="passwordError"></div>
+            </div>
+
+            <div class="auth-form-group">
+                <label class="auth-form-label" for="signupConfirmPassword">Confirm Password</label>
+                <div class="auth-password-wrap">
+                    <input id="signupConfirmPassword" type="password" class="auth-form-input" placeholder="••••••••" autocomplete="new-password" required>
+                    <button type="button" class="auth-password-toggle" id="toggleConfirmPasswordBtn" aria-label="Show password" aria-pressed="false">
+                        <i class="fas fa-eye" aria-hidden="true"></i>
+                    </button>
+                </div>
+                <div class="field-error" id="confirmPasswordError"></div>
+            </div>
+
+            <div id="signupError" class="alert-inline alert-inline-danger" style="margin-bottom: 12px; display: none;" role="alert"></div>
+
+            <button id="signupSubmit" type="submit" class="btn-primary-blue">
+                <span id="signupSubmitText">Sign up</span>
+            </button>
+        </form>
+
+        <div class="auth-footer-links" style="max-width: 360px;">
+            <div class="auth-footer-row">
+                <span style="color: #6B7280; font-size: 12px;">Already have an account? <a href="/login" class="auth-link-bold">Log in</a></span>
+            </div>
+        </div>
+    </div>
+
+    <div class="auth-right-pane" aria-hidden="true">
+        <div style="position: absolute; inset: 0; background: linear-gradient(135deg, #F8FAFC 0%, #F1EFFF 50%, #F1EFFF 100%); display: flex; align-items: center; justify-content: center; overflow: hidden;">
+            <div style="position: absolute; width: 150%; height: 150%; background: radial-gradient(circle at center, rgba(255,255,255,0.9) 0%, transparent 60%); z-index: 1; pointer-events: none;"></div>
+
+            <div style="position: relative; width: 100%; height: 100%; z-index: 2;">
+                <div style="position: absolute; top: 40%; left: 40%; width: 120px; height: 120px; background: radial-gradient(circle, #7366FF, #3A2F8F); border-radius: 50%; box-shadow: 0 0 50px rgba(115, 102, 255, 0.6); display: flex; align-items: center; justify-content: center; animation: pulse-glow 3s infinite;">
+                    <i class="fas fa-user-plus" style="color: #fff; font-size: 40px;"></i>
+                </div>
+
+                <div style="position: absolute; top: 15%; left: 10%; width: 220px; padding: 16px; background: rgba(255,255,255,0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.9); border-radius: 16px; transform: rotate(-5deg); box-shadow: 0 20px 40px rgba(0,0,0,0.05); animation: float 6s infinite;">
+                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 12px;">
+                        <div style="width: 30px; height: 30px; border-radius: 50%; background: #E2E8F0;"></div>
+                        <div>
+                            <div style="width: 80px; height: 8px; background: #CBD5E1; border-radius: 4px; margin-bottom: 4px;"></div>
+                            <div style="width: 40px; height: 6px; background: #E2E8F0; border-radius: 3px;"></div>
+                        </div>
+                    </div>
+                    <div style="width: 100%; height: 6px; background: #E2E8F0; border-radius: 3px; margin-bottom: 6px;"></div>
+                    <div style="width: 90%; height: 6px; background: #E2E8F0; border-radius: 3px;"></div>
+                </div>
+
+                <div style="position: absolute; bottom: 15%; right: 10%; width: 200px; padding: 16px; background: rgba(255,255,255,0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.9); border-radius: 16px; transform: rotate(5deg); box-shadow: 0 20px 40px rgba(0,0,0,0.05); animation: float-reverse 5s infinite;">
+                    <div style="font-weight: 700; font-size: 12px; color: #64748B; margin-bottom: 12px;">Get started in minutes</div>
+                    <div style="color: #54BA4A; font-weight: 700; font-size: 14px;"><i class="fas fa-check-circle"></i> Free to try</div>
+                </div>
+
+                <style>
+                    @keyframes float { 0%, 100% { transform: translateY(0) rotate(-5deg); } 50% { transform: translateY(-15px) rotate(-3deg); } }
+                    @keyframes float-reverse { 0%, 100% { transform: translateY(0) rotate(5deg); } 50% { transform: translateY(15px) rotate(3deg); } }
+                    @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 40px rgba(115, 102, 255, 0.4); } 50% { box-shadow: 0 0 80px rgba(115, 102, 255, 0.8); } }
+                </style>
+            </div>
+
+            <div class="auth-showcase" id="authShowcase">
+                <div class="auth-showcase-slide active">
+                    <h3><i class="fas fa-rocket" aria-hidden="true"></i>Join VortexSocial AI</h3>
+                    <p>Deploy autonomous agents that plan, write, design, and schedule your social content end to end.</p>
+                </div>
+                <div class="auth-showcase-slide">
+                    <h3><i class="fas fa-gift" aria-hidden="true"></i>Free to Get Started</h3>
+                    <p>No credit card required to explore your workspace - see what the agents can do first.</p>
+                </div>
+                <div class="auth-showcase-slide">
+                    <h3><i class="fas fa-users" aria-hidden="true"></i>Built for Every Team Size</h3>
+                    <p>From solo creators to enterprise marketing teams - pick the tier that fits how you work.</p>
+                </div>
+                <div class="auth-showcase-slide">
+                    <h3><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>AI That Knows Your Brand</h3>
+                    <p>Point us at your website - we learn your voice, colors, and style automatically.</p>
+                </div>
+                <div class="auth-showcase-dots" role="tablist" aria-label="Feature highlights">
+                    <button type="button" class="auth-showcase-dot active" aria-label="Slide 1"></button>
+                    <button type="button" class="auth-showcase-dot" aria-label="Slide 2"></button>
+                    <button type="button" class="auth-showcase-dot" aria-label="Slide 3"></button>
+                    <button type="button" class="auth-showcase-dot" aria-label="Slide 4"></button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script>
+    // Rotating right-pane showcase
+    (function () {
+        const $slides = $('#authShowcase .auth-showcase-slide');
+        const $dots = $('#authShowcase .auth-showcase-dot');
+        const total = $slides.length;
+        if (total <= 1) return;
+        let current = 0;
+        let timer = null;
+
+        function showSlide(index) {
+            $slides.removeClass('active').eq(index).addClass('active');
+            $dots.removeClass('active').eq(index).addClass('active');
+            current = index;
+        }
+
+        function startTimer() {
+            clearInterval(timer);
+            timer = setInterval(function () { showSlide((current + 1) % total); }, 4500);
+        }
+
+        $dots.on('click', function () {
+            showSlide($dots.index(this));
+            startTimer();
+        });
+
+        if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            startTimer();
+        }
+    })();
+
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    function showFieldError($input, $error, msg) {
+        $input.addClass('field-invalid').removeClass('field-valid');
+        $error.text(msg).show();
+    }
+
+    function clearFieldError($input, $error) {
+        $input.removeClass('field-invalid').addClass('field-valid');
+        $error.hide();
+    }
+
+    function validateName() {
+        const $input = $('#signupName');
+        const $error = $('#nameError');
+        const value = $input.val().trim();
+        if (!value) {
+            showFieldError($input, $error, 'Name is required.');
+            return false;
+        }
+        clearFieldError($input, $error);
+        return true;
+    }
+
+    function validateEmail() {
+        const $input = $('#signupEmail');
+        const $error = $('#emailError');
+        const value = $input.val().trim();
+        if (!value) {
+            showFieldError($input, $error, 'Email is required.');
+            return false;
+        }
+        if (!EMAIL_RE.test(value)) {
+            showFieldError($input, $error, 'Enter a valid email address.');
+            return false;
+        }
+        clearFieldError($input, $error);
+        return true;
+    }
+
+    function passwordStrength(pw) {
+        let score = 0;
+        if (pw.length >= 6) score++;
+        if (pw.length >= 10) score++;
+        if (/[A-Z]/.test(pw) && /[0-9]/.test(pw)) score++;
+        return score; // 0-3
+    }
+
+    function updatePasswordStrengthUI() {
+        const pw = $('#signupPassword').val();
+        const score = passwordStrength(pw);
+        const colors = ['#E5E7EB', '#FC4438', '#FFA941', '#54BA4A'];
+        const labels = ['', 'Weak', 'Okay', 'Strong'];
+        $('.password-strength-bar').each(function (i) {
+            $(this).css('background', i < score ? colors[score] : '#E5E7EB');
+        });
+        $('#passwordStrengthLabel').text(pw ? labels[score] : '');
+    }
+
+    function validatePassword() {
+        const $input = $('#signupPassword');
+        const $error = $('#passwordError');
+        const value = $input.val();
+        if (!value) {
+            showFieldError($input, $error, 'Password is required.');
+            return false;
+        }
+        if (value.length < 6) {
+            showFieldError($input, $error, 'Password must be at least 6 characters.');
+            return false;
+        }
+        clearFieldError($input, $error);
+        return true;
+    }
+
+    function validateConfirmPassword() {
+        const $input = $('#signupConfirmPassword');
+        const $error = $('#confirmPasswordError');
+        const value = $input.val();
+        const password = $('#signupPassword').val();
+        if (!value) {
+            showFieldError($input, $error, 'Please confirm your password.');
+            return false;
+        }
+        if (value !== password) {
+            showFieldError($input, $error, 'Passwords do not match.');
+            return false;
+        }
+        clearFieldError($input, $error);
+        return true;
+    }
+
+    // Validate on blur (after the user leaves a field) rather than on
+    // every keystroke - showing an error before someone's even finished
+    // typing is more annoying than helpful.
+    $('#signupName').on('blur', validateName);
+    $('#signupEmail').on('blur', validateEmail);
+    $('#signupPassword').on('blur', validatePassword);
+    $('#signupConfirmPassword').on('blur', validateConfirmPassword);
+    $('#signupPassword').on('input', updatePasswordStrengthUI);
+    // Re-check the match whenever either password field changes, once the
+    // user has already tried confirming once - avoids nagging "doesn't
+    // match" while they're still typing the first password.
+    $('#signupPassword, #signupConfirmPassword').on('input', function () {
+        if ($('#confirmPasswordError').is(':visible')) validateConfirmPassword();
+    });
+
+    $('#togglePasswordBtn').on('click', function () {
+        const $input = $('#signupPassword');
+        const showing = $input.attr('type') === 'text';
+        $input.attr('type', showing ? 'password' : 'text');
+        $(this).attr('aria-pressed', String(!showing)).attr('aria-label', showing ? 'Show password' : 'Hide password');
+        $(this).find('i').toggleClass('fa-eye fa-eye-slash');
+    });
+
+    $('#toggleConfirmPasswordBtn').on('click', function () {
+        const $input = $('#signupConfirmPassword');
+        const showing = $input.attr('type') === 'text';
+        $input.attr('type', showing ? 'password' : 'text');
+        $(this).attr('aria-pressed', String(!showing)).attr('aria-label', showing ? 'Show password' : 'Hide password');
+        $(this).find('i').toggleClass('fa-eye fa-eye-slash');
+    });
+
+    $('#signupForm').on('submit', function (e) {
+        e.preventDefault();
+        $('#signupError').hide();
+
+        // Client-side validation is a UX layer only - the server re-checks
+        // everything (auth/routes.py's register()) and remains the actual
+        // source of truth.
+        const nameOk = validateName();
+        const emailOk = validateEmail();
+        const passwordOk = validatePassword();
+        const confirmOk = validateConfirmPassword();
+        if (!nameOk || !emailOk || !passwordOk || !confirmOk) {
+            return;
+        }
+
+        const payload = {
+            name: $('#signupName').val().trim(),
+            email: $('#signupEmail').val().trim(),
+            password: $('#signupPassword').val()
+        };
+
+        const $submitBtn = $('#signupSubmit');
+        $submitBtn.prop('disabled', true);
+        $('#signupSubmitText').html('<i class="fas fa-spinner fa-spin"></i> Creating account...');
+
+        $.ajax({
+            url: '/api/auth/register',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(payload),
+            success: function (res) {
+                if (res.success) {
+                    window.location.href = '/verify-pending?email=' + encodeURIComponent(payload.email);
+                } else {
+                    $submitBtn.prop('disabled', false);
+                    $('#signupSubmitText').text('Sign up');
+                    $('#signupError').text(res.error || 'Something went wrong.').show();
+                }
+            },
+            error: function (xhr) {
+                const msg = (xhr.responseJSON && xhr.responseJSON.error) || 'An error occurred';
+                $('#signupError').text(msg).show();
+                $submitBtn.prop('disabled', false);
+                $('#signupSubmitText').text('Sign up');
+            }
+        });
+    });
+</script>
+</body>
+</html>

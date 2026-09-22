@@ -418,7 +418,13 @@
 <body>
     <header class="app-header">
         <div class="header-brand">
-            <div class="brand-logo"></div>
+            <div class="brand-logo">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+            </svg>
+        </div>
             <div class="brand-text">
                 <span class="brand-name">VortexSocial AI</span>
                 <span class="brand-tagline">Admin Control Center</span>
@@ -640,6 +646,47 @@
             <button type="button" class="btn-xs btn-xs-outline-neutral" onclick="closeEditUserPanel()">Cancel</button>
             <button type="button" class="btn-xs btn-xs-solid-success" id="editUserSaveBtn" onclick="submitEditUserProfile()">
                 <i class="fas fa-check me-1"></i>Save Changes
+            </button>
+        </div>
+    </aside>
+
+    <!-- Delete User panel - irreversible, requires typing the exact email
+         to confirm (not a plain confirm() popup - too easy to misclick on
+         a permanent, all-data-destroying action). -->
+    <div class="admin-panel-backdrop" id="deleteUserBackdrop" onclick="closeDeleteUserPanel()"></div>
+    <aside class="admin-side-panel" id="deleteUserPanel">
+        <div class="admin-side-panel-header">
+            <h5><i class="fas fa-triangle-exclamation text-danger me-2"></i>Delete User Permanently</h5>
+            <button type="button" class="admin-side-panel-close" onclick="closeDeleteUserPanel()">
+                <i class="fas fa-xmark"></i>
+            </button>
+        </div>
+        <div class="admin-side-panel-body">
+            <div class="alert-inline alert-inline-danger" style="margin-bottom: 1.25rem;">
+                <i class="fas fa-circle-exclamation" aria-hidden="true"></i>
+                <span>This permanently deletes the account and ALL of its data - run history, scheduled posts, approval requests, social accounts, brand profile, credit/sales requests. This cannot be undone.</span>
+            </div>
+
+            <div class="admin-side-panel-meta">
+                <div><span>User ID</span><strong id="deleteUserId">—</strong></div>
+                <div><span>Account Type</span><strong id="deleteUserAccountType">—</strong></div>
+            </div>
+
+            <div class="admin-form-group">
+                <label>Name</label>
+                <div style="font-weight: 700; font-size: 0.9rem; color: #1f2937;" id="deleteUserName">—</div>
+            </div>
+
+            <div class="admin-form-group">
+                <label for="deleteUserConfirmInput">Type <strong id="deleteUserEmailTarget">this user's email</strong> to confirm</label>
+                <input type="text" id="deleteUserConfirmInput" class="form-control form-control-sm" autocomplete="off" placeholder="Paste or type the email exactly">
+            </div>
+            <div class="alert-inline alert-inline-danger d-none" id="deleteUserFormError"></div>
+        </div>
+        <div class="admin-side-panel-footer">
+            <button type="button" class="btn-xs btn-xs-outline-neutral" onclick="closeDeleteUserPanel()">Cancel</button>
+            <button type="button" class="btn-xs btn-xs-solid-danger" id="deleteUserConfirmBtn" onclick="submitDeleteUser()" disabled>
+                <i class="fas fa-trash-can me-1"></i>Permanently Delete
             </button>
         </div>
     </aside>

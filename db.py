@@ -602,6 +602,47 @@ def set_user_active(user_id: int, is_active: bool) -> dict | None:
         return {"id": user.id, "is_active": user.is_active}
 
 
+# Every table that carries a user_id FK - see api/routes.py's
+# admin_hard_delete_user for why this can't just be "every table": global
+# StradIT data (competitor_posts, content_collections, app_settings, etc.)
+# has no user association and must never be touched by a per-user delete.
+_USER_OWNED_TABLES = (
+    SalesContactRequest,
+    UserBrandProfile,
+    CreditRequest,
+    RunHistory,
+    SocialAccount,
+    ApprovedAsset,
+    ApprovalRequest,
+    ScheduledPost,
+)
+
+
+def hard_delete_user(user_id: int) -> dict | None:
+    """Permanently deletes a user AND every row of their data across all
+    user-owned tables, in one transaction (all-or-nothing). Irreversible -
+    see api/routes.py's admin_hard_delete_user for the admin-only gating,
+    self-delete/admin-target guards, and the confirmation this requires on
+    the frontend (templates/admin.html). Returns None if the user doesn't
+    exist; otherwise a dict of {table_name: rows_deleted} plus the deleted
+    user's id/email, for the admin audit toast."""
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if not user:
+            return None
+
+        deleted_counts = {}
+        for model in _USER_OWNED_TABLES:
+            result = session.query(model).filter(model.user_id == user_id).delete()
+            deleted_counts[model.__tablename__] = result
+
+        email = user.email
+        session.delete(user)
+        session.commit()
+
+        return {"id": user_id, "email": email, "deleted": deleted_counts}
+
+
 ACCOUNT_TYPES = ("individual", "small", "medium", "enterprise")
 
 

@@ -18,7 +18,13 @@
         <button type="button" class="btn-sidebar-toggle me-2" id="sidebarToggleBtn" title="Show/Hide Sidebar">
             <i class="fas fa-bars"></i>
         </button>
-        <div class="brand-logo"></div>
+        <div class="brand-logo">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+            </svg>
+        </div>
         <div class="brand-text">
             <span class="brand-name">VortexSocial AI</span>
             <span class="brand-tagline">Chat Assistant</span>
@@ -162,10 +168,6 @@
                 <span class="sidebar-stat-label">Saved Runs</span>
                 <span class="sidebar-stat-value" id="historyCount">0</span>
             </div>
-            <div class="sidebar-stat">
-                <span class="sidebar-stat-label">Memory &amp; DB</span>
-                <span class="sidebar-stat-value text-success" id="dbStatus"><i class="fas fa-brain fa-xs me-1"></i>Chroma RAG</span>
-            </div>
         </div>
     </aside>
 
@@ -175,14 +177,10 @@
         <!-- Top Title Bar -->
         <div class="chat-header-bar">
             <div>
-                <h1 class="chat-header-title">Multi-Agent Campaign Studio</h1>
+                <h1 class="chat-header-title">Campaign Studio</h1>
                 <p class="chat-header-subtitle">Describe your idea, attach visual assets, and set campaign configs below</p>
             </div>
             <div class="d-flex gap-2 align-items-center">
-                <span class="badge-memory" id="memoryIndicatorBadge" style="cursor: pointer;" title="Click to view RAG Memory Graph"><i class="fas fa-brain me-1"></i>RAG Memory Active</span>
-                <button type="button" class="btn-memory-graph-trigger" id="openMemoryGraphBtn" title="View Interactive RAG Memory Knowledge Graph">
-                    <i class="fas fa-project-diagram me-1"></i>Memory Graph
-                </button>
                 <a href="/competitor-dashboard" class="btn btn-sm btn-outline-primary rounded-pill fw-bold text-decoration-none" title="Open Analysis Dashboard" style="font-size: 0.75rem; padding: 4px 10px;">
                     <i class="fas fa-chart-line me-1"></i>Analysis Dashboard
                 </a>
@@ -198,7 +196,12 @@
                 <div class="welcome-icon">
                     <i class="fas fa-wand-magic-sparkles"></i>
                 </div>
-                <h2 class="welcome-title">How can I assist your social media strategy?</h2>
+                <div class="welcome-title-row">
+                    <h2 class="welcome-title">How can I assist your social media strategy?</h2>
+                    <button type="button" class="btn-regenerate-greeting d-none" id="regenerateGreetingBtn" onclick="regenerateGreeting()" title="Regenerate prompt ideas">
+                        <i class="fas fa-arrows-rotate"></i>
+                    </button>
+                </div>
                 <p class="welcome-desc">Select a prompt template below or type your brief, upload image context, and pick your target channels.</p>
                 
                 <!-- Quick Prompt Cards -->

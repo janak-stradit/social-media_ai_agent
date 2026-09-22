@@ -1,5 +1,6 @@
-"""Fetches a user-supplied website (homepage plus a couple of same-origin
-"About"/"Services"-style pages) for the onboarding/brand-analysis step (see
+"""Fetches a user-supplied website (homepage plus up to 6 same-origin pages -
+About/Services/Blog/Pricing-style pages preferred, other internal links as a
+fallback - fetched concurrently) for the onboarding/brand-analysis step (see
 agents/website_analysis_agent.py). Stdlib-only HTML handling - no bs4
 dependency.
 
@@ -16,6 +17,7 @@ every request, and the same-origin crawl is capped to a small, fixed number
 of extra pages.
 """
 
+import concurrent.futures
 import ipaddress
 import re
 import socket
@@ -25,10 +27,10 @@ import requests
 
 _TIMEOUT_SECONDS = 8
 _MAX_BYTES = 3 * 1024 * 1024  # 3MB per page/asset
-_TEXT_EXCERPT_CHARS = 3000  # per page
+_TEXT_EXCERPT_CHARS = 2000  # per page - kept modest since up to 7 pages now get concatenated into one prompt
 _MAX_COLORS = 10
 _MAX_FONTS = 4
-_MAX_CRAWL_PAGES = 2  # same-origin pages fetched in addition to the homepage
+_MAX_CRAWL_PAGES = 6  # same-origin pages fetched in addition to the homepage - fetched concurrently, so this stays fast
 _MAX_STYLESHEETS = 2  # linked CSS files fetched for color/font extraction
 
 _SCRIPT_STYLE_RE = re.compile(r"<(script|style)\b[^>]*>.*?</\1>", re.IGNORECASE | re.DOTALL)
@@ -80,7 +82,14 @@ _GENERIC_FONTS = {
 # Anchor text/href hints used to find a couple of extra same-origin pages
 # worth reading, beyond the homepage - keeps the crawl small and targeted
 # instead of trying to discover a sitemap.
-_CRAWL_HINTS = ("about", "services", "products", "solutions", "who-we-are", "company")
+_CRAWL_HINTS = (
+    "about", "services", "products", "solutions", "who-we-are", "company",
+    "blog", "pricing", "features", "team", "contact", "faq", "help", "resources", "portfolio",
+)
+
+# Hrefs never worth following even as a same-origin fallback link - not a
+# real content page (or not one that tells us anything about the brand).
+_SKIP_HREF_PATTERNS = ("#", "mailto:", "tel:", "javascript:", "/login", "/signin", "/cart", "/checkout")
 
 
 def _is_safe_url(url: str) -> bool:
@@ -213,47 +222,65 @@ def _extract_text(html: str) -> str:
     return collapsed[:_TEXT_EXCERPT_CHARS]
 
 
-def _fetch_linked_stylesheets(base_url: str, html: str) -> str:
-    """Fetches up to _MAX_STYLESHEETS linked CSS files (same SSRF checks as
-    everything else) and returns their concatenated text, so color/font
+def _find_stylesheet_urls(base_url: str, html: str) -> list[str]:
+    """Finds up to _MAX_STYLESHEETS linked CSS file URLs - so color/font
     extraction can see design-system variables that live in an external
-    stylesheet rather than inline <style> blocks - most real sites keep
-    their actual theme colors there, not inline."""
+    stylesheet rather than inline <style> blocks (most real sites keep their
+    actual theme colors there, not inline). URL discovery only - the actual
+    fetches run concurrently with the crawl-page fetches, see fetch_website."""
     hrefs = _LINK_STYLESHEET_RE.findall(html)[:_MAX_STYLESHEETS]
-    combined = []
-    for href in hrefs:
-        css_url = urljoin(base_url, href)
-        result = _fetch_raw(css_url, max_bytes=512 * 1024)
-        if result:
-            combined.append(result[1])
-    return "\n".join(combined)
+    return [urljoin(base_url, href) for href in hrefs]
+
+
+def _same_origin_content_link(base_url: str, base_host: str, href: str) -> str | None:
+    """Resolves href to an absolute URL and returns it only if it's a
+    same-origin, http(s), plausible content page - None otherwise (external
+    link, anchor, mailto:, login/cart page, etc.)."""
+    href = href.strip()
+    if not href or any(href.lower().startswith(p) or p in href.lower() for p in _SKIP_HREF_PATTERNS):
+        return None
+    absolute = urljoin(base_url, href)
+    parsed = urlparse(absolute)
+    if parsed.scheme not in ("http", "https") or parsed.hostname != base_host:
+        return None
+    if absolute.rstrip("/") == base_url.rstrip("/"):
+        return None
+    return absolute
 
 
 def _find_crawl_candidates(base_url: str, html: str) -> list[str]:
-    """Finds up to _MAX_CRAWL_PAGES same-origin links whose href/text hints
-    at an About/Services/Products-style page - a deliberately small,
-    targeted crawl rather than following a sitemap or every link."""
+    """Finds up to _MAX_CRAWL_PAGES same-origin pages worth reading in
+    addition to the homepage - a deliberately bounded crawl (not a sitemap
+    or full-site crawl, which wouldn't be safe or fast enough for a
+    real-time onboarding step) but wide enough to build a real picture of
+    the site rather than just the homepage.
+
+    Two passes: first, links whose href/text hints at an About/Services/
+    Blog/Pricing-style page (highest-value, most likely to actually
+    describe the brand); then, if that didn't fill the quota, any other
+    same-origin internal link, so a site whose page names don't match the
+    hint list still gets a reasonably complete crawl instead of just one
+    page."""
     base_host = urlparse(base_url).hostname
-    candidates: list[str] = []
+    hinted: list[str] = []
+    other: list[str] = []
     seen_urls = set()
 
     for href, text in _ANCHOR_RE.findall(html):
+        link = _same_origin_content_link(base_url, base_host, href)
+        if not link or link in seen_urls:
+            continue
+
         haystack = f"{href} {_WHITESPACE_RE.sub(' ', _TAG_RE.sub(' ', text))}".lower()
-        if not any(hint in haystack for hint in _CRAWL_HINTS):
-            continue
+        seen_urls.add(link)
+        if any(hint in haystack for hint in _CRAWL_HINTS):
+            hinted.append(link)
+        else:
+            other.append(link)
 
-        absolute = urljoin(base_url, href.strip())
-        parsed = urlparse(absolute)
-        if parsed.scheme not in ("http", "https") or parsed.hostname != base_host:
-            continue
-        if absolute in seen_urls or absolute.rstrip("/") == base_url.rstrip("/"):
-            continue
-
-        seen_urls.add(absolute)
-        candidates.append(absolute)
-        if len(candidates) >= _MAX_CRAWL_PAGES:
-            break
-
+    candidates = hinted[:_MAX_CRAWL_PAGES]
+    if len(candidates) < _MAX_CRAWL_PAGES:
+        candidates += other[: _MAX_CRAWL_PAGES - len(candidates)]
     return candidates
 
 
@@ -265,8 +292,7 @@ def fetch_website(url: str) -> dict | None:
     {
       title, meta_description, og_title, og_description, og_site_name,
       og_image, favicon, theme_color,
-      text_excerpt (homepage + up to 2 same-origin About/Services-style
-        pages, concatenated),
+      text_excerpt (homepage + up to 6 same-origin pages, concatenated),
       declared_colors (from CSS custom properties like --primary/--brand -
         high confidence these ARE the brand's colors),
       colors (any other hex literals found - lower confidence, for the LLM
@@ -298,22 +324,43 @@ def fetch_website(url: str) -> dict | None:
     if og.get("og_image"):
         og["og_image"] = urljoin(final_url, og["og_image"])
 
-    stylesheet_css = _fetch_linked_stylesheets(final_url, html)
-    inline_css = "\n".join(_STYLE_BLOCK_RE.findall(html)) + "\n" + "\n".join(_STYLE_ATTR_RE.findall(html))
-    all_css = f"{inline_css}\n{stylesheet_css}"
+    # Everything from here on is a batch of independent HTTP requests (each
+    # stylesheet, each crawled page) with no data dependency on one another -
+    # fetching them concurrently instead of one-by-one cuts the real wait
+    # time users see on the onboarding "Setting up your workspace" step from
+    # roughly the SUM of every request's latency down to roughly the SLOWEST
+    # single one.
+    stylesheet_urls = _find_stylesheet_urls(final_url, html)
+    crawl_urls = _find_crawl_candidates(final_url, html)
 
-    declared_colors, generic_colors = _extract_colors(all_css)
-    fonts = _extract_fonts(all_css)
-
+    stylesheet_css_parts = []
     text_parts = [_extract_text(html)]
     pages_scraped = [final_url]
 
-    for crawl_url in _find_crawl_candidates(final_url, html):
-        crawled = _fetch_raw(crawl_url, require_html=True)
-        if crawled:
-            crawled_url, crawled_html = crawled
-            text_parts.append(_extract_text(crawled_html))
-            pages_scraped.append(crawled_url)
+    if stylesheet_urls or crawl_urls:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=_MAX_STYLESHEETS + _MAX_CRAWL_PAGES) as executor:
+            stylesheet_futures = [
+                executor.submit(_fetch_raw, css_url, max_bytes=512 * 1024) for css_url in stylesheet_urls
+            ]
+            crawl_futures = [executor.submit(_fetch_raw, crawl_url, require_html=True) for crawl_url in crawl_urls]
+
+            for future in stylesheet_futures:
+                result = future.result()
+                if result:
+                    stylesheet_css_parts.append(result[1])
+
+            for future in crawl_futures:
+                result = future.result()
+                if result:
+                    crawled_url, crawled_html = result
+                    text_parts.append(_extract_text(crawled_html))
+                    pages_scraped.append(crawled_url)
+
+    inline_css = "\n".join(_STYLE_BLOCK_RE.findall(html)) + "\n" + "\n".join(_STYLE_ATTR_RE.findall(html))
+    all_css = f"{inline_css}\n{chr(10).join(stylesheet_css_parts)}"
+
+    declared_colors, generic_colors = _extract_colors(all_css)
+    fonts = _extract_fonts(all_css)
 
     return {
         "title": _WHITESPACE_RE.sub(" ", title_match.group(1)).strip() if title_match else "",

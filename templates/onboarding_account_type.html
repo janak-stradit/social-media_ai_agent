@@ -10,18 +10,82 @@
     <style>
         body {
             min-height: 100vh; display: flex; align-items: center; justify-content: center;
-            background: linear-gradient(135deg, #F8FAFC 0%, #F1EFFF 50%, #F1EFFF 100%);
-            font-family: 'Rubik', system-ui, sans-serif; margin: 0; padding: 24px;
+            background: #F8FAFC; font-family: 'Rubik', system-ui, sans-serif; margin: 0; padding: 24px;
+            position: relative; overflow: hidden;
+        }
+        .bg-mesh {
+            position: absolute; top: -20%; left: -10%; width: 120%; height: 120%; z-index: 0;
+            background-image: radial-gradient(at 40% 20%, hsla(255,100%,85%,1) 0px, transparent 50%),
+                               radial-gradient(at 80% 0%, hsla(189,100%,88%,1) 0px, transparent 50%),
+                               radial-gradient(at 0% 50%, hsla(340,100%,93%,1) 0px, transparent 50%);
+            filter: blur(80px); opacity: 0.6; animation: blob-bounce 22s infinite alternate;
+        }
+        @keyframes blob-bounce {
+            0% { transform: translate(0, 0) scale(1); }
+            33% { transform: translate(30px, -40px) scale(1.08); }
+            66% { transform: translate(-20px, 20px) scale(0.94); }
+            100% { transform: translate(0, 0) scale(1); }
+        }
+        @media (prefers-reduced-motion: reduce) { .bg-mesh { animation: none; } }
+
+        .onboard-steps { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 20px; }
+        .onboard-step-dot { width: 8px; height: 8px; border-radius: 50%; background: #E5E7EB; transition: all 0.2s ease; }
+        .onboard-step-dot.active { background: #7366FF; width: 22px; border-radius: 4px; }
+        .onboard-step-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #9CA3AF; margin-bottom: 8px; text-align: center; }
+
+        .onboard-shell {
+            position: relative; z-index: 1; margin: 0 auto;
+            display: flex; align-items: stretch; justify-content: center; gap: 20px; max-width: 960px;
         }
         .onboard-card {
             max-width: 640px; width: 100%; background: #fff; border-radius: 20px; padding: 48px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.08);
+            box-shadow: 0 20px 40px rgba(0,0,0,0.08); flex-shrink: 0;
+            transition: max-width 0.3s ease;
         }
+
+        /* Right-side "setting up your workspace" progress card - appears
+           once the user submits their website, showing each real step of
+           the scrape/analysis pipeline instead of a static spinner. */
+        .onboard-progress-card {
+            max-width: 380px; width: 100%; background: #fff; border-radius: 20px; padding: 36px 32px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.08); align-self: center;
+            animation: progressCardIn 0.35s ease;
+        }
+        @keyframes progressCardIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
+        .progress-card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+        .progress-card-header i { font-size: 20px; color: #7366FF; }
+        .progress-card-title { font-weight: 700; font-size: 15px; color: #111827; }
+        .progress-card-sub { font-size: 12.5px; color: #6B7280; margin-top: 2px; }
+
+        .progress-steps { list-style: none; margin: 0; padding: 0; }
+        .progress-step {
+            display: flex; align-items: flex-start; gap: 12px; padding-bottom: 22px; position: relative;
+        }
+        .progress-step::before {
+            content: ''; position: absolute; left: 11px; top: 26px; bottom: 0; width: 2px; background: #E5E7EB;
+        }
+        .progress-step:last-child::before { display: none; }
+        .progress-step.done::before { background: #7366FF; }
+        .step-icon {
+            width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0; z-index: 1;
+            display: flex; align-items: center; justify-content: center;
+            background: #F3F4F6; color: #9CA3AF; font-size: 10px; border: 2px solid #F3F4F6;
+            transition: all 0.2s ease;
+        }
+        .progress-step.active .step-icon { background: #F1EFFF; color: #7366FF; border-color: #C7C0FF; }
+        .progress-step.done .step-icon { background: #7366FF; color: #fff; border-color: #7366FF; }
+        .step-label { font-size: 13.5px; font-weight: 600; color: #9CA3AF; padding-top: 3px; transition: color 0.2s ease; }
+        .progress-step.active .step-label, .progress-step.done .step-label { color: #111827; }
+        .progress-step.final .step-label { font-weight: 700; }
         .onboard-heading { font-size: 26px; font-weight: 700; color: #111827; letter-spacing: -0.02em; margin-bottom: 8px; text-align: center; }
         .onboard-subheading { font-size: 15px; color: #6B7280; text-align: center; margin-bottom: 32px; }
 
         .account-type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
         @media (max-width: 560px) { .account-type-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 860px) {
+            .onboard-shell { flex-direction: column; }
+            .onboard-progress-card { max-width: 100%; }
+        }
 
         .account-type-card {
             display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
@@ -41,7 +105,14 @@
     </style>
 </head>
 <body>
+    <div class="bg-mesh" aria-hidden="true"></div>
+    <div class="onboard-shell">
     <div class="onboard-card">
+        <div class="onboard-step-label">Step 2 of 2</div>
+        <div class="onboard-steps" aria-hidden="true">
+            <span class="onboard-step-dot active"></span>
+            <span class="onboard-step-dot active"></span>
+        </div>
         <div class="auth-brand-logo" style="justify-content: center; margin-bottom: 28px;">
             <span class="auth-brand-mark" aria-hidden="true">
                 <svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -92,6 +163,25 @@
         <div id="onboardError" class="alert-inline alert-inline-danger" role="alert"></div>
     </div>
 
+    <div class="onboard-progress-card d-none" id="onboardProgressCard">
+        <div class="progress-card-header">
+            <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
+            <div>
+                <div class="progress-card-title">Setting up your workspace</div>
+                <div class="progress-card-sub" id="progressCardSub">This usually takes a few seconds.</div>
+            </div>
+        </div>
+        <ul class="progress-steps" id="progressSteps">
+            <li class="progress-step" data-step="0"><span class="step-icon"></span><span class="step-label">Connecting to your website</span></li>
+            <li class="progress-step" data-step="1"><span class="step-icon"></span><span class="step-label">Reading your content</span></li>
+            <li class="progress-step" data-step="2"><span class="step-icon"></span><span class="step-label">Understanding your brand voice</span></li>
+            <li class="progress-step" data-step="3"><span class="step-icon"></span><span class="step-label">Extracting colors &amp; fonts</span></li>
+            <li class="progress-step" data-step="4"><span class="step-icon"></span><span class="step-label">Generating content ideas</span></li>
+            <li class="progress-step final" data-step="5"><span class="step-icon"></span><span class="step-label">Complete!</span></li>
+        </ul>
+    </div>
+    </div>
+
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script>
         let selectedType = null;
@@ -103,12 +193,6 @@
                 type: 'POST',
                 contentType: 'application/json',
                 data: JSON.stringify({ account_type: accountType, website: website || '' })
-            }).done(function (res) {
-                if (res.success) {
-                    window.location.href = res.redirect || '/dashboard';
-                } else {
-                    $err.text(res.error || 'Something went wrong.').show();
-                }
             }).fail(function (xhr) {
                 $err.text((xhr.responseJSON && xhr.responseJSON.error) || 'Something went wrong.').show();
             });
@@ -122,13 +206,82 @@
 
             if (type === 'enterprise') {
                 $(this).prop('disabled', true);
-                submitAccountType('enterprise', null);
+                submitAccountType('enterprise', null).done(function (res) {
+                    if (res.success) window.location.href = res.redirect || '/dashboard';
+                });
                 return;
             }
 
             $('#websiteStep').removeClass('d-none');
             $('#websiteInput').trigger('focus');
         });
+
+        // Real work happens in one blocking backend call (account-type save
+        // + website scrape + brand analysis), but the user shouldn't just
+        // stare at a static "Saving..." spinner for however long that
+        // takes - this steps a plausible, honestly-labelled sequence
+        // through the actual pipeline stages while the real request is in
+        // flight, and only shows "Complete!" once the real response comes
+        // back (never claims done before the backend actually is).
+        const STEP_INTERVAL_MS = 1100;
+        let stepTimer = null;
+        let currentStep = -1;
+        const LAST_WAITING_STEP = 4; // "Generating content ideas" - holds here until the real call resolves
+
+        function setStep(index, state) {
+            $(`.progress-step[data-step="${index}"]`).removeClass('active done').addClass(state);
+            const $icon = $(`.progress-step[data-step="${index}"] .step-icon`);
+            if (state === 'active') {
+                $icon.html('<i class="fas fa-circle-notch fa-spin"></i>');
+            } else if (state === 'done') {
+                $icon.html('<i class="fas fa-check"></i>');
+            }
+        }
+
+        function advanceStep() {
+            if (currentStep >= 0) setStep(currentStep, 'done');
+            if (currentStep >= LAST_WAITING_STEP) return; // hold on the last real step until the AJAX call finishes
+            currentStep++;
+            setStep(currentStep, 'active');
+        }
+
+        function startProgressCard() {
+            $('#websiteStep').addClass('d-none');
+            $('#onboardProgressCard').removeClass('d-none');
+            currentStep = -1;
+            advanceStep();
+            stepTimer = setInterval(advanceStep, STEP_INTERVAL_MS);
+        }
+
+        function finishProgressCard(onDone) {
+            clearInterval(stepTimer);
+            // Fast-forward any steps the timer hadn't reached yet, then the
+            // final "Complete!" step, each a beat apart so it still reads
+            // as a sequence rather than everything snapping at once.
+            let i = currentStep;
+            const steps = [];
+            while (i < 5) { steps.push(i); i++; }
+            let delay = 0;
+            steps.forEach(function (stepIndex) {
+                setTimeout(function () { setStep(stepIndex, 'done'); }, delay);
+                delay += 180;
+            });
+            setStep(5, 'active');
+            setTimeout(function () {
+                setStep(5, 'done');
+                $('#progressCardSub').text('All set!');
+                setTimeout(onDone, 700);
+            }, delay + 180);
+        }
+
+        function resetProgressCard() {
+            clearInterval(stepTimer);
+            currentStep = -1;
+            $('.progress-step').removeClass('active done');
+            $('.step-icon').empty();
+            $('#onboardProgressCard').addClass('d-none');
+            $('#websiteStep').removeClass('d-none');
+        }
 
         $('#continueBtn').on('click', function () {
             if (!selectedType) return;
@@ -139,10 +292,21 @@
             }
             const $btn = $(this);
             $btn.prop('disabled', true);
-            $('#continueBtnText').html('<i class="fas fa-spinner fa-spin"></i> Saving...');
-            submitAccountType(selectedType, website).always(function () {
+            startProgressCard();
+
+            submitAccountType(selectedType, website).done(function (res) {
+                if (res.success) {
+                    finishProgressCard(function () {
+                        window.location.href = res.redirect || '/dashboard';
+                    });
+                } else {
+                    resetProgressCard();
+                    $btn.prop('disabled', false);
+                    $('#onboardError').text(res.error || 'Something went wrong.').show();
+                }
+            }).fail(function () {
+                resetProgressCard();
                 $btn.prop('disabled', false);
-                $('#continueBtnText').text('Continue to dashboard');
             });
         });
     </script>

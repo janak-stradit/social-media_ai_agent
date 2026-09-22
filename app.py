@@ -138,6 +138,19 @@ def create_app(config_name="development"):
             return redirect(url_for("index"))
         return render_template("login.html")
 
+    @app.route("/signup")
+    def signup_route():
+        """Dedicated registration page (posts to /api/auth/register, same
+        endpoint login.html's old register-mode toggle used) - a real page
+        instead of a same-page mode switch, with its own client-side
+        validation (name/email format/password strength/confirm-password
+        match) layered on top of the server-side checks in
+        auth/routes.py's register(), which remain the actual source of
+        truth."""
+        if get_current_user_id():
+            return redirect(url_for("index"))
+        return render_template("signup.html")
+
     @app.route("/verify-pending")
     def verify_pending_page():
         """Shown right after registration - reachable with no session, since

@@ -27,11 +27,6 @@
         <p class="auth-subheading">Have we met before?</p>
 
         <form id="authForm" style="width: 100%; max-width: 360px;">
-            <div id="nameField" class="auth-form-group d-none" style="display: none;">
-                <label class="auth-form-label" for="authName">Full Name</label>
-                <input id="authName" type="text" class="auth-form-input" placeholder="e.g. Alex Morgan" autocomplete="name">
-            </div>
-
             <div class="auth-form-group">
                 <label class="auth-form-label" for="authEmail">Email</label>
                 <input id="authEmail" type="email" class="auth-form-input" placeholder="name@email.com" autocomplete="email" required>
@@ -56,9 +51,9 @@
 
         <div class="auth-footer-links" style="max-width: 360px;">
             <a href="#" class="auth-link-bold" style="text-decoration: underline; font-size: 12px;">Forgot my password</a>
-            
+
             <div class="auth-footer-row">
-                <span style="color: #6B7280; font-size: 12px;">Don't have an account? <a href="#" class="auth-link-bold" id="toggleModeBtn">Sign up</a></span>
+                <span style="color: #6B7280; font-size: 12px;">Don't have an account? <a href="/signup" class="auth-link-bold">Sign up</a></span>
             </div>
         </div>
     </div>
@@ -113,17 +108,30 @@
                 </style>
             </div>
 
-            <!-- Informational Overlay -->
-            <div style="position: absolute; bottom: 40px; left: 40px; right: 40px; z-index: 10; pointer-events: none; text-align: left; background: rgba(255,255,255,0.4); backdrop-filter: blur(12px); padding: 24px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.8); box-shadow: 0 20px 40px rgba(0,0,0,0.05);">
-                <h3 style="font-size: 24px; font-weight: 600; color: #0F172A; margin-bottom: 8px;">Supercharge Your Strategy</h3>
-                <p style="font-size: 14px; color: #475569; margin-bottom: 16px;">Join thousands of brands automating their entire content lifecycle. From trend discovery to multi-platform scheduling—all powered by autonomous AI.</p>
-                <div style="display: flex; align-items: center; gap: 12px;">
-                    <div style="display: flex; margin-left: 8px;">
-                        <div style="width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; margin-left: -8px; background: #A89DFF;"></div>
-                        <div style="width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; margin-left: -8px; background: #FF8FA8;"></div>
-                        <div style="width: 32px; height: 32px; border-radius: 50%; border: 2px solid #fff; margin-left: -8px; background: #7ECB70;"></div>
-                    </div>
-                    <div style="font-size: 13px; font-weight: 600; color: #0F172A;">Trusted by leading Marketers</div>
+            <!-- Rotating Showcase - auto-advances through a few value props
+                 instead of showing one fixed message the whole time. -->
+            <div class="auth-showcase" id="authShowcase">
+                <div class="auth-showcase-slide active">
+                    <h3><i class="fas fa-bolt" aria-hidden="true"></i>Supercharge Your Strategy</h3>
+                    <p>Join thousands of brands automating their entire content lifecycle - from trend discovery to multi-platform scheduling, all powered by autonomous AI.</p>
+                </div>
+                <div class="auth-showcase-slide">
+                    <h3><i class="fas fa-network-wired" aria-hidden="true"></i>Multi-Agent Content Pipeline</h3>
+                    <p>Story, Vision, Caption, Hashtag, Strategy, and Critic agents collaborate on every single post, automatically.</p>
+                </div>
+                <div class="auth-showcase-slide">
+                    <h3><i class="fas fa-palette" aria-hidden="true"></i>Brand-Aware Every Time</h3>
+                    <p>Your voice, colors, and guidelines - honored automatically in everything your agents generate.</p>
+                </div>
+                <div class="auth-showcase-slide">
+                    <h3><i class="fas fa-share-nodes" aria-hidden="true"></i>Publish Everywhere</h3>
+                    <p>LinkedIn, Instagram, Facebook, X, YouTube, TikTok - one workspace, every platform.</p>
+                </div>
+                <div class="auth-showcase-dots" role="tablist" aria-label="Feature highlights">
+                    <button type="button" class="auth-showcase-dot active" aria-label="Slide 1"></button>
+                    <button type="button" class="auth-showcase-dot" aria-label="Slide 2"></button>
+                    <button type="button" class="auth-showcase-dot" aria-label="Slide 3"></button>
+                    <button type="button" class="auth-showcase-dot" aria-label="Slide 4"></button>
                 </div>
             </div>
         </div>
@@ -132,32 +140,35 @@
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script>
-    let mode = 'login';
+    // Rotating right-pane showcase
+    (function () {
+        const $slides = $('#authShowcase .auth-showcase-slide');
+        const $dots = $('#authShowcase .auth-showcase-dot');
+        const total = $slides.length;
+        if (total <= 1) return;
+        let current = 0;
+        let timer = null;
 
-    // Single delegated handler - #toggleModeBtn's parent gets its innerHTML
-    // replaced on every toggle, so this must stay delegated (an element-bound
-    // .click() handler here would double-fire alongside this one on the
-    // first click, since both match the same click event, and the two
-    // branches would immediately undo each other - mode toggled to
-    // 'register' then straight back to 'login' in the same click).
-    $(document).on('click', '#toggleModeBtn', function (e) {
-        e.preventDefault();
-        if (mode === 'login') {
-            mode = 'register';
-            $('#nameField').show();
-            $('.auth-heading').text('Create account');
-            $('.auth-subheading').text('Welcome to VortexSocial AI');
-            $('#authSubmitText').text('Sign up');
-            $(this).parent().html('Already have an account? <a href="#" class="auth-link-bold" id="toggleModeBtn">Log in</a>');
-        } else {
-            mode = 'login';
-            $('#nameField').hide();
-            $('.auth-heading').text('Hi there!');
-            $('.auth-subheading').text('Have we met before?');
-            $('#authSubmitText').text('Log in');
-            $(this).parent().html('Don\'t have an account? <a href="#" class="auth-link-bold" id="toggleModeBtn">Sign up</a>');
+        function showSlide(index) {
+            $slides.removeClass('active').eq(index).addClass('active');
+            $dots.removeClass('active').eq(index).addClass('active');
+            current = index;
         }
-    });
+
+        function startTimer() {
+            clearInterval(timer);
+            timer = setInterval(function () { showSlide((current + 1) % total); }, 4500);
+        }
+
+        $dots.on('click', function () {
+            showSlide($dots.index(this));
+            startTimer();
+        });
+
+        if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+            startTimer();
+        }
+    })();
 
     // Password show/hide toggle
     $('#togglePasswordBtn').on('click', function () {
@@ -168,44 +179,41 @@
         $(this).find('i').toggleClass('fa-eye fa-eye-slash');
     });
 
+    const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
     $('#authForm').on('submit', function (e) {
         e.preventDefault();
         $('#authError').hide();
 
-        const endpoint = mode === 'login' ? '/api/auth/login' : '/api/auth/register';
-        const payload = {
-            email: $('#authEmail').val(),
-            password: $('#authPassword').val()
-        };
+        const email = $('#authEmail').val().trim();
+        const password = $('#authPassword').val();
 
-        if (mode === 'register') {
-            payload.name = $('#authName').val();
+        if (!email || !EMAIL_RE.test(email)) {
+            $('#authError').text('Enter a valid email address.').show();
+            return;
+        }
+        if (!password) {
+            $('#authError').text('Password is required.').show();
+            return;
         }
 
         const $submitBtn = $('#authSubmit');
-        const submittingLabel = mode === 'login' ? 'Signing in...' : 'Creating account...';
         const originalLabel = $('#authSubmitText').text();
         $submitBtn.prop('disabled', true);
-        $('#authSubmitText').html('<i class="fas fa-spinner fa-spin"></i> ' + submittingLabel);
+        $('#authSubmitText').html('<i class="fas fa-spinner fa-spin"></i> Signing in...');
 
         $.ajax({
-            url: endpoint,
+            url: '/api/auth/login',
             type: 'POST',
             contentType: 'application/json',
-            data: JSON.stringify(payload),
+            data: JSON.stringify({ email: email, password: password }),
             success: function (res) {
                 if (res.success) {
-                    if (mode === 'register') {
-                        // Registration no longer logs the user in directly -
-                        // they need to verify their email first (see
-                        // auth/routes.py's register()/verify_email()).
-                        window.location.href = '/verify-pending?email=' + encodeURIComponent(payload.email);
-                    } else {
-                        window.location.href = '/dashboard';
-                    }
+                    window.location.href = '/dashboard';
                 } else {
                     $submitBtn.prop('disabled', false);
                     $('#authSubmitText').text(originalLabel);
+                    $('#authError').text(res.error || 'Something went wrong.').show();
                 }
             },
             error: function (xhr) {

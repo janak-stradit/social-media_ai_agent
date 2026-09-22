@@ -505,6 +505,16 @@ body {
   margin: 0 auto 20px auto; box-shadow: 0 8px 24px rgba(255, 51, 100,.12);
 }
 .welcome-title { font-size: 26px; font-weight: 600; color: var(--navy); margin-bottom: 10px; letter-spacing: -0.01em; }
+
+.welcome-title-row { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.welcome-title-row .welcome-title { margin-bottom: 0; }
+.btn-regenerate-greeting {
+  width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--border);
+  background: var(--surface); color: var(--text-sub); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; font-size: 13px;
+  transition: var(--tr); flex-shrink: 0; margin-bottom: 10px;
+}
+.btn-regenerate-greeting:hover { background: var(--blue-bg); color: var(--blue); border-color: #c7c0ff; transform: rotate(45deg); }
 .welcome-desc { font-size: 14.5px; color: var(--text-sub); max-width: 580px; margin: 0 auto 36px auto; }
 
 .quick-prompts-grid {
@@ -812,6 +822,14 @@ body {
 .chat-input-dock:focus-within {
   border-color: var(--blue);
   box-shadow: 0 -4px 28px rgba(115, 102, 255,.15), 0 8px 36px rgba(15,23,42,.15);
+}
+
+/* While the Multi-Agent Execution Pipeline is running - prevents starting
+   a second overlapping generation before the first one finishes. */
+.chat-input-dock.dock-disabled {
+  opacity: 0.55;
+  pointer-events: none;
+  cursor: not-allowed;
 }
 
 /* Inline Configuration Bar inside Dock */
@@ -2637,6 +2655,28 @@ body {
 .btn-primary-blue:focus-visible { outline: 2px solid #7366FF; outline-offset: 3px; }
 .auth-footer-links { margin-top: 40px; display: flex; flex-direction: column; gap: 16px; font-size: 13px; }
 .auth-footer-row { display: flex; justify-content: space-between; }
+
+/* Auth right-pane rotating showcase - replaces a single fixed message with
+   several auto-advancing slides (login.html / signup.html). */
+.auth-showcase {
+  position: absolute; bottom: 40px; left: 40px; right: 40px; z-index: 10;
+  text-align: left; background: rgba(255,255,255,0.4); backdrop-filter: blur(12px);
+  padding: 24px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.8);
+  box-shadow: 0 20px 40px rgba(0,0,0,0.05); min-height: 106px;
+}
+.auth-showcase-slide { display: none; }
+.auth-showcase-slide.active { display: block; animation: authShowcaseFade 0.45s ease; }
+@keyframes authShowcaseFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+.auth-showcase-slide h3 { font-size: 21px; font-weight: 600; color: #0F172A; margin-bottom: 8px; display: flex; align-items: center; gap: 10px; }
+.auth-showcase-slide h3 i {
+  font-size: 15px; color: #7366FF; background: #F1EFFF; width: 32px; height: 32px;
+  border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.auth-showcase-slide p { font-size: 13.5px; color: #475569; margin: 0; line-height: 1.5; }
+.auth-showcase-dots { display: flex; gap: 6px; margin-top: 16px; }
+.auth-showcase-dot { width: 6px; height: 6px; border-radius: 50%; background: #CBD5E1; transition: all 0.3s ease; cursor: pointer; border: none; padding: 0; }
+.auth-showcase-dot.active { width: 20px; border-radius: 3px; background: #7366FF; }
+@media (prefers-reduced-motion: reduce) { .auth-showcase-slide.active { animation: none; } }
 .auth-link { color: #6B7280; text-decoration: none; font-weight: 600; transition: color 0.2s; }
 .auth-link:hover { color: #111827; }
 .auth-link-bold { color: #111827; text-decoration: none; font-weight: 600; background: none; border: none; padding: 0; font-size: inherit; cursor: pointer; }

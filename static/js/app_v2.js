@@ -184,6 +184,93 @@ $(document).ready(function () {
         tips: { icon: "fa-list-check", cls: "text-info" }
     };
 
+    let _brandProfileIdeaPool = null; // full pool fetched once (up to 8 ideas)
+    let _brandProfileCompanyName = null;
+    let _lastGreeting = null;
+    let _lastShownPrompts = null; // prompts of the currently-displayed cards, to avoid showing the exact same 4 again
+    const QUICK_PROMPT_CARD_COUNT = 4;
+
+    function shuffle(arr) {
+        const copy = arr.slice();
+        for (let i = copy.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [copy[i], copy[j]] = [copy[j], copy[i]];
+        }
+        return copy;
+    }
+
+    // Draws a fresh random subset of QUICK_PROMPT_CARD_COUNT ideas from the
+    // full pool - if the pool is bigger than the card count, this keeps
+    // retrying until it gets a set that isn't identical to what's already
+    // shown, so "regenerate" reliably produces genuinely different cards
+    // instead of occasionally reshuffling into the same 4 by chance.
+    function pickIdeaSubset(pool) {
+        if (pool.length <= QUICK_PROMPT_CARD_COUNT) return shuffle(pool);
+
+        let subset;
+        let attempts = 0;
+        do {
+            subset = shuffle(pool).slice(0, QUICK_PROMPT_CARD_COUNT);
+            attempts++;
+        } while (
+            _lastShownPrompts &&
+            attempts < 10 &&
+            subset.every(idea => _lastShownPrompts.has(idea.prompt))
+        );
+        return subset;
+    }
+
+    function renderQuickPromptCards(ideas) {
+        _lastShownPrompts = new Set(ideas.map(idea => idea.prompt));
+        let html = '';
+        ideas.forEach(idea => {
+            const meta = QUICK_PROMPT_ICONS[idea.category] || QUICK_PROMPT_ICONS.tips;
+            html += `
+                <button class="quick-prompt-card" data-prompt="${escapeAttr(idea.prompt)}">
+                    <div class="quick-prompt-header">
+                        <i class="fas ${meta.icon} ${meta.cls}"></i>
+                        <span>${escapeHtml(idea.title)}</span>
+                    </div>
+                    <p class="quick-prompt-text">${escapeHtml(idea.summary || idea.prompt)}</p>
+                </button>
+            `;
+        });
+        $('.quick-prompts-grid').html(html);
+    }
+
+    function pickGreeting(companyName) {
+        const templates = [
+            `Ready to create content for ${companyName}?`,
+            `What should we post for ${companyName} today?`,
+            `Let's grow ${companyName}'s audience - where do we start?`,
+            `${companyName}, what's the story this time?`,
+            `Your next ${companyName} post starts here.`
+        ];
+        // Avoid picking the exact same line twice in a row when the user
+        // hits regenerate.
+        let pick = templates[Math.floor(Math.random() * templates.length)];
+        if (templates.length > 1) {
+            while (pick === _lastGreeting) {
+                pick = templates[Math.floor(Math.random() * templates.length)];
+            }
+        }
+        _lastGreeting = pick;
+        return pick;
+    }
+
+    // Picks a fresh subset of cards from the already-fetched idea pool
+    // (up to 8, from a single onboarding-time analysis) and a new greeting
+    // line - no network round-trip needed, so the regenerate button next to
+    // the welcome title responds instantly. Pools of 4 or fewer (accounts
+    // analyzed before this pool feature existed) just get their order
+    // reshuffled - there's nothing genuinely new to draw from until they
+    // re-analyze their site from /brand-profile.
+    window.regenerateGreeting = function () {
+        if (!_brandProfileCompanyName || !_brandProfileIdeaPool) return;
+        $('.welcome-title').text(pickGreeting(_brandProfileCompanyName));
+        renderQuickPromptCards(pickIdeaSubset(_brandProfileIdeaPool));
+    };
+
     function loadBrandProfileQuickPrompts() {
         $.ajax({
             url: '/api/brand-profile/quick-prompts',
@@ -192,34 +279,14 @@ $(document).ready(function () {
                 const ideas = (r && r.post_ideas) || [];
                 if (!ideas.length) return;
 
-                let html = '';
-                ideas.forEach(idea => {
-                    const meta = QUICK_PROMPT_ICONS[idea.category] || QUICK_PROMPT_ICONS.tips;
-                    html += `
-                        <button class="quick-prompt-card" data-prompt="${escapeAttr(idea.prompt)}">
-                            <div class="quick-prompt-header">
-                                <i class="fas ${meta.icon} ${meta.cls}"></i>
-                                <span>${escapeHtml(idea.title)}</span>
-                            </div>
-                            <p class="quick-prompt-text">${escapeHtml(idea.summary || idea.prompt)}</p>
-                        </button>
-                    `;
-                });
-                $('.quick-prompts-grid').html(html);
+                _brandProfileIdeaPool = ideas;
+                renderQuickPromptCards(pickIdeaSubset(ideas));
 
                 if (r.company_name) {
-                    // Rotate the greeting instead of showing the exact same
-                    // sentence on every visit - picked once per page load.
-                    const greetingTemplates = [
-                        `Ready to create content for ${r.company_name}?`,
-                        `What should we post for ${r.company_name} today?`,
-                        `Let's grow ${r.company_name}'s audience - where do we start?`,
-                        `${r.company_name}, what's the story this time?`,
-                        `Your next ${r.company_name} post starts here.`
-                    ];
-                    const greeting = greetingTemplates[Math.floor(Math.random() * greetingTemplates.length)];
-                    $('.welcome-title').text(greeting);
+                    _brandProfileCompanyName = r.company_name;
+                    $('.welcome-title').text(pickGreeting(r.company_name));
                     $('.welcome-desc').text('These ideas are grounded in your brand - pick one, or type your own brief below.');
+                    $('#regenerateGreetingBtn').removeClass('d-none');
                 }
             }
         });
@@ -402,7 +469,17 @@ $(document).ready(function () {
         });
     };
 
+    // Prevents starting a second overlapping generation while the
+    // Multi-Agent Execution Pipeline is already running - the textarea and
+    // every dock control become inert (opacity + pointer-events: none via
+    // .dock-disabled) for the duration of the request.
+    function setChatDockDisabled(disabled) {
+        $('#dropZone').toggleClass('dock-disabled', disabled);
+        $('#storyInput, #generateBtn, #analyzeBtn, #attachBtn').prop('disabled', disabled);
+    }
+
     function executeGeneration(msgId, requestBody, assistantElem, platforms, activeImgPath, mediaType, selectedOutputs) {
+        setChatDockDisabled(true);
         const hasImage = !!activeImgPath;
         const stepIds = hasImage
             ? ['step_story', 'step_vision', 'step_caption', 'step_hashtag', 'step_strategy', 'step_reviewer', 'step_guardrail']
@@ -438,6 +515,7 @@ $(document).ready(function () {
             data: JSON.stringify(requestBody),
             success: function (r) {
                 window.currentGenerationRequest = null;
+                setChatDockDisabled(false);
                 clearInterval(iv);
                 lastRunId = r.run_id || null;
 
@@ -466,6 +544,7 @@ $(document).ready(function () {
             },
             error: function (xhr, status, error) {
                 window.currentGenerationRequest = null;
+                setChatDockDisabled(false);
                 clearInterval(iv);
                 
                 if (status === 'abort') {
@@ -608,6 +687,38 @@ $(document).ready(function () {
         `;
 
         $('#chatThread').append(html);
+    }
+
+    // Renders a finished image/video card - shared by triggerMediaGenInChat
+    // (a generation that just completed live) and renderAssistantResponse
+    // (a run reloaded from history that already has saved media, see
+    // db.append_run_media / content[platform].media.{image,video}) so both
+    // paths produce the identical card instead of two hand-maintained copies.
+    function buildGeneratedMediaHtml(mediaType, media) {
+        if (mediaType === 'video') {
+            return `
+                <div class="media-output-card">
+                    <div class="media-output-header">
+                        <span><i class="fas fa-video text-purple me-2"></i>Generated Video (${media.resolution || 'MP4'})</span>
+                        <button type="button" class="btn-copy-sm" onclick="downloadAsZip('${media.url}', this)"><i class="fas fa-file-zipper me-1"></i>Download</button>
+                    </div>
+                    <div class="media-output-body">
+                        <video src="${media.url}" controls class="media-output-video" loop></video>
+                    </div>
+                </div>
+            `;
+        }
+        return `
+            <div class="media-output-card">
+                <div class="media-output-header">
+                    <span><i class="fas fa-image text-primary me-2"></i>Generated Image (${media.resolution || '1024x1024'})</span>
+                    <button type="button" class="btn-copy-sm" onclick="downloadAsZip('${media.url}', this)"><i class="fas fa-file-zipper me-1"></i>Download</button>
+                </div>
+                <div class="media-output-body">
+                    <img src="${media.url}" class="media-output-img" alt="Generated media">
+                </div>
+            </div>
+        `;
     }
 
     function assistantAvatarSvg() {
@@ -956,9 +1067,18 @@ $(document).ready(function () {
                         <div class="hashtags-container" id="${tagsCardId}">${tagsHtml}</div>
                     </div>
 
-                    <!-- Media Output Placeholder/Card -->
+                    <!-- Media Output - a run reloaded from history already has
+                         its generated media saved (see db.append_run_media,
+                         content[platform].media.{image,video}) - show that
+                         directly instead of a "Generating..." placeholder,
+                         which was only ever meant for a generation actually
+                         in progress right now. Only fall back to the
+                         placeholder (and let the live-trigger block below
+                         kick off a real generation) when there's genuinely
+                         no saved media yet for a type that was requested. -->
                     <div id="${msgId}_media_${p}" class="media-container-slot">
-                        ${(selectedOutputs || []).includes('image') ? `
+                        ${pData.media?.image?.url ? buildGeneratedMediaHtml('image', pData.media.image)
+                            : (selectedOutputs || []).includes('image') ? `
                         <div class="media-output-card mb-2" id="${msgId}_media_image_${p}">
                             <div class="media-output-header">
                                 <span><i class="fas fa-spinner fa-spin me-2 text-primary"></i>Generating AI IMAGE...</span>
@@ -969,7 +1089,8 @@ $(document).ready(function () {
                             </div>
                         </div>
                         ` : ''}
-                        ${(selectedOutputs || []).includes('video') ? `
+                        ${pData.media?.video?.url ? buildGeneratedMediaHtml('video', pData.media.video)
+                            : (selectedOutputs || []).includes('video') ? `
                         <div class="media-output-card" id="${msgId}_media_video_${p}">
                             <div class="media-output-header">
                                 <span><i class="fas fa-spinner fa-spin me-2 text-purple"></i>Generating AI VIDEO...</span>
@@ -1095,19 +1216,27 @@ $(document).ready(function () {
             schedModal.show();
         });
 
-        // Trigger Media Generation asynchronously if mediaType requested
+        // Trigger Media Generation asynchronously if mediaType requested -
+        // but only for a (platform, type) pair that doesn't already have
+        // saved media. A run reloaded from history now correctly lists its
+        // already-generated types in selectedOutputs (see
+        // loadHistoryIntoChat) so its existing image/video renders via
+        // buildGeneratedMediaHtml above - without this check, viewing it
+        // would immediately kick off a brand new, wasteful (and credit-
+        // consuming) generation for content that already exists.
         if (selectedOutputs && selectedOutputs.length > 0) {
             platforms.forEach(p => {
-                const pCaption = content[p]?.caption?.primary_caption || requestBody.story;
+                const pData = content[p] || {};
+                const pCaption = pData.caption?.primary_caption || requestBody.story;
                 // media_prompt (see api/routes.py) folds the Research Summary's
                 // imagery descriptions & research notes in alongside the caption,
                 // so image/video generation actually reflects the research shown
                 // to the user - not just the short social caption text.
-                const pMediaPrompt = content[p]?.media_prompt || pCaption;
-                if (selectedOutputs.includes('image')) {
+                const pMediaPrompt = pData.media_prompt || pCaption;
+                if (selectedOutputs.includes('image') && !pData.media?.image?.url) {
                     triggerMediaGenInChat(p, pCaption, 'image', requestBody.tone, runId, historyObj.activeImgPath, `${msgId}_media_image_${p}`, pMediaPrompt);
                 }
-                if (selectedOutputs.includes('video')) {
+                if (selectedOutputs.includes('video') && !pData.media?.video?.url) {
                     triggerMediaGenInChat(p, pCaption, 'video', requestBody.tone, runId, historyObj.activeImgPath, `${msgId}_media_video_${p}`, pMediaPrompt);
                 }
             });
@@ -1254,7 +1383,7 @@ $(document).ready(function () {
                 }
             },
             error: function () {
-                $('#dbStatus').html('<i class="fas fa-circle fa-xs me-1 text-danger"></i>Disconnected');
+                showToast('Could not load your history right now.', 'error');
             }
         });
     }
@@ -1413,6 +1542,19 @@ $(document).ready(function () {
                 appendUserMessage(run.story, null, platforms, run.tone, 'Text (Caption)', 'Standard Enterprise');
                 appendAssistantThinking(msgId, false);
 
+                // Reflect what was actually generated for this run (see
+                // db.append_run_media / content[platform].media.{image,video})
+                // - this used to always be [], which meant a run that DID
+                // include a generated image never showed it when reloaded
+                // from history (the media card only ever renders when its
+                // type is listed here).
+                const savedOutputs = [];
+                platforms.forEach(p => {
+                    const media = content[p]?.media || {};
+                    if (media.image?.url && !savedOutputs.includes('image')) savedOutputs.push('image');
+                    if (media.video?.url && !savedOutputs.includes('video')) savedOutputs.push('video');
+                });
+
                 window.chatHistory[msgId] = {
                     responses: [{ content: content, runId: run.id, usage: null, agentsExecuted: null, qualitySummary: null }],
                     currentIndex: 0,
@@ -1420,7 +1562,7 @@ $(document).ready(function () {
                     platforms: platforms,
                     activeImgPath: null,
                     mediaType: 'none',
-                    selectedOutputs: []
+                    selectedOutputs: savedOutputs
                 };
                 renderAssistantResponse(msgId);
 
@@ -1579,10 +1721,6 @@ $(document).ready(function () {
     let graphEdges = [];
     let graphSelectedNode = null;
     let graphDraggedNode = null;
-
-    $('#openMemoryGraphBtn, #memoryIndicatorBadge').on('click', function () {
-        openMemoryGraphModal();
-    });
 
     function openMemoryGraphModal() {
         const modalElem = document.getElementById('memoryGraphModal');

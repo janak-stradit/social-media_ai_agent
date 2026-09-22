@@ -50,6 +50,7 @@ try:
         get_setting,
         get_user_social_accounts,
         get_user_usage_stats,
+        hard_delete_user,
         list_approval_requests,
         list_brand_assets,
         reject_credit_request,
@@ -1554,6 +1555,48 @@ def admin_set_user_active(target_user_id):
     if not res:
         return jsonify({"error": "User not found"}), 404
     return jsonify({"success": True, "user": res})
+
+
+@api_bp.route("/admin/users/<int:target_user_id>", methods=["DELETE"])
+@login_required_api
+@admin_required_api
+def admin_hard_delete_user(target_user_id):
+    """Permanently deletes a user and every row of their data (run history,
+    scheduled posts, approval requests, social accounts, brand profile,
+    credit/sales-contact requests) - see db.hard_delete_user. Irreversible;
+    the frontend (templates/admin.html) requires the admin to type the
+    user's exact email to confirm before this is ever called.
+
+    Deliberately refuses to delete admin accounts (including the caller's
+    own) - hard-deleting staff accounts is a much higher-blast-radius
+    mistake than deleting a customer account, and isn't what this feature
+    is for; an admin who genuinely needs to be removed should be handled
+    directly in the database, not through this one-click admin action."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+
+    requester_id = get_current_user_id()
+    if target_user_id == requester_id:
+        return jsonify({"error": "You cannot delete your own account."}), 400
+
+    target = get_user_by_id(target_user_id)
+    if not target:
+        return jsonify({"error": "User not found"}), 404
+    if getattr(target, "is_admin", False):
+        return jsonify({"error": "Admin accounts can't be deleted from this panel."}), 400
+
+    data = request.get_json() or {}
+    confirm_email = (data.get("confirm_email") or "").strip().lower()
+    if confirm_email != target.email.lower():
+        return jsonify({"error": "Confirmation email did not match."}), 400
+
+    try:
+        res = hard_delete_user(target_user_id)
+        if not res:
+            return jsonify({"error": "User not found"}), 404
+        return jsonify({"success": True, "deleted": res})
+    except Exception as e:
+        return jsonify({"error": str(e), "success": False}), 500
 
 
 @api_bp.route("/admin/users/<int:target_user_id>/profile", methods=["POST"])
