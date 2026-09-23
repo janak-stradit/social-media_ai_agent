@@ -4,6 +4,7 @@ $(document).ready(function () {
     let lastRunId = null;
     let lastAssistantContext = null;
     let messageCounter = 0;
+    window.chatHistory = {}; // Store generations per msgId
 
     $.ajaxSetup({
         xhrFields: { withCredentials: true }
@@ -53,6 +54,25 @@ $(document).ready(function () {
                 $('#headerUserLabel').text(user.name || 'User');
                 $('#headerUserEmail').text(user.email || '');
                 $('#headerUserAvatar').text(user.initials || 'U');
+
+                // "My Brand Configuration" (-> /brand-profile, the per-user
+                // UserBrandProfile edit page) only makes sense for
+                // Individual/Small/Medium accounts - Enterprise/admin have
+                // no scraped brand profile of their own.
+                if (['individual', 'small', 'medium'].includes(user.account_type)) {
+                    $('#dropBrandProfileLi').removeClass('d-none');
+                } else {
+                    $('#dropBrandProfileLi').addClass('d-none');
+                }
+
+                // "Brand Configuration" (-> /brand-configuration, StradIT's
+                // own global Content Guidelines) is Enterprise/admin only -
+                // matches the @enterprise_required_page gate on that route.
+                if (user.account_type === 'enterprise' || user.is_admin) {
+                    $('#dropBrandConfigLi').removeClass('d-none');
+                } else {
+                    $('#dropBrandConfigLi').addClass('d-none');
+                }
             },
             error: function () {
                 window.location.href = '/api/auth/login';
@@ -97,12 +117,11 @@ $(document).ready(function () {
                         }
                     }
 
-                    // Show Admin Portal button if user is admin
+                    // Show the "Admin Management Portal" link (-> /admin,
+                    // a standalone page - see templates/admin.html) only for admins.
                     if (r.is_admin) {
-                        $('#headerAdminBtn').removeClass('d-none');
                         $('#dropAdminPortalLi').removeClass('d-none');
                     } else {
-                        $('#headerAdminBtn').addClass('d-none');
                         $('#dropAdminPortalLi').addClass('d-none');
                     }
 
@@ -122,14 +141,8 @@ $(document).ready(function () {
         openModelArchitectureModal();
     });
 
-    $('#dropHeaderAdminBtn').on('click', function () {
-        const modalElem = document.getElementById('adminModal');
-        if (modalElem) {
-            const modal = bootstrap.Modal.getOrCreateInstance(modalElem);
-            modal.show();
-            if (typeof loadAdminPortalData === 'function') loadAdminPortalData();
-        }
-    });
+    // Admin Management Portal is now a plain link to /admin (see
+    // templates/admin.html) - no click handler needed.
 
     $('#dropRequestCreditBtn').on('click', function () {
         const modalElem = document.getElementById('creditRequestModal');
@@ -152,7 +165,132 @@ $(document).ready(function () {
     loadCurrentUser().always(function () {
         renderHistory();
         loadUserUsageMetrics();
+        loadBrandProfileQuickPrompts();
     });
+
+    // ── Brand-grounded Quick Prompts ─────────────────────────────────────
+    // Replaces the welcome screen's generic example prompt cards with ones
+    // grounded in the user's own brand (derived from their onboarding
+    // website - see services/website_scraper_service.py,
+    // agents/website_analysis_agent.py). Falls back to leaving the static
+    // example cards already in the template when the user has no brand
+    // profile (StradIT's own team, Enterprise, or the scrape failed).
+    const QUICK_PROMPT_ICONS = {
+        product: { icon: "fa-rocket", cls: "text-primary" },
+        thought_leadership: { icon: "fa-lightbulb", cls: "text-warning" },
+        story: { icon: "fa-heart", cls: "text-danger" },
+        promo: { icon: "fa-fire", cls: "text-danger" },
+        event: { icon: "fa-calendar-check", cls: "text-success" },
+        tips: { icon: "fa-list-check", cls: "text-info" }
+    };
+
+    let _brandProfileIdeaPool = null; // full pool fetched once (up to 8 ideas)
+    let _brandProfileCompanyName = null;
+    let _lastGreeting = null;
+    let _lastShownPrompts = null; // prompts of the currently-displayed cards, to avoid showing the exact same 4 again
+    const QUICK_PROMPT_CARD_COUNT = 4;
+
+    function shuffle(arr) {
+        const copy = arr.slice();
+        for (let i = copy.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [copy[i], copy[j]] = [copy[j], copy[i]];
+        }
+        return copy;
+    }
+
+    // Draws a fresh random subset of QUICK_PROMPT_CARD_COUNT ideas from the
+    // full pool - if the pool is bigger than the card count, this keeps
+    // retrying until it gets a set that isn't identical to what's already
+    // shown, so "regenerate" reliably produces genuinely different cards
+    // instead of occasionally reshuffling into the same 4 by chance.
+    function pickIdeaSubset(pool) {
+        if (pool.length <= QUICK_PROMPT_CARD_COUNT) return shuffle(pool);
+
+        let subset;
+        let attempts = 0;
+        do {
+            subset = shuffle(pool).slice(0, QUICK_PROMPT_CARD_COUNT);
+            attempts++;
+        } while (
+            _lastShownPrompts &&
+            attempts < 10 &&
+            subset.every(idea => _lastShownPrompts.has(idea.prompt))
+        );
+        return subset;
+    }
+
+    function renderQuickPromptCards(ideas) {
+        _lastShownPrompts = new Set(ideas.map(idea => idea.prompt));
+        let html = '';
+        ideas.forEach(idea => {
+            const meta = QUICK_PROMPT_ICONS[idea.category] || QUICK_PROMPT_ICONS.tips;
+            html += `
+                <button class="quick-prompt-card" data-prompt="${escapeAttr(idea.prompt)}">
+                    <div class="quick-prompt-header">
+                        <i class="fas ${meta.icon} ${meta.cls}"></i>
+                        <span>${escapeHtml(idea.title)}</span>
+                    </div>
+                    <p class="quick-prompt-text">${escapeHtml(idea.summary || idea.prompt)}</p>
+                </button>
+            `;
+        });
+        $('.quick-prompts-grid').html(html);
+    }
+
+    function pickGreeting(companyName) {
+        const templates = [
+            `Ready to create content for ${companyName}?`,
+            `What should we post for ${companyName} today?`,
+            `Let's grow ${companyName}'s audience - where do we start?`,
+            `${companyName}, what's the story this time?`,
+            `Your next ${companyName} post starts here.`
+        ];
+        // Avoid picking the exact same line twice in a row when the user
+        // hits regenerate.
+        let pick = templates[Math.floor(Math.random() * templates.length)];
+        if (templates.length > 1) {
+            while (pick === _lastGreeting) {
+                pick = templates[Math.floor(Math.random() * templates.length)];
+            }
+        }
+        _lastGreeting = pick;
+        return pick;
+    }
+
+    // Picks a fresh subset of cards from the already-fetched idea pool
+    // (up to 8, from a single onboarding-time analysis) and a new greeting
+    // line - no network round-trip needed, so the regenerate button next to
+    // the welcome title responds instantly. Pools of 4 or fewer (accounts
+    // analyzed before this pool feature existed) just get their order
+    // reshuffled - there's nothing genuinely new to draw from until they
+    // re-analyze their site from /brand-profile.
+    window.regenerateGreeting = function () {
+        if (!_brandProfileCompanyName || !_brandProfileIdeaPool) return;
+        $('.welcome-title').text(pickGreeting(_brandProfileCompanyName));
+        renderQuickPromptCards(pickIdeaSubset(_brandProfileIdeaPool));
+    };
+
+    function loadBrandProfileQuickPrompts() {
+        $.ajax({
+            url: '/api/brand-profile/quick-prompts',
+            type: 'GET',
+            success: function (r) {
+                const ideas = (r && r.post_ideas) || [];
+                if (!ideas.length) return;
+
+                _brandProfileIdeaPool = ideas;
+                renderQuickPromptCards(pickIdeaSubset(ideas));
+
+                if (r.company_name) {
+                    _brandProfileCompanyName = r.company_name;
+                    $('.welcome-title').text(pickGreeting(r.company_name));
+                    $('.welcome-desc').text('These ideas are grounded in your brand - pick one, or type your own brief below.');
+                    $('#regenerateGreetingBtn').removeClass('d-none');
+                }
+            }
+        });
+    }
 
     // ── Auto-resizing Textarea & Char Counter ──────────────────────────
     const storyInput = $('#storyInput');
@@ -191,6 +329,46 @@ $(document).ready(function () {
         showToast('Started a new conversation', 'info');
     }
 
+    // ── Incoming handoff from the Analysis Dashboard's "Refine in Studio
+    // Chat" button (see sendPipelineToStudioChat in dashboard.js). Studio
+    // Chat is a separate page, so the seed content is passed via localStorage
+    // and consumed exactly once here on load. ──────────────────────────────
+    (function hydrateIncomingStudioChatSeed() {
+        let seed = null;
+        try {
+            const raw = localStorage.getItem('incomingStudioChatSeed');
+            if (raw) seed = JSON.parse(raw);
+        } catch (e) { /* ignore malformed/inaccessible storage */ }
+
+        if (!seed || !seed.text) return;
+
+        try {
+            localStorage.removeItem('incomingStudioChatSeed');
+        } catch (e) { /* ignore storage errors */ }
+
+        startNewChat();
+        storyInput.val(seed.text).trigger('input').focus();
+
+        // If the dashboard run generated an image, attach it as the active
+        // reference image (it's already on the server, no re-upload needed)
+        // so it shows up as a real image in the chat, not just a URL in text.
+        if (seed.imagePath) {
+            uploadedImagePath = seed.imagePath;
+            threadActiveImagePath = seed.imagePath;
+            $('#previewImg').attr('src', '/' + seed.imagePath.replace(/^\//, ''));
+            $('#imagePreview').removeClass('d-none');
+            setAnalysisBadge('badge-ok', '<i class="fas fa-check me-1"></i>From Dashboard');
+        }
+
+        const extraCount = (seed.imageUrls && seed.imageUrls.length > 1) ? seed.imageUrls.length - 1 : 0;
+        showToast(
+            extraCount
+                ? `Loaded content from the Analysis Dashboard (+${extraCount} more variation${extraCount > 1 ? 's' : ''} referenced below) - review and send to start refining.`
+                : 'Loaded content from the Analysis Dashboard - review and send to start refining.',
+            'info'
+        );
+    })();
+
     // ── Drag & Drop Visual Asset ───────────────────────────────────────
     const dropZone = $('#dropZone');
     dropZone.on('dragover', function (e) { e.preventDefault(); $(this).addClass('dragover'); });
@@ -221,7 +399,7 @@ $(document).ready(function () {
     function handleImageUpload(file) {
         const formData = new FormData();
         formData.append('image', file);
-        
+
         const reader = new FileReader();
         reader.onload = e => {
             $('#previewImg').attr('src', e.target.result);
@@ -257,16 +435,16 @@ $(document).ready(function () {
     window.analyzeStory = function () {
         const story = $('#storyInput').val().trim();
         const targetCompany = $('#targetCompanySelect').val() || 'None';
-        
+
         if (!story && targetCompany === 'None') {
             showToast('Please enter your brief text or select a company first!', 'warning');
             return;
         }
-        
+
         showToast('Contacting Scraper Explorer API for ' + targetCompany + '...', 'info');
         const btn = $('#analyzeBtn');
         btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i><span class="d-none d-md-inline ms-1">Fetching Data...</span>');
-        
+
         $.ajax({
             url: '/api/analyze-story',
             type: 'POST',
@@ -291,56 +469,21 @@ $(document).ready(function () {
         });
     };
 
-    // ── Generate Content (Main Chat Flow) ──────────────────────────────
-    window.generateContent = function () {
-        const story = storyInput.val().trim();
-        const targetCompany = $('#targetCompanySelect').val() || 'None';
-        
-        if (!story && targetCompany === 'None') {
-            showToast('Please enter a campaign brief or select a company!', 'warning');
-            return;
-        }
+    // Prevents starting a second overlapping generation while the
+    // Multi-Agent Execution Pipeline is already running - the textarea and
+    // every dock control become inert (opacity + pointer-events: none via
+    // .dock-disabled) for the duration of the request.
+    function setChatDockDisabled(disabled) {
+        $('#dropZone').toggleClass('dock-disabled', disabled);
+        $('#storyInput, #generateBtn, #analyzeBtn, #attachBtn').prop('disabled', disabled);
+    }
 
-        const platforms = [];
-        $('.platform-chips-inline input[type="checkbox"]:checked').each(function () {
-            platforms.push($(this).val());
-        });
-
-        if (!platforms.length) {
-            showToast('Select at least one platform (FB, IG, LinkedIn)!', 'warning');
-            return;
-        }
-
-        const tone = $('#toneSelect').val();
-        const brandVoice = $('#brandVoiceSelect').val() || 'Standard Enterprise';
-        const selectedOutputs = Array.from(document.querySelectorAll('input[name="outputOptions"]:checked')).map(el => el.value);
-        const mediaType = selectedOutputs.join(', ') || 'none';
-        const hasImage = !!(uploadedImagePath || threadActiveImagePath);
-
-        // Hide welcome hero on first message
-        $('#welcomeHero').addClass('d-none');
-
-        // Create unique message IDs
-        messageCounter++;
-        const msgId = 'msg_' + Date.now() + '_' + messageCounter;
-
-        // 1. Append User Chat Message Bubble
-        appendUserMessage(story, uploadedImagePath, platforms, tone, mediaType, brandVoice);
-
-        // 2. Append Assistant Thinking Message Bubble with Multi-Agent Stepper
-        const assistantElem = appendAssistantThinking(msgId, hasImage);
-
-        // Clear input area
-        storyInput.val('').trigger('input');
-        const activeImgPath = uploadedImagePath || threadActiveImagePath;
-        clearAttachment();
-
-        // Scroll workspace to bottom
-        scrollToBottom();
-
-        // 3. Step Progress Interval for Multi-Agent Stepper
-        const stepIds = hasImage ? ['step_story', 'step_vision', 'step_caption', 'step_hashtag', 'step_strategy', 'step_reviewer']
-                                 : ['step_story', 'step_caption', 'step_hashtag', 'step_strategy', 'step_reviewer'];
+    function executeGeneration(msgId, requestBody, assistantElem, platforms, activeImgPath, mediaType, selectedOutputs) {
+        setChatDockDisabled(true);
+        const hasImage = !!activeImgPath;
+        const stepIds = hasImage
+            ? ['step_story', 'step_vision', 'step_caption', 'step_hashtag', 'step_strategy', 'step_reviewer', 'step_guardrail']
+            : ['step_story', 'step_caption', 'step_hashtag', 'step_strategy', 'step_reviewer', 'step_guardrail'];
         let currentStep = 0;
 
         const iv = setInterval(() => {
@@ -365,30 +508,19 @@ $(document).ready(function () {
             }
         }, 750);
 
-
-        const requestBody = {
-            story: story,
-            image_path: activeImgPath,
-            platforms: platforms,
-            tone: tone,
-            brand_voice: brandVoice,
-            include_strategy: true,
-            previous_context: lastAssistantContext,
-            selected_outputs: selectedOutputs,
-            target_company: targetCompany
-        };
-
-        $.ajax({
+        window.currentGenerationRequest = $.ajax({
             url: '/api/generate',
             type: 'POST',
             contentType: 'application/json',
             data: JSON.stringify(requestBody),
             success: function (r) {
+                window.currentGenerationRequest = null;
+                setChatDockDisabled(false);
                 clearInterval(iv);
                 lastRunId = r.run_id || null;
 
                 // Cache summary context for multi-turn edits
-                let contextSummary = `Brief: ${story}\nGenerated Captions:\n`;
+                let contextSummary = `Brief: ${requestBody.story}\nGenerated Captions:\n`;
                 platforms.forEach(p => {
                     if (r.content[p]?.caption?.primary_caption) {
                         contextSummary += `[${p.toUpperCase()}]: ${r.content[p].caption.primary_caption}\n`;
@@ -396,14 +528,31 @@ $(document).ready(function () {
                 });
                 lastAssistantContext = contextSummary;
 
+                if (!window.chatHistory[msgId]) {
+                    window.chatHistory[msgId] = { responses: [], currentIndex: 0, requestBody, platforms, activeImgPath, mediaType, selectedOutputs };
+                }
+
+                const rData = { content: r.content, runId: lastRunId, usage: r.usage, agentsExecuted: r.agents_executed, qualitySummary: r.quality_summary };
+                window.chatHistory[msgId].responses.push(rData);
+                window.chatHistory[msgId].currentIndex = window.chatHistory[msgId].responses.length - 1;
+
                 // Render finished Assistant Response inside Assistant Card
-                renderAssistantResponse(assistantElem, r.content, platforms, msgId, story, activeImgPath, mediaType, tone, lastRunId, r.usage, r.agents_executed, r.quality_summary, selectedOutputs);
+                renderAssistantResponse(msgId);
                 renderHistory();
                 loadUserUsageMetrics();
                 scrollToBottom();
             },
-            error: function (xhr) {
+            error: function (xhr, status, error) {
+                window.currentGenerationRequest = null;
+                setChatDockDisabled(false);
                 clearInterval(iv);
+                
+                if (status === 'abort') {
+                    assistantElem.remove();
+                    showToast('Generation cancelled', 'info');
+                    return;
+                }
+
                 const res = xhr.responseJSON || {};
                 const errText = res.error || 'Generation failed';
 
@@ -433,6 +582,77 @@ $(document).ready(function () {
                 }
             }
         });
+    }
+
+    window.cancelGeneration = function(msgId) {
+        if (window.currentGenerationRequest) {
+            window.currentGenerationRequest.abort();
+            window.currentGenerationRequest = null;
+        }
+    };
+
+    // ── Generate Content (Main Chat Flow) ──────────────────────────────
+    window.generateContent = function () {
+        const story = storyInput.val().trim();
+        const targetCompany = $('#targetCompanySelect').val() || 'None';
+
+        if (!story && targetCompany === 'None') {
+            showToast('Please enter a campaign brief or select a company!', 'warning');
+            return;
+        }
+
+        const platforms = [];
+        $('.platform-chips-inline input[type="checkbox"]:checked').each(function () {
+            platforms.push($(this).val());
+        });
+
+        const tone = $('#toneSelect').val();
+        const brandVoice = $('#brandVoiceSelect').val() || 'Standard Enterprise';
+        const selectedOutputs = Array.from(document.querySelectorAll('input[name="outputOptions"]:checked')).map(el => el.value);
+        const mediaType = selectedOutputs.join(', ') || 'none';
+        const hasImage = !!(uploadedImagePath || threadActiveImagePath);
+        const activeImgPath = uploadedImagePath || threadActiveImagePath;
+
+        // Hide welcome hero on first message
+        $('#welcomeHero').addClass('d-none');
+
+        // Create unique message IDs
+        messageCounter++;
+        const msgId = 'msg_' + Date.now() + '_' + messageCounter;
+
+        // 1. Append User Chat Message Bubble
+        appendUserMessage(story, uploadedImagePath, platforms, tone, mediaType, brandVoice);
+
+        // Clear input area
+        storyInput.val('').trigger('input');
+        clearAttachment();
+        scrollToBottom();
+
+        // No platform and/or no output type picked yet - don't block with a
+        // validation error. Research the brief first and let the user decide
+        // the format afterward (see runResearchThenAsk).
+        if (!platforms.length || !selectedOutputs.length) {
+            runResearchThenAsk(msgId, story, targetCompany, activeImgPath, tone, brandVoice);
+            return;
+        }
+
+        // 2. Append Assistant Thinking Message Bubble with Multi-Agent Stepper
+        const assistantElem = appendAssistantThinking(msgId, hasImage);
+        scrollToBottom();
+
+        const requestBody = {
+            story: story,
+            image_path: activeImgPath,
+            platforms: platforms,
+            tone: tone,
+            brand_voice: brandVoice,
+            include_strategy: true,
+            previous_context: lastAssistantContext,
+            selected_outputs: selectedOutputs,
+            target_company: targetCompany
+        };
+
+        executeGeneration(msgId, requestBody, assistantElem, platforms, activeImgPath, mediaType, selectedOutputs);
     };
 
     // ── Chat Bubble Render Helpers ─────────────────────────────────────
@@ -469,7 +689,54 @@ $(document).ready(function () {
         $('#chatThread').append(html);
     }
 
-    function appendAssistantThinking(msgId, hasImage) {
+    // Renders a finished image/video card - shared by triggerMediaGenInChat
+    // (a generation that just completed live) and renderAssistantResponse
+    // (a run reloaded from history that already has saved media, see
+    // db.append_run_media / content[platform].media.{image,video}) so both
+    // paths produce the identical card instead of two hand-maintained copies.
+    function buildGeneratedMediaHtml(mediaType, media) {
+        if (mediaType === 'video') {
+            return `
+                <div class="media-output-card">
+                    <div class="media-output-header">
+                        <span><i class="fas fa-video text-purple me-2"></i>Generated Video (${media.resolution || 'MP4'})</span>
+                        <button type="button" class="btn-copy-sm" onclick="downloadAsZip('${media.url}', this)"><i class="fas fa-file-zipper me-1"></i>Download</button>
+                    </div>
+                    <div class="media-output-body">
+                        <video src="${media.url}" controls class="media-output-video" loop></video>
+                    </div>
+                </div>
+            `;
+        }
+        return `
+            <div class="media-output-card">
+                <div class="media-output-header">
+                    <span><i class="fas fa-image text-primary me-2"></i>Generated Image (${media.resolution || '1024x1024'})</span>
+                    <button type="button" class="btn-copy-sm" onclick="downloadAsZip('${media.url}', this)"><i class="fas fa-file-zipper me-1"></i>Download</button>
+                </div>
+                <div class="media-output-body">
+                    <img src="${media.url}" class="media-output-img" alt="Generated media">
+                </div>
+            </div>
+        `;
+    }
+
+    function assistantAvatarSvg() {
+        return `
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+            </svg>
+        `;
+    }
+
+    // Builds just the .assistant-card inner HTML for the full generation
+    // pipeline stepper - factored out so it can be used both for a brand new
+    // chat message (appendAssistantThinking) and to replace an existing
+    // research-only card in place once the user picks platform/output there
+    // (see runResearchThenAsk / its "Generate Content" button handler).
+    function buildPipelineCardHtml(msgId, hasImage) {
         const visionStepHtml = hasImage ? `
             <div class="agent-step-item" id="${msgId}_step_vision">
                 <div class="agent-step-icon"><i class="fas fa-circle-notch fa-spin text-muted"></i></div>
@@ -478,56 +745,98 @@ $(document).ready(function () {
             </div>
         ` : '';
 
+        return `
+            <div class="assistant-header">
+                <div class="assistant-title">
+                    <i class="fas fa-network-wired text-primary me-1"></i>Multi-Agent Execution Pipeline
+                </div>
+                <div class="d-flex align-items-center">
+                    <span class="assistant-run-tag me-2">Active Agents</span>
+                    <button class="btn btn-sm btn-outline-danger py-0 px-2 cancel-generation-btn" onclick="cancelGeneration('${msgId}')" title="Cancel generation"><i class="fas fa-times me-1"></i>Cancel</button>
+                </div>
+            </div>
+
+            <!-- Live Agent Execution Stepper -->
+            <div class="agent-stepper">
+                <div class="agent-stepper-title">
+                    <i class="fas fa-cogs me-1"></i>Autonomous Agents Orchestrating Request:
+                </div>
+
+                <div class="agent-step-item active" id="${msgId}_step_story">
+                    <div class="agent-step-icon"><div class="spinner-border spinner-border-sm text-primary" role="status"></div></div>
+                    <span class="agent-step-name"><i class="fas fa-brain me-1 text-purple"></i>Story &amp; RAG Agent</span>
+                    <span class="agent-step-desc">Analyzing narrative themes &amp; retrieving past brand memory</span>
+                </div>
+
+                ${visionStepHtml}
+
+                <div class="agent-step-item" id="${msgId}_step_caption">
+                    <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
+                    <span class="agent-step-name"><i class="fas fa-pen-nib me-1 text-primary"></i>Caption Agent</span>
+                    <span class="agent-step-desc">Crafting 3 psychological hook variations per platform</span>
+                </div>
+
+                <div class="agent-step-item" id="${msgId}_step_hashtag">
+                    <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
+                    <span class="agent-step-name"><i class="fas fa-hashtag me-1 text-warning"></i>Hashtag Agent</span>
+                    <span class="agent-step-desc">Curating high-converting trending &amp; niche hashtags</span>
+                </div>
+
+                <div class="agent-step-item" id="${msgId}_step_strategy">
+                    <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
+                    <span class="agent-step-name"><i class="fas fa-chart-line me-1 text-success"></i>Strategy Agent</span>
+                    <span class="agent-step-desc">Optimizing posting schedules &amp; reach forecasts</span>
+                </div>
+
+                <div class="agent-step-item" id="${msgId}_step_reviewer">
+                    <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
+                    <span class="agent-step-name"><i class="fas fa-shield-check me-1 text-danger"></i>Critic Agent</span>
+                    <span class="agent-step-desc">Evaluating quality, hook rating &amp; applying self-corrections</span>
+                </div>
+
+                <div class="agent-step-item" id="${msgId}_step_guardrail">
+                    <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
+                    <span class="agent-step-name"><i class="fas fa-user-shield me-1 text-indigo"></i>Brand Guardrail</span>
+                    <span class="agent-step-desc">Verifying the brand-voice persona was never used as the company name</span>
+                </div>
+            </div>
+        `;
+    }
+
+    function appendAssistantThinking(msgId, hasImage) {
         const html = `
             <div class="chat-message-assistant" id="${msgId}">
-                <div class="assistant-avatar"><i class="fas fa-robot"></i></div>
+                <div class="assistant-avatar">${assistantAvatarSvg()}</div>
+                <div class="assistant-card">${buildPipelineCardHtml(msgId, hasImage)}</div>
+            </div>
+        `;
+        const elem = $(html);
+        $('#chatThread').append(elem);
+        return elem;
+    }
+
+    // ── Research-first flow ──────────────────────────────────────────────
+    // When the user sends a brief without picking a platform/output, don't
+    // block them with a validation error - research the topic via the Story
+    // & Research Agent (see agents/story_agent.py) and show that first, then
+    // let them pick platform(s)/output(s) inline to actually generate a post
+    // from the same brief, instead of forcing that choice upfront.
+    function appendResearchThinking(msgId) {
+        const html = `
+            <div class="chat-message-assistant" id="${msgId}">
+                <div class="assistant-avatar">${assistantAvatarSvg()}</div>
                 <div class="assistant-card">
                     <div class="assistant-header">
-                        <div class="assistant-title">
-                            <i class="fas fa-network-wired text-primary me-1"></i>Multi-Agent Execution Pipeline
-                        </div>
-                        <span class="assistant-run-tag">Active Agents</span>
+                        <div class="assistant-title"><i class="fas fa-magnifying-glass"></i>Researching Your Topic</div>
                     </div>
-                    
-                    <!-- Live Agent Execution Stepper -->
                     <div class="agent-stepper">
-                        <div class="agent-stepper-title">
-                            <i class="fas fa-cogs me-1"></i>Autonomous Agents Orchestrating Request:
-                        </div>
-                        
-                        <div class="agent-step-item active" id="${msgId}_step_story">
+                        <div class="agent-stepper-title"><i class="fas fa-cogs me-1"></i>Autonomous Agent Working:</div>
+                        <div class="agent-step-item active">
                             <div class="agent-step-icon"><div class="spinner-border spinner-border-sm text-primary" role="status"></div></div>
-                            <span class="agent-step-name"><i class="fas fa-brain me-1 text-purple"></i>Story &amp; RAG Agent</span>
-                            <span class="agent-step-desc">Analyzing narrative themes &amp; retrieving past brand memory</span>
-                        </div>
-
-                        ${visionStepHtml}
-
-                        <div class="agent-step-item" id="${msgId}_step_caption">
-                            <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
-                            <span class="agent-step-name"><i class="fas fa-pen-nib me-1 text-primary"></i>Caption Agent</span>
-                            <span class="agent-step-desc">Crafting 3 psychological hook variations per platform</span>
-                        </div>
-
-                        <div class="agent-step-item" id="${msgId}_step_hashtag">
-                            <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
-                            <span class="agent-step-name"><i class="fas fa-hashtag me-1 text-warning"></i>Hashtag Agent</span>
-                            <span class="agent-step-desc">Curating high-converting trending &amp; niche hashtags</span>
-                        </div>
-
-                        <div class="agent-step-item" id="${msgId}_step_strategy">
-                            <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
-                            <span class="agent-step-name"><i class="fas fa-chart-line me-1 text-success"></i>Strategy Agent</span>
-                            <span class="agent-step-desc">Optimizing posting schedules &amp; reach forecasts</span>
-                        </div>
-
-                        <div class="agent-step-item" id="${msgId}_step_reviewer">
-                            <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
-                            <span class="agent-step-name"><i class="fas fa-shield-check me-1 text-danger"></i>Critic Agent</span>
-                            <span class="agent-step-desc">Evaluating quality, hook rating &amp; applying self-corrections</span>
+                            <span class="agent-step-name"><i class="fas fa-brain me-1 text-purple"></i>Story &amp; Research Agent</span>
+                            <span class="agent-step-desc">Researching the topic &amp; retrieving relevant brand memory</span>
                         </div>
                     </div>
-
                 </div>
             </div>
         `;
@@ -536,7 +845,131 @@ $(document).ready(function () {
         return elem;
     }
 
-    function renderAssistantResponse(elem, content, platforms, msgId, story, imagePath, mediaType, tone, runId, usage, agentsExecuted, qualitySummary, selectedOutputs = []) {
+    function runResearchThenAsk(msgId, story, targetCompany, activeImgPath, tone, brandVoice) {
+        const assistantElem = appendResearchThinking(msgId);
+
+        $.ajax({
+            url: '/api/analyze-story',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ story: story, target_company: targetCompany }),
+            success: function (r) {
+                renderResearchResult(msgId, assistantElem, r, story, targetCompany, activeImgPath, tone, brandVoice);
+                scrollToBottom();
+            },
+            error: function (xhr) {
+                const errText = xhr.responseJSON?.error || 'Research failed';
+                assistantElem.find('.assistant-card').html(`
+                    <div class="alert alert-danger mb-0">
+                        <i class="fas fa-exclamation-triangle me-2"></i><strong>Error:</strong> ${escapeHtml(errText)}
+                    </div>
+                `);
+                showToast('Research failed: ' + errText, 'error');
+            }
+        });
+    }
+
+    function renderResearchResult(msgId, assistantElem, r, story, targetCompany, activeImgPath, tone, brandVoice) {
+        const analysis = r.analysis || {};
+        const themes = Array.isArray(analysis.themes) ? analysis.themes : [];
+        const researchNotes = Array.isArray(analysis.research_notes) ? analysis.research_notes : [];
+        const hooks = Array.isArray(analysis.hooks) ? analysis.hooks : [];
+
+        const themesHtml = themes.length
+            ? `<div class="research-section">
+                    <span class="research-section-label">Key Themes</span>
+                    <div class="research-theme-pills">${themes.map(t => `<span class="research-theme-pill">${escapeHtml(t)}</span>`).join('')}</div>
+                </div>`
+            : '';
+        const notesHtml = `<div class="research-section">
+                <span class="research-section-label">Research Notes</span>
+                ${researchNotes.length
+                    ? `<ul class="research-notes-list">${researchNotes.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>`
+                    : '<p class="text-muted small mb-0">No additional research notes for this brief.</p>'}
+            </div>`;
+        const hooksHtml = hooks.length
+            ? `<div class="research-section">
+                    <span class="research-section-label">Possible Angles</span>
+                    <ul class="research-notes-list research-hooks-list">${hooks.map(h => `<li>${escapeHtml(h)}</li>`).join('')}</ul>
+                </div>`
+            : '';
+
+        const cardContent = `
+            <div class="assistant-header">
+                <div class="assistant-title"><i class="fas fa-magnifying-glass"></i>Research Summary</div>
+            </div>
+            <div class="research-result-block">
+                ${themesHtml}
+                ${notesHtml}
+                ${hooksHtml}
+            </div>
+            <div class="research-cta-block">
+                <div class="research-cta-title"><i class="fas fa-wand-magic-sparkles me-1"></i>Want to turn this into a post?</div>
+                <div class="research-cta-row">
+                    <span class="config-label">Platforms:</span>
+                    <div class="platform-chips-inline" id="${msgId}_researchPlatforms">
+                        <label class="platform-chip-sm"><input type="checkbox" value="facebook"><span class="chip-content"><i class="fab fa-facebook me-1 color-fb"></i>FB</span></label>
+                        <label class="platform-chip-sm"><input type="checkbox" value="instagram"><span class="chip-content"><i class="fab fa-instagram me-1 color-ig"></i>IG</span></label>
+                        <label class="platform-chip-sm"><input type="checkbox" value="linkedin" checked><span class="chip-content"><i class="fab fa-linkedin me-1 color-li"></i>LinkedIn</span></label>
+                        <label class="platform-chip-sm"><input type="checkbox" value="youtube"><span class="chip-content"><i class="fab fa-youtube me-1 color-yt"></i>YouTube</span></label>
+                    </div>
+                </div>
+                <div class="research-cta-row">
+                    <span class="config-label">Output:</span>
+                    <div class="media-chips-inline" id="${msgId}_researchOutputs">
+                        <label class="media-chip-sm"><input type="checkbox" value="text" checked><span class="chip-content">Text (Caption)</span></label>
+                        <label class="media-chip-sm"><input type="checkbox" value="image"><span class="chip-content"><i class="fas fa-image me-1 text-primary"></i>Image</span></label>
+                        <label class="media-chip-sm"><input type="checkbox" value="video"><span class="chip-content"><i class="fas fa-video me-1 text-purple"></i>Video</span></label>
+                    </div>
+                </div>
+                <button type="button" class="btn btn-primary btn-sm mt-2 research-generate-btn" id="${msgId}_researchGenerateBtn">
+                    <i class="fas fa-bolt me-1"></i>Generate Content
+                </button>
+            </div>
+        `;
+        assistantElem.find('.assistant-card').html(cardContent);
+
+        $(`#${msgId}_researchGenerateBtn`).on('click', function () {
+            const platforms = [];
+            $(`#${msgId}_researchPlatforms input:checked`).each(function () { platforms.push($(this).val()); });
+            const selectedOutputs = [];
+            $(`#${msgId}_researchOutputs input:checked`).each(function () { selectedOutputs.push($(this).val()); });
+
+            if (!platforms.length) {
+                showToast('Select at least one platform to generate content!', 'warning');
+                return;
+            }
+            if (!selectedOutputs.length) {
+                showToast('Select at least one output type (text/image/video)!', 'warning');
+                return;
+            }
+
+            const hasImage = !!activeImgPath;
+            assistantElem.find('.assistant-card').html(buildPipelineCardHtml(msgId, hasImage));
+
+            const requestBody = {
+                story: story,
+                image_path: activeImgPath,
+                platforms: platforms,
+                tone: tone,
+                brand_voice: brandVoice,
+                include_strategy: true,
+                previous_context: lastAssistantContext,
+                selected_outputs: selectedOutputs,
+                target_company: targetCompany,
+                precomputed_analysis: analysis
+            };
+
+            executeGeneration(msgId, requestBody, assistantElem, platforms, activeImgPath, selectedOutputs.join(', '), selectedOutputs);
+        });
+    }
+
+    function renderAssistantResponse(msgId) {
+        const historyObj = window.chatHistory[msgId];
+        const rData = historyObj.responses[historyObj.currentIndex];
+        const { requestBody, platforms, selectedOutputs } = historyObj;
+        const { content, runId, usage, agentsExecuted, qualitySummary } = rData;
+        const elem = $(`#${msgId}`);
         // Badges for Token Usage & Memory Context
         const totalTokens = usage?.total_tokens ? Number(usage.total_tokens).toLocaleString() : '1,560';
         const costUsd = usage?.cost_usd ? '$' + Number(usage.cost_usd).toFixed(4) : '$0.0003';
@@ -549,9 +982,12 @@ $(document).ready(function () {
         const costBadgeHtml = `<span class="badge-cost-tag me-1" title="Tokens & USD Cost"><i class="fas fa-bolt text-warning me-1"></i>${totalTokens} tok | ${costUsd}</span>`;
         const memBadgeHtml = memCount > 0 ? `<span class="badge-memory-tag me-1" title="ChromaDB RAG Memory Context"><i class="fas fa-brain me-1"></i>${memCount} Memories</span>` : '';
 
-        // Build Agents Breakdown Panel
-        let agentBreakdownHtml = `<div class="agent-pipeline-breakdown d-none" id="${msgId}_pipeline_panel">`;
-        agentBreakdownHtml += `<div class="fw-bold mb-1 text-primary"><i class="fas fa-robot me-1"></i>Agents Engaged in this Turn:</div>`;
+        // Build Agents Breakdown Panel - visible by default (was hidden
+        // behind the "N Agents Active" toggle, so it never actually showed
+        // unless the user happened to click it); the button still lets you
+        // collapse it if you want.
+        let agentBreakdownHtml = `<div class="agent-pipeline-breakdown" id="${msgId}_pipeline_panel">`;
+        agentBreakdownHtml += `<div class="fw-bold mb-1 text-primary">Agents Engaged in this Turn:</div>`;
         (agentsExecuted || []).forEach(a => {
             agentBreakdownHtml += `
                 <div class="d-flex align-items-center justify-content-between py-1 border-bottom border-light">
@@ -583,42 +1019,28 @@ $(document).ready(function () {
         platforms.forEach((p, idx) => {
             const pData = content[p] || {};
             const displayStyle = idx === 0 ? 'block' : 'none';
-            
+
             const primaryCap = pData.caption?.primary_caption || 'No caption generated.';
-            const storyHookCap = pData.caption?.story_hook_caption || primaryCap;
-            const contrarianHookCap = pData.caption?.contrarian_hook_caption || primaryCap;
-            
             const isRefined = pData.caption?.refined_by_critic || pData.quality?.self_corrected;
-            
-            // Hashtags
-            const rawTags = pData.hashtags;
-            const tagList = Array.isArray(rawTags) 
-                ? rawTags 
-                : (Array.isArray(rawTags?.hashtags) 
-                    ? rawTags.hashtags 
-                    : (Array.isArray(rawTags?.primary_hashtags) 
-                        ? rawTags.primary_hashtags 
-                        : []));
-            const tagHtml = tagList.map(t => `<span class="hashtag-pill">${escapeHtml(t)}</span>`).join(' ') || '<em>No hashtags</em>';
-            const allTagsStr = tagList.join(' ');
 
-            // Quality Scores
-            const pQuality = pData.quality || {};
-            const hookScore = pQuality.hook_score || 9.2;
-            const readabilityScore = pQuality.readability_score || 9.4;
-
-            // Strategy
-            const strat = pData.strategy || {};
-            const bestTime = safeStr(strat.best_time_to_post || strat.posting_schedule || 'Peak Hours');
-            const formatRec = safeStr(strat.content_format || strat.recommended_format || 'Standard Post');
-            const reach = safeReach(strat.expected_reach || strat.reach_score);
+            // Hashtags - a single curated set (see agents/hashtag_agent.py);
+            // tolerate the old reach_hashtags key too in case a cached/older
+            // run's content is being re-rendered from history.
+            const rawTags = pData.hashtags || {};
+            const tagList = Array.isArray(rawTags.hashtags) ? rawTags.hashtags
+                : Array.isArray(rawTags) ? rawTags
+                : Array.isArray(rawTags.reach_hashtags) ? rawTags.reach_hashtags
+                : [];
+            const tagsHtml = tagList.map(t => `<span class="hashtag-pill">${escapeHtml(t)}</span>`).join(' ') || '<em>No hashtags</em>';
+            const tagsStr = tagList.join(' ');
 
             const cardId = `${msgId}_caption_target_${p}`;
+            const tagsCardId = `${msgId}_hashtags_target_${p}`;
 
             panelsHtml += `
                 <div class="platform-panel-item" id="${msgId}_tab_${p}" style="display: ${displayStyle}">
-                    
-                    <!-- Post Caption Card with Hook Angle Switcher -->
+
+                    <!-- Post Caption Card -->
                     <div class="post-box-card">
                         <div class="post-box-header">
                             <span class="post-box-title">
@@ -626,20 +1048,7 @@ $(document).ready(function () {
                                 ${isRefined ? '<span class="badge bg-success ms-2"><i class="fas fa-shield-check me-1"></i>Critic Refined</span>' : ''}
                             </span>
                             <button class="btn-copy-sm btn-copy-text" id="${cardId}_copy" data-text="${escapeAttr(primaryCap)}">
-                                <i class="fas fa-copy me-1"></i>Copy Selected
-                            </button>
-                        </div>
-                        
-                        <!-- 1-Click Hook Angle Switcher Chips -->
-                        <div class="hook-angle-switcher mb-2">
-                            <button class="hook-chip-btn active" data-target-text="${cardId}" data-caption="${escapeAttr(primaryCap)}">
-                                <i class="fas fa-bullseye me-1 text-primary"></i>🎯 Primary Hook
-                            </button>
-                            <button class="hook-chip-btn" data-target-text="${cardId}" data-caption="${escapeAttr(storyHookCap)}">
-                                <i class="fas fa-book-open me-1 text-warning"></i>📖 Story Angle
-                            </button>
-                            <button class="hook-chip-btn" data-target-text="${cardId}" data-caption="${escapeAttr(contrarianHookCap)}">
-                                <i class="fas fa-bolt me-1 text-danger"></i>⚡ Bold Hook
+                                <i class="fas fa-copy me-1"></i>Copy
                             </button>
                         </div>
 
@@ -650,32 +1059,26 @@ $(document).ready(function () {
                     <div class="post-box-card">
                         <div class="post-box-header">
                             <span class="post-box-title"><i class="fas fa-hashtag me-1"></i>Curated Hashtags</span>
-                            <button class="btn-copy-sm btn-copy-text" data-text="${escapeAttr(allTagsStr)}">
+                            <button class="btn-copy-sm btn-copy-text" id="${tagsCardId}_copy" data-text="${escapeAttr(tagsStr)}">
                                 <i class="fas fa-copy me-1"></i>Copy Tags
                             </button>
                         </div>
-                        <div class="hashtags-container">${tagHtml}</div>
+
+                        <div class="hashtags-container" id="${tagsCardId}">${tagsHtml}</div>
                     </div>
 
-                    <!-- Strategy & Quality Breakdown Grid -->
-                    <div class="strategy-grid-chat">
-                        <div class="strategy-item-card">
-                            <span class="strategy-label"><i class="fas fa-fire me-1 text-warning"></i>Hook Score</span>
-                            <span class="strategy-value text-primary">${hookScore}/10 Rating</span>
-                        </div>
-                        <div class="strategy-item-card">
-                            <span class="strategy-label"><i class="fas fa-align-left me-1 text-info"></i>Readability</span>
-                            <span class="strategy-value">${readabilityScore}/10 Index</span>
-                        </div>
-                        <div class="strategy-item-card">
-                            <span class="strategy-label"><i class="fas fa-chart-line me-1 text-success"></i>Reach Index</span>
-                            <span class="strategy-value text-success">${reach}% Potential</span>
-                        </div>
-                    </div>
-
-                    <!-- Media Output Placeholder/Card -->
+                    <!-- Media Output - a run reloaded from history already has
+                         its generated media saved (see db.append_run_media,
+                         content[platform].media.{image,video}) - show that
+                         directly instead of a "Generating..." placeholder,
+                         which was only ever meant for a generation actually
+                         in progress right now. Only fall back to the
+                         placeholder (and let the live-trigger block below
+                         kick off a real generation) when there's genuinely
+                         no saved media yet for a type that was requested. -->
                     <div id="${msgId}_media_${p}" class="media-container-slot">
-                        ${(selectedOutputs || []).includes('image') ? `
+                        ${pData.media?.image?.url ? buildGeneratedMediaHtml('image', pData.media.image)
+                            : (selectedOutputs || []).includes('image') ? `
                         <div class="media-output-card mb-2" id="${msgId}_media_image_${p}">
                             <div class="media-output-header">
                                 <span><i class="fas fa-spinner fa-spin me-2 text-primary"></i>Generating AI IMAGE...</span>
@@ -686,7 +1089,8 @@ $(document).ready(function () {
                             </div>
                         </div>
                         ` : ''}
-                        ${(selectedOutputs || []).includes('video') ? `
+                        ${pData.media?.video?.url ? buildGeneratedMediaHtml('video', pData.media.video)
+                            : (selectedOutputs || []).includes('video') ? `
                         <div class="media-output-card" id="${msgId}_media_video_${p}">
                             <div class="media-output-header">
                                 <span><i class="fas fa-spinner fa-spin me-2 text-purple"></i>Generating AI VIDEO...</span>
@@ -704,10 +1108,21 @@ $(document).ready(function () {
         });
         panelsHtml += `</div>`;
 
+        const totalGens = historyObj.responses.length;
+        const currentGen = historyObj.currentIndex + 1;
+        const paginationHtml = totalGens > 1 ? `
+            <div class="generation-pagination ms-2 d-inline-flex align-items-center bg-light rounded px-2 py-1 border">
+                <i class="fas fa-chevron-left cursor-pointer text-secondary me-2 gen-prev" data-msg="${msgId}" ${currentGen === 1 ? 'style="opacity: 0.5; pointer-events: none;"' : ''}></i>
+                <span class="small font-weight-bold">${currentGen} / ${totalGens}</span>
+                <i class="fas fa-chevron-right cursor-pointer text-secondary ms-2 gen-next" data-msg="${msgId}" ${currentGen === totalGens ? 'style="opacity: 0.5; pointer-events: none;"' : ''}></i>
+            </div>
+        ` : '';
+
         const cardContent = `
             <div class="assistant-header">
-                <div class="assistant-title">
-                    <i class="fas fa-sparkles text-primary me-1"></i>VortexSocial Studio Output
+                <div class="assistant-title d-flex align-items-center">
+                    <div><i class="fas fa-sparkles text-primary me-1"></i>VortexSocial Studio Output</div>
+                    ${paginationHtml}
                 </div>
                 <div class="assistant-meta-tags">
                     ${qualityBadgeHtml}
@@ -720,22 +1135,17 @@ $(document).ready(function () {
             ${agentBreakdownHtml}
             ${tabsHtml}
             ${panelsHtml}
+            <div class="assistant-card-footer">
+                <button class="btn btn-sm btn-outline-success btn-schedule-post" data-msg="${msgId}">
+                    <i class="fas fa-calendar-plus me-1"></i>Schedule
+                </button>
+                <button class="btn btn-sm btn-outline-primary btn-regenerate" data-msg="${msgId}">
+                    <i class="fas fa-sync-alt me-1"></i>Regenerate
+                </button>
+            </div>
         `;
 
         elem.find('.assistant-card').html(cardContent);
-
-        // Bind 1-Click Hook Angle Switcher
-        elem.find('.hook-chip-btn').on('click', function () {
-            const parentGroup = $(this).closest('.hook-angle-switcher');
-            parentGroup.find('.hook-chip-btn').removeClass('active');
-            $(this).addClass('active');
-
-            const targetId = $(this).attr('data-target-text');
-            const newCaption = $(this).attr('data-caption');
-
-            $(`#${targetId}`).hide().text(newCaption).fadeIn(150);
-            $(`#${targetId}_copy`).attr('data-text', newCaption);
-        });
 
         // Bind Agent Pipeline toggle
         $(`#${msgId}_pipeline_btn`).on('click', function () {
@@ -751,21 +1161,131 @@ $(document).ready(function () {
             $('#' + targetId).fadeIn(150);
         });
 
-        // Trigger Media Generation asynchronously if mediaType requested
+        // Bind Pagination
+        elem.find('.gen-prev').on('click', function () {
+            const mId = $(this).attr('data-msg');
+            const h = window.chatHistory[mId];
+            if (h && h.currentIndex > 0) {
+                h.currentIndex--;
+                renderAssistantResponse(mId);
+            }
+        });
+
+        elem.find('.gen-next').on('click', function () {
+            const mId = $(this).attr('data-msg');
+            const h = window.chatHistory[mId];
+            if (h && h.currentIndex < h.responses.length - 1) {
+                h.currentIndex++;
+                renderAssistantResponse(mId);
+            }
+        });
+
+        // Bind Regenerate
+        elem.find('.btn-regenerate').on('click', function () {
+            const mId = $(this).attr('data-msg');
+            const h = window.chatHistory[mId];
+            if (h) {
+                const assistantElem = $(`#${mId}`);
+                const hasImage = !!h.activeImgPath;
+                assistantElem.replaceWith(appendAssistantThinking(mId, hasImage));
+                executeGeneration(mId, h.requestBody, $(`#${mId}`), h.platforms, h.activeImgPath, h.mediaType, h.selectedOutputs);
+            }
+        });
+
+        // Bind Schedule - opens the same schedulePostModal the History detail
+        // modal uses (see $('#modalScheduleBtn')/$('#confirmSchedulePostBtn')
+        // below), just pointed at this chat message's run/story instead of
+        // whichever run the History modal last had open. Also always
+        // pre-fills the date/time field with a sensible default (tomorrow),
+        // since the field only shows a value once something sets it - opening
+        // the modal any other way left it blank.
+        elem.find('.btn-schedule-post').on('click', function () {
+            const mId = $(this).attr('data-msg');
+            const h = window.chatHistory[mId];
+            if (!h) return;
+            const rDataForSchedule = h.responses[h.currentIndex];
+
+            lastRunId = rDataForSchedule.runId;
+            $('#modalStory').text(h.requestBody.story || 'Campaign Post');
+
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            $('#schedDateTimeInput').val(tomorrow.toISOString().slice(0, 16));
+
+            const schedModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('schedulePostModal'));
+            schedModal.show();
+        });
+
+        // Trigger Media Generation asynchronously if mediaType requested -
+        // but only for a (platform, type) pair that doesn't already have
+        // saved media. A run reloaded from history now correctly lists its
+        // already-generated types in selectedOutputs (see
+        // loadHistoryIntoChat) so its existing image/video renders via
+        // buildGeneratedMediaHtml above - without this check, viewing it
+        // would immediately kick off a brand new, wasteful (and credit-
+        // consuming) generation for content that already exists.
         if (selectedOutputs && selectedOutputs.length > 0) {
             platforms.forEach(p => {
-                const pCaption = content[p]?.caption?.primary_caption || story;
-                if (selectedOutputs.includes('image')) {
-                    triggerMediaGenInChat(p, pCaption, 'image', tone, runId, imagePath, `${msgId}_media_image_${p}`);
+                const pData = content[p] || {};
+                const pCaption = pData.caption?.primary_caption || requestBody.story;
+                // media_prompt (see api/routes.py) folds the Research Summary's
+                // imagery descriptions & research notes in alongside the caption,
+                // so image/video generation actually reflects the research shown
+                // to the user - not just the short social caption text.
+                const pMediaPrompt = pData.media_prompt || pCaption;
+                if (selectedOutputs.includes('image') && !pData.media?.image?.url) {
+                    triggerMediaGenInChat(p, pCaption, 'image', requestBody.tone, runId, historyObj.activeImgPath, `${msgId}_media_image_${p}`, pMediaPrompt);
                 }
-                if (selectedOutputs.includes('video')) {
-                    triggerMediaGenInChat(p, pCaption, 'video', tone, runId, imagePath, `${msgId}_media_video_${p}`);
+                if (selectedOutputs.includes('video') && !pData.media?.video?.url) {
+                    triggerMediaGenInChat(p, pCaption, 'video', requestBody.tone, runId, historyObj.activeImgPath, `${msgId}_media_video_${p}`, pMediaPrompt);
                 }
             });
         }
     }
 
-    function triggerMediaGenInChat(platform, caption, mediaType, tone, runId, imagePath, targetSlotId) {
+    // Downloads one or more generated assets bundled into a single .zip via
+    // the shared /api/download-zip endpoint (same one the Analysis Dashboard's
+    // pipeline modal ZIP download uses), instead of downloading each file
+    // individually.
+    window.downloadAsZip = function (urls, btnEl) {
+        const list = (Array.isArray(urls) ? urls : [urls]).filter(Boolean);
+        if (!list.length) {
+            showToast('Nothing to download yet.', 'warning');
+            return;
+        }
+        const $btn = btnEl ? $(btnEl) : null;
+        const originalHtml = $btn ? $btn.html() : null;
+        if ($btn) $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Zipping...');
+
+        fetch('/api/download-zip', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ urls: list })
+        })
+            .then(response => {
+                if (!response.ok) throw new Error('Network response was not ok');
+                return response.blob();
+            })
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = 'generated_assets.zip';
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                window.URL.revokeObjectURL(url);
+            })
+            .catch(() => {
+                showToast('Failed to download ZIP file. Please try again.', 'error');
+            })
+            .finally(() => {
+                if ($btn) $btn.prop('disabled', false).html(originalHtml);
+            });
+    };
+
+    function triggerMediaGenInChat(platform, caption, mediaType, tone, runId, imagePath, targetSlotId, mediaPrompt) {
         $.ajax({
             url: '/api/generate-media',
             type: 'POST',
@@ -776,7 +1296,9 @@ $(document).ready(function () {
                 media_type: mediaType,
                 tone: tone,
                 run_id: runId,
-                image_path: imagePath
+                image_path: imagePath,
+                image_prompt: mediaType === 'image' ? mediaPrompt : undefined,
+                video_prompt: mediaType === 'video' ? mediaPrompt : undefined
             }),
             success: function (res) {
                 const slot = $('#' + targetSlotId);
@@ -785,7 +1307,7 @@ $(document).ready(function () {
                         <div class="media-output-card">
                             <div class="media-output-header">
                                 <span><i class="fas fa-video text-purple me-2"></i>Generated Video (${res.resolution || 'MP4'})</span>
-                                <a href="${res.url}" target="_blank" class="btn-copy-sm"><i class="fas fa-download me-1"></i>Download</a>
+                                <button type="button" class="btn-copy-sm" onclick="downloadAsZip('${res.url}', this)"><i class="fas fa-file-zipper me-1"></i>Download</button>
                             </div>
                             <div class="media-output-body">
                                 <video src="${res.url}?v=${Date.now()}" controls class="media-output-video" autoplay loop></video>
@@ -795,7 +1317,7 @@ $(document).ready(function () {
                         <div class="media-output-card">
                             <div class="media-output-header">
                                 <span><i class="fas fa-image text-primary me-2"></i>Generated Image (${res.resolution || '1024x1024'})</span>
-                                <a href="${res.url}" target="_blank" class="btn-copy-sm"><i class="fas fa-download me-1"></i>Download</a>
+                                <button type="button" class="btn-copy-sm" onclick="downloadAsZip('${res.url}', this)"><i class="fas fa-file-zipper me-1"></i>Download</button>
                             </div>
                             <div class="media-output-body">
                                 <img src="${res.url}" class="media-output-img" alt="Generated media">
@@ -861,7 +1383,7 @@ $(document).ready(function () {
                 }
             },
             error: function () {
-                $('#dbStatus').html('<i class="fas fa-circle fa-xs me-1 text-danger"></i>Disconnected');
+                showToast('Could not load your history right now.', 'error');
             }
         });
     }
@@ -869,7 +1391,7 @@ $(document).ready(function () {
     function filterAndRenderHistory(query, isArchived) {
         if (!window._allHistoryItems) return;
         const q = query.toLowerCase();
-        const filtered = window._allHistoryItems.filter(item => 
+        const filtered = window._allHistoryItems.filter(item =>
             (item.story && item.story.toLowerCase().includes(q)) ||
             (item.tone && item.tone.toLowerCase().includes(q)) ||
             (Array.isArray(item.platforms) && item.platforms.join(' ').toLowerCase().includes(q))
@@ -925,6 +1447,7 @@ $(document).ready(function () {
                     <div class="history-card-header">
                         <div class="history-card-title">${escapeHtml(item.story)}</div>
                         <div class="history-card-actions">
+                            <button class="btn-history-icon btn-view-details-item" data-id="${item.id}" title="View run details"><i class="fas fa-circle-info"></i></button>
                             ${actionBtn}
                         </div>
                     </div>
@@ -945,6 +1468,12 @@ $(document).ready(function () {
             if ($(e.target).closest('.history-card-actions').length) return;
             $('.history-card').removeClass('active');
             $(this).addClass('active');
+            const id = $(this).data('id');
+            loadHistoryIntoChat(id);
+        });
+
+        $('.btn-view-details-item').on('click', function (e) {
+            e.stopPropagation();
             const id = $(this).data('id');
             openHistoryDetails(id);
         });
@@ -986,6 +1515,74 @@ $(document).ready(function () {
             },
             error: function () {
                 showToast('Failed to restore conversation', 'error');
+            }
+        });
+    }
+
+    // Loads a past run into the live chat workspace as a resumable
+    // conversation (instead of the read-only Run Details modal), so the user
+    // can send a follow-up message to fine-tune it with more information.
+    function loadHistoryIntoChat(runId) {
+        $.ajax({
+            url: `/api/history/${runId}`,
+            type: 'GET',
+            success: function (r) {
+                const run = r.run;
+                if (!run) return;
+
+                const platforms = Array.isArray(run.platforms) ? run.platforms : (run.platforms ? [run.platforms] : ['linkedin']);
+                const content = run.content || {};
+
+                startNewChat();
+                $('#welcomeHero').addClass('d-none');
+
+                messageCounter++;
+                const msgId = 'msg_' + Date.now() + '_' + messageCounter;
+
+                appendUserMessage(run.story, null, platforms, run.tone, 'Text (Caption)', 'Standard Enterprise');
+                appendAssistantThinking(msgId, false);
+
+                // Reflect what was actually generated for this run (see
+                // db.append_run_media / content[platform].media.{image,video})
+                // - this used to always be [], which meant a run that DID
+                // include a generated image never showed it when reloaded
+                // from history (the media card only ever renders when its
+                // type is listed here).
+                const savedOutputs = [];
+                platforms.forEach(p => {
+                    const media = content[p]?.media || {};
+                    if (media.image?.url && !savedOutputs.includes('image')) savedOutputs.push('image');
+                    if (media.video?.url && !savedOutputs.includes('video')) savedOutputs.push('video');
+                });
+
+                window.chatHistory[msgId] = {
+                    responses: [{ content: content, runId: run.id, usage: null, agentsExecuted: null, qualitySummary: null }],
+                    currentIndex: 0,
+                    requestBody: { story: run.story, platforms: platforms, tone: run.tone, brand_voice: 'Standard Enterprise' },
+                    platforms: platforms,
+                    activeImgPath: null,
+                    mediaType: 'none',
+                    selectedOutputs: savedOutputs
+                };
+                renderAssistantResponse(msgId);
+
+                // Seed multi-turn context the same way a live generation does,
+                // so the next message the user sends continues refining this
+                // run instead of starting from scratch.
+                lastRunId = run.id;
+                let contextSummary = `Brief: ${run.story}\nGenerated Captions:\n`;
+                platforms.forEach(p => {
+                    if (content[p]?.caption?.primary_caption) {
+                        contextSummary += `[${p.toUpperCase()}]: ${content[p].caption.primary_caption}\n`;
+                    }
+                });
+                lastAssistantContext = contextSummary;
+
+                scrollToBottom();
+                showToast('Loaded past conversation - send a message to keep refining it.', 'info');
+            },
+            error: function () {
+                showToast('Could not load that conversation.', 'error');
             }
         });
     }
@@ -1065,23 +1662,6 @@ $(document).ready(function () {
         return str.charAt(0).toUpperCase() + str.slice(1);
     }
 
-    function safeStr(val) {
-        if (val == null) return '—';
-        if (typeof val === 'string') return val;
-        if (typeof val === 'number') return String(val);
-        if (Array.isArray(val)) return val.join(', ');
-        if (typeof val === 'object') {
-            return val.text || val.value || val.time || val.label || val.name || '—';
-        }
-        return String(val);
-    }
-
-    function safeReach(val) {
-        if (val == null) return 75;
-        if (typeof val === 'object') val = val.percentage || val.value || val.score || 75;
-        return Math.min(100, Math.max(0, parseInt(val) || 75));
-    }
-
     // ── Credit Extension Modal Handlers ────────────────────────────────
     function openCreditRequestModal() {
         loadUserUsageMetrics();
@@ -1135,281 +1715,12 @@ $(document).ready(function () {
         });
     });
 
-    // ── Admin Portal Handlers ─────────────────────────────────────────
-    $('#headerAdminBtn').on('click', function () {
-        openAdminModal();
-    });
-
-    function openAdminModal() {
-        loadAdminUsers();
-        loadAdminRequests();
-        loadAdminCostHistory();
-        const modalElem = document.getElementById('adminModal');
-        if (modalElem) {
-            const modal = bootstrap.Modal.getOrCreateInstance(modalElem);
-            modal.show();
-        }
-    }
-
-    function loadAdminUsers() {
-        $.ajax({
-            url: '/api/admin/users',
-            type: 'GET',
-            success: function (r) {
-                if (!r.success) return;
-                const users = r.users || [];
-                window._allAdminUsers = users;
-                renderAdminUsersTable(users);
-            }
-        });
-    }
-
-    function renderAdminUsersTable(users) {
-        let html = '';
-        if (!users.length) {
-            html = '<tr><td colspan="9" class="text-center py-4 text-slate-400">No registered users found.</td></tr>';
-        } else {
-            users.forEach(u => {
-                const roleBadge = u.is_admin ? '<span class="badge bg-purple">Admin</span>' : '<span class="badge bg-secondary">User</span>';
-                const statusBadge = u.remaining_credits > 0 ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-danger">Exhausted</span>';
-                const pendingBadge = u.has_pending_request ? '<span class="badge bg-warning text-dark ms-1">Req Pending</span>' : '';
-
-                html += `
-                    <tr>
-                        <td>${u.id}</td>
-                        <td><strong>${escapeHtml(u.name)}</strong></td>
-                        <td>${escapeHtml(u.email)}</td>
-                        <td>${roleBadge}</td>
-                        <td><span class="font-monospace text-light">$${Number(u.credit_limit).toFixed(2)}</span></td>
-                        <td><span class="font-monospace text-warning">$${Number(u.used_credits).toFixed(4)}</span></td>
-                        <td><span class="font-monospace text-success">$${Number(u.remaining_credits).toFixed(4)}</span></td>
-                        <td>${statusBadge} ${pendingBadge}</td>
-                        <td>
-                            <div class="d-flex gap-1 align-items-center">
-                                <button type="button" class="btn-xs-credit btn-xs-credit-add" onclick="adminAddCredits(${u.id}, 10)">+$10</button>
-                                <button type="button" class="btn-xs-credit btn-xs-credit-add" onclick="adminAddCredits(${u.id}, 50)">+$50</button>
-                                <button type="button" class="btn btn-outline-info btn-xs" onclick="adminSetCustomCredit(${u.id}, ${u.credit_limit})">Set Limit</button>
-                            </div>
-                        </td>
-                    </tr>
-                `;
-            });
-        }
-        $('#adminUsersTbody').html(html);
-    }
-
-    $('#adminUserSearchInput').on('input', function () {
-        const q = $(this).val().toLowerCase().trim();
-        if (!window._allAdminUsers) return;
-        if (!q) {
-            renderAdminUsersTable(window._allAdminUsers);
-        } else {
-            const filtered = window._allAdminUsers.filter(u => 
-                u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)
-            );
-            renderAdminUsersTable(filtered);
-        }
-    });
-
-    window.adminAddCredits = function (userId, addAmount) {
-        $.ajax({
-            url: `/api/admin/users/${userId}/credits`,
-            type: 'POST',
-            contentType: 'application/json',
-            data: JSON.stringify({ add_amount: addAmount }),
-            success: function (r) {
-                if (r.success) {
-                    showToast(`Added +$${addAmount} credits to user!`, 'success');
-                    loadAdminUsers();
-                    loadUserUsageMetrics();
-                }
-            },
-            error: function (xhr) {
-                showToast('Failed to update credits: ' + (xhr.responseJSON?.error || 'Error'), 'error');
-            }
-        });
-    };
-
-    window.adminSetCustomCredit = function (userId, currentLimit) {
-        const input = prompt(`Set new credit limit ($USD) for User ID ${userId}:`, currentLimit);
-        if (input === null) return;
-        const newLimit = parseFloat(input);
-        if (isNaN(newLimit) || newLimit < 0) {
-            showToast('Invalid credit limit value', 'warning');
-            return;
-        }
-
-        $.ajax({
-            url: `/api/admin/users/${userId}/credits`,
-            type: 'POST',
-            contentType: 'application/json',
-            data: JSON.stringify({ new_limit: newLimit }),
-            success: function (r) {
-                if (r.success) {
-                    showToast(`Updated credit limit to $${newLimit.toFixed(2)}!`, 'success');
-                    loadAdminUsers();
-                    loadUserUsageMetrics();
-                }
-            },
-            error: function (xhr) {
-                showToast('Failed to update limit: ' + (xhr.responseJSON?.error || 'Error'), 'error');
-            }
-        });
-    };
-
-    function loadAdminRequests() {
-        $.ajax({
-            url: '/api/admin/credit-requests',
-            type: 'GET',
-            success: function (r) {
-                if (!r.success) return;
-                const requests = r.requests || [];
-                window._allAdminReqs = requests;
-                
-                const pendingCount = requests.filter(req => req.status === 'pending').length;
-                if (pendingCount > 0) {
-                    $('#adminPendingBadge').text(pendingCount).removeClass('d-none');
-                } else {
-                    $('#adminPendingBadge').addClass('d-none');
-                }
-
-                renderAdminReqTable(requests);
-            }
-        });
-    }
-
-    function renderAdminReqTable(reqs) {
-        let html = '';
-        if (!reqs.length) {
-            html = '<tr><td colspan="8" class="text-center py-4 text-slate-400">No credit extension requests found.</td></tr>';
-        } else {
-            reqs.forEach(req => {
-                let statusBadge = '<span class="badge bg-warning text-dark">Pending</span>';
-                if (req.status === 'approved') statusBadge = '<span class="badge bg-success">Approved</span>';
-                if (req.status === 'rejected') statusBadge = '<span class="badge bg-danger">Rejected</span>';
-
-                let actionBtns = '—';
-                if (req.status === 'pending') {
-                    actionBtns = `
-                        <div class="btn-group btn-group-sm">
-                            <button type="button" class="btn btn-success btn-xs" onclick="adminApproveReq(${req.id})">
-                                <i class="fas fa-check me-1"></i>Approve (+$${req.requested_amount})
-                            </button>
-                            <button type="button" class="btn btn-danger btn-xs" onclick="adminRejectReq(${req.id})">
-                                <i class="fas fa-times me-1"></i>Reject
-                            </button>
-                        </div>
-                    `;
-                }
-
-                html += `
-                    <tr>
-                        <td>#${req.id}</td>
-                        <td><strong>${escapeHtml(req.user_name)}</strong><br><small class="text-slate-400">${escapeHtml(req.user_email)}</small></td>
-                        <td>$${Number(req.current_limit).toFixed(2)}</td>
-                        <td><strong class="text-success">+$${Number(req.requested_amount).toFixed(2)}</strong></td>
-                        <td style="max-width: 250px;">${escapeHtml(req.reason || '—')}</td>
-                        <td>${req.created_at}</td>
-                        <td>${statusBadge}</td>
-                        <td>${actionBtns}</td>
-                    </tr>
-                `;
-            });
-        }
-        $('#adminReqTbody').html(html);
-    }
-
-    $('#filterReqAll').on('click', function () {
-        $(this).addClass('active').siblings().removeClass('active');
-        if (window._allAdminReqs) renderAdminReqTable(window._allAdminReqs);
-    });
-
-    $('#filterReqPending').on('click', function () {
-        $(this).addClass('active').siblings().removeClass('active');
-        if (window._allAdminReqs) {
-            renderAdminReqTable(window._allAdminReqs.filter(r => r.status === 'pending'));
-        }
-    });
-
-    window.adminApproveReq = function (reqId) {
-        $.ajax({
-            url: `/api/admin/credit-requests/${reqId}/approve`,
-            type: 'POST',
-            success: function (r) {
-                if (r.success) {
-                    showToast('Request approved! User credit limit increased.', 'success');
-                    loadAdminRequests();
-                    loadAdminUsers();
-                    loadUserUsageMetrics();
-                }
-            },
-            error: function (xhr) {
-                showToast('Approval failed: ' + (xhr.responseJSON?.error || 'Error'), 'error');
-            }
-        });
-    };
-
-    window.adminRejectReq = function (reqId) {
-        $.ajax({
-            url: `/api/admin/credit-requests/${reqId}/reject`,
-            type: 'POST',
-            success: function (r) {
-                if (r.success) {
-                    showToast('Request rejected.', 'info');
-                    loadAdminRequests();
-                }
-            },
-            error: function (xhr) {
-                showToast('Rejection failed: ' + (xhr.responseJSON?.error || 'Error'), 'error');
-            }
-        });
-    };
-
-    function loadAdminCostHistory() {
-        $.ajax({
-            url: '/api/admin/cost-history?limit=100',
-            type: 'GET',
-            success: function (r) {
-                if (!r.success) return;
-                const history = r.history || [];
-                const summary = r.summary || {};
-
-                $('#adminTotalSystemCost').text('$' + Number(summary.total_system_cost_usd || 0).toFixed(4));
-                $('#adminTotalSystemTokens').text(Number(summary.total_tokens || 0).toLocaleString());
-
-                let html = '';
-                if (!history.length) {
-                    html = '<tr><td colspan="7" class="text-center py-4 text-slate-400">No generation history recorded.</td></tr>';
-                } else {
-                    history.forEach(h => {
-                        html += `
-                            <tr>
-                                <td>#${h.id}</td>
-                                <td>${escapeHtml(h.user_email)}</td>
-                                <td>${h.timestamp}</td>
-                                <td style="max-width: 280px;" class="text-truncate" title="${escapeAttr(h.story)}">${escapeHtml(h.story)}</td>
-                                <td><span class="badge bg-secondary me-1">${h.tone || 'Auto'}</span> <small class="text-slate-400">${(h.platforms || []).join(', ')}</small></td>
-                                <td><span class="font-monospace">${Number(h.tokens_used).toLocaleString()}</span></td>
-                                <td><strong class="text-warning font-monospace">$${Number(h.cost_usd).toFixed(6)}</strong></td>
-                            </tr>
-                        `;
-                    });
-                }
-                $('#adminCostHistoryTbody').html(html);
-            }
-        });
-    }
-
     // ── RAG Memory Knowledge Graph Visualizer ─────────────────────────────
     let graphAnimationId = null;
     let graphNodes = [];
     let graphEdges = [];
     let graphSelectedNode = null;
     let graphDraggedNode = null;
-
-    $('#openMemoryGraphBtn, #memoryIndicatorBadge').on('click', function () {
-        openMemoryGraphModal();
-    });
 
     function openMemoryGraphModal() {
         const modalElem = document.getElementById('memoryGraphModal');
@@ -2011,7 +2322,7 @@ $(document).ready(function () {
 
                 r.models.forEach(m => {
                     const iconMeta = categoryIcons[m.category] || { icon: 'fa-microchip', class: 'cat-llm' };
-                    const agentTags = (m.agents || []).map(a => `<span class="agent-pill-tag"><i class="fas fa-robot me-1"></i>${a}</span>`).join(' ');
+                    const agentTags = (m.agents || []).map(a => `<span class="agent-pill-tag">${a}</span>`).join(' ');
 
                     const statusBadges = {
                         ACTIVE: '<span class="badge bg-success text-white"><i class="fas fa-circle me-1 fs-9"></i>ACTIVE</span>',

@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Brand Configuration — VortexSocial AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #7366ff;
+            --primary-light: #eef2ff;
+            --text-primary: #111827;
+            --text-secondary: #667085;
+            --border-color: #e5e7eb;
+            --bg-body: #f7f8fc;
+            --bg-card: #ffffff;
+            --radius-sm: 8px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            color: var(--text-primary);
+            overflow: hidden;
+            background: var(--bg-body);
+        }
+
+        .bc-main {
+            margin-top: var(--header-h);
+            height: calc(100vh - var(--header-h));
+            display: flex;
+        }
+
+        .bc-sidebar {
+            width: 260px;
+            flex-shrink: 0;
+            background: var(--bg-card);
+            border-right: 1px solid var(--border-color);
+            padding: 1.5rem 1rem;
+            overflow-y: auto;
+        }
+
+        .bc-sidebar-header {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            margin-bottom: 1.5rem;
+            padding: 0 0.5rem;
+        }
+
+        .bc-sidebar-header i {
+            font-size: 1.3rem;
+            margin-top: 2px;
+            color: var(--primary);
+        }
+
+        .bc-nav {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .bc-nav-item {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            background: transparent;
+            border: none;
+            border-radius: var(--radius-sm);
+            padding: 0.7rem 0.85rem;
+            font-weight: 500;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            width: 100%;
+            text-decoration: none;
+        }
+
+        .bc-nav-item i {
+            width: 18px;
+            text-align: center;
+            color: #9ca3af;
+        }
+
+        .bc-nav-item:hover {
+            background: #f3f4f6;
+            color: var(--text-primary);
+        }
+
+        .bc-nav-item.active {
+            background: var(--primary-light);
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .bc-nav-item.active i {
+            color: var(--primary);
+        }
+
+        .bc-content {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 2.5rem 3rem 6rem;
+            background: var(--bg-body);
+            display: flex;
+            justify-content: center;
+        }
+
+        .bc-content-inner {
+            width: 100%;
+            max-width: 1200px;
+            position: relative;
+        }
+
+        .bc-pane-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .bc-pane-header h5 {
+            font-weight: 700;
+            font-size: 1.4rem;
+            margin-bottom: 0.25rem;
+            color: var(--text-primary);
+        }
+
+        .bc-pane-header p {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin: 0;
+        }
+
+        .brand-config-card {
+            background: var(--bg-card);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-color);
+            padding: 1.75rem 2rem;
+            margin-bottom: 1.5rem;
+            scroll-margin-top: 1rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.02);
+        }
+
+        .brand-config-card h6 {
+            font-weight: 600;
+            font-size: 1rem;
+            margin-bottom: 0.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: var(--text-primary);
+        }
+
+        .brand-config-card-desc {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 1.5rem;
+        }
+
+        .guideline-field-label {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: #374151;
+            margin-bottom: 0.4rem;
+            display: block;
+        }
+
+        .guideline-field-hint {
+            font-size: 0.8rem;
+            color: #9ca3af;
+            margin-top: 0.35rem;
+        }
+
+        .bp-form-row {
+            margin-bottom: 1.25rem;
+        }
+
+        .bp-website-bar {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1rem 1.25rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+        }
+
+        .bp-website-bar .bp-website-url {
+            font-weight: 500;
+            font-size: 0.9rem;
+            color: var(--text-primary);
+            word-break: break-all;
+        }
+
+        .bp-website-bar .bp-analyzed-at {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background-color: #10B981;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .bp-logo-preview {
+            width: 36px;
+            height: 36px;
+            border-radius: var(--radius-sm);
+            object-fit: contain;
+            background: var(--bg-body);
+            border: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+
+        .bp-colors-preview {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 0.75rem;
+        }
+
+        .bp-color-swatch {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 4px 10px 4px 6px;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-primary);
+            background: var(--bg-card);
+        }
+
+        .bp-color-dot {
+            width: 16px;
+            height: 16px;
+            border-radius: 4px;
+            border: 1px solid rgba(0, 0, 0, 0.08);
+            flex-shrink: 0;
+        }
+
+        .bp-empty-state {
+            text-align: center;
+            padding: 4rem 1.5rem;
+        }
+
+        .bp-empty-state i {
+            font-size: 2.5rem;
+            color: #d1d5db;
+            margin-bottom: 1.25rem;
+        }
+
+        .bp-empty-state h5 {
+            font-weight: 600;
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+        }
+
+        .bp-empty-state p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            max-width: 420px;
+            margin: 0 auto 1.5rem;
+        }
+
+        .btn-xs-outline-info {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 6px 14px;
+            font-weight: 500;
+            font-size: 0.85rem;
+            transition: all 0.15s ease;
+        }
+
+        .btn-xs-outline-info:hover {
+            background: #f9fafb;
+            color: var(--text-primary);
+            border-color: #d1d5db;
+        }
+
+        .btn-xs-outline-info:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-primary-save {
+            background: var(--primary);
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-sm);
+            padding: 0.6rem 1.25rem;
+            font-weight: 500;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-primary-save:hover {
+            background: #5b4fd6;
+        }
+
+        .btn-primary-save:disabled {
+            background: #d1d5db;
+            cursor: not-allowed;
+            color: #9ca3af;
+        }
+
+        .bc-content .form-control {
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+            font-size: 0.9rem;
+            padding: 0.6rem 0.85rem;
+            color: var(--text-primary);
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+            min-height: 44px;
+        }
+
+        .bc-content .form-control:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(115, 102, 255, 0.15);
+            outline: none;
+        }
+
+        .bc-content textarea.form-control {
+            line-height: 1.5;
+            min-height: auto;
+        }
+
+        .theme-textarea {
+            font-family: monospace;
+            background: #f9fafb;
+        }
+
+        .semantic-card-do {
+            background: #F0FDF4;
+            border-color: #BBF7D0;
+        }
+
+        .semantic-card-dont {
+            background: #FEF2F2;
+            border-color: #FECACA;
+        }
+
+        .bp-save-bar {
+            position: sticky;
+            bottom: 0;
+            margin-left: -3rem;
+            margin-right: -3rem;
+            margin-bottom: -6rem;
+            padding: 1rem 3rem;
+            background: rgba(255, 255, 255, 0.98);
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 100;
+            box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.03);
+            transform: translateY(100%);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .bp-save-bar.visible {
+            transform: translateY(0);
+        }
+
+        .unsaved-warning {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            color: #d97706;
+            font-weight: 500;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+
+<body>
+    <header class="app-header">
+        <div class="header-brand">
+            <div class="brand-logo">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+            </svg>
+        </div>
+            <div class="brand-text">
+                <span class="brand-name">VortexSocial AI</span>
+                <span class="brand-tagline">My Brand Configuration</span>
+            </div>
+        </div>
+        <nav class="header-nav">
+            <a href="/dashboard" class="header-nav-item"><i class="fas fa-comments me-2"></i>Studio Chat</a>
+            <a href="/brand-profile" class="header-nav-item active"><i class="fas fa-palette me-1"></i>My Brand
+                Configuration</a>
+        </nav>
+        <div class="header-actions">
+            <a href="/dashboard" class="btn-secondary-ent text-decoration-none me-2">
+                <i class="fas fa-arrow-left me-1"></i>Back to Studio Chat
+            </a>
+        </div>
+    </header>
+
+    <div class="bc-main">
+        <aside class="bc-sidebar">
+            <div class="bc-sidebar-header">
+                <i class="fas fa-palette"></i>
+                <div>
+                    <div style="font-weight:700; font-size:0.95rem;">My Brand Configuration</div>
+                    <div style="font-size:0.75rem; color:#6b7280;">Fetched from your website</div>
+                </div>
+            </div>
+            <nav class="bc-nav">
+                <a href="#bpOverview" class="bc-nav-item"><i class="fas fa-building"></i> Brand Overview</a>
+                <a href="#bpVoice" class="bc-nav-item"><i class="fas fa-comment-dots"></i> Voice &amp; Themes</a>
+                <a href="#bpColors" class="bc-nav-item"><i class="fas fa-droplet"></i> Colors &amp; Fonts</a>
+                <a href="#bpRules" class="bc-nav-item"><i class="fas fa-list-check"></i> Content Rules</a>
+            </nav>
+        </aside>
+
+        <main class="bc-content">
+            <div class="bc-content-inner">
+                <div class="bc-pane-header d-flex justify-content-between align-items-start flex-wrap gap-3">
+                    <div>
+                        <h5><i class="fas fa-palette text-primary me-2"></i>My Brand Configuration</h5>
+                        <p class="mb-0">Review and refine the brand intelligence extracted from your website before it is used to generate content.</p>
+                    </div>
+                    <div class="d-flex align-items-center gap-3" id="bpSaveBar">
+                        <div class="unsaved-warning" id="bpUnsavedWarning" style="opacity: 0; transition: opacity 0.2s;">
+                            <i class="fas fa-circle-exclamation"></i> Unsaved changes
+                        </div>
+                        <button type="button" class="btn-primary-save" id="bpSaveBtn" onclick="saveBrandProfile()">
+                            <i class="fas fa-check me-1"></i>Save Changes
+                        </button>
+                    </div>
+                </div>
+
+                <div id="bpLoading" class="text-center text-muted py-5">
+                    <i class="fas fa-spinner fa-spin me-2"></i>Loading your brand profile...
+                </div>
+
+                <!-- EMPTY STATE: no profile analyzed yet / scrape never succeeded -->
+                <div id="bpEmptyState" class="brand-config-card bp-empty-state d-none">
+                    <i class="fas fa-globe"></i>
+                    <h5>No brand profile yet</h5>
+                    <p>We couldn't analyze your website during signup, or it hasn't been analyzed yet. Enter your
+                        website below and we'll fetch your industry, voice, and brand colors automatically.</p>
+                    <div class="d-flex justify-content-center gap-2">
+                        <input type="text" id="bpEmptyWebsiteInput" class="form-control form-control-sm"
+                            style="max-width:280px;" placeholder="https://yourwebsite.com">
+                        <button type="button" class="btn-xs btn-xs-outline-info" id="bpEmptyAnalyzeBtn"
+                            onclick="rescanBrandProfile('empty')">
+                            <i class="fas fa-magnifying-glass me-1"></i>Analyze Website
+                        </button>
+                    </div>
+                </div>
+
+                <!-- FORM STATE -->
+                <div id="bpFormWrap" class="d-none">
+                    <div class="bp-website-bar">
+                        <img id="bpLogoPreview" class="bp-logo-preview d-none" alt="Logo">
+                        <i class="fas fa-globe text-primary fs-5" id="bpWebsiteIcon"></i>
+                        <div class="flex-grow-1">
+                            <div class="d-flex align-items-center">
+                                <input type="text" id="bpWebsiteUrl" class="border-0 bg-transparent p-0 fw-medium m-0" style="color: var(--text-primary); font-size: 0.95rem; box-shadow: none; width: 100%; max-width: 320px; cursor: text; outline: none; line-height: 1.2;" placeholder="https://yourwebsite.com">
+                                <i class="fas fa-pencil text-muted ms-2" style="font-size: 0.8rem; opacity: 0.7; cursor: pointer; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'" onclick="document.getElementById('bpWebsiteUrl').focus(); document.getElementById('bpWebsiteUrl').select();" title="Edit Website URL"></i>
+                            </div>
+                            <div class="bp-analyzed-at mt-1" id="bpAnalyzedAt"></div>
+                        </div>
+                        <button type="button" class="btn-xs-outline-info" id="bpRescanBtn"
+                            onclick="rescanBrandProfile('form')">
+                            <i class="fas fa-arrows-rotate me-1"></i>Re-analyze
+                        </button>
+                    </div>
+
+                    <div class="brand-config-card" id="bpOverview">
+                        <h6><i class="fas fa-building text-primary"></i>Brand Overview</h6>
+                        <div class="brand-config-card-desc">Core identity and audience information used to guide
+                            generated content.</div>
+                        <div class="row">
+                            <div class="col-md-6 bp-form-row">
+                                <label class="guideline-field-label">Company Name</label>
+                                <input type="text" id="bpCompanyName" class="form-control form-control-sm">
+                            </div>
+                            <div class="col-md-6 bp-form-row">
+                                <label class="guideline-field-label">Industry</label>
+                                <input type="text" id="bpIndustry" class="form-control form-control-sm">
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6 bp-form-row">
+                                <label class="guideline-field-label">Tagline</label>
+                                <input type="text" id="bpTagline" class="form-control form-control-sm"
+                                    placeholder="No tagline detected">
+                            </div>
+                            <div class="col-md-6 bp-form-row">
+                                <label class="guideline-field-label">Visual Style</label>
+                                <input type="text" id="bpVisualStyle" class="form-control form-control-sm"
+                                    placeholder="e.g. minimal, modern, high-contrast">
+                            </div>
+                        </div>
+                        <div class="bp-form-row">
+                            <label class="guideline-field-label">Target Audience</label>
+                            <input type="text" id="bpTargetAudience" class="form-control form-control-sm">
+                        </div>
+                    </div>
+
+                    <div class="brand-config-card" id="bpVoice">
+                        <h6><i class="fas fa-comment-dots text-primary"></i>Voice &amp; Themes</h6>
+                        <div class="brand-config-card-desc">Defines how your brand sounds and the topics you frequently
+                            discuss.</div>
+                        <div class="bp-form-row">
+                            <label class="guideline-field-label">Brand Voice Summary</label>
+                            <textarea id="bpVoiceSummary" class="form-control form-control-sm" rows="3"></textarea>
+                        </div>
+                        <div class="bp-form-row">
+                            <label class="guideline-field-label">Recurring Themes</label>
+                            <textarea id="bpKeyThemes" class="form-control form-control-sm theme-textarea" rows="5"
+                                placeholder="One theme per line"></textarea>
+                            <div class="guideline-field-hint">One theme per line.</div>
+                        </div>
+                    </div>
+
+                    <div class="brand-config-card" id="bpColors">
+                        <h6><i class="fas fa-droplet text-primary"></i>Colors &amp; Fonts</h6>
+                        <div class="brand-config-card-desc">Visual assets extracted from your website's stylesheets.
+                        </div>
+                        <div class="bp-form-row">
+                            <label class="guideline-field-label">Primary Colors</label>
+                            <textarea id="bpPrimaryColors" class="form-control form-control-sm theme-textarea" rows="3"
+                                placeholder="#7366ff&#10;#111827" oninput="renderColorPreview()"></textarea>
+                            <div class="guideline-field-hint">One hex color per line (e.g. #7366ff).</div>
+                            <div class="bp-colors-preview" id="bpColorsPreview"></div>
+                        </div>
+                        <div class="bp-form-row">
+                            <label class="guideline-field-label">Fonts Detected</label>
+                            <textarea id="bpFonts" class="form-control form-control-sm theme-textarea" rows="2"
+                                placeholder="One font name per line"></textarea>
+                            <div class="guideline-field-hint" id="bpFontsHint">Detected from the site's CSS - one per
+                                line.</div>
+                        </div>
+                    </div>
+
+                    <div class="brand-config-card" id="bpRules">
+                        <h6><i class="fas fa-list-check text-primary"></i>Content Rules</h6>
+                        <div class="brand-config-card-desc">Specific instructions for AI generation behaviors.</div>
+                        <div class="row">
+                            <div class="col-md-6 bp-form-row">
+                                <label class="guideline-field-label">Do <span
+                                        class="badge bg-success bg-opacity-10 text-success ms-1 fw-normal">Recommended</span></label>
+                                <textarea id="bpContentDos" class="form-control form-control-sm semantic-card-do"
+                                    rows="6" placeholder="One rule per line"></textarea>
+                            </div>
+                            <div class="col-md-6 bp-form-row">
+                                <label class="guideline-field-label">Don't <span
+                                        class="badge bg-danger bg-opacity-10 text-danger ms-1 fw-normal">Avoid</span></label>
+                                <textarea id="bpContentDonts" class="form-control form-control-sm semantic-card-dont"
+                                    rows="6" placeholder="One rule per line"></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                </div> <!-- end bc-content-inner -->
+        </main>
+    </div>
+
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div id="toast" class="ent-toast" role="alert">
+            <div class="ent-toast-body" id="toastBody"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="{{ url_for('static', filename='js/brand_profile.js') }}"></script>
+</body>
+
+</html>
