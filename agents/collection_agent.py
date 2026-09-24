@@ -76,11 +76,15 @@ One entry per group, in the same order given, using the exact cluster_index show
 
         annotated = []
         for idx, cluster in enumerate(clusters):
-            meta = labels_by_index.get(idx, {})
-            relevance = str(meta.get("relevance") or "medium").lower()
+            meta = labels_by_index.get(idx)
+            if not meta:
+                continue
+
+            relevance = str(meta.get("relevance", "")).lower()
+            label = str(meta.get("label", "")).lower()
             
             # Filter out clusters that do not align with any StradIT project
-            if relevance in ["low", "no strong match", "none"]:
+            if "no strong match" in relevance or relevance in ["low", "none", "", "n/a"]:
                 continue
                 
             annotated.append(

@@ -112,7 +112,9 @@ def verify_email(token):
     registration no longer does."""
     user = get_user_by_verification_token(token)
     if not user:
-        return render_template("verify_pending.html", error="This verification link is invalid or has already been used.")
+        return render_template(
+            "verify_pending.html", error="This verification link is invalid or has already been used."
+        )
 
     sent_at = user.verification_sent_at
     if sent_at and sent_at.tzinfo is None:

@@ -6,7 +6,6 @@ transformers==4.42.0
 torch==2.3.1
 pillow==10.3.0
 openai==1.35.0
-chromadb==0.5.0
 posthog>=2.4.0,<6.0.0
 python-dotenv==1.0.1
 gunicorn==22.0.0
@@ -23,3 +22,4 @@ demjson3
 gtts
 moviepy
 google-genai
+sentence-transformers==3.0.1
