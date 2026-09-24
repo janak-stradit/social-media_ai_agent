@@ -1,0 +1,89 @@
+{#- Shared header user menu - included in every signed-in page's
+    .header-actions so the menu is identical everywhere. Filled in and
+    opened/closed by static/js/user_menu.js (no Bootstrap JS needed).
+    IDs match what app_v2.js already updates (headerUser*, dropHeader*,
+    drop*Li, dropRequestCreditBtn, dropHeaderModelInfoBtn, logoutBtn). -#}
+{%- set p = request.path -%}
+<div class="um" id="userMenu">
+    <button type="button" class="um-trigger" id="userMenuDropdown" aria-haspopup="true" aria-expanded="false" aria-controls="userMenuPanel">
+        <span class="um-avatar" id="headerUserAvatar" aria-hidden="true">U</span>
+        <span class="um-trigger-meta">
+            <span class="um-trigger-name" id="headerUserLabel">User</span>
+            <span class="um-trigger-plan" id="headerUserPlan">&nbsp;</span>
+        </span>
+        <i class="fas fa-chevron-down um-chevron" aria-hidden="true"></i>
+    </button>
+
+    <div class="um-panel" id="userMenuPanel" role="menu" aria-labelledby="userMenuDropdown" hidden>
+        <!-- Identity -->
+        <div class="um-identity">
+            <span class="um-avatar um-avatar-lg" id="umAvatarLg" aria-hidden="true">U</span>
+            <div class="um-identity-text">
+                <div class="um-name" id="umName">User</div>
+                <div class="um-email" id="headerUserEmail">&nbsp;</div>
+            </div>
+            <span class="um-plan-badge" id="umPlanBadge"></span>
+        </div>
+
+        <!-- Usage & credits -->
+        <div class="um-section-label">Usage &amp; Credits</div>
+        <div class="um-credit-card">
+            <div class="um-credit-row">
+                <span class="um-credit-label"><i class="fas fa-wallet" aria-hidden="true"></i>Credit balance</span>
+                <strong id="dropHeaderCreditsRemaining">—</strong>
+            </div>
+            <div class="um-progress" aria-hidden="true"><span id="umCreditBar" style="width: 0%;"></span></div>
+            <div class="um-credit-row um-credit-sub">
+                <span>Limit <span id="dropHeaderCreditLimit">—</span></span>
+                <button type="button" class="um-extend-btn" id="dropRequestCreditBtn">
+                    <i class="fas fa-plus" aria-hidden="true"></i>Extend
+                </button>
+            </div>
+        </div>
+        <div class="um-stat-row">
+            <div class="um-stat">
+                <span class="um-stat-label">Tokens used</span>
+                <span class="um-stat-value" id="dropHeaderTokens">—</span>
+            </div>
+            <div class="um-stat">
+                <span class="um-stat-label">Total cost</span>
+                <span class="um-stat-value" id="dropHeaderCost">—</span>
+            </div>
+        </div>
+
+        <!-- Workspace links -->
+        <div class="um-section-label">Workspace</div>
+        <nav class="um-links">
+            <a class="um-link{{ ' active' if p == '/dashboard' }}" href="/dashboard" role="menuitem">
+                <i class="fas fa-comments" aria-hidden="true"></i>Studio Chat
+            </a>
+            <a class="um-link{{ ' active' if p.startswith('/competitor-dashboard') }}" href="/competitor-dashboard" role="menuitem">
+                <i class="fas fa-chart-line" aria-hidden="true"></i>Analysis Dashboard
+                <span class="um-tag d-none" id="umAnalysisTag">Enterprise</span>
+            </a>
+            <a class="um-link{{ ' active' if p.startswith('/approve') }}" href="/approve" role="menuitem">
+                <i class="fas fa-clipboard-check" aria-hidden="true"></i>Approval Requests
+            </a>
+            <a class="um-link{{ ' active' if p.startswith('/settings') }}" href="/settings" role="menuitem">
+                <i class="fas fa-plug" aria-hidden="true"></i>Social Accounts &amp; Scheduling
+            </a>
+            <a class="um-link d-none{{ ' active' if p.startswith('/brand-profile') }}" id="dropBrandProfileLi" href="/brand-profile" role="menuitem">
+                <i class="fas fa-palette" aria-hidden="true"></i>My Brand Configuration
+            </a>
+            <a class="um-link d-none{{ ' active' if p.startswith('/brand-configuration') }}" id="dropBrandConfigLi" href="/brand-configuration" role="menuitem">
+                <i class="fas fa-swatchbook" aria-hidden="true"></i>Brand Configuration
+            </a>
+            <button type="button" class="um-link" id="dropHeaderModelInfoBtn" role="menuitem">
+                <i class="fas fa-microchip" aria-hidden="true"></i>AI Models &amp; Purpose Matrix
+            </button>
+            <a class="um-link d-none{{ ' active' if p.startswith('/admin') }}" id="dropAdminPortalLi" href="/admin" role="menuitem">
+                <i class="fas fa-user-shield" aria-hidden="true"></i>Admin Control Center
+            </a>
+        </nav>
+
+        <div class="um-divider"></div>
+        <button type="button" class="um-link um-signout" id="logoutBtn" role="menuitem">
+            <i class="fas fa-right-from-bracket" aria-hidden="true"></i>Sign Out
+        </button>
+    </div>
+</div>

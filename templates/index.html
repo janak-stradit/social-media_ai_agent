@@ -7,7 +7,7 @@
     <meta name="description" content="Enterprise AI-powered social media content generation platform. Chat with multi-agent AI to create platform-optimized captions, hashtags, and visual assets.">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
 </head>
 <body>
@@ -35,95 +35,7 @@
         <a href="/dashboard" class="header-nav-item" id="headerNewChatBtn"><i class="fas fa-plus me-2"></i>New Chat</a>
     </nav>
     <div class="header-actions">
-        <!-- Status Pill -->
-        <div class="status-pill me-2"><span class="status-dot-green"></span>Agents Online</div>
-        
-        <!-- User Profile & System Settings Dropdown -->
-        <div class="dropdown">
-            <button class="header-user-btn border-0 bg-transparent dropdown-toggle d-flex align-items-center gap-2 p-1 rounded-3" type="button" id="userMenuDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                <div class="header-avatar" id="headerUserAvatar">U</div>
-                <div class="header-user-meta text-start me-1">
-                    <span class="header-user-name d-block font-bold" id="headerUserLabel">User</span>
-                    <span class="header-user-email d-block text-slate-500 fs-8" id="headerUserEmail">user@vortexsocial.ai</span>
-                </div>
-            </button>
-
-            <ul class="dropdown-menu dropdown-menu-end user-dropdown-menu shadow-lg rounded-4 p-3 border mt-2" aria-labelledby="userMenuDropdown" style="min-width: 320px;">
-                
-                <!-- Section 1: Usage & Credit Summary Cards -->
-                <li class="dropdown-header text-uppercase text-slate-400 font-bold fs-8 tracking-wider mb-2 px-1">Usage &amp; Credits</li>
-                <li class="px-1 mb-2">
-                    <div class="dropdown-card bg-slate-50 p-2.5 rounded-3 border mb-2">
-                        <div class="d-flex justify-content-between align-items-center mb-1">
-                            <span class="small font-semibold text-slate-600"><i class="fas fa-bolt text-warning me-1"></i>LLM Tokens</span>
-                            <strong class="font-monospace fs-7 text-navy" id="dropHeaderTokens">0 Tokens</strong>
-                        </div>
-                        <div class="d-flex justify-content-between align-items-center">
-                            <span class="small text-slate-500">Total Usage Cost:</span>
-                            <span class="font-monospace text-slate-600 fs-7" id="dropHeaderCost">$0.0000</span>
-                        </div>
-                    </div>
-
-                    <div class="dropdown-card bg-slate-50 p-2.5 rounded-3 border">
-                        <div class="d-flex justify-content-between align-items-center mb-1">
-                            <span class="small font-semibold text-slate-600"><i class="fas fa-wallet text-success me-1"></i>Credit Balance</span>
-                            <strong class="font-monospace fs-7 text-emerald" id="dropHeaderCreditsRemaining">$10.00</strong>
-                        </div>
-                        <div class="d-flex justify-content-between align-items-center">
-                            <span class="small text-slate-500">Limit: <span id="dropHeaderCreditLimit">$10.00</span></span>
-                            <button type="button" class="btn-credit-req-xs ms-2" id="dropRequestCreditBtn" title="Request Credit Extension">
-                                <i class="fas fa-plus-circle me-1"></i>Extend
-                            </button>
-                        </div>
-                    </div>
-                </li>
-
-                <li><hr class="dropdown-divider my-2"></li>
-
-                <!-- Section 2: Quick Studio Links -->
-                <li class="dropdown-header text-uppercase text-slate-400 font-bold fs-8 tracking-wider mb-1 px-1">Studio Tools</li>
-                <li>
-                    <a class="dropdown-item py-2 px-3 rounded-2 font-medium" href="/settings">
-                        <i class="fas fa-plug text-primary me-2"></i>Social Accounts &amp; Scheduling
-                    </a>
-                </li>
-                <li>
-                    <a class="dropdown-item py-2 px-3 rounded-2 font-medium" href="/approve">
-                        <i class="fas fa-clipboard-check text-primary me-2"></i>Approval Requests
-                    </a>
-                </li>
-                <li>
-                    <button class="dropdown-item py-2 px-3 rounded-2 text-navy font-medium" type="button" id="dropHeaderModelInfoBtn">
-                        <i class="fas fa-microchip text-info me-2"></i>AI Models &amp; Purpose Matrix
-                    </button>
-                </li>
-                <li id="dropBrandProfileLi" class="d-none">
-                    <a class="dropdown-item py-2 px-3 rounded-2 font-medium" href="/brand-profile">
-                        <i class="fas fa-palette text-primary me-2"></i>My Brand Configuration
-                    </a>
-                </li>
-                <li id="dropBrandConfigLi" class="d-none">
-                    <a class="dropdown-item py-2 px-3 rounded-2 font-medium" href="/brand-configuration">
-                        <i class="fas fa-swatchbook text-primary me-2"></i>Brand Configuration
-                    </a>
-                </li>
-                <li id="dropAdminPortalLi" class="d-none">
-                    <a class="dropdown-item py-2 px-3 rounded-2 text-indigo font-medium" href="/admin">
-                        <i class="fas fa-user-shield text-indigo me-2"></i>Admin Management Portal
-                    </a>
-                </li>
-
-                <li><hr class="dropdown-divider my-2"></li>
-
-                <!-- Section 3: Logout -->
-                <li>
-                    <button class="dropdown-item text-danger py-2 px-3 rounded-2 font-semibold" type="button" id="logoutBtn">
-                        <i class="fas fa-right-from-bracket me-2"></i>Sign Out
-                    </button>
-                </li>
-
-            </ul>
-        </div>
+        {% include 'partials/user_menu.html' %}
     </div>
 </header>
 
@@ -132,6 +44,14 @@
 
     <!-- ── SIDEBAR ── -->
     <aside class="sidebar" id="sidebar">
+        <div class="bc-sidebar-header sidebar-panel-header">
+            <i class="fas fa-comments"></i>
+            <div>
+                <div class="sidebar-panel-title">Studio Chat</div>
+                <div class="sidebar-panel-sub">Campaign conversations</div>
+            </div>
+        </div>
+
         <div class="sidebar-top-action d-flex align-items-center gap-2">
             <button class="btn-new-chat flex-grow-1" id="newChatBtn">
                 <i class="fas fa-plus me-2"></i>New Conversation
@@ -181,8 +101,8 @@
                 <p class="chat-header-subtitle">Describe your idea, attach visual assets, and set campaign configs below</p>
             </div>
             <div class="d-flex gap-2 align-items-center">
-                <a href="/competitor-dashboard" class="btn btn-sm btn-outline-primary rounded-pill fw-bold text-decoration-none" title="Open Analysis Dashboard" style="font-size: 0.75rem; padding: 4px 10px;">
-                    <i class="fas fa-chart-line me-1"></i>Analysis Dashboard
+                <a href="/competitor-dashboard" class="btn-xs-outline-info text-decoration-none" title="Open Analysis Dashboard">
+                    <i class="fas fa-chart-line me-2"></i>Analysis Dashboard
                 </a>
                 <span class="badge-version">v2.5 Critic</span>
             </div>
@@ -193,16 +113,35 @@
             
             <!-- Welcome Hero View (Shown on Empty Chat) -->
             <div id="welcomeHero" class="welcome-hero">
-                <div class="welcome-icon">
-                    <i class="fas fa-wand-magic-sparkles"></i>
+                <div class="welcome-hero-card">
+                    <div class="welcome-hero-copy">
+                        <div class="welcome-eyebrow">Campaign Studio</div>
+                        <div class="welcome-title-row">
+                            <h2 class="welcome-title">How can I assist your social media strategy?</h2>
+                            <button type="button" class="btn-regenerate-greeting d-none" id="regenerateGreetingBtn" onclick="regenerateGreeting()" title="Regenerate prompt ideas">
+                                <i class="fas fa-arrows-rotate"></i>
+                            </button>
+                        </div>
+                        <p class="welcome-desc">Select a prompt template below or type your brief, upload image context, and pick your target channels.</p>
+                    </div>
+                    <div class="welcome-hero-graphic" aria-hidden="true">
+                        <div class="welcome-hero-caption">
+                            From one brief<br>
+                            <strong>to every channel</strong>
+                        </div>
+                        <div class="welcome-hero-mock">
+                            <div class="d-flex gap-3 mb-3 align-items-center">
+                                <div class="welcome-hero-mock-icon"><i class="fas fa-wand-magic-sparkles"></i></div>
+                                <div class="mock-bar" style="width: 80px; height: 12px; margin: 0;"></div>
+                            </div>
+                            <div class="mock-bar" style="width: 100%;"></div>
+                            <div class="mock-bar" style="width: 85%;"></div>
+                            <div class="mock-bar" style="width: 95%; margin-bottom: 0;"></div>
+                        </div>
+                    </div>
                 </div>
-                <div class="welcome-title-row">
-                    <h2 class="welcome-title">How can I assist your social media strategy?</h2>
-                    <button type="button" class="btn-regenerate-greeting d-none" id="regenerateGreetingBtn" onclick="regenerateGreeting()" title="Regenerate prompt ideas">
-                        <i class="fas fa-arrows-rotate"></i>
-                    </button>
-                </div>
-                <p class="welcome-desc">Select a prompt template below or type your brief, upload image context, and pick your target channels.</p>
+
+                <div class="welcome-section-label">Start from an idea</div>
                 
                 <!-- Quick Prompt Cards -->
                 <div class="quick-prompts-grid">
@@ -1007,5 +946,6 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="{{ url_for('static', filename='js/app_v2.js') }}"></script>
+<script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
 </body>
 </html>

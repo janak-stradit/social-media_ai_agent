@@ -87,6 +87,19 @@ _CRAWL_HINTS = (
     "blog", "pricing", "features", "team", "contact", "faq", "help", "resources", "portfolio",
 )
 
+# Browser-like request headers. Many sites (Akamai/Cloudflare-fronted ones in
+# particular, e.g. hungama.com) answer a self-identified bot User-Agent with a
+# 403 while serving the same page normally to a browser - which made the
+# onboarding analysis and the brand-profile re-scan fail for those sites.
+_REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+    ),
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.9",
+}
+
 # Hrefs never worth following even as a same-origin fallback link - not a
 # real content page (or not one that tells us anything about the brand).
 _SKIP_HREF_PATTERNS = ("#", "mailto:", "tel:", "javascript:", "/login", "/signin", "/cart", "/checkout")
@@ -141,7 +154,7 @@ def _fetch_raw(url: str, max_bytes: int = _MAX_BYTES, require_html: bool = False
                 timeout=_TIMEOUT_SECONDS,
                 allow_redirects=False,
                 stream=True,
-                headers={"User-Agent": "VortexSocialAI-OnboardingBot/1.0"},
+                headers=_REQUEST_HEADERS,
             )
             if response.status_code in (301, 302, 303, 307, 308):
                 location = response.headers.get("Location")
@@ -151,6 +164,7 @@ def _fetch_raw(url: str, max_bytes: int = _MAX_BYTES, require_html: bool = False
                 continue
 
             if response.status_code != 200:
+                print(f"[website_scraper_service] {url} returned HTTP {response.status_code}")
                 return None
 
             if require_html:

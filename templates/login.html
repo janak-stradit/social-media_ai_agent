@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sign In — VortexSocial AI</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
 </head>
 <body>
@@ -13,20 +13,29 @@
 <div class="auth-split-layout">
     <div class="auth-left-pane">
         <div class="auth-brand-logo">
-            <span class="auth-brand-mark" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <div class="brand-logo">
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                     <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
                     <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
                     <circle cx="12" cy="12" r="1.7" fill="#fff"/>
                 </svg>
-            </span>
-            VortexSocial AI
+            </div>
+            <div>
+                <span class="brand-name">VortexSocial AI</span>
+                <span class="brand-tagline">Autonomous Social Studio</span>
+            </div>
         </div>
 
-        <h1 class="auth-heading">Hi there!</h1>
-        <p class="auth-subheading">Have we met before?</p>
+        <div class="auth-card">
+            <div class="auth-card-header">
+                <div class="card-icon-circle"><i class="fas fa-right-to-bracket"></i></div>
+                <div>
+                    <h1 class="auth-heading">Hi there!</h1>
+                    <p class="auth-subheading">Have we met before?</p>
+                </div>
+            </div>
 
-        <form id="authForm" style="width: 100%; max-width: 360px;">
+        <form id="authForm">
             <div class="auth-form-group">
                 <label class="auth-form-label" for="authEmail">Email</label>
                 <input id="authEmail" type="email" class="auth-form-input" placeholder="name@email.com" autocomplete="email" required>
@@ -49,24 +58,28 @@
             </button>
         </form>
 
-        <div class="auth-footer-links" style="max-width: 360px;">
-            <a href="#" class="auth-link-bold" style="text-decoration: underline; font-size: 12px;">Forgot my password</a>
+        <div class="auth-footer-links">
+            <a href="/forgot-password" class="auth-link-bold" style="font-size: 13px;">Forgot my password?</a>
 
             <div class="auth-footer-row">
                 <span style="color: #6B7280; font-size: 12px;">Don't have an account? <a href="/signup" class="auth-link-bold">Sign up</a></span>
             </div>
         </div>
+        </div>
     </div>
 
     <div class="auth-right-pane" id="sceneContainer" aria-hidden="true">
-        <div style="position: absolute; inset: 0; background: linear-gradient(135deg, #F8FAFC 0%, #F1EFFF 50%, #F1EFFF 100%); display: flex; align-items: center; justify-content: center; overflow: hidden; perspective: 1000px;">
-            <div style="position: absolute; width: 150%; height: 150%; background: radial-gradient(circle at center, rgba(255,255,255,0.9) 0%, transparent 60%); z-index: 1; pointer-events: none;"></div>
+        <div class="auth-scene-bg" style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; perspective: 1000px;">
+            <div class="auth-scene-caption">
+                From your website<br>
+                <strong>to on-brand content</strong>
+            </div>
             
             <!-- Animated 3D Scene Wrapper -->
             <div id="interactiveScene" style="position: relative; width: 100%; height: 100%; z-index: 2; transform-style: preserve-3d; transition: transform 0.1s ease-out;">
                 
                 <!-- Central AI Core -->
-                <div class="shape" data-speed="0.02" style="position: absolute; top: 40%; left: 40%; width: 120px; height: 120px; background: radial-gradient(circle, #7366FF, #3A2F8F); border-radius: 50%; box-shadow: 0 0 50px rgba(115, 102, 255, 0.6); display: flex; align-items: center; justify-content: center; animation: pulse-glow 3s infinite;">
+                <div class="shape" data-speed="0.02" style="position: absolute; top: 40%; left: 40%; width: 120px; height: 120px; background: radial-gradient(circle, #8A2BE2, #2F4FB8); border-radius: 50%; box-shadow: 0 0 50px rgba(138, 43, 226, 0.6); display: flex; align-items: center; justify-content: center; animation: pulse-glow 3s infinite;">
                     <i class="fas fa-network-wired" style="color: #fff; font-size: 40px;"></i>
                 </div>
 
@@ -82,17 +95,17 @@
                     </div>
                     <div style="width: 100%; height: 6px; background: #E2E8F0; border-radius: 3px; margin-bottom: 6px;"></div>
                     <div style="width: 90%; height: 6px; background: #E2E8F0; border-radius: 3px; margin-bottom: 12px;"></div>
-                    <div style="width: 100%; height: 80px; background: #F1EFFF; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #A89DFF;"><i class="fas fa-image"></i></div>
+                    <div style="width: 100%; height: 80px; background: #F3F0FF; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #B98AF0;"><i class="fas fa-image"></i></div>
                 </div>
 
                 <!-- Floating Analytics Card -->
                 <div class="shape" data-speed="-0.04" style="position: absolute; bottom: 15%; right: 10%; width: 200px; padding: 16px; background: rgba(255,255,255,0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.9); border-radius: 16px; transform: rotate(5deg); box-shadow: 0 20px 40px rgba(0,0,0,0.05); animation: float-reverse 5s infinite;">
                     <div style="font-weight: 700; font-size: 12px; color: #64748B; margin-bottom: 12px;">Engagement Growth</div>
                     <div style="display: flex; align-items: flex-end; gap: 8px; height: 60px; margin-bottom: 12px;">
-                        <div style="width: 24px; height: 30%; background: #C7C0FF; border-radius: 4px 4px 0 0;"></div>
-                        <div style="width: 24px; height: 50%; background: #A89DFF; border-radius: 4px 4px 0 0;"></div>
-                        <div style="width: 24px; height: 80%; background: #7366FF; border-radius: 4px 4px 0 0;"></div>
-                        <div style="width: 24px; height: 100%; background: #7366FF; border-radius: 4px 4px 0 0;"></div>
+                        <div style="width: 24px; height: 30%; background: #D8B4FE; border-radius: 4px 4px 0 0;"></div>
+                        <div style="width: 24px; height: 50%; background: #B98AF0; border-radius: 4px 4px 0 0;"></div>
+                        <div style="width: 24px; height: 80%; background: #8A2BE2; border-radius: 4px 4px 0 0;"></div>
+                        <div style="width: 24px; height: 100%; background: #8A2BE2; border-radius: 4px 4px 0 0;"></div>
                     </div>
                     <div style="color: #54BA4A; font-weight: 700; font-size: 14px;"><i class="fas fa-arrow-up"></i> +124%</div>
                 </div>
@@ -104,7 +117,7 @@
                 <style>
                     @keyframes float { 0%, 100% { transform: translateY(0) rotate(-5deg); } 50% { transform: translateY(-15px) rotate(-3deg); } }
                     @keyframes float-reverse { 0%, 100% { transform: translateY(0) rotate(5deg); } 50% { transform: translateY(15px) rotate(3deg); } }
-                    @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 40px rgba(115, 102, 255, 0.4); } 50% { box-shadow: 0 0 80px rgba(115, 102, 255, 0.8); } }
+                    @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 40px rgba(138, 43, 226, 0.4); } 50% { box-shadow: 0 0 80px rgba(138, 43, 226, 0.8); } }
                 </style>
             </div>
 

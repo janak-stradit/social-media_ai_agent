@@ -7,13 +7,13 @@
     <title>Analysis Dashboard - VortexSocial AI</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&display=swap"
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
         rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
         :root {
-            --primary: #7366ff;
-            --primary-hover: #5b4fd6;
+            --primary: #8A2BE2;
+            --primary-hover: #7322C4;
             --bg-gradient: linear-gradient(135deg, #f3f4f6 0%, #ffffff 100%);
             --glass-bg: rgba(255, 255, 255, 0.85);
             --glass-border: rgba(255, 255, 255, 0.5);
@@ -23,39 +23,23 @@
         }
 
         body {
-            background: var(--bg-gradient);
-            font-family: 'Rubik', sans-serif;
-            color: #1f2937;
             min-height: 100vh;
         }
 
-        .premium-card {
-            background: #ffffff;
-            border-radius: 16px;
-            border: 1px solid rgba(229, 231, 235, 0.6);
-            box-shadow: var(--card-shadow);
-            transition: var(--transition);
-            overflow: hidden;
-        }
-
-        .premium-card:hover {
-            box-shadow: var(--hover-shadow);
-        }
-
         .premium-btn {
-            background: linear-gradient(135deg, var(--primary) 0%, #7366ff 100%);
+            background: linear-gradient(135deg, var(--primary) 0%, #8A2BE2 100%);
             color: white;
             border: none;
-            border-radius: 999px;
-            padding: 0.5rem 1.25rem;
-            font-weight: 700;
+            border-radius: 6px;
+            padding: 0.6rem 1.25rem;
+            font-weight: 600;
             transition: var(--transition);
-            box-shadow: 0 4px 12px rgba(115, 102, 255, 0.3);
+            box-shadow: 0 4px 10px rgba(138, 43, 226, 0.25);
         }
 
         .premium-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 6px 16px rgba(115, 102, 255, 0.4);
+            box-shadow: 0 6px 16px rgba(138, 43, 226, 0.4);
             color: white;
         }
 
@@ -73,8 +57,8 @@
            one-off padding. */
         .action-btn {
             padding: 0.75rem 1.25rem;
-            border-radius: 999px;
-            font-weight: 700;
+            border-radius: 6px;
+            font-weight: 600;
             font-size: 0.95rem;
             line-height: 1.3;
         }
@@ -82,8 +66,8 @@
         /* Unified small pill nav buttons (Back / Next across workflow slides) */
         .nav-pill-btn {
             padding: 0.35rem 0.9rem;
-            border-radius: 999px;
-            font-weight: 700;
+            border-radius: 6px;
+            font-weight: 600;
             font-size: 0.8rem;
         }
 
@@ -103,10 +87,10 @@
             background: transparent;
             border: none;
             border-bottom: 2px solid transparent;
-            padding: 0.5rem 0.75rem;
-            font-weight: 700;
-            font-size: 0.82rem;
-            color: #6b7280;
+            padding: 0.6rem 0.85rem;
+            font-weight: 500;
+            font-size: 0.85rem;
+            color: #667085;
             cursor: pointer;
             transition: var(--transition);
         }
@@ -117,6 +101,7 @@
 
         .quick-start-tab.active {
             color: var(--primary);
+            font-weight: 600;
             border-bottom-color: var(--primary);
         }
 
@@ -154,12 +139,14 @@
 
         .custom-select {
             appearance: none;
-            background: rgba(243, 244, 246, 0.8);
-            border: 2px solid transparent;
-            border-radius: 8px;
-            padding: 0.6rem 2.5rem 0.6rem 1rem;
-            font-weight: 600;
-            color: #374151;
+            min-height: 44px;
+            background: #F9FAFB;
+            border: 1px solid #E6E8EF;
+            border-radius: 6px;
+            padding: 0.55rem 2.5rem 0.55rem 0.85rem;
+            font-weight: 500;
+            font-size: 0.9rem;
+            color: #172033;
             transition: var(--transition);
             cursor: pointer;
         }
@@ -168,7 +155,7 @@
             border-color: var(--primary);
             outline: none;
             background: white;
-            box-shadow: 0 0 0 4px rgba(115, 102, 255, 0.1);
+            box-shadow: 0 0 0 3px rgba(138, 43, 226, 0.15);
         }
 
         .select-icon {
@@ -181,8 +168,9 @@
         /* Post Cards */
         .competitor-post-card {
             background: #ffffff;
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
+            border: 1px solid #E6E8EF;
+            border-radius: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
             padding: 1.25rem;
             transition: var(--transition);
             cursor: pointer;
@@ -207,9 +195,9 @@
         }
 
         .competitor-post-card:hover {
-            border-color: #c7c0ff;
-            transform: translateY(-4px);
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+            border-color: #C5C9DB;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(138, 43, 226, 0.08);
         }
 
         .competitor-post-card:hover::before {
@@ -232,12 +220,13 @@
         }
 
         .textarea-premium {
-            background: #f9fafb;
-            border: 2px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 1rem;
+            background: #F9FAFB;
+            border: 1px solid #E6E8EF;
+            border-radius: 6px;
+            padding: 0.85rem;
             font-size: 0.875rem;
-            color: #4b5563;
+            line-height: 1.6;
+            color: #172033;
             transition: var(--transition);
             resize: none;
         }
@@ -246,11 +235,11 @@
             background: #ffffff;
             border-color: var(--primary);
             outline: none;
-            box-shadow: 0 0 0 4px rgba(115, 102, 255, 0.1);
+            box-shadow: 0 0 0 3px rgba(138, 43, 226, 0.15);
         }
 
         .badge-premium {
-            background: rgba(115, 102, 255, 0.1);
+            background: rgba(138, 43, 226, 0.1);
             color: var(--primary);
             font-weight: 700;
             padding: 0.4rem 0.8rem;
@@ -337,7 +326,7 @@
         }
 
         .pipeline-stage-row-clickable:hover {
-            background: rgba(115, 102, 255, 0.05);
+            background: rgba(138, 43, 226, 0.05);
         }
 
         .pipeline-stage-row-clickable:hover .pipeline-step-dot {
@@ -353,7 +342,7 @@
            right, distinct from the muted primary-text used for reached-but-
            not-currently-viewed stages. */
         .pipeline-stage-row-active {
-            background: rgba(115, 102, 255, 0.08);
+            background: rgba(138, 43, 226, 0.08);
         }
 
         /* Pipeline Stage Detail Modal as a right-docked slide-in panel
@@ -406,11 +395,118 @@
         }
 
         #pipelineModalFooter .action-btn {
-            border-radius: 999px;
-            font-weight: 700;
+            border-radius: 6px;
+            font-weight: 600;
             font-size: 0.875rem;
             padding: 0.6rem 1.25rem;
             transition: var(--transition);
+        }
+
+
+        /* ── Brand-profile layout (see brand_profile.html) ───────────── */
+        .cd-main { margin-top: var(--header-h); padding: 2rem 1.75rem 3rem; }
+
+        .cd-hero-card {
+            position: relative; overflow: hidden;
+            display: flex; flex-direction: column; justify-content: center;
+            min-height: 190px; padding: 2rem 2.75rem; margin-bottom: 1.5rem;
+            background: #fff; border: 1px solid #E6E8EF; border-radius: 16px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+        }
+        .cd-hero-copy { position: relative; z-index: 1; max-width: 55%; }
+        .cd-hero-eyebrow { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #667085; margin-bottom: 0.4rem; }
+        .cd-hero-title { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; color: #172033; margin-bottom: 0.4rem; }
+        .cd-hero-desc { font-size: 0.95rem; line-height: 1.5; color: #667085; max-width: 480px; margin: 0; }
+        .cd-hero-graphic {
+            position: absolute; top: 0; right: 0; width: 50%; height: 100%;
+            background: linear-gradient(135deg, #c4b5fd 0%, #818cf8 100%);
+            clip-path: polygon(15% 0, 100% 0, 100% 100%, 0 100%);
+        }
+        .cd-hero-caption { position: absolute; left: 12%; top: 50%; transform: translateY(-50%); font-size: 0.85rem; line-height: 1.3; font-weight: 500; color: #172033; }
+        .cd-hero-caption strong { position: relative; display: inline-block; padding-bottom: 4px; color: var(--primary); }
+        .cd-hero-caption strong::after { content: ""; position: absolute; left: 0; bottom: 0; width: 100%; height: 2px; background: var(--primary); }
+        .cd-hero-mock {
+            position: absolute; right: 12%; top: 50%; width: 230px; padding: 1.15rem;
+            background: #fff; border-radius: 16px; box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.175);
+            transform: translateY(-50%) rotate(-3deg); opacity: 0.95;
+        }
+        .cd-hero-mock-icon {
+            width: 34px; height: 34px; border-radius: 8px; font-size: 13px;
+            background: linear-gradient(135deg, #8A2BE2 0%, #4169E1 100%); color: #fff;
+            display: flex; align-items: center; justify-content: center;
+        }
+        .cd-mock-bar { height: 9px; background: #e2e8f0; border-radius: 4px; margin-bottom: 10px; }
+
+        /* KPI tiles: gradient icon circle + eyebrow label, like brand-profile cards. */
+        .kpi-stat-card { padding: 1.25rem 1.5rem; }
+        .kpi-stat-card .kpi-icon-box {
+            width: 44px; height: 44px; border-radius: 50%; font-size: 1.05rem;
+            background: linear-gradient(135deg, #8A2BE2 0%, #4169E1 100%); color: #fff;
+            box-shadow: 0 4px 10px rgba(138, 43, 226, 0.2);
+        }
+        .kpi-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #667085; margin-bottom: 0.15rem; }
+        .kpi-stat-card h4 { font-size: 1.35rem; letter-spacing: -0.01em; color: #172033 !important; }
+
+        /* Panel headers: icon circle + title + description. */
+        .cd-panel-header {
+            display: flex; align-items: center; gap: 0.75rem;
+            padding: 1.1rem 1.25rem;
+            background: #fff; border-bottom: 1px solid #E6E8EF;
+        }
+        .cd-feed-header { flex-wrap: wrap; row-gap: 1rem; }
+        .cd-panel-heading { flex: 1; min-width: 0; }
+        .cd-feed-header .cd-panel-heading { flex: 0 0 auto; }
+        .cd-panel-title { font-weight: 700; font-size: 1.05rem; line-height: 1.25; color: #172033; }
+        .cd-panel-desc { font-size: 0.8rem; color: #667085; margin-top: 2px; }
+        .cd-panel-search { padding: 0.75rem 1rem; background: #F8F9FC; border-bottom: 1px solid #E6E8EF; }
+        .cd-panel-search .form-control,
+        .feed-search-box .form-control {
+            min-height: 40px; background: #fff; border: 1px solid #E6E8EF; border-radius: 6px; font-size: 0.85rem;
+        }
+        .cd-panel-search .form-control:focus,
+        .feed-search-box .form-control:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(138, 43, 226, 0.15); }
+
+        .cd-quickstart { background: #fff; border-bottom: 1px solid #E6E8EF; }
+        .cd-feed-body { background: #F8F9FC; }
+        .feed-action-bar { background: #F8F9FC; border-color: #E6E8EF; }
+        .synth-panel-header { background: #fff; padding: 1.1rem 1.25rem; border-bottom-color: #E6E8EF; }
+        .synth-stepper { background: #F8F9FC; border-bottom-color: #E6E8EF; }
+        .synth-step.active .synth-step-dot { background: linear-gradient(135deg, #8A2BE2 0%, #4169E1 100%); border-color: transparent; }
+        .synth-nav-btn { border-radius: 6px; border-width: 1px; border-color: #E6E8EF; font-weight: 600; }
+        .synth-nav-btn.primary-nav { background: linear-gradient(135deg, #8A2BE2 0%, #4169E1 100%); border-color: transparent; }
+        .synth-action-bar { border-top-color: #E6E8EF; }
+        .synth-action-bar .btn { border-radius: 6px; font-weight: 600; }
+
+        /* History items (rendered by dashboard.js) read like brand-profile nav items. */
+        #pipelineHistoryList .list-group-item {
+            background: #fff !important;
+            border: none; border-bottom: 1px solid #E6E8EF !important;
+            border-left: 3px solid transparent !important;
+            transition: background 0.15s ease, border-color 0.15s ease;
+        }
+        #pipelineHistoryList .list-group-item:hover { background: rgba(138, 43, 226, 0.04) !important; border-left-color: var(--primary) !important; }
+
+        /* Storyline cards (suggested + festive, rendered by dashboard.js). */
+        .storyline-card {
+            background: #fff !important; border: 1px solid #E6E8EF !important; border-radius: 16px !important;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04); padding: 1rem !important;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+        }
+        .storyline-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(138, 43, 226, 0.08); border-color: #C5C9DB !important; }
+        .storyline-card-festive { border-left: 3px solid #FFA941 !important; }
+        .storyline-card .btn { border-radius: 6px !important; font-weight: 600 !important; }
+
+        .competitor-post-card.selected-card { background-color: #f3f0ff !important; }
+
+        .modal-content { border: 1px solid #E6E8EF; border-radius: 16px; }
+
+        @media (max-width: 992px) {
+            .cd-hero-copy { max-width: 100%; }
+            .cd-hero-graphic { display: none; }
+        }
+        @media (max-width: 768px) {
+            .cd-main { padding: 1.25rem 1rem 2rem; }
+            .cd-hero-card { padding: 1.5rem; min-height: 0; }
         }
 
         @media (max-width: 900px) {
@@ -446,57 +542,35 @@
                     class="fas fa-chart-line me-1"></i>Analysis Dashboard</a>
         </nav>
         <div class="header-actions">
-            <a href="/dashboard" class="btn-secondary-ent text-decoration-none me-2">
-                <i class="fas fa-arrow-left me-1"></i>Back to Studio Chat
-            </a>
-
-            <!-- User Profile & System Settings Dropdown -->
-            <div class="dropdown">
-                <button
-                    class="header-user-btn border-0 bg-transparent dropdown-toggle d-flex align-items-center gap-2 p-1 rounded-3"
-                    type="button" id="userMenuDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                    <div class="header-avatar" id="headerUserAvatar">U</div>
-                    <div class="header-user-meta text-start me-1">
-                        <span class="header-user-name d-block font-bold" id="headerUserLabel">User</span>
-                        <span class="header-user-email d-block text-slate-500 fs-8"
-                            id="headerUserEmail">user@vortexsocial.ai</span>
-                    </div>
-                </button>
-
-                <ul class="dropdown-menu dropdown-menu-end user-dropdown-menu shadow-lg rounded-4 p-3 border mt-2"
-                    aria-labelledby="userMenuDropdown" style="min-width: 320px;">
-
-                    <!-- Section 1: Quick Studio Links -->
-                    <li class="dropdown-header text-uppercase text-slate-400 font-bold fs-8 tracking-wider mb-1 px-1">
-                        Studio Tools</li>
-                    <li>
-                        <a class="dropdown-item py-2 px-3 rounded-2 font-medium" href="/dashboard">
-                            <i class="fas fa-comments text-primary me-2"></i>Studio Chat
-                        </a>
-                    </li>
-                    <li>
-                        <a class="dropdown-item py-2 px-3 rounded-2 font-medium" href="/settings">
-                            <i class="fas fa-plug text-primary me-2"></i>Social Accounts &amp; Scheduling
-                        </a>
-                    </li>
-
-                    <li>
-                        <hr class="dropdown-divider my-2">
-                    </li>
-
-                    <!-- Section 2: Logout -->
-                    <li>
-                        <a class="dropdown-item text-danger py-2 px-3 rounded-2 font-semibold" href="/logout">
-                            <i class="fas fa-right-from-bracket me-2"></i>Sign Out
-                        </a>
-                    </li>
-
-                </ul>
-            </div>
-        </div>
+        {% include 'partials/user_menu.html' %}
+    </div>
     </header>
 
-    <main class="container-fluid py-4 px-lg-4" style="margin-top: var(--header-h);">
+    <main class="container-fluid cd-main">
+
+        <!-- HERO - same composition as the brand_profile hero card -->
+        <div class="cd-hero-card">
+            <div class="cd-hero-copy">
+                <div class="cd-hero-eyebrow">Competitor Intelligence</div>
+                <h2 class="cd-hero-title">Analysis Dashboard</h2>
+                <p class="cd-hero-desc">Scan competitor activity, spot the gaps they leave open, and turn them into on-brand counter-content.</p>
+            </div>
+            <div class="cd-hero-graphic" aria-hidden="true">
+                <div class="cd-hero-caption">
+                    From competitor posts<br>
+                    <strong>to counter-content</strong>
+                </div>
+                <div class="cd-hero-mock">
+                    <div class="d-flex gap-3 mb-3 align-items-center">
+                        <div class="cd-hero-mock-icon"><i class="fas fa-chart-line"></i></div>
+                        <div class="cd-mock-bar" style="width: 80px; height: 12px; margin: 0;"></div>
+                    </div>
+                    <div class="cd-mock-bar" style="width: 100%;"></div>
+                    <div class="cd-mock-bar" style="width: 85%;"></div>
+                    <div class="cd-mock-bar" style="width: 95%; margin-bottom: 0;"></div>
+                </div>
+            </div>
+        </div>
 
         <!-- Top Metrics & 4-Step User Journey Stepper Bar -->
         <div class="row g-3 mb-4">
@@ -505,7 +579,7 @@
                 <div class="kpi-stat-card">
                     <div class="kpi-icon-box kpi-icon-primary"><i class="fas fa-building-columns"></i></div>
                     <div>
-                        <div class="text-slate-500 font-semibold fs-8 text-uppercase tracking-wider">Tracked Accounts
+                        <div class="kpi-label">Tracked Accounts
                         </div>
                         <h4 class="fw-bold text-navy mb-0" id="statTrackedCount">4 Enterprises</h4>
                     </div>
@@ -515,7 +589,7 @@
                 <div class="kpi-stat-card">
                     <div class="kpi-icon-box kpi-icon-emerald"><i class="fas fa-satellite"></i></div>
                     <div>
-                        <div class="text-slate-500 font-semibold fs-8 text-uppercase tracking-wider">Scraped Intel Posts
+                        <div class="kpi-label">Scraped Intel Posts
                         </div>
                         <h4 class="fw-bold text-navy mb-0" id="statScrapedCount">0 Posts</h4>
                     </div>
@@ -525,7 +599,7 @@
                 <div class="kpi-stat-card">
                     <div class="kpi-icon-box kpi-icon-purple"><i class="fas fa-bolt"></i></div>
                     <div>
-                        <div class="text-slate-500 font-semibold fs-8 text-uppercase tracking-wider">AI Strategy Runs
+                        <div class="kpi-label">AI Strategy Runs
                         </div>
                         <h4 class="fw-bold text-navy mb-0" id="statPipelinesCount">0 Runs</h4>
                     </div>
@@ -535,7 +609,7 @@
                 <div class="kpi-stat-card">
                     <div class="kpi-icon-box kpi-icon-amber"><i class="fas fa-lightbulb"></i></div>
                     <div>
-                        <div class="text-slate-500 font-semibold fs-8 text-uppercase tracking-wider">Growth Whitespaces
+                        <div class="kpi-label">Growth Whitespaces
                         </div>
                         <h4 class="fw-bold text-navy mb-0" id="statOpportunitiesCount">0 Found</h4>
                     </div>
@@ -547,22 +621,23 @@
         <div class="row g-4">
             <!-- New Left Panel: History -->
             <div class="col-xl-3 col-lg-3" id="historyPanelCol" style="transition: var(--transition);">
-                <div class="premium-card d-flex flex-column" style="height: calc(100vh - 110px); min-height: 550px;">
-                    <div
-                        class="p-3 border-bottom bg-white d-flex align-items-center justify-content-between flex-shrink-0">
-                        <h6 class="fw-bold m-0 text-gray-700 text-uppercase tracking-wider" style="font-size: 0.85rem;">
-                            <i class="fas fa-history me-2 text-primary"></i>History
-                        </h6>
+                <div class="premium-card d-flex flex-column" style="height: calc(100vh - 140px); min-height: 550px;">
+                    <div class="cd-panel-header flex-shrink-0">
+                        <div class="card-icon-circle"><i class="fas fa-history"></i></div>
+                        <div class="cd-panel-heading">
+                            <div class="cd-panel-title">History</div>
+                            <div class="cd-panel-desc">Previous pipeline runs</div>
+                        </div>
                         <button type="button" class="btn btn-sm btn-light border-0 icon-toggle-btn"
                             id="collapseHistoryBtn" title="Hide history panel" onclick="toggleHistoryPanel(false)">
                             <i class="fas fa-chevron-left text-muted small"></i>
                         </button>
                     </div>
-                    <div class="p-2 border-bottom bg-light flex-shrink-0">
+                    <div class="cd-panel-search flex-shrink-0">
                         <input type="text" class="form-control form-control-sm" id="historySearchInput"
                             placeholder="Filter pipeline runs..." oninput="filterHistoryList()">
                     </div>
-                    <div class="flex-grow-1 p-0 bg-white" id="pipelineHistoryList" style="overflow-y: auto;">
+                    <div class="flex-grow-1 p-0" id="pipelineHistoryList" style="overflow-y: auto;">
                         <div class="empty-state p-4 text-center">
                             <i class="fas fa-clipboard-list mb-3" style="font-size: 2rem; color: #cbd5e1;"></i>
                             <p class="text-muted small">No active pipelines yet.</p>
@@ -591,12 +666,15 @@
                  always fills whatever space is left beside the fixed-width History /
                  collapsed-rail / Synthesis columns, regardless of which are visible. -->
             <div class="col-xl col-lg" id="centerFeedPanel" style="transition: var(--transition); min-width: 0;">
-                <div class="premium-card d-flex flex-column" style="height: calc(100vh - 110px); min-height: 550px;">
-                    <div
-                        class="p-3 p-lg-4 border-bottom d-flex flex-wrap justify-content-between align-items-center gap-3 bg-white flex-shrink-0">
+                <div class="premium-card d-flex flex-column" style="height: calc(100vh - 140px); min-height: 550px;">
+                    <div class="cd-panel-header cd-feed-header flex-shrink-0">
+                        <div class="card-icon-circle"><i class="fas fa-satellite"></i></div>
+                        <div class="cd-panel-heading me-2">
+                            <div class="cd-panel-title">Competitor Feed</div>
+                            <div class="cd-panel-desc">Pick a platform and account, then scan</div>
+                        </div>
                         <div class="d-flex align-items-center gap-3 flex-grow-1 flex-wrap">
-                            <label class="fw-bold text-gray-700 m-0"><i
-                                    class="fas fa-filter me-2 text-primary"></i>Platform:</label>
+                            <label class="guideline-field-label m-0" for="dashboardPlatformSelect">Platform</label>
                             <div class="custom-select-wrapper">
                                 <select id="dashboardPlatformSelect" class="custom-select">
                                     <option value="all" selected>All Platforms</option>
@@ -608,8 +686,7 @@
                                 </select>
                                 <i class="fas fa-chevron-down select-icon"></i>
                             </div>
-                            <label class="fw-bold text-gray-700 m-0"><i
-                                    class="fas fa-building-columns me-2 text-primary"></i>Accounts:</label>
+                            <label class="guideline-field-label m-0" for="dashboardCompetitorSelect">Accounts</label>
                             <div class="custom-select-wrapper">
                                 <select id="dashboardCompetitorSelect" class="custom-select">
                                     <option value="all">All Accounts</option>
@@ -656,7 +733,7 @@
                          always shown one after another, pushing the actual post feed
                          further down before the user saw any real content. Collapsible
                          so it can be tucked away entirely once picked from. -->
-                        <div class="border-bottom bg-white flex-shrink-0" id="quickStartSection">
+                        <div class="cd-quickstart flex-shrink-0" id="quickStartSection">
                             <div class="d-flex align-items-center justify-content-between px-2 pt-2">
                                 <div class="d-flex gap-1" id="quickStartTabs">
                                     <button type="button" class="quick-start-tab active" data-tab="suggested"
@@ -708,7 +785,7 @@
                             </div>
                         </div>
 
-                        <div class="p-4 bg-gray-50 flex-grow-1 d-flex flex-column">
+                        <div class="p-4 cd-feed-body flex-grow-1 d-flex flex-column">
 
                             <!-- Loader -->
                             <div id="postsLoader" class="d-none empty-state">
@@ -736,16 +813,14 @@
 
             <!-- Right Panel: Synthesis (opens only once a post is selected) -->
             <div class="col-xl-3 col-lg-3 d-none" id="rightSynthesisPanel" style="transition: var(--transition);">
-                <div class="premium-card d-flex flex-column" style="height: calc(100vh - 110px); min-height: 550px;">
+                <div class="premium-card d-flex flex-column" style="height: calc(100vh - 140px); min-height: 550px;">
 
                     <!-- Panel Header -->
                     <div class="synth-panel-header flex-shrink-0">
-                        <div class="synth-panel-icon"><i class="fas fa-brain"></i></div>
-                        <div style="flex:1; min-width:0;">
-                            <div style="font-weight:700; font-size:0.88rem; color:#1e293b; line-height:1.2;">Generate
-                                Storyline</div>
-                            <div style="font-size:0.72rem; color:#64748b; margin-top:2px;">Select posts from feed for AI
-                                context.</div>
+                        <div class="card-icon-circle"><i class="fas fa-brain"></i></div>
+                        <div class="cd-panel-heading">
+                            <div class="cd-panel-title">Generate Storyline</div>
+                            <div class="cd-panel-desc">Select posts from feed for AI context.</div>
                         </div>
                     </div>
 
@@ -1050,10 +1125,10 @@
         <div class="modal-dialog modal-dialog-scrollable">
             <div class="modal-content" style="border: none;">
                 <div class="modal-header border-0 py-3 px-4"
-                    style="background: linear-gradient(135deg, rgba(115, 102, 255,0.06) 0%, rgba(115, 102, 255,0.02) 100%);">
+                    style="background: linear-gradient(135deg, rgba(138, 43, 226,0.06) 0%, rgba(138, 43, 226,0.02) 100%);">
                     <div class="d-flex align-items-center gap-3">
                         <div class="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0 shadow-sm"
-                            style="width: 40px; height: 40px; background: rgba(115, 102, 255, 0.1); color: var(--primary);">
+                            style="width: 40px; height: 40px; background: rgba(138, 43, 226, 0.1); color: var(--primary);">
                             <i class="fas fa-layer-group"></i>
                         </div>
                         <div>
@@ -1143,6 +1218,7 @@
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+<script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
 </body>
 
 </html>

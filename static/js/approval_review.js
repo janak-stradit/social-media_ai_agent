@@ -174,45 +174,65 @@ $(document).ready(function () {
                 <i class="fab fa-${p} me-1"></i>${platformDisplayName(p)}
             </button>
         `).join('');
+        const status = req.status || 'pending';
+        const statusPill = status === 'approved'
+            ? '<span class="ap-status ap-status-approved"><i class="fas fa-check-circle"></i>Accepted</span>'
+            : status === 'rejected'
+                ? '<span class="ap-status ap-status-rejected"><i class="fas fa-times-circle"></i>Rejected</span>'
+                : '<span class="ap-status ap-status-pending"><i class="fas fa-hourglass-half"></i>Pending</span>';
 
         let decisionHtml;
         if (req.status === 'pending') {
             decisionHtml = `
-                <div class="mt-4 pt-3 border-top">
-                    <label class="form-label fw-bold small text-muted">Comments (optional)</label>
-                    <textarea id="approvalDecisionComments" class="form-control mb-3" rows="3" placeholder="Add any feedback for the requester..."></textarea>
-                    <div class="d-flex gap-2">
-                        <button class="btn btn-outline-danger flex-grow-1 fw-bold rounded-pill py-2" onclick="submitApprovalDecision('rejected')"><i class="fas fa-times me-1"></i>Reject</button>
-                        <button class="btn btn-success flex-grow-1 fw-bold rounded-pill py-2 shadow-sm" onclick="submitApprovalDecision('approved')"><i class="fas fa-check me-2"></i>Accept</button>
-                    </div>
+                <label class="guideline-field-label" for="approvalDecisionComments">Comments <span style="font-weight: 400; color: #9CA3AF;">(optional)</span></label>
+                <textarea id="approvalDecisionComments" class="form-control" rows="3" placeholder="Add any feedback for the requester..."></textarea>
+                <div class="ap-decision-actions">
+                    <button type="button" class="ap-btn ap-btn-reject" onclick="submitApprovalDecision('rejected')"><i class="fas fa-times"></i>Reject</button>
+                    <button type="button" class="ap-btn ap-btn-accept" onclick="submitApprovalDecision('approved')"><i class="fas fa-check"></i>Accept</button>
                 </div>
             `;
         } else {
             const isApproved = req.status === 'approved';
             decisionHtml = `
-                <div class="alert ${isApproved ? 'alert-success' : 'alert-danger'} d-flex align-items-center gap-3 p-3 rounded-3 border-0 shadow-sm mt-4">
-                    <i class="fas ${isApproved ? 'fa-check-circle' : 'fa-times-circle'} fs-4"></i>
+                <div class="ap-decision ${isApproved ? 'approved' : 'rejected'}">
+                    <div class="card-icon-circle"><i class="fas ${isApproved ? 'fa-check' : 'fa-times'}"></i></div>
                     <div>
-                        <strong class="d-block">${isApproved ? 'Accepted' : 'Rejected'}${req.decided_by ? ' by ' + escapeHtml(req.decided_by) : ''}</strong>
+                        <strong>${isApproved ? 'Accepted' : 'Rejected'}${req.decided_by ? ' by ' + escapeHtml(req.decided_by) : ''}</strong>
                         <small>${req.decided_at ? new Date(req.decided_at).toLocaleString() : ''}</small>
-                        ${req.comments ? `<div class="mt-2 small"><strong>Comments:</strong> ${escapeHtml(req.comments)}</div>` : ''}
+                        ${req.comments ? `<div class="ap-decision-comments"><strong>Comments:</strong> ${escapeHtml(req.comments)}</div>` : ''}
                     </div>
                 </div>
             `;
         }
 
+        // Two brand-profile cards: post preview (left), details + decision (right).
         $('#approvalReviewCard').html(`
-            <div class="d-flex gap-2 mb-3 flex-wrap">
-                <span class="badge rounded-pill bg-primary-subtle text-primary px-3 py-2">Generated for ${platformDisplayName(platform)}</span>
-                <span class="badge rounded-pill bg-light text-dark border px-3 py-2">${escapeHtml(req.asset_type || 'content')}</span>
+            <div class="ap-review-grid">
+                <div class="brand-config-card">
+                    <h6><div class="card-icon-circle"><i class="fas fa-eye"></i></div> Post preview</h6>
+                    <div class="brand-config-card-desc">How this content looks on each platform.</div>
+                    <div class="preview-platform-tabs" id="previewPlatformTabs">${platformTabsHtml}</div>
+                    <div id="approvalPreviewArea">${previewsHtml}</div>
+                </div>
+                <div class="d-flex flex-column gap-4">
+                    <div class="brand-config-card">
+                        <h6><div class="card-icon-circle"><i class="fas fa-circle-info"></i></div> Request details</h6>
+                        <div class="brand-config-card-desc">What was generated and why.</div>
+                        <div class="ap-row-meta mb-3">
+                            ${statusPill}
+                            <span class="ap-tag ap-tag-primary">Generated for ${platformDisplayName(platform)}</span>
+                            <span class="ap-tag">${escapeHtml(req.asset_type || 'content')}</span>
+                        </div>
+                        <label class="guideline-field-label">Story / Strategy Context</label>
+                        <div class="ap-context">${escapeHtml(req.story_context || 'No context captured.')}</div>
+                    </div>
+                    <div class="brand-config-card">
+                        <h6><div class="card-icon-circle"><i class="fas fa-gavel"></i></div> Decision</h6>
+                        <div class="brand-config-card-desc">${status === 'pending' ? 'Accept to clear it for publishing, or reject with feedback.' : 'This request has already been decided.'}</div>
+                        ${decisionHtml}
+                    </div>
+                </div>
             </div>
-            <div class="d-flex gap-1 mb-3 border-bottom" id="previewPlatformTabs">${platformTabsHtml}</div>
-            <div id="approvalPreviewArea">${previewsHtml}</div>
-            <div class="mt-3">
-                <label class="form-label fw-bold small text-muted">Story / Strategy Context</label>
-                <div class="bg-light rounded-3 p-3 small" style="max-height: 220px; overflow-y: auto; white-space: pre-wrap;">${escapeHtml(req.story_context || 'No context captured.')}</div>
-            </div>
-            ${decisionHtml}
         `);
     }
 
@@ -244,12 +264,12 @@ $(document).ready(function () {
             if (r.success && r.request) {
                 renderApprovalCard(r.request);
             } else {
-                $('#approvalReviewCard').html('<div class="text-center text-muted py-5"><i class="fas fa-circle-exclamation mb-3" style="font-size: 1.75rem; opacity: 0.4;"></i><p class="small m-0">Approval request not found.</p></div>');
+                $('#approvalReviewCard').html('<div class="brand-config-card"><div class="ap-empty"><div class="card-icon-circle"><i class="fas fa-circle-exclamation"></i></div><h6>Not found</h6><p>Approval request not found.</p></div></div>');
             }
         },
         error: function (xhr) {
             const msg = (xhr.responseJSON && xhr.responseJSON.error) || 'Could not load this approval request.';
-            $('#approvalReviewCard').html(`<div class="text-center text-muted py-5"><i class="fas fa-circle-exclamation mb-3" style="font-size: 1.75rem; opacity: 0.4;"></i><p class="small m-0">${escapeHtml(msg)}</p></div>`);
+            $('#approvalReviewCard').html(`<div class="brand-config-card"><div class="ap-empty"><div class="card-icon-circle"><i class="fas fa-circle-exclamation"></i></div><h6>Could not load</h6><p>${escapeHtml(msg)}</p></div></div>`);
         }
     });
 });

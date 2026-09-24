@@ -44,6 +44,7 @@ $(document).ready(function () {
     const GUIDELINE_SCHEMA = [
         {
             key: 'colors', label: 'Colors', icon: 'fa-palette',
+            desc: 'Brand palette the image agents stick to.',
             fields: [
                 { key: 'primary', label: 'Primary Color', type: 'color-pair', nameKey: 'primary_name' },
                 { key: 'secondary', label: 'Secondary Color', type: 'color-pair', nameKey: 'secondary_name' },
@@ -53,6 +54,7 @@ $(document).ready(function () {
         },
         {
             key: 'typography', label: 'Typography', icon: 'fa-font',
+            desc: 'Fonts and text styling for on-image copy.',
             fields: [
                 { key: 'font_family', label: 'Font Family', type: 'text' },
                 { key: 'heading_style', label: 'Heading Style', type: 'text' },
@@ -62,6 +64,7 @@ $(document).ready(function () {
         },
         {
             key: 'voice_tone', label: 'Voice & Tone', icon: 'fa-comment-dots',
+            desc: 'How your brand sounds in every caption.',
             fields: [
                 { key: 'descriptors', label: 'Tone Descriptors', type: 'text' },
                 { key: 'formality', label: 'Formality Level', type: 'text' },
@@ -72,6 +75,7 @@ $(document).ready(function () {
         },
         {
             key: 'content_rules', label: 'Content Rules', icon: 'fa-list-check',
+            desc: 'Length, hashtag, emoji and CTA conventions.',
             fields: [
                 { key: 'caption_length', label: 'Caption Length', type: 'text' },
                 { key: 'hashtag_policy', label: 'Hashtag Policy', type: 'text' },
@@ -81,6 +85,7 @@ $(document).ready(function () {
         },
         {
             key: 'imagery_style', label: 'Imagery Style', icon: 'fa-image',
+            desc: 'The visual look generated images should follow.',
             fields: [
                 { key: 'aesthetic', label: 'Aesthetic', type: 'textarea' },
                 { key: 'avoid', label: 'Avoid', type: 'textarea' },
@@ -88,6 +93,7 @@ $(document).ready(function () {
         },
         {
             key: 'persona_rules', label: 'Character/Persona Rules', icon: 'fa-user-tie',
+            desc: 'Keeps brand characters consistent across posts.',
             fields: [
                 { key: 'clothing', label: 'Clothing', type: 'text' },
                 { key: 'demeanor', label: 'Demeanor', type: 'text' },
@@ -96,6 +102,7 @@ $(document).ready(function () {
         },
         {
             key: 'messaging', label: 'Messaging', icon: 'fa-bullhorn',
+            desc: 'Taglines, value props and claims to avoid.',
             fields: [
                 { key: 'tagline', label: 'Official Tagline', type: 'text' },
                 { key: 'value_props', label: 'Key Value Props', type: 'textarea' },
@@ -129,17 +136,15 @@ $(document).ready(function () {
     }
 
     function renderGuidelinesForm() {
-        // #guidelinesFormContainer is itself a Bootstrap .row (see
-        // brand_configuration.html), so each section becomes its own
-        // responsive column + card - a 2-column grid on wide screens instead
-        // of one long stacked list, making better use of the full-width layout.
+        // #guidelinesFormContainer is a 2-column .brand-config-grid (see
+        // brand_configuration.html); each section is one brand-profile style
+        // card with a gradient icon circle, title and short description.
         const html = GUIDELINE_SCHEMA.map((section) => `
-            <div class="col-lg-6">
-                <div class="guideline-card">
-                    <h6 class="fw-bold text-dark mb-3"><i class="fas ${section.icon} text-primary me-2"></i>${section.label}</h6>
-                    <div class="row g-2">
-                        ${section.fields.map((f) => `<div class="col-md-6">${fieldInputHtml(section.key, f)}</div>`).join('')}
-                    </div>
+            <div class="brand-config-card">
+                <h6><div class="card-icon-circle"><i class="fas ${section.icon}"></i></div> ${section.label}</h6>
+                <div class="brand-config-card-desc">${section.desc}</div>
+                <div class="row g-3 mt-auto">
+                    ${section.fields.map((f) => `<div class="col-md-6">${fieldInputHtml(section.key, f)}</div>`).join('')}
                 </div>
             </div>
         `).join('');
@@ -268,13 +273,13 @@ $(document).ready(function () {
             <div class="col-md-6 col-xl-4" data-asset-key="${a.key}">
                 <div class="brand-asset-card">
                     <img src="${a.url}" class="brand-asset-preview" alt="${escapeHtml(a.label)}">
-                    <h6 class="fw-bold mb-2">${escapeHtml(a.label)}</h6>
+                    <h6>${escapeHtml(a.label)}</h6>
                     <input type="file" class="form-control form-control-sm mb-2 brand-asset-file-input" accept="image/*">
                     <div class="d-flex gap-2">
-                        <button class="btn btn-sm btn-primary fw-bold rounded-pill px-3 flex-grow-1" onclick="uploadBrandAsset('${a.key}', this)">
-                            <i class="fas fa-upload me-1"></i>Replace
+                        <button type="button" class="btn-primary-save justify-content-center flex-grow-1" onclick="uploadBrandAsset('${a.key}', this)">
+                            <i class="fas fa-upload me-2"></i>Replace
                         </button>
-                        <button class="btn btn-sm btn-outline-danger rounded-pill px-3" onclick="deleteBrandAsset('${a.key}', '${escapeHtml(a.label).replace(/'/g, "\\'")}')" title="Remove">
+                        <button type="button" class="btn-icon-danger" onclick="deleteBrandAsset('${a.key}', '${escapeHtml(a.label).replace(/'/g, "\\'")}')" title="Remove">
                             <i class="fas fa-trash"></i>
                         </button>
                     </div>
@@ -284,14 +289,14 @@ $(document).ready(function () {
 
         const addCardHtml = `
             <div class="col-md-6 col-xl-4">
-                <div class="brand-asset-card" style="border-style: dashed;">
+                <div class="brand-asset-card is-new">
                     <div class="brand-asset-preview d-flex align-items-center justify-content-center text-muted">
                         <i class="fas fa-plus fa-2x opacity-50"></i>
                     </div>
                     <input type="text" class="form-control form-control-sm mb-2" id="newAssetLabel" placeholder="Name (e.g. Marcus - Support Persona)">
                     <input type="file" class="form-control form-control-sm mb-2" id="newAssetFile" accept="image/*">
-                    <button class="btn btn-sm btn-success fw-bold rounded-pill px-3 w-100" onclick="createBrandAsset()">
-                        <i class="fas fa-plus me-1"></i>Add New
+                    <button type="button" class="btn-xs-outline-info justify-content-center w-100" onclick="createBrandAsset()">
+                        <i class="fas fa-plus me-2"></i>Add New
                     </button>
                 </div>
             </div>

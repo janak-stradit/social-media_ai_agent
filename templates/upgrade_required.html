@@ -5,51 +5,90 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Enterprise Feature — VortexSocial AI</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
-        body {
-            min-height: 100vh; display: flex; align-items: center; justify-content: center;
-            background: linear-gradient(135deg, #F8FAFC 0%, #F1EFFF 50%, #F1EFFF 100%);
-            font-family: 'Rubik', system-ui, sans-serif; margin: 0; padding: 24px;
-        }
-        .upgrade-card {
-            max-width: 440px; width: 100%; background: #fff; border-radius: 16px; padding: 48px 40px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.08); text-align: center; margin: 24px;
-        }
-        .upgrade-icon {
-            width: 64px; height: 64px; border-radius: 16px; margin: 0 auto 24px;
-            background: linear-gradient(135deg, #7366FF, #5B4FD6); display: flex; align-items: center; justify-content: center;
-        }
-        .upgrade-icon i { color: #fff; font-size: 26px; }
-        .upgrade-copy { color: #6B7280; font-size: 14px; line-height: 1.6; margin-bottom: 28px; }
-        .upgrade-links { display: flex; flex-direction: column; gap: 12px; }
+        .upgrade-features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; margin-bottom: 1.5rem; }
+        .upgrade-features .brand-config-card-desc { margin-bottom: 0; }
+        .upgrade-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; }
+        .upgrade-actions p { margin: 0; font-size: 0.9rem; color: var(--bp-text-sub); }
+        .upgrade-actions .btns { display: flex; gap: 0.75rem; }
+        @media (max-width: 860px) { .upgrade-features { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
-    <div class="upgrade-card">
-        <div class="auth-brand-logo" style="justify-content: center; margin-bottom: 32px;">
-            <span class="auth-brand-mark" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <header class="app-header app-header-simple">
+        <a href="/dashboard" class="header-brand text-decoration-none">
+            <div class="brand-logo">
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                     <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
                     <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
                     <circle cx="12" cy="12" r="1.7" fill="#fff"/>
                 </svg>
-            </span>
-            VortexSocial AI
-        </div>
-
-        <div class="upgrade-icon" aria-hidden="true"><i class="fas fa-chart-line"></i></div>
-        <h1 class="auth-heading" style="font-size: 22px;">Analysis Dashboard is an Enterprise feature</h1>
-        <p class="upgrade-copy">
-            Competitor intelligence and counter-strategy content generation are available on
-            Enterprise plans. Talk to our team to upgrade your account.
-        </p>
-
-        <div class="upgrade-links">
-            <a href="/onboarding/contact-sales" class="btn-primary-blue" style="text-decoration: none; display: block;">Contact Sales</a>
-            <a href="/dashboard" class="auth-link">Back to Studio Chat</a>
-        </div>
+            </div>
+            <div>
+                <span class="brand-name">VortexSocial AI</span>
+                <span class="brand-tagline">Enterprise Feature</span>
+            </div>
+        </a>
+    <div class="header-actions">
+        {% include 'partials/user_menu.html' %}
     </div>
+    </header>
+
+    <main class="bp-page">
+        <div class="bp-page-inner">
+
+            <div class="bp-hero">
+                <div class="bp-hero-copy">
+                    <div class="bp-hero-eyebrow">Enterprise plan</div>
+                    <h1 class="bp-hero-title">Analysis Dashboard is an Enterprise feature</h1>
+                    <p class="bp-hero-desc">Competitor intelligence and counter-strategy content generation are available on Enterprise plans. Talk to our team to upgrade your account.</p>
+                </div>
+                <div class="bp-hero-graphic" aria-hidden="true">
+                    <div class="bp-hero-caption">
+                        From competitor posts<br>
+                        <strong>to counter-content</strong>
+                    </div>
+                    <div class="bp-hero-mock">
+                        <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 1rem;">
+                            <div class="bp-hero-mock-icon"><i class="fas fa-chart-line"></i></div>
+                            <div class="bp-mock-bar" style="width: 80px; height: 12px; margin: 0;"></div>
+                        </div>
+                        <div class="bp-mock-bar" style="width: 100%;"></div>
+                        <div class="bp-mock-bar" style="width: 85%;"></div>
+                        <div class="bp-mock-bar" style="width: 95%; margin-bottom: 0;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="upgrade-features">
+                <div class="brand-config-card">
+                    <h6><div class="card-icon-circle"><i class="fas fa-satellite-dish"></i></div> Competitor scans</h6>
+                    <div class="brand-config-card-desc">Track the accounts you compete with across LinkedIn, X, YouTube, Facebook and blogs.</div>
+                </div>
+                <div class="brand-config-card">
+                    <h6><div class="card-icon-circle"><i class="fas fa-lightbulb"></i></div> Content gaps</h6>
+                    <div class="brand-config-card-desc">Spot the topics competitors leave open and group related posts into storylines.</div>
+                </div>
+                <div class="brand-config-card">
+                    <h6><div class="card-icon-circle"><i class="fas fa-wand-magic-sparkles"></i></div> Counter-content</h6>
+                    <div class="brand-config-card-desc">Turn a storyline into on-brand posts, images and video with approval built in.</div>
+                </div>
+            </div>
+
+            <div class="brand-config-card upgrade-actions">
+                <p>Ready to upgrade? Our sales team sets Enterprise workspaces up for you.</p>
+                <div class="btns">
+                    <a href="/dashboard" class="btn-xs-outline-info text-decoration-none">Back to Studio Chat</a>
+                    <a href="/onboarding/contact-sales" class="btn-primary-save text-decoration-none">
+                        <i class="fas fa-headset me-2" aria-hidden="true"></i>Contact Sales
+                    </a>
+                </div>
+            </div>
+
+        </div>
+    </main>
+<script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
 </body>
 </html>

@@ -6,19 +6,6 @@ $(document).ready(function () {
         return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
     }
 
-    // Load current user info
-    $.ajax({
-        url: '/api/auth/me',
-        type: 'GET',
-        success: function (r) {
-            if (r.user) {
-                $('#headerUserLabel').text(r.user.name);
-                $('#headerUserEmail').text(r.user.email);
-                $('#headerUserAvatar').text(r.user.name.charAt(0).toUpperCase());
-            }
-        }
-    });
-
     // Load social accounts and scheduled posts on page load
     loadUserSocialAccounts();
     loadScheduledPosts();
@@ -447,7 +434,7 @@ $(document).ready(function () {
     }
 
     // ── AI Models & Purpose Inspector Handler ─────────────────────────────
-    $('#headerModelInfoBtn').on('click', function () {
+    $('#dropHeaderModelInfoBtn').on('click', function () {
         openModelArchitectureModal();
     });
 

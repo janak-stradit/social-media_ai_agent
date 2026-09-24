@@ -152,21 +152,24 @@ $(document).ready(function () {
         }
     });
 
-    $('#logoutBtn').on('click', function () {
-        $.ajax({
-            url: '/api/auth/logout',
-            type: 'POST',
-            xhrFields: { withCredentials: true }
-        }).always(function () {
-            window.location.href = '/login';
-        });
-    });
-
     loadCurrentUser().always(function () {
         renderHistory();
         loadUserUsageMetrics();
         loadBrandProfileQuickPrompts();
+        openModalFromHash();
     });
+
+    function openModalFromHash() {
+        const hash = window.location.hash;
+        if (hash === '#request-credit') {
+            $('#dropRequestCreditBtn').trigger('click');
+        } else if (hash === '#ai-models') {
+            openModelArchitectureModal();
+        } else {
+            return;
+        }
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
 
     // ── Brand-grounded Quick Prompts ─────────────────────────────────────
     // Replaces the welcome screen's generic example prompt cards with ones

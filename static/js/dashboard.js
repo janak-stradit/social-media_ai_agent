@@ -1,19 +1,6 @@
 /* global showToast, renderCarousel */
 $(document).ready(function () {
 
-    // Load current user info into the shared app header
-    $.ajax({
-        url: '/api/auth/me',
-        type: 'GET',
-        success: function (r) {
-            if (r.user) {
-                $('#headerUserLabel').text(r.user.name);
-                $('#headerUserEmail').text(r.user.email);
-                $('#headerUserAvatar').text(r.user.name.charAt(0).toUpperCase());
-            }
-        }
-    });
-
     $('input[name="mediaType"]').on('change', function () {
         if ($(this).val() === 'image') {
             $('#imageContextContainer').removeClass('d-none');
@@ -314,7 +301,7 @@ $(document).ready(function () {
                     ${isNew ? '<span class="badge bg-success position-absolute" style="top: 0; left: 0; font-size: 0.7rem; padding: 0.35rem 0.8rem; box-shadow: 2px 2px 6px rgba(0,0,0,0.1); z-index: 10; border-bottom-right-radius: 12px;"><i class="fas fa-sparkles me-1"></i>New</span>' : ''}
                     <div class="d-flex justify-content-between align-items-start mb-3">
                         <div class="d-flex align-items-center gap-2">
-                            <div class="rounded-circle d-flex align-items-center justify-content-center shadow-sm" style="width: 36px; height: 36px; background: rgba(79, 70, 229, 0.1); color: var(--primary);">
+                            <div class="card-icon-circle">
                                 <i class="fas fa-building-columns"></i>
                             </div>
                             <div>
@@ -451,7 +438,7 @@ $(document).ready(function () {
             }
 
             html += `
-                <div class="border rounded-4 p-2 flex-shrink-0 d-flex flex-column gap-1 position-relative mt-2" style="min-width: 260px; max-width: 280px; background: #f8fafc;">
+                <div class="storyline-card flex-shrink-0 d-flex flex-column gap-1 position-relative mt-2" style="min-width: 260px; max-width: 280px;">
                     ${isNew ? '<span class="badge rounded-pill bg-success position-absolute" style="top: -8px; right: 10px; font-size: 0.6rem;">New</span>' : ''}
                     <div class="d-flex align-items-center justify-content-between badge-row">
                         <div>
@@ -528,7 +515,7 @@ $(document).ready(function () {
             const daysLabel = f.days_until === 0 ? 'Today' : (f.days_until === 1 ? 'Tomorrow' : `In ${f.days_until} days`);
 
             html += `
-                <div class="border rounded-4 p-3 flex-shrink-0 d-flex flex-column gap-2" style="min-width: 220px; max-width: 240px; background: #fffbeb;">
+                <div class="storyline-card storyline-card-festive flex-shrink-0 d-flex flex-column gap-2" style="min-width: 220px; max-width: 240px;">
                     <div class="d-flex align-items-center justify-content-between">
                         <span class="badge rounded-pill ${badgeClass}" style="font-size: 0.65rem;">${escapeHtml(f.region)}</span>
                         <span class="text-muted small">${daysLabel}</span>

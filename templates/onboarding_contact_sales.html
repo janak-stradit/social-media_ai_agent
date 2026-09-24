@@ -5,109 +5,137 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Contact Sales — VortexSocial AI</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
-        body {
-            min-height: 100vh; display: flex; align-items: center; justify-content: center;
-            background: #F8FAFC; font-family: 'Rubik', system-ui, sans-serif; margin: 0; padding: 24px;
-            position: relative; overflow: hidden;
-        }
-        .bg-mesh {
-            position: absolute; top: -20%; left: -10%; width: 120%; height: 120%; z-index: 0;
-            background-image: radial-gradient(at 40% 20%, hsla(255,100%,85%,1) 0px, transparent 50%),
-                               radial-gradient(at 80% 0%, hsla(189,100%,88%,1) 0px, transparent 50%),
-                               radial-gradient(at 0% 50%, hsla(340,100%,93%,1) 0px, transparent 50%);
-            filter: blur(80px); opacity: 0.6; animation: blob-bounce 22s infinite alternate;
-        }
-        @keyframes blob-bounce {
-            0% { transform: translate(0, 0) scale(1); }
-            33% { transform: translate(30px, -40px) scale(1.08); }
-            66% { transform: translate(-20px, 20px) scale(0.94); }
-            100% { transform: translate(0, 0) scale(1); }
-        }
-        @media (prefers-reduced-motion: reduce) { .bg-mesh { animation: none; } }
-
-        .onboard-steps { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 20px; }
-        .onboard-step-dot { width: 8px; height: 8px; border-radius: 50%; background: #E5E7EB; transition: all 0.2s ease; }
-        .onboard-step-dot.active { background: #7366FF; width: 22px; border-radius: 4px; }
-        .onboard-step-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #9CA3AF; margin-bottom: 8px; text-align: center; }
-
-        .sales-back-link {
-            display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600;
-            color: #6B7280; text-decoration: none; margin-bottom: 20px; transition: color 0.15s ease;
-        }
-        .sales-back-link:hover { color: #111827; }
-
-        .sales-card {
-            position: relative; z-index: 1;
-            max-width: 460px; width: 100%; background: #fff; border-radius: 20px; padding: 48px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.08);
-        }
-        .sales-heading { font-size: 24px; font-weight: 700; color: #111827; letter-spacing: -0.02em; margin-bottom: 8px; text-align: center; }
-        .sales-subheading { font-size: 14px; color: #6B7280; text-align: center; margin-bottom: 28px; line-height: 1.6; }
-        #salesError { margin-top: 4px; margin-bottom: 12px; display: none; }
+        /* Frame (header, hero, cards) comes from style.css's STANDALONE PAGES
+           + brand-profile card rules; only this page's pieces are here. */
+        .sales-grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 1.5rem; align-items: start; }
+        .sales-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 1rem; }
+        .optional { font-weight: 400; color: #9CA3AF; }
+        .sales-textarea { height: 110px; padding-top: 10px; resize: vertical; line-height: 1.6; }
+        .sales-form-footer { display: flex; justify-content: flex-end; }
+        #salesError { margin-bottom: 1rem; display: none; }
         .d-none { display: none !important; }
 
-        .confirm-icon {
-            width: 64px; height: 64px; border-radius: 16px; margin: 0 auto 20px;
-            background: linear-gradient(135deg, #54BA4A, #3f9536); display: flex; align-items: center; justify-content: center;
+        .sales-perks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1rem; }
+        .sales-perks li { display: flex; gap: 0.75rem; align-items: flex-start; font-size: 0.85rem; color: var(--bp-text-sub); line-height: 1.45; }
+        .sales-perks li i { color: var(--bp-primary); margin-top: 3px; width: 16px; text-align: center; }
+        .sales-perks strong { display: block; color: var(--bp-text); font-weight: 600; }
+
+        .confirm-view { text-align: center; padding: 1.5rem 0; }
+        .confirm-view .card-icon-circle {
+            width: 64px; height: 64px; font-size: 26px; margin: 0 auto 1.25rem;
+            background: linear-gradient(135deg, #10B981, #059669); box-shadow: 0 4px 10px rgba(16, 185, 129, 0.25);
         }
-        .confirm-icon i { color: #fff; font-size: 26px; }
+        .confirm-view h2 { font-size: 1.35rem; font-weight: 700; color: var(--bp-text); margin-bottom: 0.4rem; }
+        .confirm-view p { color: var(--bp-text-sub); font-size: 0.95rem; max-width: 420px; margin: 0 auto 1.5rem; }
+
+        @media (max-width: 860px) { .sales-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 560px) { .sales-form-row { grid-template-columns: 1fr; } }
     </style>
 </head>
 <body>
-    <div class="bg-mesh" aria-hidden="true"></div>
-    <div class="sales-card">
-        <div class="onboard-step-label">Step 2 of 2</div>
-        <div class="onboard-steps" aria-hidden="true">
-            <span class="onboard-step-dot active"></span>
-            <span class="onboard-step-dot active"></span>
-        </div>
-        <div class="auth-brand-logo" style="justify-content: center; margin-bottom: 28px;">
-            <span class="auth-brand-mark" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <header class="app-header app-header-simple">
+        <div class="header-brand">
+            <div class="brand-logo">
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                     <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
                     <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
                     <circle cx="12" cy="12" r="1.7" fill="#fff"/>
                 </svg>
-            </span>
-            VortexSocial AI
+            </div>
+            <div>
+                <span class="brand-name">VortexSocial AI</span>
+                <span class="brand-tagline">Workspace Setup</span>
+            </div>
         </div>
+        <a href="/onboarding" class="btn-xs-outline-info">
+            <i class="fas fa-arrow-left" aria-hidden="true"></i>Back to account type
+        </a>
+    </header>
 
-        <div id="salesFormView">
-            <a href="/onboarding" class="sales-back-link"><i class="fas fa-arrow-left" aria-hidden="true"></i>Back to account type</a>
-            <h1 class="sales-heading">Let's talk</h1>
-            <p class="sales-subheading">Enterprise plans are set up with our sales team. Tell us a bit about your organization and we'll be in touch.</p>
+    <main class="bp-page">
+        <div class="bp-page-inner">
 
-            <form id="salesForm">
-                <div class="auth-form-group">
-                    <label class="auth-form-label" for="companyName">Company name</label>
-                    <input id="companyName" type="text" class="auth-form-input" placeholder="Acme Corp" autocomplete="organization" required>
+            <div class="bp-hero">
+                <div class="bp-hero-copy">
+                    <div class="bp-hero-eyebrow">
+                        Step 2 of 2 · Enterprise
+                        <span class="bp-step-dots" aria-hidden="true"><span class="active"></span><span class="active"></span></span>
+                    </div>
+                    <h1 class="bp-hero-title">Let's talk</h1>
+                    <p class="bp-hero-desc">Enterprise plans are set up with our sales team. Tell us a bit about your organization and we'll be in touch.</p>
                 </div>
-                <div class="auth-form-group">
-                    <label class="auth-form-label" for="companyPhone">Phone <span style="font-weight: 400; color: #9CA3AF;">(optional)</span></label>
-                    <input id="companyPhone" type="tel" class="auth-form-input" placeholder="+1 (555) 000-0000" autocomplete="tel">
+                <div class="bp-hero-graphic" aria-hidden="true">
+                    <div class="bp-hero-caption">
+                        Your team &amp; goals<br>
+                        <strong>a workspace built for them</strong>
+                    </div>
+                    <div class="bp-hero-mock">
+                        <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 1rem;">
+                            <div class="bp-hero-mock-icon"><i class="fas fa-headset"></i></div>
+                            <div class="bp-mock-bar" style="width: 80px; height: 12px; margin: 0;"></div>
+                        </div>
+                        <div class="bp-mock-bar" style="width: 100%;"></div>
+                        <div class="bp-mock-bar" style="width: 85%;"></div>
+                        <div class="bp-mock-bar" style="width: 95%; margin-bottom: 0;"></div>
+                    </div>
                 </div>
-                <div class="auth-form-group">
-                    <label class="auth-form-label" for="companyMessage">What are you looking for? <span style="font-weight: 400; color: #9CA3AF;">(optional)</span></label>
-                    <textarea id="companyMessage" class="auth-form-input" style="height: 90px; padding-top: 10px; resize: vertical;" placeholder="Team size, use case, timeline..."></textarea>
+            </div>
+
+            <div class="sales-grid">
+                <div class="brand-config-card">
+                    <div id="salesFormView">
+                        <h6><div class="card-icon-circle"><i class="fas fa-building-columns"></i></div> Company details</h6>
+                        <div class="brand-config-card-desc">We'll use these to prepare for your call.</div>
+
+                        <form id="salesForm">
+                            <div class="sales-form-row">
+                                <div class="auth-form-group">
+                                    <label class="auth-form-label" for="companyName">Company name</label>
+                                    <input id="companyName" type="text" class="auth-form-input" placeholder="Acme Corp" autocomplete="organization" required>
+                                </div>
+                                <div class="auth-form-group">
+                                    <label class="auth-form-label" for="companyPhone">Phone <span class="optional">(optional)</span></label>
+                                    <input id="companyPhone" type="tel" class="auth-form-input" placeholder="+1 (555) 000-0000" autocomplete="tel">
+                                </div>
+                            </div>
+                            <div class="auth-form-group">
+                                <label class="auth-form-label" for="companyMessage">What are you looking for? <span class="optional">(optional)</span></label>
+                                <textarea id="companyMessage" class="auth-form-input sales-textarea" placeholder="Team size, use case, timeline..."></textarea>
+                            </div>
+
+                            <div id="salesError" class="alert-inline alert-inline-danger" role="alert"></div>
+
+                            <div class="sales-form-footer">
+                                <button id="salesSubmitBtn" type="submit" class="btn-primary-blue">
+                                    <span id="salesSubmitBtnText">Request a call</span>
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div id="salesConfirmView" class="d-none confirm-view">
+                        <div class="card-icon-circle" aria-hidden="true"><i class="fas fa-check"></i></div>
+                        <h2>Thanks - we'll be in touch</h2>
+                        <p>Our sales team will reach out shortly to help set up your Enterprise workspace.</p>
+                    </div>
                 </div>
 
-                <div id="salesError" class="alert-inline alert-inline-danger" role="alert"></div>
+                <div class="brand-config-card">
+                    <h6><div class="card-icon-circle"><i class="fas fa-star"></i></div> What's included</h6>
+                    <div class="brand-config-card-desc">Enterprise-only tools, on top of Studio Chat:</div>
+                    <ul class="sales-perks">
+                        <li><i class="fas fa-chart-line" aria-hidden="true"></i><span><strong>Analysis Dashboard</strong>Competitor scans and content-gap storylines.</span></li>
+                        <li><i class="fas fa-swatchbook" aria-hidden="true"></i><span><strong>Brand Configuration</strong>Shared guidelines, products and brand assets.</span></li>
+                        <li><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i><span><strong>Counter-content</strong>Turn competitor storylines into posts, images and video.</span></li>
+                    </ul>
+                </div>
+            </div>
 
-                <button id="salesSubmitBtn" type="submit" class="btn-primary-blue">
-                    <span id="salesSubmitBtnText">Request a call</span>
-                </button>
-            </form>
         </div>
-
-        <div id="salesConfirmView" class="d-none" style="text-align: center;">
-            <div class="confirm-icon" aria-hidden="true"><i class="fas fa-check"></i></div>
-            <h1 class="sales-heading">Thanks - we'll be in touch</h1>
-            <p class="sales-subheading">Our sales team will reach out shortly to help set up your Enterprise workspace.</p>
-        </div>
-    </div>
+    </main>
 
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script>

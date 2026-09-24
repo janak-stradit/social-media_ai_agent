@@ -31,46 +31,7 @@
         <a href="/settings" class="header-nav-item active"><i class="fas fa-plug me-1"></i>Social Accounts &amp; Scheduling</a>
     </nav>
     <div class="header-actions">
-        <a href="/dashboard" class="btn-secondary-ent text-decoration-none me-2">
-            <i class="fas fa-arrow-left me-1"></i>Back to Studio Chat
-        </a>
-        
-        <!-- User Profile & System Settings Dropdown -->
-        <div class="dropdown">
-            <button class="header-user-btn border-0 bg-transparent dropdown-toggle d-flex align-items-center gap-2 p-1 rounded-3" type="button" id="userMenuDropdown" data-bs-toggle="dropdown" aria-expanded="false">
-                <div class="header-avatar" id="headerUserAvatar">U</div>
-                <div class="header-user-meta text-start me-1">
-                    <span class="header-user-name d-block font-bold" id="headerUserLabel">User</span>
-                    <span class="header-user-email d-block text-slate-500 fs-8" id="headerUserEmail">user@vortexsocial.ai</span>
-                </div>
-            </button>
-
-            <ul class="dropdown-menu dropdown-menu-end user-dropdown-menu shadow-lg rounded-4 p-3 border mt-2" aria-labelledby="userMenuDropdown" style="min-width: 320px;">
-                
-                <!-- Section 1: Quick Studio Links -->
-                <li class="dropdown-header text-uppercase text-slate-400 font-bold fs-8 tracking-wider mb-1 px-1">Studio Tools</li>
-                <li>
-                    <a class="dropdown-item py-2 px-3 rounded-2 font-medium" href="/dashboard">
-                        <i class="fas fa-comments text-primary me-2"></i>Studio Chat
-                    </a>
-                </li>
-                <li>
-                    <button class="dropdown-item py-2 px-3 rounded-2 text-navy font-medium" type="button" id="headerModelInfoBtn">
-                        <i class="fas fa-microchip text-info me-2"></i>AI Models &amp; Purpose Matrix
-                    </button>
-                </li>
-
-                <li><hr class="dropdown-divider my-2"></li>
-
-                <!-- Section 2: Logout -->
-                <li>
-                    <a class="dropdown-item text-danger py-2 px-3 rounded-2 font-semibold" href="/logout">
-                        <i class="fas fa-right-from-bracket me-2"></i>Sign Out
-                    </a>
-                </li>
-
-            </ul>
-        </div>
+        {% include 'partials/user_menu.html' %}
     </div>
 </header>
 
@@ -669,5 +630,6 @@
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="{{ url_for('static', filename='js/settings.js') }}"></script>
+<script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
 </body>
 </html>

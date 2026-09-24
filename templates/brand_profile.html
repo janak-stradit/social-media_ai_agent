@@ -7,6 +7,7 @@
     <title>My Brand Configuration — VortexSocial AI</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://unpkg.com/feather-icons"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
@@ -409,24 +410,32 @@
             padding: 0.2rem 0;
         }
 
+        /* Empty state: a normal-height centred card, not a full-height
+           stretched one (.brand-config-card sets height:100% for the grid
+           cards - reset here). */
         .bp-empty-state {
+            height: auto;
+            align-items: center;
             text-align: center;
-            padding: 5rem 2rem;
-            background: var(--bg-body);
-            border: 1px dashed var(--border-color);
-            box-shadow: none;
+            padding: 3.5rem 2rem;
+            max-width: 720px;
+            margin: 2rem auto 0;
+            border: 1px dashed var(--border-hover) !important;
         }
+        .bp-empty-state:hover { transform: none; }
 
-        .bp-empty-state i {
-            font-size: 3rem;
-            color: #d1d5db;
-            margin-bottom: 1.5rem;
+        .bp-empty-icon {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 1.25rem;
         }
+        .bp-empty-icon svg.feather { width: 28px; height: 28px; }
 
         .bp-empty-state h5 {
-            font-weight: 600;
-            font-size: 1.25rem;
-            margin-bottom: 0.75rem;
+            font-weight: 700;
+            font-size: 1.35rem;
+            letter-spacing: -0.01em;
+            margin-bottom: 0.5rem;
             color: var(--text-primary);
         }
 
@@ -434,8 +443,22 @@
             color: var(--text-secondary);
             font-size: 0.95rem;
             max-width: 480px;
-            margin: 0 auto 2rem;
+            margin: 0 auto 1.75rem;
             line-height: 1.6;
+        }
+
+        .bp-empty-form {
+            display: flex;
+            gap: 0.75rem;
+            width: 100%;
+            max-width: 480px;
+        }
+        .bp-empty-form .form-control { flex: 1; }
+        .bp-empty-form .btn-primary-save { white-space: nowrap; }
+        .bp-empty-form .btn-primary-save svg.feather { width: 16px; height: 16px; }
+
+        @media (max-width: 560px) {
+            .bp-empty-form { flex-direction: column; }
         }
 
         .btn-xs-outline-info {
@@ -669,14 +692,9 @@
             <a href="/brand-profile" class="header-nav-item active"><i data-feather="aperture" class="me-1"></i>My Brand
                 Configuration</a>
         </nav>
-        <div class="header-actions d-flex align-items-center">
-            <i data-feather="bell" class="me-3 text-secondary" style="cursor:pointer;"></i>
-            <div class="user-profile-pill d-flex align-items-center gap-2 px-2 py-1 rounded-pill" style="border: 1px solid var(--border-color); cursor: pointer; background: white;">
-                <div class="user-avatar" style="width:28px; height:28px; background:var(--primary); color:#fff; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:0.85rem; font-weight:600;">V</div>
-                <span class="fs-sm fw-medium me-1" style="font-size: 0.9rem;">Vaishnavi</span>
-                <i data-feather="chevron-down" style="width:16px; height:16px; color: var(--text-secondary);"></i>
-            </div>
-        </div>
+        <div class="header-actions">
+        {% include 'partials/user_menu.html' %}
+    </div>
     </header>
 
     <div class="bc-main">
@@ -708,13 +726,13 @@
             <div class="bc-content-inner">
                 <!-- EMPTY STATE -->
                 <div id="bpEmptyState" class="brand-config-card bp-empty-state d-none mb-4">
-                    <i data-feather="globe"></i>
+                    <div class="card-icon-circle bp-empty-icon"><i data-feather="globe"></i></div>
                     <h5>No brand profile yet</h5>
                     <p>We couldn't analyze your website during signup, or it hasn't been analyzed yet. Enter your website below and we'll fetch your industry, voice, and brand colors automatically.</p>
-                    <div class="d-flex justify-content-center gap-2">
-                        <input type="text" id="bpEmptyWebsiteInput" class="form-control form-control-sm" style="max-width:280px;" placeholder="https://yourwebsite.com">
-                        <button type="button" class="btn-xs-outline-info" id="bpEmptyAnalyzeBtn" onclick="rescanBrandProfile('empty')">
-                            <i data-feather="search" class="me-1"></i>Analyze Website
+                    <div class="bp-empty-form">
+                        <input type="text" id="bpEmptyWebsiteInput" class="form-control" placeholder="https://yourwebsite.com">
+                        <button type="button" class="btn-primary-save" id="bpEmptyAnalyzeBtn" onclick="rescanBrandProfile('empty')">
+                            <i data-feather="search" class="me-2"></i>Analyze Website
                         </button>
                     </div>
                 </div>
@@ -768,7 +786,7 @@
                             </div>
                             <div class="bp-analyzed-at mt-1" id="bpAnalyzedAt"></div>
                         </div>
-                        <button type="button" class="btn-xs-outline-info bg-white" onclick="rescanBrandProfile('form')">
+                        <button type="button" class="btn-xs-outline-info bg-white" id="bpRescanBtn" onclick="rescanBrandProfile('form')">
                             <i data-feather="refresh-cw" class="me-1"></i>Re-analyze
                         </button>
                     </div>
@@ -917,6 +935,7 @@
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="{{ url_for('static', filename='js/brand_profile.js') }}"></script>
+<script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
 </body>
 
 </html>

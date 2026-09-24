@@ -380,6 +380,49 @@ def _build_verification_html(name: str, verify_url: str) -> str:
 """
 
 
+def _build_password_reset_html(name: str, reset_url: str, ttl_minutes: int) -> str:
+    return f"""<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 0; background-color: #f8f9fc; font-family: 'Segoe UI', Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fc; padding: 32px 0;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="560" cellpadding="0" cellspacing="0"
+                       style="background-color: #ffffff; border: 1px solid #e6e8ef; border-radius: 16px; overflow: hidden;">
+                    <tr>
+                        <td style="background-color: #8a2be2; background-image: linear-gradient(135deg, #8a2be2 0%, #4169e1 100%); padding: 32px; text-align: center;">
+                            <span style="color: #ffffff; font-size: 22px; font-weight: 700;">Reset your password</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 32px 32px 8px 32px; color: #172033; font-size: 15px; line-height: 1.6;">
+                            Hi {_escape(name)},<br><br>
+                            We received a request to reset the password for your VortexSocial AI account. Click the button below to choose a new one.
+                        </td>
+                    </tr>
+                    <tr>
+                        <td align="center" style="padding: 24px 32px 32px 32px;">
+                            <a href="{_escape(reset_url)}"
+                               style="display: inline-block; background-color: #8a2be2; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 6px;">
+                                Reset my password
+                            </a>
+                            <div style="color: #667085; font-size: 12px; margin-top: 12px;">This link expires in {ttl_minutes} minutes and can only be used once.</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 16px 32px; background-color: #f8f9fc; border-top: 1px solid #e6e8ef; color: #667085; font-size: 12px;">
+                            If you didn't ask to reset your password, you can safely ignore this email - your password won't change.
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+
+
 def _build_sales_lead_html(user_name: str, user_email: str, company_name: str, phone: str | None, message: str | None) -> str:
     phone_row = (
         f"""<tr><td style="padding: 4px 0; color: #6b7280; font-size: 13px;"><strong style="color: #374151;">Phone:</strong> {_escape(phone)}</td></tr>"""
@@ -546,6 +589,26 @@ class EmailService:
         msg["From"] = self.from_email
         msg["To"] = to_email
         msg.attach(MIMEText(_build_verification_html(name, verify_url), "html"))
+
+        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
+            server.starttls()
+            server.login(self.username, self.password)
+            server.sendmail(self.from_email, [to_email], msg.as_string())
+
+        return {"success": True, "recipient": to_email}
+
+    def send_password_reset_email(self, to_email: str, name: str, reset_url: str, ttl_minutes: int) -> dict:
+        """Sent by auth/routes.py's forgot_password()."""
+        if not self.enabled:
+            raise RuntimeError(
+                "SMTP is not configured. Set SMTP_HOST, SMTP_USERNAME and SMTP_PASSWORD in .env."
+            )
+
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = "Reset your password - VortexSocial AI"
+        msg["From"] = self.from_email
+        msg["To"] = to_email
+        msg.attach(MIMEText(_build_password_reset_html(name, reset_url, ttl_minutes), "html"))
 
         with smtplib.SMTP(self.host, self.port, timeout=30) as server:
             server.starttls()

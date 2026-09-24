@@ -151,6 +151,23 @@ def create_app(config_name="development"):
             return redirect(url_for("index"))
         return render_template("signup.html")
 
+    @app.route("/forgot-password")
+    def forgot_password_page():
+        """Asks for an email and posts to /api/auth/forgot-password, which
+        emails a single-use reset link (see auth/routes.py)."""
+        return render_template("forgot_password.html")
+
+    @app.route("/reset-password/<token>")
+    def reset_password_page(token):
+        """Opened from the reset email. The token is checked up front so an
+        expired/used link shows that straight away instead of after the user
+        has typed a new password; /api/auth/reset-password re-checks it."""
+        from auth.routes import get_user_for_reset_token
+
+        return render_template(
+            "reset_password.html", token=token, token_valid=get_user_for_reset_token(token) is not None
+        )
+
     @app.route("/verify-pending")
     def verify_pending_page():
         """Shown right after registration - reachable with no session, since

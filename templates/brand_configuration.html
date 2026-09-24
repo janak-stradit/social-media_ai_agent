@@ -7,149 +7,99 @@
     <title>Brand Configuration - VortexSocial AI</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
-        body {
-            font-family: 'Rubik', sans-serif;
-            color: #1f2937;
+        /* Layout mirrors /brand-profile (brand_profile.html): gradient side
+           panel, hero card, then icon-circle cards. Shared panel/card/button
+           styles live in style.css; only page-specific bits are here. */
+        body { overflow: hidden; }
+
+        .bc-content-inner { width: 100%; position: relative; }
+
+        /* Hero card - same composition as the brand_profile hero. */
+        .brand-hero-card {
+            position: relative;
             overflow: hidden;
-        }
-
-        .bc-main {
-            margin-top: var(--header-h);
-            height: calc(100vh - var(--header-h));
-            display: flex;
-        }
-
-        .bc-sidebar {
-            width: 260px;
-            flex-shrink: 0;
-            background: #ffffff;
-            border-right: 1px solid #e5e7eb;
-            padding: 1.5rem 1rem;
-            overflow-y: auto;
-        }
-
-        .bc-sidebar-header {
-            display: flex;
-            align-items: flex-start;
-            gap: 0.75rem;
-            margin-bottom: 1.5rem;
-            padding: 0 0.5rem;
-        }
-
-        .bc-sidebar-header i {
-            font-size: 1.3rem;
-            margin-top: 2px;
-            color: #7366ff;
-        }
-
-        .bc-nav {
             display: flex;
             flex-direction: column;
-            gap: 0.25rem;
-        }
-
-        .bc-nav-item {
-            display: flex;
-            align-items: center;
-            gap: 0.6rem;
-            background: transparent;
-            border: none;
-            border-radius: 10px;
-            padding: 0.7rem 0.85rem;
-            font-weight: 600;
-            font-size: 0.85rem;
-            color: #4b5563;
-            text-align: left;
-            cursor: pointer;
-            transition: all 0.15s ease;
-            width: 100%;
-        }
-
-        .bc-nav-item i {
-            width: 18px;
-            text-align: center;
-            color: #9ca3af;
-        }
-
-        .bc-nav-item:hover {
-            background: #f3f4f6;
-            color: #1f2937;
-        }
-
-        .bc-nav-item.active {
-            background: #f1efff;
-            color: #7366ff;
-        }
-
-        .bc-nav-item.active i {
-            color: #7366ff;
-        }
-
-        .bc-content {
-            flex-grow: 1;
-            overflow-y: auto;
-            padding: 2rem 2.5rem 4rem;
-            background: #f9fafb;
-        }
-
-        .bc-pane-header {
-            display: flex;
-            align-items: flex-start;
-            justify-content: space-between;
-            gap: 1rem;
+            justify-content: center;
+            min-height: 220px;
+            padding: 2.5rem 3rem;
             margin-bottom: 1.5rem;
-            flex-wrap: wrap;
+            background: var(--bp-card);
+            border: 1px solid var(--bp-border);
+            border-radius: var(--bp-radius-lg);
+            box-shadow: var(--bp-shadow-sm);
         }
-
-        .guideline-card {
-            background: #ffffff;
-            border-radius: 14px;
-            border: 1px solid #e5e7eb;
-            padding: 1.5rem;
-            height: 100%;
+        .brand-hero-copy { position: relative; z-index: 1; max-width: 55%; }
+        .brand-hero-eyebrow { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--bp-text-sub); margin-bottom: 0.5rem; }
+        .brand-hero-title { font-size: 2.1rem; font-weight: 700; letter-spacing: -0.02em; color: var(--bp-text); margin-bottom: 0.5rem; }
+        .brand-hero-desc { font-size: 0.95rem; line-height: 1.5; color: var(--bp-text-sub); max-width: 480px; margin: 0; }
+        .brand-hero-graphic {
+            position: absolute; top: 0; right: 0; height: 100%; width: 50%;
+            background: linear-gradient(135deg, #c4b5fd 0%, #818cf8 100%);
+            clip-path: polygon(15% 0, 100% 0, 100% 100%, 0 100%);
         }
-
-        .guideline-field-label {
-            font-size: 0.78rem;
-            font-weight: 700;
-            color: #6b7280;
-            margin-bottom: 0.25rem;
-            display: block;
+        .brand-hero-caption { position: absolute; left: 12%; top: 50%; transform: translateY(-50%); font-size: 0.85rem; line-height: 1.3; font-weight: 500; color: var(--bp-text); }
+        .brand-hero-caption strong { position: relative; display: inline-block; padding-bottom: 4px; color: var(--bp-primary); }
+        .brand-hero-caption strong::after { content: ''; position: absolute; left: 0; bottom: 0; width: 100%; height: 2px; background: var(--bp-primary); }
+        .brand-hero-mock {
+            position: absolute; right: 12%; top: 50%;
+            width: 240px; padding: 1.25rem;
+            background: #fff; border-radius: var(--bp-radius-lg);
+            box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.175);
+            transform: translateY(-50%) rotate(-3deg);
+            opacity: 0.95;
         }
+        .brand-hero-mock .swatches { display: flex; gap: 6px; margin-bottom: 1rem; }
+        .brand-hero-mock .swatches span { width: 28px; height: 28px; border-radius: 6px; }
+        .mock-bar { height: 9px; background: #e2e8f0; border-radius: 4px; margin-bottom: 10px; }
 
-        .color-pair-input {
-            width: 42px;
-            height: 38px;
-            padding: 2px;
-            flex-shrink: 0;
-        }
+        /* Pane header row: title on the left, save button on the right. */
+        .bc-pane-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 
-        .brand-config-card {
-            background: #ffffff;
-            border-radius: 14px;
-            border: 1px solid #e5e7eb;
-            padding: 1.75rem;
-        }
+        .brand-config-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem; align-items: stretch; }
+        .brand-config-grid .brand-config-card { height: 100%; display: flex; flex-direction: column; }
 
-        .brand-asset-card {
-            border: 1px solid #e5e7eb;
-            border-radius: 12px;
-            padding: 1.25rem;
-            text-align: center;
-            background: #ffffff;
-        }
+        .color-pair-input { width: 48px; height: 44px; padding: 3px; flex-shrink: 0; }
+        .brand-config-card .form-control { min-height: 44px; }
+        .brand-config-card textarea.form-control { min-height: auto; line-height: 1.6; }
 
+        .services-textarea { font-size: 0.85rem; font-family: ui-monospace, monospace; line-height: 1.6; }
+
+        /* Logo & Character cards */
+        .brand-asset-card { padding: 1.5rem; text-align: center; height: 100%; }
+        .brand-asset-card.is-new { border-style: dashed !important; background: var(--bp-bg); box-shadow: none; }
         .brand-asset-preview {
-            width: 120px;
-            height: 120px;
+            width: 120px; height: 120px;
             object-fit: contain;
-            background: #f9fafb;
-            border: 1px solid #e5e7eb;
-            border-radius: 10px;
-            margin-bottom: 0.75rem;
+            margin: 0 auto 1rem;
+            padding: 4px;
+            background: var(--bp-bg);
+            border: 1px solid var(--bp-border);
+            border-radius: var(--bp-radius-md);
+        }
+        .brand-asset-card h6 { font-weight: 700; color: var(--bp-text); margin-bottom: 0.75rem; }
+        .btn-icon-danger {
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 40px; flex-shrink: 0;
+            background: var(--bp-card);
+            color: #EF4444;
+            border: 1px solid #FECACA;
+            border-radius: var(--bp-radius-sm);
+            transition: all 0.15s ease;
+        }
+        .btn-icon-danger:hover { background: #FEF2F2; border-color: #EF4444; }
+
+        @media (max-width: 992px) {
+            .brand-config-grid { grid-template-columns: 1fr; }
+            .brand-hero-copy { max-width: 100%; }
+            .brand-hero-graphic { display: none; }
+        }
+        @media (max-width: 768px) {
+            body { overflow: auto; }
+            .brand-hero-card { padding: 1.75rem 1.5rem; }
         }
     </style>
 </head>
@@ -158,26 +108,25 @@
     <header class="app-header">
         <div class="header-brand">
             <div class="brand-logo">
-            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
-                <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
-                <circle cx="12" cy="12" r="1.7" fill="#fff"/>
-            </svg>
-        </div>
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                    <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+                </svg>
+            </div>
             <div class="brand-text">
                 <span class="brand-name">VortexSocial AI</span>
-                <span class="brand-tagline">Enterprise Sales Intelligence Command Center</span>
+                <span class="brand-tagline">Brand Configuration</span>
             </div>
         </div>
         <nav class="header-nav">
             <a href="/dashboard" class="header-nav-item"><i class="fas fa-comments me-2"></i>Studio Chat</a>
-            <a href="/competitor-dashboard" class="header-nav-item"><i class="fas fa-chart-line me-1"></i>Analysis Dashboard</a>
+            <a href="/competitor-dashboard" class="header-nav-item"><i class="fas fa-chart-line me-2"></i>Analysis Dashboard</a>
+            <a href="/brand-configuration" class="header-nav-item active"><i class="fas fa-swatchbook me-2"></i>Brand Configuration</a>
         </nav>
         <div class="header-actions">
-            <a href="{{ url_for('competitor_dashboard') }}" class="btn-secondary-ent text-decoration-none me-2">
-                <i class="fas fa-arrow-left me-1"></i>Back to Dashboard
-            </a>
-        </div>
+        {% include 'partials/user_menu.html' %}
+    </div>
     </header>
 
     <main class="bc-main">
@@ -185,8 +134,8 @@
             <div class="bc-sidebar-header">
                 <i class="fas fa-swatchbook"></i>
                 <div>
-                    <div class="fw-bold" style="font-size: 0.95rem;">Brand Configuration</div>
-                    <div class="text-muted" style="font-size: 0.75rem;">Used on every generation</div>
+                    <div style="font-weight: 700; font-size: 1rem; color: var(--bp-text);">Brand Config</div>
+                    <div style="font-size: 0.75rem; color: var(--bp-text-sub);">Used on every generation</div>
                 </div>
             </div>
             <nav class="bc-nav" id="brandConfigTabs">
@@ -200,51 +149,95 @@
                     <i class="fas fa-images"></i>Logo &amp; Character
                 </button>
             </nav>
+            <div class="promo-card mt-auto p-3 rounded-3 position-relative overflow-hidden" style="background: linear-gradient(135deg, #f4f3fe, #e9d5ff); border: 1px solid #d8b4fe;">
+                <div style="position: relative; z-index: 1;">
+                    <h6 class="text-dark fw-bold mb-1 fs-6">Create AI content<br>that feels like you</h6>
+                    <p class="text-muted mb-0" style="font-size: 0.75rem; line-height: 1.4;">Set up your brand once,<br>use it everywhere.</p>
+                </div>
+                <div style="position: absolute; bottom: -10px; left: 0; width: 100%; height: 40px; background: linear-gradient(to right, #a855f7, #6366f1); border-radius: 40% 40% 0 0; opacity: 0.8; transform: scaleX(1.5);"></div>
+            </div>
         </aside>
 
         <div class="bc-content">
-            <div id="brandConfigPaneGuidelines">
-                <div class="bc-pane-header">
-                    <div>
-                        <h5 class="fw-bold text-dark mb-1">Guidelines</h5>
-                        <p class="text-muted small m-0">Colors, fonts, tone, and more - used on every generation.</p>
-                    </div>
-                    <button class="btn btn-primary fw-bold rounded-pill px-4" id="saveGuidelinesBtn" onclick="saveGuidelines()">
-                        <i class="fas fa-floppy-disk me-1"></i>Save
-                    </button>
-                </div>
-                <div class="row g-3" id="guidelinesFormContainer"></div>
-            </div>
+            <div class="bc-content-inner">
 
-            <div id="brandConfigPaneServices" class="d-none">
-                <div class="bc-pane-header">
-                    <div>
-                        <h5 class="fw-bold text-dark mb-1">Products &amp; Service</h5>
-                        <p class="text-muted small m-0">StradIT's services &amp; company overview, used to match competitor content to a real offering.</p>
+                <!-- HERO -->
+                <div class="brand-hero-card">
+                    <div class="brand-hero-copy">
+                        <div class="brand-hero-eyebrow">Brand Configuration</div>
+                        <h2 class="brand-hero-title">Brand Configuration</h2>
+                        <p class="brand-hero-desc">Guidelines, products and brand assets that every generation reads live - edit them here and the next post changes with them.</p>
                     </div>
-                    <button class="btn btn-primary fw-bold rounded-pill px-4" id="saveServicesBtn" onclick="saveAppSetting('products_services', 'servicesTextarea', 'saveServicesBtn')">
-                        <i class="fas fa-floppy-disk me-1"></i>Save
-                    </button>
+                    <div class="brand-hero-graphic" aria-hidden="true">
+                        <div class="brand-hero-caption">
+                            Your rules &amp; assets<br>
+                            <strong>in every post</strong>
+                        </div>
+                        <div class="brand-hero-mock">
+                            <div class="swatches">
+                                <span style="background: #8A2BE2;"></span>
+                                <span style="background: #4169E1;"></span>
+                                <span style="background: #c4b5fd;"></span>
+                            </div>
+                            <div class="mock-bar" style="width: 100%;"></div>
+                            <div class="mock-bar" style="width: 85%;"></div>
+                            <div class="mock-bar" style="width: 60%; margin-bottom: 0;"></div>
+                        </div>
+                    </div>
                 </div>
-                <div class="brand-config-card">
-                    <textarea id="servicesTextarea" class="form-control" rows="26" style="font-size: 0.8rem; font-family: monospace;"></textarea>
-                </div>
-            </div>
 
-            <div id="brandConfigPaneAssets" class="d-none">
-                <div class="bc-pane-header">
-                    <div>
-                        <h5 class="fw-bold text-dark mb-1">Logo &amp; Character</h5>
-                        <p class="text-muted small m-0">Add, replace, or remove characters/logos - they show up as options in the dashboard's Character Setup immediately.</p>
+                <!-- GUIDELINES -->
+                <div id="brandConfigPaneGuidelines">
+                    <div class="bc-pane-header">
+                        <div>
+                            <h5>Guidelines</h5>
+                            <p>Colors, fonts, tone, and more - used on every generation.</p>
+                        </div>
+                        <button type="button" class="btn-primary-save" id="saveGuidelinesBtn" onclick="saveGuidelines()">
+                            <i class="fas fa-check me-2"></i>Save Changes
+                        </button>
+                    </div>
+                    <!-- Filled by brand_configuration.js renderGuidelinesForm() -->
+                    <div class="brand-config-grid" id="guidelinesFormContainer"></div>
+                </div>
+
+                <!-- PRODUCTS & SERVICE -->
+                <div id="brandConfigPaneServices" class="d-none">
+                    <div class="bc-pane-header">
+                        <div>
+                            <h5>Products &amp; Service</h5>
+                            <p>StradIT's services &amp; company overview, used to match competitor content to a real offering.</p>
+                        </div>
+                        <button type="button" class="btn-primary-save" id="saveServicesBtn" onclick="saveAppSetting('products_services', 'servicesTextarea', 'saveServicesBtn')">
+                            <i class="fas fa-check me-2"></i>Save Changes
+                        </button>
+                    </div>
+                    <div class="brand-config-card">
+                        <h6><div class="card-icon-circle"><i class="fas fa-boxes-stacked"></i></div> Services &amp; Company Overview</h6>
+                        <div class="brand-config-card-desc">Plain text - the agents read it as-is when matching content to what you sell.</div>
+                        <textarea id="servicesTextarea" class="form-control services-textarea" rows="24"></textarea>
                     </div>
                 </div>
-                <div class="row g-4" id="brandAssetsGrid"></div>
+
+                <!-- LOGO & CHARACTER -->
+                <div id="brandConfigPaneAssets" class="d-none">
+                    <div class="bc-pane-header">
+                        <div>
+                            <h5>Logo &amp; Character</h5>
+                            <p>Add, replace, or remove characters/logos - they show up as options in the dashboard's Character Setup immediately.</p>
+                        </div>
+                    </div>
+                    <!-- Filled by brand_configuration.js renderBrandAssetsGrid() -->
+                    <div class="row g-4" id="brandAssetsGrid"></div>
+                </div>
+
             </div>
         </div>
     </main>
 
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="{{ url_for('static', filename='js/brand_configuration.js') }}"></script>
+<script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
 </body>
 
 </html>

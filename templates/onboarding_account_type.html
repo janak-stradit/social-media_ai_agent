@@ -5,182 +5,187 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tell us about you — VortexSocial AI</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
-        body {
-            min-height: 100vh; display: flex; align-items: center; justify-content: center;
-            background: #F8FAFC; font-family: 'Rubik', system-ui, sans-serif; margin: 0; padding: 24px;
-            position: relative; overflow: hidden;
-        }
-        .bg-mesh {
-            position: absolute; top: -20%; left: -10%; width: 120%; height: 120%; z-index: 0;
-            background-image: radial-gradient(at 40% 20%, hsla(255,100%,85%,1) 0px, transparent 50%),
-                               radial-gradient(at 80% 0%, hsla(189,100%,88%,1) 0px, transparent 50%),
-                               radial-gradient(at 0% 50%, hsla(340,100%,93%,1) 0px, transparent 50%);
-            filter: blur(80px); opacity: 0.6; animation: blob-bounce 22s infinite alternate;
-        }
-        @keyframes blob-bounce {
-            0% { transform: translate(0, 0) scale(1); }
-            33% { transform: translate(30px, -40px) scale(1.08); }
-            66% { transform: translate(-20px, 20px) scale(0.94); }
-            100% { transform: translate(0, 0) scale(1); }
-        }
-        @media (prefers-reduced-motion: reduce) { .bg-mesh { animation: none; } }
+        /* Frame (header, hero, cards) comes from style.css's STANDALONE PAGES
+           + brand-profile card rules; only this page's pieces are here. */
+        .onboard-shell { display: flex; align-items: flex-start; gap: 1.5rem; }
+        .onboard-card { flex: 1; min-width: 0; }
 
-        .onboard-steps { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 20px; }
-        .onboard-step-dot { width: 8px; height: 8px; border-radius: 50%; background: #E5E7EB; transition: all 0.2s ease; }
-        .onboard-step-dot.active { background: #7366FF; width: 22px; border-radius: 4px; }
-        .onboard-step-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #9CA3AF; margin-bottom: 8px; text-align: center; }
+        /* Account type options - brand-profile cards with icon circles. */
+        .account-type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+        .account-type-card {
+            display: flex; align-items: flex-start; gap: 0.75rem;
+            padding: 1.1rem 1.25rem; text-align: left; cursor: pointer;
+            font-family: inherit;
+            background: var(--bp-card); border: 1px solid var(--bp-border) !important;
+            border-radius: var(--bp-radius-md) !important;
+            box-shadow: var(--bp-shadow-sm);
+            transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+        }
+        .account-type-card:hover { transform: translateY(-2px); border-color: var(--bp-border-hover) !important; box-shadow: var(--bp-shadow-md); }
+        .account-type-card.selected { background: var(--bp-primary-light); border-color: var(--bp-primary) !important; box-shadow: 0 0 0 3px rgba(138, 43, 226, 0.15); }
+        .account-type-card:focus-visible { outline: 2px solid var(--bp-primary); outline-offset: 3px; }
+        .account-type-card:disabled { cursor: progress; }
+        .account-type-card .card-icon-circle { margin-top: 2px; }
+        .account-type-card .type-title { display: block; font-weight: 700; font-size: 1rem; color: var(--bp-text); }
+        .account-type-card .type-desc { display: block; font-size: 0.85rem; color: var(--bp-text-sub); line-height: 1.45; margin-top: 2px; }
 
-        .onboard-shell {
-            position: relative; z-index: 1; margin: 0 auto;
-            display: flex; align-items: stretch; justify-content: center; gap: 20px; max-width: 960px;
-        }
-        .onboard-card {
-            max-width: 640px; width: 100%; background: #fff; border-radius: 20px; padding: 48px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.08); flex-shrink: 0;
-            transition: max-width 0.3s ease;
-        }
+        #websiteStep { margin-top: 1.5rem; padding-top: 1.5rem; border-top: 1px solid var(--bp-border); }
+        .website-row { display: flex; gap: 0.75rem; align-items: flex-end; }
+        .website-row .auth-form-group { flex: 1; margin-bottom: 0; }
+        .website-row .btn-primary-blue { height: 48px; margin: 0; white-space: nowrap; }
+        #onboardError { margin-top: 1rem; display: none; }
+        .d-none { display: none !important; }
 
-        /* Right-side "setting up your workspace" progress card - appears
-           once the user submits their website, showing each real step of
-           the scrape/analysis pipeline instead of a static spinner. */
-        .onboard-progress-card {
-            max-width: 380px; width: 100%; background: #fff; border-radius: 20px; padding: 36px 32px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.08); align-self: center;
-            animation: progressCardIn 0.35s ease;
-        }
+        /* "Setting up your workspace" progress card. */
+        .onboard-progress-card { flex: 0 0 340px; animation: progressCardIn 0.35s ease; }
         @keyframes progressCardIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
-        .progress-card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
-        .progress-card-header i { font-size: 20px; color: #7366FF; }
-        .progress-card-title { font-weight: 700; font-size: 15px; color: #111827; }
-        .progress-card-sub { font-size: 12.5px; color: #6B7280; margin-top: 2px; }
-
         .progress-steps { list-style: none; margin: 0; padding: 0; }
-        .progress-step {
-            display: flex; align-items: flex-start; gap: 12px; padding-bottom: 22px; position: relative;
-        }
-        .progress-step::before {
-            content: ''; position: absolute; left: 11px; top: 26px; bottom: 0; width: 2px; background: #E5E7EB;
-        }
+        .progress-step { display: flex; align-items: flex-start; gap: 12px; padding-bottom: 20px; position: relative; }
+        .progress-step::before { content: ''; position: absolute; left: 11px; top: 26px; bottom: 0; width: 2px; background: var(--bp-border); }
+        .progress-step:last-child { padding-bottom: 0; }
         .progress-step:last-child::before { display: none; }
-        .progress-step.done::before { background: #7366FF; }
+        .progress-step.done::before { background: var(--bp-primary); }
         .step-icon {
             width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0; z-index: 1;
             display: flex; align-items: center; justify-content: center;
-            background: #F3F4F6; color: #9CA3AF; font-size: 10px; border: 2px solid #F3F4F6;
+            background: var(--bp-bg); color: #9CA3AF; font-size: 10px; border: 1px solid var(--bp-border);
             transition: all 0.2s ease;
         }
-        .progress-step.active .step-icon { background: #F1EFFF; color: #7366FF; border-color: #C7C0FF; }
-        .progress-step.done .step-icon { background: #7366FF; color: #fff; border-color: #7366FF; }
-        .step-label { font-size: 13.5px; font-weight: 600; color: #9CA3AF; padding-top: 3px; transition: color 0.2s ease; }
-        .progress-step.active .step-label, .progress-step.done .step-label { color: #111827; }
+        .progress-step.active .step-icon { background: var(--bp-primary-light); color: var(--bp-primary); border-color: #D8B4FE; }
+        .progress-step.done .step-icon { background: var(--bp-primary-gradient); color: #fff; border-color: transparent; }
+        .step-label { font-size: 0.9rem; font-weight: 500; color: #9CA3AF; padding-top: 2px; transition: color 0.2s ease; }
+        .progress-step.active .step-label, .progress-step.done .step-label { color: var(--bp-text); }
         .progress-step.final .step-label { font-weight: 700; }
-        .onboard-heading { font-size: 26px; font-weight: 700; color: #111827; letter-spacing: -0.02em; margin-bottom: 8px; text-align: center; }
-        .onboard-subheading { font-size: 15px; color: #6B7280; text-align: center; margin-bottom: 32px; }
 
-        .account-type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-        @media (max-width: 560px) { .account-type-grid { grid-template-columns: 1fr; } }
         @media (max-width: 860px) {
-            .onboard-shell { flex-direction: column; }
-            .onboard-progress-card { max-width: 100%; }
+            .onboard-shell { flex-direction: column; align-items: stretch; }
+            .onboard-progress-card { flex: none; }
         }
-
-        .account-type-card {
-            display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
-            padding: 20px; border: 2px solid #E5E7EB; border-radius: 14px; background: #fff;
-            cursor: pointer; text-align: left; transition: border-color 0.2s, box-shadow 0.2s, transform 0.1s;
+        @media (max-width: 560px) {
+            .account-type-grid { grid-template-columns: 1fr; }
+            .website-row { flex-direction: column; align-items: stretch; }
         }
-        .account-type-card:hover { border-color: #C7C0FF; transform: translateY(-1px); }
-        .account-type-card.selected { border-color: #7366FF; box-shadow: 0 0 0 3px rgba(115, 102, 255,0.12); }
-        .account-type-card i { font-size: 20px; color: #7366FF; margin-bottom: 4px; }
-        .account-type-card .type-title { font-weight: 700; font-size: 15px; color: #111827; }
-        .account-type-card .type-desc { font-size: 12.5px; color: #6B7280; line-height: 1.4; }
-        .account-type-card:focus-visible { outline: 2px solid #7366FF; outline-offset: 3px; }
-
-        #websiteStep { margin-top: 28px; }
-        #onboardError { margin-top: 10px; display: none; }
-        .d-none { display: none !important; }
     </style>
 </head>
 <body>
-    <div class="bg-mesh" aria-hidden="true"></div>
-    <div class="onboard-shell">
-    <div class="onboard-card">
-        <div class="onboard-step-label">Step 2 of 2</div>
-        <div class="onboard-steps" aria-hidden="true">
-            <span class="onboard-step-dot active"></span>
-            <span class="onboard-step-dot active"></span>
-        </div>
-        <div class="auth-brand-logo" style="justify-content: center; margin-bottom: 28px;">
-            <span class="auth-brand-mark" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <header class="app-header app-header-simple">
+        <div class="header-brand">
+            <div class="brand-logo">
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                     <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
                     <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
                     <circle cx="12" cy="12" r="1.7" fill="#fff"/>
                 </svg>
-            </span>
-            VortexSocial AI
-        </div>
-
-        <h1 class="onboard-heading">What best describes you?</h1>
-        <p class="onboard-subheading">This helps us tailor your workspace and limits to how you'll actually use it.</p>
-
-        <div class="account-type-grid" id="accountTypeGrid" role="radiogroup" aria-label="Account type">
-            <button type="button" class="account-type-card" data-type="individual" role="radio" aria-checked="false">
-                <i class="fas fa-user" aria-hidden="true"></i>
-                <span class="type-title">Individual</span>
-                <span class="type-desc">Solo creator, freelancer, or personal brand.</span>
-            </button>
-            <button type="button" class="account-type-card" data-type="small" role="radio" aria-checked="false">
-                <i class="fas fa-store" aria-hidden="true"></i>
-                <span class="type-title">Small Industry</span>
-                <span class="type-desc">A small business or early-stage startup.</span>
-            </button>
-            <button type="button" class="account-type-card" data-type="medium" role="radio" aria-checked="false">
-                <i class="fas fa-building" aria-hidden="true"></i>
-                <span class="type-title">Medium Industry</span>
-                <span class="type-desc">A growing company or marketing team.</span>
-            </button>
-            <button type="button" class="account-type-card" data-type="enterprise" role="radio" aria-checked="false">
-                <i class="fas fa-building-columns" aria-hidden="true"></i>
-                <span class="type-title">Enterprise</span>
-                <span class="type-desc">Large organization - let's talk to our sales team.</span>
-            </button>
-        </div>
-
-        <div id="websiteStep" class="d-none">
-            <div class="auth-form-group">
-                <label class="auth-form-label" for="websiteInput">Your website</label>
-                <input id="websiteInput" type="url" class="auth-form-input" placeholder="https://yourcompany.com" autocomplete="url">
             </div>
-            <button id="continueBtn" type="button" class="btn-primary-blue">
-                <span id="continueBtnText">Continue to dashboard</span>
-            </button>
-        </div>
-
-        <div id="onboardError" class="alert-inline alert-inline-danger" role="alert"></div>
-    </div>
-
-    <div class="onboard-progress-card d-none" id="onboardProgressCard">
-        <div class="progress-card-header">
-            <i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
             <div>
-                <div class="progress-card-title">Setting up your workspace</div>
-                <div class="progress-card-sub" id="progressCardSub">This usually takes a few seconds.</div>
+                <span class="brand-name">VortexSocial AI</span>
+                <span class="brand-tagline">Workspace Setup</span>
             </div>
         </div>
-        <ul class="progress-steps" id="progressSteps">
-            <li class="progress-step" data-step="0"><span class="step-icon"></span><span class="step-label">Connecting to your website</span></li>
-            <li class="progress-step" data-step="1"><span class="step-icon"></span><span class="step-label">Reading your content</span></li>
-            <li class="progress-step" data-step="2"><span class="step-icon"></span><span class="step-label">Understanding your brand voice</span></li>
-            <li class="progress-step" data-step="3"><span class="step-icon"></span><span class="step-label">Extracting colors &amp; fonts</span></li>
-            <li class="progress-step" data-step="4"><span class="step-icon"></span><span class="step-label">Generating content ideas</span></li>
-            <li class="progress-step final" data-step="5"><span class="step-icon"></span><span class="step-label">Complete!</span></li>
-        </ul>
-    </div>
-    </div>
+        <a href="/logout" class="btn-xs-outline-info">
+            <i class="fas fa-right-from-bracket" aria-hidden="true"></i>Sign out
+        </a>
+    </header>
+
+    <main class="bp-page">
+        <div class="bp-page-inner">
+
+            <div class="bp-hero">
+                <div class="bp-hero-copy">
+                    <div class="bp-hero-eyebrow">
+                        Step 2 of 2
+                        <span class="bp-step-dots" aria-hidden="true"><span class="active"></span><span class="active"></span></span>
+                    </div>
+                    <h1 class="bp-hero-title">What best describes you?</h1>
+                    <p class="bp-hero-desc">This helps us tailor your workspace and limits to how you'll actually use it.</p>
+                </div>
+                <div class="bp-hero-graphic" aria-hidden="true">
+                    <div class="bp-hero-caption">
+                        From your website<br>
+                        <strong>to on-brand content</strong>
+                    </div>
+                    <div class="bp-hero-mock">
+                        <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 1rem;">
+                            <div class="bp-hero-mock-icon"><i class="fas fa-rocket"></i></div>
+                            <div class="bp-mock-bar" style="width: 80px; height: 12px; margin: 0;"></div>
+                        </div>
+                        <div class="bp-mock-bar" style="width: 100%;"></div>
+                        <div class="bp-mock-bar" style="width: 85%;"></div>
+                        <div class="bp-mock-bar" style="width: 95%; margin-bottom: 0;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="onboard-shell">
+                <div class="brand-config-card onboard-card">
+                    <h6><div class="card-icon-circle"><i class="fas fa-users"></i></div> Account type</h6>
+                    <div class="brand-config-card-desc">Pick the option closest to you - you can talk to us later if it changes.</div>
+
+                    <div class="account-type-grid" id="accountTypeGrid" role="radiogroup" aria-label="Account type">
+                        <button type="button" class="account-type-card" data-type="individual" role="radio" aria-checked="false">
+                            <span class="card-icon-circle"><i class="fas fa-user" aria-hidden="true"></i></span>
+                            <span>
+                                <span class="type-title">Individual</span>
+                                <span class="type-desc">Solo creator, freelancer, or personal brand.</span>
+                            </span>
+                        </button>
+                        <button type="button" class="account-type-card" data-type="small" role="radio" aria-checked="false">
+                            <span class="card-icon-circle"><i class="fas fa-store" aria-hidden="true"></i></span>
+                            <span>
+                                <span class="type-title">Small Industry</span>
+                                <span class="type-desc">A small business or early-stage startup.</span>
+                            </span>
+                        </button>
+                        <button type="button" class="account-type-card" data-type="medium" role="radio" aria-checked="false">
+                            <span class="card-icon-circle"><i class="fas fa-building" aria-hidden="true"></i></span>
+                            <span>
+                                <span class="type-title">Medium Industry</span>
+                                <span class="type-desc">A growing company or marketing team.</span>
+                            </span>
+                        </button>
+                        <button type="button" class="account-type-card" data-type="enterprise" role="radio" aria-checked="false">
+                            <span class="card-icon-circle"><i class="fas fa-building-columns" aria-hidden="true"></i></span>
+                            <span>
+                                <span class="type-title">Enterprise</span>
+                                <span class="type-desc">Large organization - let's talk to our sales team.</span>
+                            </span>
+                        </button>
+                    </div>
+
+                    <div id="websiteStep" class="d-none">
+                        <div class="website-row">
+                            <div class="auth-form-group">
+                                <label class="auth-form-label" for="websiteInput">Your website</label>
+                                <input id="websiteInput" type="url" class="auth-form-input" placeholder="https://yourcompany.com" autocomplete="url">
+                            </div>
+                            <button id="continueBtn" type="button" class="btn-primary-blue">
+                                <span id="continueBtnText">Continue to dashboard</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="onboardError" class="alert-inline alert-inline-danger" role="alert"></div>
+                </div>
+
+                <div class="brand-config-card onboard-progress-card d-none" id="onboardProgressCard">
+                    <h6><div class="card-icon-circle"><i class="fas fa-wand-magic-sparkles"></i></div> Setting up your workspace</h6>
+                    <div class="brand-config-card-desc" id="progressCardSub">This usually takes a few seconds.</div>
+                    <ul class="progress-steps" id="progressSteps">
+                        <li class="progress-step" data-step="0"><span class="step-icon"></span><span class="step-label">Connecting to your website</span></li>
+                        <li class="progress-step" data-step="1"><span class="step-icon"></span><span class="step-label">Reading your content</span></li>
+                        <li class="progress-step" data-step="2"><span class="step-icon"></span><span class="step-label">Understanding your brand voice</span></li>
+                        <li class="progress-step" data-step="3"><span class="step-icon"></span><span class="step-label">Extracting colors &amp; fonts</span></li>
+                        <li class="progress-step" data-step="4"><span class="step-icon"></span><span class="step-label">Generating content ideas</span></li>
+                        <li class="progress-step final" data-step="5"><span class="step-icon"></span><span class="step-label">Complete!</span></li>
+                    </ul>
+                </div>
+            </div>
+
+        </div>
+    </main>
 
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script>

@@ -87,6 +87,12 @@ class User(Base):
     # this after onboarding_completed. Individual/Small/Medium default active.
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
+    # Forgot-password flow (auth/routes.py forgot_password/reset_password).
+    # Only a SHA-256 hash of the emailed token is stored, so a leaked row
+    # can't be turned into a working reset link; cleared once used.
+    password_reset_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    password_reset_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
 
 class SalesContactRequest(Base):
     """An Enterprise-tier signup's "Contact Sales" submission - see
@@ -420,6 +426,8 @@ def init_db():
             f"ALTER TABLE {usr_tbl} ADD COLUMN company_website VARCHAR(500)",
             f"ALTER TABLE {usr_tbl} ADD COLUMN onboarding_completed BOOLEAN DEFAULT FALSE",
             f"ALTER TABLE {usr_tbl} ADD COLUMN is_active BOOLEAN DEFAULT TRUE",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN password_reset_token_hash VARCHAR(64)",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN password_reset_sent_at TIMESTAMP",
         ]:
             try:
                 with engine.begin() as sub_conn:
@@ -561,6 +569,31 @@ def set_user_verification_token(user_id: int, token: str) -> None:
 def get_user_by_verification_token(token: str) -> User | None:
     with Session(engine) as session:
         return session.query(User).filter(User.verification_token == token).first()
+
+
+def set_user_password_reset_token(user_id: int, token_hash: str) -> None:
+    """Stores the hash of a freshly issued password-reset token (replacing
+    any earlier one, so only the newest emailed link works)."""
+    with Session(engine) as session:
+        session.query(User).filter(User.id == user_id).update(
+            {"password_reset_token_hash": token_hash, "password_reset_sent_at": _utcnow()}
+        )
+        session.commit()
+
+
+def get_user_by_password_reset_token_hash(token_hash: str) -> User | None:
+    with Session(engine) as session:
+        return session.query(User).filter(User.password_reset_token_hash == token_hash).first()
+
+
+def reset_user_password(user_id: int, password_hash: str) -> None:
+    """Sets the new password and clears the reset token so the link is
+    single-use."""
+    with Session(engine) as session:
+        session.query(User).filter(User.id == user_id).update(
+            {"password_hash": password_hash, "password_reset_token_hash": None, "password_reset_sent_at": None}
+        )
+        session.commit()
 
 
 def mark_user_email_verified(user_id: int) -> None:
