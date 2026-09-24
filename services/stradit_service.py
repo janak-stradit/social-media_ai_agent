@@ -8,49 +8,46 @@ import os
 # user edit is saved (see db.get_setting / api/routes.py's SETTINGS_DEFAULTS).
 DEFAULT_CONTENT_GUIDELINES = {
     "colors": {
-        "primary": "#F5821F",
-        "primary_name": "Strad Orange",
+        "primary": "#000000",
+        "primary_name": "Primary Brand Color",
         "secondary": "#FFFFFF",
-        "secondary_name": "IT White",
+        "secondary_name": "Secondary Brand Color",
         "accent": "",
         "accent_name": "",
-        "usage_notes": (
-            'The text "Strad" must always render in the primary color; "IT" must always render in the '
-            "secondary color, wherever the StradIT wordmark appears."
-        ),
+        "usage_notes": "Specify how your brand colors should be used in visual assets.",
     },
     "typography": {
         "font_family": "Inter, Helvetica, Roboto",
-        "heading_style": "Bold, clean, minimal titles",
-        "body_style": "Soft, elegant, small subtitle text",
-        "restrictions": "Avoid thick, clumsy, or overly bold/vibrant fonts.",
+        "heading_style": "Clean, minimal titles",
+        "body_style": "Clear, readable subtitle text",
+        "restrictions": "Specify any fonts that should never be used.",
     },
     "voice_tone": {
-        "descriptors": "Confident, data-driven, professional, approachable",
-        "formality": "Professional / Enterprise",
-        "jargon_policy": "Avoid excessive jargon; explain technical concepts simply.",
+        "descriptors": "Professional, clear, engaging",
+        "formality": "Professional",
+        "jargon_policy": "Avoid excessive jargon; explain concepts clearly.",
         "avoid_words": "",
         "key_terms": "",
     },
     "content_rules": {
-        "caption_length": "Concise - a few short paragraphs, not a wall of text",
-        "hashtag_policy": "3-5 relevant hashtags, no hashtag stuffing",
-        "emoji_policy": "Sparingly - only where it adds warmth (e.g. festive posts)",
-        "cta_style": "Soft, consultative - no hard sell",
+        "caption_length": "Concise - a few short paragraphs",
+        "hashtag_policy": "3-5 relevant hashtags",
+        "emoji_policy": "Sparingly, where appropriate",
+        "cta_style": "Clear and direct",
     },
     "imagery_style": {
-        "aesthetic": "Premium, institutional, minimalist, high-end agency-designed",
-        "avoid": "Stock-photo look, exaggerated expressions, cluttered layouts",
+        "aesthetic": "Premium, professional, clean",
+        "avoid": "Stock-photo look, cluttered layouts",
     },
     "persona_rules": {
-        "clothing": "Business-appropriate, tailored, no casual wear (no t-shirts/sweatpants)",
-        "demeanor": "Credible, professional, natural interaction with environment/technology",
-        "consistency": "Same character appearance (clothing, hairstyle, identity) across all scenes",
+        "clothing": "Business-appropriate",
+        "demeanor": "Credible, professional",
+        "consistency": "Same character appearance across all scenes",
     },
     "messaging": {
-        "tagline": "Automate. Elevate. Accelerate.",
-        "value_props": "AI-driven precision, enterprise-grade reliability, regulatory readiness",
-        "prohibited_claims": "No unsupported guarantees, no fabricated customer quotes, no competitor disparagement",
+        "tagline": "Your Brand Tagline",
+        "value_props": "Your key value propositions",
+        "prohibited_claims": "No unsupported guarantees",
     },
 }
 

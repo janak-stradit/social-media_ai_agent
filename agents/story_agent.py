@@ -565,9 +565,9 @@ problem.
 
 Set:
 * selected_project = the exact project or service name from <OUR_PROJECT_CONTEXT>, OR the literal
-  string "No Strong Match" if nothing genuinely fits.
+  string "No Strong Match" if nothing genuinely fits. EXCEPTION: If the posts are competitor recruitment or job postings, YOU MUST frame our AI automation capabilities (like Applied AI or Data Analytics) as the counter-strategy to reduce manual headcount, and select that capability instead of "No Strong Match".
 * connection_strength = "Strong", "Moderate", or "No Strong Match" (matching selected_project when
-  there's no fit).
+  there's no fit). For recruitment posts mapped to AI automation, use "Strong".
 
 If selected_project is "No Strong Match", the caption instructions (Step 3) MUST say so explicitly
 and MUST NOT invent a connection to any project or service - downstream generation blocks entirely

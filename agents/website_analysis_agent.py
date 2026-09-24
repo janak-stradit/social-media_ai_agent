@@ -29,15 +29,18 @@ From this, infer:
    from the detected colors and fonts together with the copy's tone - e.g. "minimal, modern,
    high-contrast", "bold, playful, saturated", "corporate, restrained, trustworthy"
 7. key_themes: 3-5 recurring topics/values this brand talks about
-8. primary_colors: 2-4 hex colors that most plausibly ARE the brand's real colors. Strongly
+8. core_products: 3-6 core products, services, or offerings this brand provides
+9. primary_colors: 2-4 hex colors that most plausibly ARE the brand's real colors. Strongly
    prefer the "declared brand colors" list when it has usable entries - those were explicitly
    named as brand/primary/accent colors in the site's own CSS. Only fall back to picking from
    "other colors on page" if no declared colors were found, and even then skip obviously generic
    ones (pure white/black/gray) if better options exist. Return an empty list rather than
    guessing if nothing plausible is available.
-9. content_dos: 2-4 concrete things future social content for this brand SHOULD do
-10. content_donts: 2-4 concrete things future social content for this brand should AVOID
-11. suggested_post_ideas: exactly 8 concrete, ready-to-use post ideas for THIS specific brand
+10. fonts: up to 3 primary font families used for headings and body text on the site. Base this
+    strictly on the "Fonts detected in the site's CSS" list.
+11. content_dos: 2-4 concrete things future social content for this brand SHOULD do
+12. content_donts: 2-4 concrete things future social content for this brand should AVOID
+13. suggested_post_ideas: exactly 8 concrete, ready-to-use post ideas for THIS specific brand
     (not generic marketing advice) - a genuinely varied set covering different angles across the
     6 categories below (not 8 variations on the same angle), so the user has real variety to pick
     from and regenerate through, not near-duplicates. Each idea has:
@@ -50,12 +53,12 @@ From this, infer:
       content generator - not a placeholder, an actually usable brief
 
 If the page content is too thin/generic to infer something confidently, make a reasonable
-best-effort guess from what's given rather than leaving fields empty - only primary_colors and
+best-effort guess from what's given rather than leaving fields empty - only primary_colors, fonts, and
 tagline should ever legitimately be empty/null.
 
 Return ONLY a JSON object with keys: company_name, industry, target_audience,
-brand_voice_summary, tagline, visual_style, key_themes (list), primary_colors (list),
-content_dos (list), content_donts (list), suggested_post_ideas (list of the objects described
+brand_voice_summary, tagline, visual_style, key_themes (list), core_products (list), primary_colors (list),
+fonts (list), content_dos (list), content_donts (list), suggested_post_ideas (list of the objects described
 above)"""
 
     def __init__(self):
@@ -132,6 +135,7 @@ Website text excerpt{pages_note}:
             "tagline": result.get("tagline") or None,
             "visual_style": result.get("visual_style") or None,
             "key_themes": result.get("key_themes") if isinstance(result.get("key_themes"), list) else [],
+            "core_products": result.get("core_products") if isinstance(result.get("core_products"), list) else [],
             "primary_colors": primary_colors,
             "content_dos": result.get("content_dos") if isinstance(result.get("content_dos"), list) else [],
             "content_donts": result.get("content_donts") if isinstance(result.get("content_donts"), list) else [],

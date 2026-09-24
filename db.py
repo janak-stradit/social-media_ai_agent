@@ -128,6 +128,7 @@ class UserBrandProfile(Base):
     primary_colors: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of hex strings
     content_dos: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list
     content_donts: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list
+    core_products: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list
     suggested_post_ideas: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of {category,title,summary,prompt}
     tagline: Mapped[str | None] = mapped_column(String(255), nullable=True)
     visual_style: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -368,6 +369,30 @@ class ScheduledPost(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
+class MemoryEmbedding(Base):
+    __tablename__ = "memory_embeddings"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=True)
+    embedding_array: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class CompetitorPostEmbedding(Base):
+    __tablename__ = "competitor_post_embeddings"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[str] = mapped_column(String(1000), primary_key=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_json: Mapped[str] = mapped_column(Text, nullable=True)
+    embedding_array: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+
+
 def init_db():
     """Create schema, tables, and apply lightweight migrations."""
     if not IS_SQLITE:
@@ -410,6 +435,7 @@ def init_db():
             f"ALTER TABLE {profile_tbl} ADD COLUMN visual_style TEXT",
             f"ALTER TABLE {profile_tbl} ADD COLUMN fonts TEXT",
             f"ALTER TABLE {profile_tbl} ADD COLUMN logo_url VARCHAR(1000)",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN core_products TEXT",
         ]:
             try:
                 with engine.begin() as sub_conn:
@@ -703,6 +729,7 @@ def save_user_brand_profile(
     visual_style: str | None = None,
     fonts: list | None = None,
     logo_url: str | None = None,
+    core_products: list | None = None,
 ) -> dict:
     """Upsert - see agents/website_analysis_agent.py for how these fields are
     derived. One row per user (unique on user_id)."""
@@ -721,6 +748,7 @@ def save_user_brand_profile(
         row.primary_colors = json.dumps(primary_colors or [])
         row.content_dos = json.dumps(content_dos or [])
         row.content_donts = json.dumps(content_donts or [])
+        row.core_products = json.dumps(core_products or [])
         row.suggested_post_ideas = json.dumps(suggested_post_ideas or [])
         row.tagline = tagline
         row.visual_style = visual_style
@@ -742,7 +770,7 @@ _BRAND_PROFILE_TEXT_FIELDS = {
     "visual_style",
     "logo_url",
 }
-_BRAND_PROFILE_LIST_FIELDS = {"key_themes", "primary_colors", "content_dos", "content_donts", "fonts"}
+_BRAND_PROFILE_LIST_FIELDS = {"key_themes", "primary_colors", "content_dos", "content_donts", "fonts", "core_products"}
 
 
 def update_user_brand_profile_fields(user_id: int, **fields) -> dict | None:
@@ -783,6 +811,7 @@ def get_user_brand_profile(user_id: int) -> dict | None:
             "primary_colors": json.loads(row.primary_colors) if row.primary_colors else [],
             "content_dos": json.loads(row.content_dos) if row.content_dos else [],
             "content_donts": json.loads(row.content_donts) if row.content_donts else [],
+            "core_products": json.loads(row.core_products) if getattr(row, 'core_products', None) else [],
             "suggested_post_ideas": json.loads(row.suggested_post_ideas) if row.suggested_post_ideas else [],
             "tagline": row.tagline,
             "visual_style": row.visual_style,
@@ -1145,8 +1174,8 @@ def get_all_users_credit_summary() -> list[dict]:
                     "is_active": bool(getattr(u, "is_active", True)),
                     "account_type": u.account_type,
                     "company_website": u.company_website,
-                    "onboarding_completed": bool(u.onboarding_completed),
-                    "email_verified": bool(u.email_verified),
+                    "onboarding_completed": u.onboarding_completed,
+                    "email_verified": u.email_verified,
                     "credit_limit": round(limit, 2),
                     "used_credits": round(used_cost, 4),
                     "remaining_credits": round(remaining, 4),

@@ -112,7 +112,7 @@ $(document).ready(function () {
                 <label class="guideline-field-label">${field.label}</label>
                 <div class="d-flex gap-2 mb-2">
                     <input type="color" class="form-control form-control-color color-pair-input" id="${id}">
-                    <input type="text" class="form-control form-control-sm" id="${nameId}" placeholder="Name (e.g. Strad Orange)">
+                    <input type="text" class="form-control form-control-sm" id="${nameId}" placeholder="Name (e.g. Brand Primary)">
                 </div>
             `;
         }

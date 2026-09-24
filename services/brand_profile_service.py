@@ -30,6 +30,7 @@ def run_brand_analysis(user_id: int, website: str) -> bool:
         target_audience=profile.get("target_audience"),
         brand_voice_summary=profile.get("brand_voice_summary"),
         key_themes=profile.get("key_themes"),
+        core_products=profile.get("core_products"),
         primary_colors=profile.get("primary_colors"),
         content_dos=profile.get("content_dos"),
         content_donts=profile.get("content_donts"),
@@ -77,6 +78,8 @@ def build_brand_profile_block(user_id: int | None) -> str:
         lines.append(f"Visual style: {profile['visual_style']}")
     if profile.get("key_themes"):
         lines.append(f"Recurring themes: {', '.join(profile['key_themes'])}")
+    if profile.get("core_products"):
+        lines.append(f"Core Products/Services: {', '.join(profile['core_products'])}")
     if profile.get("primary_colors"):
         lines.append(f"Brand colors: {', '.join(profile['primary_colors'])}")
     if profile.get("content_dos"):
