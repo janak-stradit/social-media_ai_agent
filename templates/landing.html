@@ -244,10 +244,92 @@
             .cta-section { padding: 40px 16px 70px; }
         }
 
+        /* HERO motion - entrance, shimmer, ambient glow, button shine, parallax.
+           Entrance + parallax use the standalone `translate` / `scale`
+           properties so they stack with the existing `transform` float loops
+           on .hero-mock / .hero-floating-card instead of overriding them. */
+        @keyframes hero-rise { from { opacity: 0; translate: 0 24px; } to { opacity: 1; translate: 0 0; } }
+        @keyframes hero-slide-in { from { opacity: 0; translate: 60px 0; } to { opacity: 1; translate: 0 0; } }
+        @keyframes hero-pop { from { opacity: 0; scale: 0.85; } to { opacity: 1; scale: 1; } }
+        @keyframes hero-shimmer { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+        @keyframes hero-drift-a { 0%, 100% { translate: 0 0; scale: 1; } 50% { translate: 60px 40px; scale: 1.15; } }
+        @keyframes hero-drift-b { 0%, 100% { translate: 0 0; scale: 1; } 50% { translate: -50px -30px; scale: 1.1; } }
+        @keyframes hero-shine { 0%, 70% { left: -60%; } 100% { left: 130%; } }
+
+        .hero .brand-hero-card { isolation: isolate; }
+        .hero .brand-hero-card::before,
+        .hero .brand-hero-card::after {
+            content: ''; position: absolute; z-index: -1; border-radius: 50%;
+            filter: blur(60px); pointer-events: none;
+        }
+        .hero .brand-hero-card::before {
+            width: 420px; height: 420px; top: -140px; left: -120px;
+            background: radial-gradient(circle, rgba(138, 43, 226, 0.16), transparent 70%);
+            animation: hero-drift-a 16s ease-in-out infinite;
+        }
+        .hero .brand-hero-card::after {
+            width: 360px; height: 360px; bottom: -140px; left: 30%;
+            background: radial-gradient(circle, rgba(65, 105, 225, 0.14), transparent 70%);
+            animation: hero-drift-b 18s ease-in-out infinite;
+        }
+
+        .hero-copy > .eyebrow,
+        .hero-copy > .hero-title,
+        .hero-copy > .hero-subtitle,
+        .hero-copy > .hero-quickstart,
+        .hero-trust-list li,
+        .hero .hero-scroll-cue {
+            animation: hero-rise 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+            animation-delay: var(--d, 0s);
+        }
+        .hero-copy > .eyebrow { --d: 0.05s; display: inline-block; }
+        .hero-copy > .hero-title { --d: 0.15s; }
+        .hero-copy > .hero-subtitle { --d: 0.3s; }
+        .hero-copy > .hero-quickstart { --d: 0.45s; }
+        .hero-trust-list li:nth-child(1) { --d: 0.6s; }
+        .hero-trust-list li:nth-child(2) { --d: 0.7s; }
+        .hero-trust-list li:nth-child(3) { --d: 0.8s; }
+        .hero .hero-scroll-cue { --d: 1.2s; }
+
+        .hero .hero-panel { animation: hero-slide-in 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both; }
+        .hero .hero-mock { animation: float 6s ease-in-out infinite, hero-pop 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 0.5s both; }
+        .hero .hero-card-1 { animation: float-soft 6s ease-in-out infinite, hero-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.8s both; }
+        .hero .hero-card-2 { animation: float-soft 6s ease-in-out 1.5s infinite, hero-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 1s both; }
+        .hero .hero-panel-caption { animation: hero-rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) 1.1s both; }
+
+        .hero .hero-title .text-gradient {
+            background: linear-gradient(90deg, #8A2BE2, #4169E1, #C026D3, #8A2BE2);
+            background-size: 300% 100%;
+            -webkit-background-clip: text; background-clip: text;
+            animation: hero-shimmer 8s ease-in-out infinite;
+        }
+
+        .hero-quickstart .btn-primary-save { position: relative; overflow: hidden; }
+        .hero-quickstart .btn-primary-save::after {
+            content: ''; position: absolute; top: 0; left: -60%; width: 40%; height: 100%;
+            background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+            transform: skewX(-20deg); pointer-events: none;
+            animation: hero-shine 4.5s ease-in-out 1.6s infinite;
+        }
+
+        /* Parallax offsets come from --px / --py (-0.5..0.5) set by JS on .hero-panel. */
+        .hero .hero-mock, .hero .hero-floating-card { transition: translate 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        .hero .hero-mock { translate: calc(var(--px, 0) * -16px) calc(var(--py, 0) * -16px); }
+        .hero .hero-card-1 { translate: calc(var(--px, 0) * 28px) calc(var(--py, 0) * 28px); }
+        .hero .hero-card-2 { translate: calc(var(--px, 0) * 40px) calc(var(--py, 0) * 40px); }
+
+        @media (max-width: 640px) {
+            .hero .hero-mock { animation: hero-pop 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 0.5s both; }
+            .hero .hero-panel { animation-name: hero-rise; }
+        }
+
         @media (prefers-reduced-motion: reduce) {
-            .hero-mock, .hero-floating-card, .cta-floating-icon, .hero-scroll-cue i, .typewriter-text, .mock-pulse {
+            .hero-mock, .hero-floating-card, .cta-floating-icon, .hero-scroll-cue i, .typewriter-text, .mock-pulse,
+            .hero *, .hero .brand-hero-card::before, .hero .brand-hero-card::after, .hero-quickstart .btn-primary-save::after {
                 animation: none !important;
             }
+            .hero .hero-mock, .hero .hero-floating-card { translate: none !important; }
+            .hero .mock-stream-line { opacity: 1; }
         }
     </style>
 </head>
@@ -501,6 +583,29 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', () => {
+            // Hero parallax: mouse position -> --px/--py on the panel, which
+            // the mock and floating cards read as `translate` offsets.
+            const hero = document.querySelector('.hero');
+            const heroPanel = hero && hero.querySelector('.hero-panel');
+            const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            const finePointer = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+            if (heroPanel && finePointer && !reduceMotion) {
+                let frame = null;
+                hero.addEventListener('pointermove', (e) => {
+                    if (frame) return;
+                    frame = requestAnimationFrame(() => {
+                        frame = null;
+                        const rect = hero.getBoundingClientRect();
+                        heroPanel.style.setProperty('--px', ((e.clientX - rect.left) / rect.width - 0.5).toFixed(3));
+                        heroPanel.style.setProperty('--py', ((e.clientY - rect.top) / rect.height - 0.5).toFixed(3));
+                    });
+                });
+                hero.addEventListener('pointerleave', () => {
+                    heroPanel.style.setProperty('--px', 0);
+                    heroPanel.style.setProperty('--py', 0);
+                });
+            }
+
             // Intersection Observer for Step Reveal
             const observer = new IntersectionObserver((entries) => {
                 entries.forEach(entry => {
