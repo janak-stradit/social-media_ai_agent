@@ -6,10 +6,10 @@
     <title>Social Media Settings &amp; Scheduling — VortexSocial AI</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
-    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
 </head>
-<body class="bg-slate-50">
+<body class="settings-page">
 
 <!-- ═══════════════════════ TOP HEADER ═══════════════════════ -->
 <header class="app-header">
@@ -23,12 +23,12 @@
         </div>
         <div class="brand-text">
             <span class="brand-name">VortexSocial AI</span>
-            <span class="brand-tagline">Settings Studio</span>
+            <span class="brand-tagline">Social Accounts &amp; Scheduling</span>
         </div>
     </div>
     <nav class="header-nav">
         <a href="/dashboard" class="header-nav-item"><i class="fas fa-comments me-2"></i>Studio Chat</a>
-        <a href="/settings" class="header-nav-item active"><i class="fas fa-plug me-1"></i>Social Accounts &amp; Scheduling</a>
+        <a href="/settings" class="header-nav-item active"><i class="fas fa-plug me-2"></i>Social Accounts &amp; Scheduling</a>
     </nav>
     <div class="header-actions">
         {% include 'partials/user_menu.html' %}
@@ -36,52 +36,75 @@
 </header>
 
 <!-- ═══════════════════════ SETTINGS PAGE MAIN CONTENT ═══════════════════════ -->
-<div class="container-fluid py-4 px-4" style="margin-top: var(--header-h);">
-    <div class="max-w-7xl mx-auto">
-
-        <!-- Page Title & Header -->
-        <div class="d-flex align-items-center justify-content-between mb-4 pb-3 border-bottom">
+<div class="bc-main">
+    <!-- Side panel: the page's tabs. Still real Bootstrap tabs (role="tablist"
+         + data-bs-toggle) so settings.js's shown.bs.tab / Tab.show() work. -->
+    <aside class="bc-sidebar">
+        <div class="bc-sidebar-header">
+            <i class="fas fa-plug"></i>
             <div>
-                <h2 class="font-bold text-navy mb-1"><i class="fas fa-plug text-primary me-2"></i>Social Accounts &amp; Post Scheduling Studio</h2>
-                <p class="text-slate-500 mb-0 font-medium">Connect your Facebook, Instagram, and LinkedIn accounts, follow setup guides, and manage upcoming scheduled posts.</p>
-            </div>
-            <div class="d-flex gap-2.5 align-items-center">
-                <button type="button" class="btn-header-emerald text-decoration-none" onclick="openManualPostModal()">
-                    <i class="fas fa-edit me-1.5"></i>Create Manual Post
-                </button>
-                <a href="/dashboard" class="btn-header-primary text-decoration-none">
-                    <i class="fas fa-plus me-1.5"></i>Create New Campaign
-                </a>
+                <div style="font-weight: 700; font-size: 1rem; color: var(--bp-text);">Publishing Setup</div>
+                <div style="font-size: 0.75rem; color: var(--bp-text-sub);">Accounts, guides &amp; schedule</div>
             </div>
         </div>
+        <nav class="bc-nav" id="socialSettingsTab" role="tablist">
+            <button class="bc-nav-item active" id="connected-accounts-tab" data-bs-toggle="tab" data-bs-target="#connected-accounts-pane" type="button" role="tab" aria-controls="connected-accounts-pane" aria-selected="true">
+                <i class="fas fa-link"></i>Connected Accounts
+            </button>
+            <button class="bc-nav-item" id="setup-guides-tab" data-bs-toggle="tab" data-bs-target="#setup-guides-pane" type="button" role="tab" aria-controls="setup-guides-pane" aria-selected="false">
+                <i class="fas fa-book-open"></i>Connection Guides
+            </button>
+            <button class="bc-nav-item" id="scheduled-posts-tab" data-bs-toggle="tab" data-bs-target="#scheduled-posts-pane" type="button" role="tab" aria-controls="scheduled-posts-pane" aria-selected="false">
+                <i class="fas fa-calendar-days"></i>Scheduled Posts
+            </button>
+        </nav>
+    </aside>
 
-        <!-- Main Card Wrapper -->
-        <div class="social-page-card bg-white p-4 rounded-4 border shadow-sm mb-5">
+    <main class="bc-content">
+        <div class="bc-content-inner">
 
-            <!-- Nav Tabs -->
-            <ul class="nav nav-tabs social-nav-tabs mb-4" id="socialSettingsTab" role="tablist">
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link active" id="connected-accounts-tab" data-bs-toggle="tab" data-bs-target="#connected-accounts-pane" type="button" role="tab">
-                        <i class="fas fa-link me-2"></i>Connected Social Accounts
-                    </button>
-                </li>
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="setup-guides-tab" data-bs-toggle="tab" data-bs-target="#setup-guides-pane" type="button" role="tab">
-                        <i class="fas fa-book-open me-2"></i>Step-by-Step Connection Guides
-                    </button>
-                </li>
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" id="scheduled-posts-tab" data-bs-toggle="tab" data-bs-target="#scheduled-posts-pane" type="button" role="tab">
-                        <i class="fas fa-calendar-days me-2"></i>Upcoming Scheduled Posts
-                    </button>
-                </li>
-            </ul>
+            <!-- HERO -->
+            <div class="bp-hero">
+                <div class="bp-hero-copy">
+                    <div class="bp-hero-eyebrow">Social Accounts &amp; Scheduling</div>
+                    <h1 class="bp-hero-title">Publishing Setup</h1>
+                    <p class="bp-hero-desc">Connect your Facebook, Instagram, LinkedIn and YouTube accounts, follow the setup guides, and manage scheduled posts.</p>
+                    <div class="settings-hero-actions">
+                        <button type="button" class="btn-primary-save" onclick="openManualPostModal()">
+                            <i class="fas fa-edit me-2"></i>Create Manual Post
+                        </button>
+                        <a href="/dashboard" class="btn-xs-outline-info text-decoration-none">
+                            <i class="fas fa-plus me-2"></i>Create New Campaign
+                        </a>
+                    </div>
+                </div>
+                <div class="bp-hero-graphic" aria-hidden="true">
+                    <div class="bp-hero-caption">
+                        Connect once<br>
+                        <strong>publish everywhere</strong>
+                    </div>
+                    <div class="bp-hero-mock">
+                        <div style="display: flex; gap: 8px; margin-bottom: 1rem;">
+                            <div class="platform-icon-circle bg-fb"><i class="fab fa-facebook-f"></i></div>
+                            <div class="platform-icon-circle bg-ig"><i class="fab fa-instagram"></i></div>
+                            <div class="platform-icon-circle bg-li"><i class="fab fa-linkedin-in"></i></div>
+                            <div class="platform-icon-circle bg-yt"><i class="fab fa-youtube"></i></div>
+                        </div>
+                        <div class="bp-mock-bar" style="width: 100%;"></div>
+                        <div class="bp-mock-bar" style="width: 85%;"></div>
+                        <div class="bp-mock-bar" style="width: 60%; margin-bottom: 0;"></div>
+                    </div>
+                </div>
+            </div>
 
             <div class="tab-content" id="socialSettingsTabContent">
                 
                 <!-- ── TAB 1: CONNECTED ACCOUNTS ── -->
-                <div class="tab-pane fade show active" id="connected-accounts-pane" role="tabpanel">
-                    <div class="row g-4 mb-4">
+                <div class="tab-pane fade show active" id="connected-accounts-pane" role="tabpanel" aria-labelledby="connected-accounts-tab">
+                  <div class="brand-config-card settings-pane-card">
+                    <h6><div class="card-icon-circle"><i class="fas fa-link"></i></div> Connected Accounts</h6>
+                    <div class="brand-config-card-desc">Add the credentials for each platform you publish to, then verify the connection.</div>
+                    <div class="row g-4">
                         <!-- Facebook Account Card -->
                         <div class="col-md-4">
                             <div class="social-account-card card-facebook">
@@ -100,10 +123,10 @@
                                     <div class="small text-slate-500">Page ID: <span class="font-monospace text-slate-600" id="fbAccountId">—</span></div>
                                 </div>
                                 <div class="d-flex gap-2">
-                                    <button type="button" class="btn-connect-platform btn-fb flex-fill" onclick="openConnectModal('facebook')">
+                                    <button type="button" class="btn-primary-save flex-fill justify-content-center" onclick="openConnectModal('facebook')">
                                         <i class="fas fa-key me-1"></i>Configure
                                     </button>
-                                    <button type="button" class="btn btn-outline-primary btn-sm px-3 font-semibold rounded-3" onclick="testLiveAccountConnection('facebook')">
+                                    <button type="button" class="btn-xs-outline-info" onclick="testLiveAccountConnection('facebook')">
                                         <i class="fas fa-network-wired me-1"></i>Verify API
                                     </button>
                                 </div>
@@ -128,10 +151,10 @@
                                     <div class="small text-slate-500">Business ID: <span class="font-monospace text-slate-600" id="igAccountId">—</span></div>
                                 </div>
                                 <div class="d-flex gap-2">
-                                    <button type="button" class="btn-connect-platform btn-ig flex-fill" onclick="openConnectModal('instagram')">
+                                    <button type="button" class="btn-primary-save flex-fill justify-content-center" onclick="openConnectModal('instagram')">
                                         <i class="fas fa-key me-1"></i>Configure
                                     </button>
-                                    <button type="button" class="btn btn-outline-danger btn-sm px-3 font-semibold rounded-3" onclick="testLiveAccountConnection('instagram')">
+                                    <button type="button" class="btn-xs-outline-info" onclick="testLiveAccountConnection('instagram')">
                                         <i class="fas fa-network-wired me-1"></i>Verify API
                                     </button>
                                 </div>
@@ -156,10 +179,10 @@
                                     <div class="small text-slate-500">Author URN: <span class="font-monospace text-slate-600" id="liAccountId">—</span></div>
                                 </div>
                                 <div class="d-flex gap-2">
-                                    <button type="button" class="btn-connect-platform btn-li flex-fill" onclick="openConnectModal('linkedin')">
+                                    <button type="button" class="btn-primary-save flex-fill justify-content-center" onclick="openConnectModal('linkedin')">
                                         <i class="fas fa-key me-1"></i>Configure
                                     </button>
-                                    <button type="button" class="btn btn-outline-info btn-sm px-3 font-semibold rounded-3" onclick="testLiveAccountConnection('linkedin')">
+                                    <button type="button" class="btn-xs-outline-info" onclick="testLiveAccountConnection('linkedin')">
                                         <i class="fas fa-network-wired me-1"></i>Verify API
                                     </button>
                                 </div>
@@ -184,20 +207,24 @@
                                     <div class="small text-slate-500">Channel ID: <span class="font-monospace text-slate-600" id="ytAccountId">—</span></div>
                                 </div>
                                 <div class="d-flex gap-2">
-                                    <button type="button" class="btn-connect-platform btn-yt flex-fill" onclick="openConnectModal('youtube')">
+                                    <button type="button" class="btn-primary-save flex-fill justify-content-center" onclick="openConnectModal('youtube')">
                                         <i class="fas fa-key me-1"></i>Configure
                                     </button>
-                                    <button type="button" class="btn btn-outline-danger btn-sm px-3 font-semibold rounded-3" onclick="testLiveAccountConnection('youtube')">
+                                    <button type="button" class="btn-xs-outline-info" onclick="testLiveAccountConnection('youtube')">
                                         <i class="fas fa-network-wired me-1"></i>Verify API
                                     </button>
                                 </div>
                             </div>
                         </div>
                     </div>
+                  </div>
                 </div>
 
                 <!-- ── TAB 2: STEP-BY-STEP GUIDES ── -->
-                <div class="tab-pane fade" id="setup-guides-pane" role="tabpanel">
+                <div class="tab-pane fade" id="setup-guides-pane" role="tabpanel" aria-labelledby="setup-guides-tab">
+                  <div class="brand-config-card settings-pane-card">
+                    <h6><div class="card-icon-circle"><i class="fas fa-book-open"></i></div> Connection Guides</h6>
+                    <div class="brand-config-card-desc">Step-by-step instructions for getting the credentials each platform needs.</div>
                     <div class="accordion guide-accordion" id="platformGuidesAccordion">
                         
                         <!-- Facebook Guide -->
@@ -361,16 +388,14 @@
                         </div>
 
                     </div>
+                  </div>
                 </div>
 
                 <!-- ── TAB 3: UPCOMING SCHEDULED POSTS ── -->
-                <div class="tab-pane fade" id="scheduled-posts-pane" role="tabpanel">
-                    <div class="d-flex justify-content-between align-items-center mb-3">
-                        <div>
-                            <h6 class="font-bold text-navy mb-0"><i class="fas fa-calendar-alt text-emerald me-2"></i>Upcoming &amp; Past Scheduled Campaigns</h6>
-                            <small class="text-slate-500">View automated AI runs or manually schedule custom social media posts</small>
-                        </div>
-                    </div>
+                <div class="tab-pane fade" id="scheduled-posts-pane" role="tabpanel" aria-labelledby="scheduled-posts-tab">
+                  <div class="brand-config-card settings-pane-card">
+                    <h6><div class="card-icon-circle"><i class="fas fa-calendar-days"></i></div> Scheduled Posts</h6>
+                    <div class="brand-config-card-desc">Upcoming and past scheduled campaigns - automated AI runs and manual posts.</div>
 
                     <div class="table-responsive">
                         <table class="table table-hover align-middle scheduled-posts-table">
@@ -391,13 +416,13 @@
                             </tbody>
                         </table>
                     </div>
+                  </div>
                 </div>
 
             </div>
 
         </div>
-
-    </div>
+    </main>
 </div>
 
 <!-- ═══════════════════════ MANUAL POST CREATOR & SCHEDULER MODAL ═══════════════════════ -->

@@ -3673,3 +3673,191 @@ body {
 .auth-reset-mock-bar { height: 9px; background: #e2e8f0; border-radius: 4px; margin-bottom: 8px; }
 .auth-reset-mock-field { height: 36px; background: #F9FAFB; border: 1px solid #E6E8EF; border-radius: 6px; margin-bottom: 10px; }
 .auth-reset-mock-btn { height: 36px; border-radius: 6px; background: linear-gradient(135deg, #8A2BE2 0%, #4169E1 100%); }
+
+/* ══════════════════════════════════════════════════════════════════════
+   SETTINGS (/settings) - brand-profile look
+   Side panel tabs + hero + brand-config-card panes (templates/settings.html).
+   ══════════════════════════════════════════════════════════════════════ */
+body.settings-page { overflow: hidden; }
+
+.settings-hero-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.25rem; }
+.settings-hero-actions .btn-xs-outline-info { padding: 0.6rem 1.1rem; }
+.bp-hero-mock .platform-icon-circle { width: 32px; height: 32px; font-size: 14px; border-radius: 8px; }
+
+/* Big pane cards don't lift on hover - only the cards inside them do. */
+.settings-pane-card:hover { transform: none; box-shadow: var(--bp-shadow-sm) !important; border-color: var(--bp-border) !important; }
+
+/* Account cards */
+.social-account-card { padding: 1.25rem; height: 100%; display: flex; flex-direction: column; }
+.social-account-card h6 { font-weight: 700; font-size: 1rem; color: var(--bp-text); }
+.social-account-card small { color: var(--bp-text-sub); font-size: 0.78rem; }
+.social-account-card .platform-icon-circle { width: 40px; height: 40px; border-radius: 50%; font-size: 17px; box-shadow: var(--bp-shadow-sm); }
+.social-account-card .account-details-box { margin-top: auto; }
+.social-account-card .btn-primary-save { font-size: 0.85rem; padding: 0.5rem 0.9rem; }
+.social-account-card .btn-xs-outline-info { font-size: 0.85rem; padding: 0.5rem 0.9rem; white-space: nowrap; }
+.account-details-box { background: var(--bp-bg); border: 1px solid var(--bp-border); border-radius: var(--bp-radius-md); padding: 0.7rem 0.85rem; font-size: 0.82rem; }
+.account-details-box strong { color: var(--bp-text); }
+
+/* Connection status - same pill shape as the approval statuses. */
+.status-badge {
+  display: inline-flex; align-items: center; white-space: nowrap;
+  font-size: 0.72rem; font-weight: 600; padding: 0.25rem 0.65rem;
+  border-radius: 999px; border: 1px solid transparent;
+}
+.badge-connected { background: #F0FDF4; color: #047857; border-color: #BBF7D0; }
+.badge-disconnected { background: var(--bp-bg); color: var(--bp-text-sub); border-color: var(--bp-border); }
+.status-badge.bg-purple { background: var(--bp-primary-light) !important; color: var(--bp-primary) !important; border-color: #d8b4fe; }
+
+/* Connection guides accordion */
+.guide-accordion .guide-item {
+  border: 1px solid var(--bp-border) !important; border-radius: var(--bp-radius-md) !important;
+  box-shadow: var(--bp-shadow-sm); overflow: hidden; margin-bottom: 0.75rem !important;
+}
+.guide-accordion .accordion-button {
+  font-family: inherit; font-size: 0.95rem; font-weight: 600; color: var(--bp-text);
+  padding: 1rem 1.25rem; background: var(--bp-card); box-shadow: none;
+}
+.guide-accordion .accordion-button:not(.collapsed) { background: var(--bp-primary-light); color: var(--bp-primary); box-shadow: inset 3px 0 0 var(--bp-primary); }
+.guide-accordion .accordion-button:focus { box-shadow: 0 0 0 3px rgba(138, 43, 226, 0.15); border-color: transparent; }
+.guide-body { background: var(--bp-card); border-top: 1px solid var(--bp-border); padding: 1.25rem 1.5rem; font-size: 0.9rem; }
+.guide-steps-list li strong { color: var(--bp-text); }
+.guide-steps-list li p { color: var(--bp-text-sub); }
+.badge-list code { border-color: #d8b4fe; background: var(--bp-primary-light); }
+
+/* Scheduled posts table */
+#scheduled-posts-pane .table-responsive { border: 1px solid var(--bp-border); border-radius: var(--bp-radius-md); overflow: hidden; }
+.scheduled-posts-table { margin: 0; font-size: 0.85rem; }
+.scheduled-posts-table th {
+  background: var(--bp-bg); color: var(--bp-text-sub); font-size: 0.72rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em; border-bottom: 1px solid var(--bp-border); padding: 0.75rem 1rem;
+}
+.scheduled-posts-table td { border-color: var(--bp-border); padding: 0.75rem 1rem; color: var(--bp-text); }
+.scheduled-posts-table.table-hover > tbody > tr:hover > * { background: rgba(138, 43, 226, 0.04); }
+.sp-thumb {
+  width: 38px; height: 38px; flex-shrink: 0; margin-right: 0.6rem;
+  border-radius: var(--bp-radius-sm); border: 1px solid var(--bp-border); object-fit: cover;
+}
+.sp-thumb-empty { display: inline-flex; align-items: center; justify-content: center; background: var(--bp-primary-light); color: var(--bp-primary); font-size: 0.85rem; }
+.sp-cancel-btn {
+  display: inline-flex; align-items: center; gap: 0.35rem;
+  font-family: inherit; font-size: 0.8rem; font-weight: 600;
+  color: #DC2626; background: var(--bp-card); border: 1px solid #FECACA;
+  border-radius: var(--bp-radius-sm); padding: 0.3rem 0.7rem; cursor: pointer; transition: all 0.15s ease;
+}
+.sp-cancel-btn:hover { background: #FEF2F2; border-color: #EF4444; }
+.ap-status-neutral { background: var(--bp-bg); color: var(--bp-text-sub); border-color: var(--bp-border); }
+.ap-tag i { font-size: 0.8rem; }
+
+@media (max-width: 768px) {
+  body.settings-page { overflow: auto; }
+}
+
+/* ===== Slider-puzzle verification (static/js/captcha.js) ===== */
+body.captcha-open { overflow: hidden; }
+.captcha-overlay {
+    position: fixed; inset: 0; z-index: 2000;
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+    background: rgba(17, 24, 39, 0.45); backdrop-filter: blur(4px);
+    animation: captcha-fade 0.18s ease;
+}
+.captcha-overlay[hidden] { display: none; }
+.captcha-modal {
+    width: 100%; max-width: 400px;
+    background: #FFFFFF; border: 1px solid #E6E8EF; border-radius: 20px;
+    box-shadow: 0 24px 60px rgba(17, 24, 39, 0.18);
+    padding: 1.5rem 1.5rem 1.25rem;
+    animation: captcha-pop 0.22s cubic-bezier(.2, .9, .3, 1.2);
+}
+.captcha-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.captcha-header h2 { margin: 0; font-size: 1.15rem; font-weight: 700; color: #111827; line-height: 1.35; }
+.captcha-close, .captcha-refresh {
+    flex-shrink: 0; width: 34px; height: 34px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: transparent; border: 1px solid #E5E7EB; color: #4B5563;
+    cursor: pointer; transition: background 0.15s ease, color 0.15s ease, transform 0.3s ease;
+}
+.captcha-close:hover, .captcha-refresh:hover { background: #F3F4F6; color: #111827; }
+.captcha-refresh:hover i { transform: rotate(90deg); transition: transform 0.3s ease; }
+.captcha-close:focus-visible, .captcha-refresh:focus-visible, .captcha-handle:focus-visible {
+    outline: 2px solid #4169E1; outline-offset: 2px;
+}
+.captcha-sub { margin: 0.5rem 0 1rem; font-size: 0.85rem; color: #6B7280; line-height: 1.5; }
+.captcha-bar {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    margin-bottom: 0.6rem; font-size: 0.85rem; font-weight: 600; color: #1F2937;
+}
+.captcha-refresh { border: none; }
+
+.captcha-stage {
+    position: relative; width: 100%; aspect-ratio: 2 / 1;
+    border-radius: 14px; overflow: hidden; background: #F3F4F6;
+    user-select: none; -webkit-user-select: none;
+}
+.captcha-bg { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.captcha-piece {
+    position: absolute; left: 0; top: 0; height: auto;
+    filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.35));
+    pointer-events: none; will-change: left;
+}
+.captcha-piece.is-animating { transition: left 0.28s ease; }
+.captcha-loading, .captcha-success {
+    position: absolute; inset: 0; display: none;
+    align-items: center; justify-content: center;
+}
+.captcha-loading { background: rgba(243, 244, 246, 0.85); color: #6B7280; font-size: 22px; }
+.captcha-stage.is-loading .captcha-loading { display: flex; }
+.captcha-success { background: rgba(84, 186, 74, 0.25); color: #FFFFFF; }
+.captcha-success i {
+    width: 52px; height: 52px; border-radius: 50%; background: #54BA4A;
+    display: flex; align-items: center; justify-content: center; font-size: 22px;
+    box-shadow: 0 6px 18px rgba(84, 186, 74, 0.45);
+}
+.captcha-modal.is-success .captcha-success { display: flex; animation: captcha-fade 0.2s ease; }
+
+.captcha-track {
+    position: relative; height: 44px; margin-top: 1rem;
+    display: flex; align-items: center;
+    touch-action: none;
+}
+.captcha-track::before {
+    content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 12px;
+    transform: translateY(-50%); border-radius: 999px; background: #E5E7EB;
+}
+.captcha-fill {
+    position: absolute; left: 0; top: 50%; height: 12px; width: 0;
+    transform: translateY(-50%); border-radius: 999px;
+    background: linear-gradient(90deg, rgba(138, 43, 226, 0.35), rgba(65, 105, 225, 0.35));
+}
+.captcha-fill.is-animating { transition: width 0.28s ease; }
+.captcha-handle {
+    position: relative; z-index: 1; width: 68px; height: 44px; border-radius: 999px;
+    background: #111827; color: #FFFFFF; font-size: 18px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: grab; touch-action: none;
+    box-shadow: 0 6px 16px rgba(17, 24, 39, 0.3);
+    transition: background 0.15s ease;
+}
+.captcha-handle.is-animating { transition: transform 0.28s ease, background 0.15s ease; }
+.captcha-modal.is-dragging .captcha-handle { cursor: grabbing; background: #1F2937; }
+.captcha-modal.is-success .captcha-handle { background: #54BA4A; }
+.captcha-modal.is-error .captcha-handle { background: #FC4438; }
+.captcha-modal.is-error .captcha-stage { animation: captcha-shake 0.4s ease; }
+
+.captcha-msg { min-height: 1.2em; margin: 0.6rem 0 0; font-size: 0.8rem; color: #6B7280; text-align: center; }
+.captcha-msg.is-error { color: #FC4438; }
+.captcha-msg.is-success { color: #3F9A36; font-weight: 600; }
+
+@keyframes captcha-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes captcha-pop { from { opacity: 0; transform: translateY(8px) scale(0.97); } to { opacity: 1; transform: none; } }
+@keyframes captcha-shake {
+    0%, 100% { transform: translateX(0); }
+    20%, 60% { transform: translateX(-6px); }
+    40%, 80% { transform: translateX(6px); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .captcha-overlay, .captcha-modal, .captcha-modal.is-error .captcha-stage { animation: none; }
+}
+@media (max-width: 420px) {
+    .captcha-modal { padding: 1.25rem 1rem 1rem; border-radius: 16px; }
+    .captcha-header h2 { font-size: 1.05rem; }
+}

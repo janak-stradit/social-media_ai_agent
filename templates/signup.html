@@ -166,7 +166,10 @@
 </div>
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="{{ url_for('static', filename='js/captcha.js') }}"></script>
 <script>
+    const CAPTCHA_ENABLED = {{ 'true' if captcha_enabled|default(true) else 'false' }};
+
     // Rotating right-pane showcase
     (function () {
         const $slides = $('#authShowcase .auth-showcase-slide');
@@ -341,32 +344,53 @@
             password: $('#signupPassword').val()
         };
 
-        const $submitBtn = $('#signupSubmit');
-        $submitBtn.prop('disabled', true);
+        if (!CAPTCHA_ENABLED) {
+            register(payload, null);
+            return;
+        }
+        // The puzzle token is one-use and short-lived, so get a fresh one
+        // on every attempt (auth/captcha.py).
+        window.SliderCaptcha.open()
+            .then(function (token) { register(payload, token); })
+            .catch(function () { /* closed the puzzle - leave the form as is */ });
+    });
+
+    function resetSubmit() {
+        $('#signupSubmit').prop('disabled', false);
+        $('#signupSubmitText').text('Sign up');
+    }
+
+    function register(payload, captchaToken) {
+        $('#signupSubmit').prop('disabled', true);
         $('#signupSubmitText').html('<i class="fas fa-spinner fa-spin"></i> Creating account...');
 
         $.ajax({
             url: '/api/auth/register',
             type: 'POST',
             contentType: 'application/json',
-            data: JSON.stringify(payload),
+            data: JSON.stringify($.extend({ captcha_token: captchaToken }, payload)),
             success: function (res) {
                 if (res.success) {
                     window.location.href = '/verify-pending?email=' + encodeURIComponent(payload.email);
                 } else {
-                    $submitBtn.prop('disabled', false);
-                    $('#signupSubmitText').text('Sign up');
+                    resetSubmit();
                     $('#signupError').text(res.error || 'Something went wrong.').show();
                 }
             },
             error: function (xhr) {
-                const msg = (xhr.responseJSON && xhr.responseJSON.error) || 'An error occurred';
-                $('#signupError').text(msg).show();
-                $submitBtn.prop('disabled', false);
-                $('#signupSubmitText').text('Sign up');
+                const body = xhr.responseJSON || {};
+                resetSubmit();
+                if (body.captcha_required && CAPTCHA_ENABLED) {
+                    // Token expired or was already used - just ask again.
+                    window.SliderCaptcha.open()
+                        .then(function (token) { register(payload, token); })
+                        .catch(function () {});
+                    return;
+                }
+                $('#signupError').text(body.error || 'An error occurred').show();
             }
         });
-    });
+    }
 </script>
 </body>
 </html>

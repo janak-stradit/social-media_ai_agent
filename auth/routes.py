@@ -14,6 +14,7 @@ from flask import (
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from auth.captcha import consume_pass_token
 from auth.utils import get_current_user_id
 from config import Config
 from db import (
@@ -109,6 +110,13 @@ def register():
         return jsonify({"success": False, "error": "Password must be at least 6 characters"}), 400
     if get_user_by_email(email):
         return jsonify({"success": False, "error": "An account with this email already exists"}), 409
+    # Checked last so a typo'd form doesn't burn the one-use token.
+    if Config.CAPTCHA_ENABLED and not consume_pass_token(data.get("captcha_token")):
+        return jsonify({
+            "success": False,
+            "captcha_required": True,
+            "error": "Please complete the security verification",
+        }), 400
 
     user = create_user(name, email, generate_password_hash(password))
     # No session set here - registration no longer logs the user straight in.

@@ -231,8 +231,8 @@ $(document).ready(function () {
                 let html = '';
                 posts.forEach(p => {
                     const platforms = Array.isArray(p.platforms) ? p.platforms.map(pl => {
-                        const icons = { facebook: '<i class="fab fa-facebook color-fb me-1"></i>', instagram: '<i class="fab fa-instagram color-ig me-1"></i>', linkedin: '<i class="fab fa-linkedin color-li me-1"></i>' };
-                        return `<span class="badge bg-light text-navy border me-1">${icons[pl] || ''}${pl.toUpperCase()}</span>`;
+                        const icons = { facebook: '<i class="fab fa-facebook color-fb"></i>', instagram: '<i class="fab fa-instagram color-ig"></i>', linkedin: '<i class="fab fa-linkedin color-li"></i>', youtube: '<i class="fab fa-youtube color-yt"></i>' };
+                        return `<span class="ap-tag me-1">${icons[pl] || ''}${escapeHtml(pl.charAt(0).toUpperCase() + pl.slice(1))}</span>`;
                     }).join('') : p.platforms;
 
                     let cJson = {};
@@ -243,20 +243,20 @@ $(document).ready(function () {
                     }
 
                     const mediaUrl = cJson.image_url || cJson.media_url || p.media_url;
-                    const mediaTag = mediaUrl ? `<img src="${mediaUrl}" class="rounded-2 me-2 border shadow-xs" style="width: 38px; height: 38px; object-fit: cover;">` : '<div class="rounded-2 me-2 bg-light d-inline-flex align-items-center justify-content-center border" style="width: 38px; height: 38px;"><i class="fas fa-file-text text-slate-400"></i></div>';
+                    const mediaTag = mediaUrl ? `<img src="${mediaUrl}" class="sp-thumb" alt="">` : '<div class="sp-thumb sp-thumb-empty"><i class="fas fa-align-left"></i></div>';
 
                     const storyText = cJson.caption || cJson.story || p.story || 'Custom Manual Post';
-                    const manualBadge = cJson.is_manual ? '<span class="badge bg-info text-dark ms-1">Manual</span>' : '';
+                    const manualBadge = cJson.is_manual ? '<span class="ap-tag ap-tag-primary ms-1">Manual</span>' : '';
 
                     const statusBadges = {
-                        pending: '<span class="badge bg-warning text-dark"><i class="fas fa-clock me-1"></i>Pending</span>',
-                        published: '<span class="badge bg-success"><i class="fas fa-check-circle me-1"></i>Published</span>',
-                        failed: '<span class="badge bg-danger"><i class="fas fa-triangle-exclamation me-1"></i>Failed</span>',
-                        cancelled: '<span class="badge bg-secondary"><i class="fas fa-ban me-1"></i>Cancelled</span>'
+                        pending: '<span class="ap-status ap-status-pending"><i class="fas fa-clock"></i>Pending</span>',
+                        published: '<span class="ap-status ap-status-approved"><i class="fas fa-check-circle"></i>Published</span>',
+                        failed: '<span class="ap-status ap-status-rejected"><i class="fas fa-triangle-exclamation"></i>Failed</span>',
+                        cancelled: '<span class="ap-status ap-status-neutral"><i class="fas fa-ban"></i>Cancelled</span>'
                     };
 
                     const cancelBtn = p.status === 'pending'
-                        ? `<button class="btn btn-sm btn-outline-danger" onclick="cancelScheduledPostItem(${p.id})"><i class="fas fa-ban me-1"></i>Cancel</button>`
+                        ? `<button type="button" class="sp-cancel-btn" onclick="cancelScheduledPostItem(${p.id})"><i class="fas fa-ban"></i>Cancel</button>`
                         : '—';
 
                     html += `

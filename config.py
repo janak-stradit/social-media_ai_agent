@@ -14,6 +14,10 @@ class Config:
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     PERMANENT_SESSION_LIFETIME = 60 * 60 * 24 * 7  # 7 days
+
+    # Slider-puzzle check before signup (auth/captcha.py)
+    CAPTCHA_ENABLED = os.getenv("CAPTCHA_ENABLED", "true").lower() in ("1", "true", "yes")
+    CAPTCHA_TOLERANCE_PX = int(os.getenv("CAPTCHA_TOLERANCE_PX", "6"))
     # API Keys
     YOUTUBE_CLIENT_ID = os.getenv("YOUTUBE_CLIENT_ID")
     YOUTUBE_CLIENT_SECRET = os.getenv("YOUTUBE_CLIENT_SECRET")

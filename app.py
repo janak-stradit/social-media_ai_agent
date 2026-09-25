@@ -5,6 +5,7 @@ from flask import Flask, jsonify, redirect, render_template, request, session, u
 from flask_cors import CORS
 
 from api.routes import api_bp
+from auth.captcha import captcha_bp
 from auth.routes import auth_bp
 from auth.utils import (
     admin_required_page,
@@ -57,6 +58,7 @@ def create_app(config_name="development"):
     # Register blueprints
     app.register_blueprint(api_bp, url_prefix="/api")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
+    app.register_blueprint(captcha_bp, url_prefix="/api/auth/captcha")
 
     @app.route("/dashboard")
     @login_required_page
@@ -149,7 +151,7 @@ def create_app(config_name="development"):
         truth."""
         if get_current_user_id():
             return redirect(url_for("index"))
-        return render_template("signup.html")
+        return render_template("signup.html", captcha_enabled=app.config.get("CAPTCHA_ENABLED", True))
 
     @app.route("/forgot-password")
     def forgot_password_page():
