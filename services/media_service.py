@@ -584,6 +584,218 @@ class MediaGenerationService:
             print(f"[Media Service] kie.ai file upload error: {e}")
             return None
 
+    # ── HeyRoute (https://heyroute.ai/v1, OpenAI-compatible) ─────────────────
+    # Image: gemini-3-pro-image via /images/generations (text-to-image) or
+    # /images/edits (with reference images). n must be 1 (the Gemini models
+    # return 400 otherwise) and size is ignored, so the aspect ratio goes in the
+    # prompt. "stream": false asks for a plain JSON body; an SSE body (the
+    # endpoint's default) is still parsed if the gateway sends one anyway.
+    # Video: /videos creates a task, /videos/{id} is polled, and the finished
+    # file is downloaded from /videos/{id}/content with the same key.
+
+    _HEYROUTE_ASPECT_HINTS = {
+        "instagram": "Square 1:1 aspect ratio.",
+        "facebook": "Landscape 16:9 aspect ratio.",
+        "linkedin": "Landscape 16:9 aspect ratio.",
+    }
+    _HEYROUTE_VIDEO_RATIOS = {"instagram": "9:16", "facebook": "16:9", "linkedin": "16:9"}
+    _HEYROUTE_MAX_REFERENCES = 14  # HeyRoute's documented limit for Gemini edits
+
+    def _heyroute_headers(self, key: str) -> dict:
+        return {"Authorization": f"Bearer {key}"}
+
+    @staticmethod
+    def _heyroute_image_payload(resp) -> dict:
+        """The {"data": [...]} payload from a JSON or SSE images response."""
+        content_type = resp.headers.get("Content-Type", "")
+        if "text/event-stream" not in content_type:
+            return resp.json()
+        import json as _json
+
+        event = None
+        for line in resp.text.splitlines():
+            if line.startswith("event: "):
+                event = line[len("event: "):].strip()
+            elif line.startswith("data: "):
+                data = line[len("data: "):]
+                if event == "error":
+                    raise RuntimeError(f"HeyRoute image error: {data[:300]}")
+                if event == "completed":
+                    return _json.loads(data)
+        raise RuntimeError("HeyRoute image stream ended without a completed event.")
+
+    def _generate_image_heyroute(
+        self, prompt: str, platform: str, size: str, image_path: str | list[str] | None = None
+    ) -> dict:
+        """Same return shape as _generate_image_kie: {url (local), original_url,
+        prompt, model, cost}."""
+        import base64
+
+        key = Config.HEYROUTE_IMAGE_API_KEY
+        if not key:
+            raise RuntimeError("HEYROUTE_IMAGE_API_KEY is not configured.")
+        model = Config.HEYROUTE_IMAGE_MODEL
+        hint = self._HEYROUTE_ASPECT_HINTS.get(platform)
+        full_prompt = f"{prompt}\n\n{hint}" if hint and hint not in prompt else prompt
+        references = self._resolve_image_paths(image_path)[: self._HEYROUTE_MAX_REFERENCES]
+        base = Config.HEYROUTE_BASE_URL
+
+        if references:
+            files = []
+            try:
+                for ref in references:
+                    mime = mimetypes.guess_type(ref)[0] or "image/png"
+                    files.append(("image", (os.path.basename(ref), open(ref, "rb"), mime)))
+                resp = requests.post(
+                    f"{base}/images/edits",
+                    headers=self._heyroute_headers(key),
+                    data={"model": model, "prompt": full_prompt, "n": "1", "stream": "false"},
+                    files=files,
+                    timeout=300,
+                )
+            finally:
+                for _, (_, handle, _) in files:
+                    handle.close()
+        else:
+            resp = requests.post(
+                f"{base}/images/generations",
+                headers={**self._heyroute_headers(key), "Content-Type": "application/json"},
+                json={"model": model, "prompt": full_prompt, "n": 1, "stream": False},
+                timeout=300,
+            )
+        if not resp.ok:
+            raise RuntimeError(f"HeyRoute image request failed: {resp.status_code} - {resp.text[:300]}")
+
+        item = ((self._heyroute_image_payload(resp) or {}).get("data") or [{}])[0]
+        original_url = item.get("url")
+        if item.get("b64_json"):
+            img_data = base64.b64decode(item["b64_json"])
+        elif original_url:
+            img_data = requests.get(original_url, timeout=60).content
+        else:
+            raise RuntimeError("HeyRoute image response had no image data.")
+
+        local_filename, _ = self._save_image_bytes(img_data, platform)
+        return {
+            "url": f"/static/uploads/{local_filename}",
+            "original_url": original_url,
+            "prompt": full_prompt,
+            "model": f"heyroute/{model}",
+        }
+
+    def _generate_image_primary(
+        self, prompt: str, platform: str, size: str, image_path: str | list[str] | None = None
+    ) -> dict:
+        """The default image provider: HeyRoute when its image key is set
+        (falling back to kie.ai if HeyRoute fails and a kie.ai key exists),
+        kie.ai otherwise -- exactly as before HeyRoute was added."""
+        if Config.HEYROUTE_IMAGE_API_KEY:
+            try:
+                return self._generate_image_heyroute(prompt, platform, size, image_path)
+            except Exception as err:
+                if not Config.KIE_API_KEY:
+                    raise
+                print(f"[Media Service] HeyRoute image failed ({err}); falling back to kie.ai...")
+        return self._generate_image_kie(prompt, platform, size, image_path)
+
+    def _file_to_data_uri(self, path: str) -> str:
+        mime = mimetypes.guess_type(path)[0] or "image/jpeg"
+        with open(path, "rb") as f:
+            return f"data:{mime};base64," + base64.b64encode(f.read()).decode()
+
+    def _heyroute_video_task(self, key: str, body: dict) -> bytes:
+        """Create a HeyRoute video task, poll it to completion and return the
+        MP4 bytes. Raises on failure or timeout (never resubmits: every
+        submission is billed separately)."""
+        base = Config.HEYROUTE_BASE_URL
+        headers = self._heyroute_headers(key)
+        created = requests.post(f"{base}/videos", headers={**headers, "Content-Type": "application/json"},
+                                json=body, timeout=60)
+        if not created.ok:
+            raise RuntimeError(f"HeyRoute video create failed ({body.get('model')}): "
+                               f"{created.status_code} - {created.text[:300]}")
+        task_id = (created.json() or {}).get("task_id") or (created.json() or {}).get("id")
+        if not task_id:
+            raise RuntimeError(f"HeyRoute video create returned no task id: {created.text[:300]}")
+
+        deadline = time.time() + Config.HEYROUTE_VIDEO_TIMEOUT
+        while time.time() < deadline:
+            time.sleep(10)
+            task = requests.get(f"{base}/videos/{task_id}", headers=headers, timeout=60).json() or {}
+            status = task.get("status")
+            if status == "completed":
+                video = requests.get(f"{base}/videos/{task_id}/content", headers=headers, timeout=600)
+                video.raise_for_status()
+                return video.content
+            if status == "failed":
+                raise RuntimeError(f"HeyRoute video failed ({body.get('model')}): "
+                                   f"{(task.get('error') or {}).get('message', 'task failed')}")
+        raise RuntimeError(f"HeyRoute video timed out after {Config.HEYROUTE_VIDEO_TIMEOUT}s (task {task_id}).")
+
+    @staticmethod
+    def _heyroute_takes_reference(model: str) -> bool:
+        """grok-imagine-video* accept a first-frame image, ratio and resolution;
+        grok-video accepts none of them (HeyRoute: forwarded but unverified)."""
+        return model.startswith("grok-imagine")
+
+    def _heyroute_video_body(self, model: str, prompt: str, platform: str, image_path: str | None) -> dict:
+        seconds = max(1, min(15, int(Config.HEYROUTE_VIDEO_SECONDS)))
+        if not self._heyroute_takes_reference(model):
+            # grok-video: only 6 / 10 / 15 seconds (anything else is a 400),
+            # and ratio / resolution / reference images are not supported.
+            return {"model": model, "prompt": prompt,
+                    "seconds": str(min((6, 10, 15), key=lambda s: abs(s - seconds)))}
+        body = {
+            "model": model,
+            "prompt": prompt,
+            "seconds": str(seconds),
+            "ratio": self._HEYROUTE_VIDEO_RATIOS.get(platform, "16:9"),
+            "resolution": Config.HEYROUTE_VIDEO_RESOLUTION,
+        }
+        resolved = self._resolve_image_path(image_path)
+        if resolved and os.path.exists(resolved):
+            body["input_reference"] = self._file_to_data_uri(resolved)
+        return body
+
+    def _generate_video_heyroute(self, prompt: str, platform: str, image_path: str | None = None) -> dict:
+        """HEYROUTE_VIDEO_MODEL (grok-video by default), then
+        HEYROUTE_VIDEO_FALLBACK_MODEL if one is set. Same return shape as
+        _generate_google_gemini_video. Raises if every attempt fails."""
+        key = Config.HEYROUTE_VIDEO_API_KEY
+        if not key:
+            raise RuntimeError("HEYROUTE_VIDEO_API_KEY is not configured.")
+
+        models = [m for m in (Config.HEYROUTE_VIDEO_MODEL, Config.HEYROUTE_VIDEO_FALLBACK_MODEL) if m]
+        # grok-imagine generates its own audio; grok-video is treated as silent
+        # so the existing narration step runs.
+        attempts = [
+            (self._heyroute_video_body(m, prompt, platform, image_path), self._heyroute_takes_reference(m))
+            for m in models
+        ]
+
+        last_error = None
+        for body, native_audio in attempts:
+            try:
+                print(f"[Media Service] Generating video via HeyRoute {body['model']}...")
+                content = self._heyroute_video_task(key, body)
+                filename = f"heyroute_video_{uuid.uuid4().hex[:8]}.mp4"
+                with open(os.path.join(self.upload_folder, filename), "wb") as f:
+                    f.write(content)
+                return {
+                    "success": True,
+                    "url": f"/static/uploads/{filename}",
+                    "prompt": prompt,
+                    "model": body["model"],
+                    "provider": f"HeyRoute ({body['model']})",
+                    "duration": int(body["seconds"]),
+                    "has_native_audio": native_audio,
+                    "audio_mode": "single_pass_native" if native_audio else "none",
+                }
+            except Exception as err:
+                last_error = err
+                print(f"[Media Service] HeyRoute {body['model']} failed: {err}")
+        raise RuntimeError(f"HeyRoute video generation failed: {last_error}")
+
     def _generate_image_kie(
         self, prompt: str, platform: str, size: str, image_path: str | list[str] | None = None
     ) -> dict:
@@ -1083,7 +1295,8 @@ class MediaGenerationService:
             elif ai_model == "openrouter":
                 result = self._generate_image_openrouter(prompt, platform, size, single_reference)
             elif ai_model == "kie":
-                result = self._generate_image_kie(prompt, platform, size, resolved_references)
+                # The default: HeyRoute when configured, kie.ai otherwise
+                result = self._generate_image_primary(prompt, platform, size, resolved_references)
             else:
                 # Default to pollinations
                 result = self._generate_pollinations_image(prompt, platform, size)
@@ -1145,7 +1358,7 @@ class MediaGenerationService:
 
         size = self.IMAGE_SIZES.get(platform, "1024x1024")
         try:
-            result = self._generate_image_kie(
+            result = self._generate_image_primary(
                 _with_no_logo_rule(prompt), platform, size, self._resolve_image_paths(image_path)
             )
         except Exception as e:
@@ -1210,7 +1423,7 @@ class MediaGenerationService:
             slide_prompt = " ".join(prompt_parts)[:2000]
 
             try:
-                result = self._generate_image_kie(slide_prompt, platform, "1792x1024", reference_image_path)
+                result = self._generate_image_primary(slide_prompt, platform, "1792x1024", reference_image_path)
                 result["success"] = True
                 result["slide_number"] = slide_num
                 result["slide_title"] = slide_title
@@ -1289,13 +1502,15 @@ class MediaGenerationService:
 
         client = genai.Client(api_key=google_key)
         aspect_ratio = "9:16" if platform == "instagram" else "16:9"
+        # Veo accepts only 4 / 6 / 8 seconds -- snap the configured value to one.
+        veo_seconds = min((4, 6, 8), key=lambda s: abs(s - int(getattr(Config, "GEMINI_VIDEO_DURATION", 8))))
 
         gen_kwargs = {
             "model": model_name,
             "prompt": prompt[:512],
             "config": types.GenerateVideosConfig(  # pylint: disable=no-member
                 aspect_ratio=aspect_ratio,
-                duration_seconds=5,
+                duration_seconds=veo_seconds,
                 number_of_videos=1,
                 generate_audio=getattr(Config, "GENERATE_NATIVE_AUDIO", True),
             ),
@@ -1323,7 +1538,7 @@ class MediaGenerationService:
                 native_audio_requested = False
                 gen_kwargs["config"] = types.GenerateVideosConfig(  # pylint: disable=no-member
                     aspect_ratio=aspect_ratio,
-                    duration_seconds=5,
+                    duration_seconds=veo_seconds,
                     number_of_videos=1,
                 )
                 operation = client.models.generate_videos(**gen_kwargs)  # pylint: disable=no-member
@@ -1426,10 +1641,25 @@ class MediaGenerationService:
             print("[Media Service] USE_MOCK_LLM is enabled. Generating mock video asset...")
             return self._generate_mock_media(platform, "video", caption)
 
-        resolved_image = self._resolve_image_path(image_path)
+        # Video is generated ONLY through HeyRoute (HEYROUTE_VIDEO_API_KEY,
+        # HEYROUTE_VIDEO_MODEL = grok-video by default). No other video provider
+        # (Gemini / Veo, Bedrock) is tried: when HeyRoute fails, the request
+        # fails with HeyRoute's own error.
+        if not Config.HEYROUTE_VIDEO_API_KEY:
+            return {
+                "success": False,
+                "type": "video",
+                "platform": platform,
+                "error": "Video generation needs HEYROUTE_VIDEO_API_KEY in .env (HeyRoute is the only video provider).",
+            }
 
-        # Auto-generate a visual keyframe image if no reference image was provided
-        if not resolved_image:
+        video_models = [m for m in (Config.HEYROUTE_VIDEO_MODEL, Config.HEYROUTE_VIDEO_FALLBACK_MODEL) if m]
+        # A keyframe image only helps a model that takes one (grok-imagine);
+        # grok-video ignores reference images, so for it none is generated or
+        # billed.
+        takes_reference = any(self._heyroute_takes_reference(m) for m in video_models)
+        resolved_image = self._resolve_image_path(image_path) if takes_reference else None
+        if takes_reference and not resolved_image:
             print("[Media Service] No user image uploaded for video. Auto-generating keyframe image...")
             keyframe_res = self.generate_image(caption, platform, tone)
             if keyframe_res.get("success") and keyframe_res.get("url"):
@@ -1439,44 +1669,10 @@ class MediaGenerationService:
 
         try:
             try:
-                # Check if Gemini / Google API key is set or media provider is gemini
-                if (
-                    Config.MEDIA_PROVIDER == "gemini"
-                    or os.getenv("MEDIA_PROVIDER") == "gemini"
-                    or Config.GOOGLE_API_KEY
-                    or os.getenv("GOOGLE_API_KEY")
-                ):
-                    print("[Media Service] Attempting video generation via Google Gemini / Veo...")
-                    result = self._generate_google_gemini_video(prompt, platform, image_path=resolved_image)
-                else:
-                    result = self._generate_video_bedrock(prompt, platform, image_path=resolved_image)
-            except Exception as primary_err:
-                err_msg = str(primary_err)
-                print(f"[Media Service] Primary video generation failed: {err_msg}")
-                # Fallback to Bedrock if Gemini failed but Bedrock client is available
-                if (Config.GOOGLE_API_KEY or os.getenv("GOOGLE_API_KEY")) and self.bedrock_client:
-                    print("[Media Service] Falling back to AWS Bedrock Nova Reel...")
-                    try:
-                        result = self._generate_video_bedrock(prompt, platform, image_path=resolved_image)
-                    except Exception as fallback_err:
-                        fallback_msg = str(fallback_err)
-                        print(f"[Media Service] Bedrock video generation fallback failed: {fallback_msg}")
-                        raise fallback_err
-                elif (
-                    "Access denied" in err_msg or "ResourceNotFoundException" in err_msg or "legacy" in err_msg.lower()
-                ):
-                    return {
-                        "success": False,
-                        "type": "video",
-                        "platform": platform,
-                        "error": (
-                            "AWS Bedrock model access denied or model is legacy. "
-                            "Please open your AWS Bedrock Console, navigate to 'Model access' in the left menu, "
-                            "and request access for Amazon Nova Reel (for videos)."
-                        ),
-                    }
-                else:
-                    raise primary_err
+                result = self._generate_video_heyroute(prompt, platform, image_path=resolved_image)
+            except Exception as heyroute_err:
+                print(f"[Media Service] {heyroute_err}")
+                return {"success": False, "type": "video", "platform": platform, "error": str(heyroute_err)}
 
             # --- Single-Pass Native Video + Audio Optimization ---
             if result.get("url") and result.get("has_native_audio"):
@@ -1642,11 +1838,11 @@ class MediaGenerationService:
                 "platform": platform,
                 "url": result["url"],
                 "prompt": result["prompt"],
-                "duration": result["duration"],
+                "duration": result.get("duration"),
                 "resolution": "1080x1420",
                 "model": result["model"],
                 "cost": result.get("cost"),
-                "provider": self.media_provider,
+                "provider": result.get("provider") or self.media_provider,
                 # resolved_image can legitimately be None here (no reference image was provided
                 # or auto-keyframe generation failed) -- video generation still proceeds without
                 # one, so this field is omitted rather than crashing on None.replace().

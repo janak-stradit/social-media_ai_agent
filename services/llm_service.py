@@ -77,9 +77,23 @@ class LLMService:
 
         self.providers = []
 
-        # OpenRouter is tried first when configured (currently a free model), so
-        # it's the effective default; Bedrock/OpenAI/Gemini remain as automatic
-        # failover if it errors or rate-limits.
+        # HeyRoute's gpt-5.6-terra is tried first when its key is set; every
+        # provider below stays as automatic failover. A reasoning model: see
+        # _chat_kwargs for how its request differs.
+        heyroute_key = getattr(Config, "HEYROUTE_API_KEY", None)
+        if heyroute_key:
+            self.providers.append(
+                {
+                    "name": "heyroute",
+                    "client": openai.OpenAI(api_key=heyroute_key, base_url=Config.HEYROUTE_BASE_URL),
+                    "model": Config.HEYROUTE_LLM_MODEL,
+                    "reasoning": True,
+                }
+            )
+
+        # OpenRouter is tried next when configured (currently a free model);
+        # Bedrock/OpenAI/Gemini remain as automatic failover if it errors or
+        # rate-limits.
         if self.openrouter_key:
             self.providers.append(
                 {
@@ -202,6 +216,45 @@ class LLMService:
         else:
             return "VortexSocial AI Studio is ready! Generate, schedule, and publish high-converting social content across Facebook, Instagram, and LinkedIn."
 
+    # Reasoning models spend part of their completion budget thinking before
+    # they answer; a budget sized for a plain model (e.g. 700 tokens for an
+    # image prompt) can be used up entirely by reasoning, leaving an empty
+    # answer. Billing is per token actually used, so headroom costs nothing.
+    _REASONING_MIN_COMPLETION_TOKENS = 4096
+
+    def _chat_kwargs(self, provider, system_prompt, user_prompt, temperature, max_tokens):
+        """Chat-completions arguments for an OpenAI-compatible provider. A
+        reasoning model (HeyRoute gpt-5.6-terra) takes max_completion_tokens and
+        reasoning_effort, and only its default temperature -- the gpt-5 family
+        rejects any other value -- so temperature is left out for it."""
+        kwargs = {
+            "model": provider["model"],
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        if provider.get("reasoning"):
+            kwargs["max_completion_tokens"] = max(int(max_tokens or 0) * 4, self._REASONING_MIN_COMPLETION_TOKENS)
+            effort = getattr(Config, "HEYROUTE_REASONING_EFFORT", None)
+            if effort:
+                kwargs["reasoning_effort"] = effort
+        else:
+            kwargs["temperature"] = temperature
+            kwargs["max_tokens"] = max_tokens
+        return kwargs
+
+    def _first_choice_text(self, response, provider_name):
+        """Text of the first completion choice. A gateway (OpenRouter, HeyRoute)
+        can answer HTTP 200 with an error body instead of choices (rate limit,
+        upstream model down), which surfaced as the opaque "'NoneType' object
+        is not subscriptable" - raise the provider's actual error instead so the
+        retry/fallback log says why."""
+        if not getattr(response, "choices", None):
+            error = getattr(response, "error", None) or (getattr(response, "model_extra", None) or {}).get("error")
+            raise Exception(f"{provider_name} returned no choices: {error or 'empty response'}")
+        return response.choices[0].message.content or ""
+
     def _calculate_cost(self, provider_name, model_name, in_tokens, out_tokens):
         """Calculate estimated cost USD based on provider and model rates"""
         if provider_name == "mock":
@@ -284,15 +337,9 @@ class LLMService:
                         usage_metrics = self._calculate_cost("bedrock", provider["model"], in_t, out_t)
                     else:
                         response = provider["client"].chat.completions.create(
-                            model=provider["model"],
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_prompt},
-                            ],
-                            temperature=temperature,
-                            max_tokens=max_tokens,
+                            **self._chat_kwargs(provider, system_prompt, user_prompt, temperature, max_tokens)
                         )
-                        text_out = response.choices[0].message.content
+                        text_out = self._first_choice_text(response, provider["name"])
 
                         usage_raw = getattr(response, "usage", None)
                         in_t = (
@@ -418,18 +465,10 @@ class LLMService:
                         content = self._generate_mock_response(system_prompt, user_prompt)
                         usage_metrics = self._calculate_cost("mock", "mock-llm-v1", 0, 0)
                     else:
-                        kwargs = {
-                            "model": provider["model"],
-                            "messages": [
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_prompt},
-                            ],
-                            "temperature": temperature,
-                            "max_tokens": max_tokens,
-                        }
+                        kwargs = self._chat_kwargs(provider, system_prompt, user_prompt, temperature, max_tokens)
                         kwargs["response_format"] = {"type": "json_object"}
                         response = provider["client"].chat.completions.create(**kwargs)
-                        content = response.choices[0].message.content
+                        content = self._first_choice_text(response, provider["name"])
 
                         usage_raw = getattr(response, "usage", None)
                         in_t = (

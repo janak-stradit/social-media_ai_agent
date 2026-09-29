@@ -28,6 +28,31 @@ class Config:
     Z_AI_BASE_URL = os.getenv("Z_AI_BASE_URL", "https://api.z.ai/api/paas/v4/")
     KIE_API_KEY = os.getenv("KIE_API_KEY")
 
+    # HeyRoute (https://heyroute.ai) - OpenAI-compatible gateway. A HeyRoute
+    # key can only call the models of the group it was created in, so each
+    # purpose has its own key: SMAI (reasoning, codex-plus group), SMAI-Image
+    # (gemini group) and SMAI-Video (grok group). Each is used only when set;
+    # otherwise the existing providers (kie.ai, OpenRouter, Gemini, Bedrock)
+    # are used exactly as before.
+    HEYROUTE_BASE_URL = os.getenv("HEYROUTE_BASE_URL", "https://heyroute.ai/v1").rstrip("/")
+    HEYROUTE_API_KEY = os.getenv("HEYROUTE_API_KEY")  # reasoning / text (SMAI)
+    HEYROUTE_IMAGE_API_KEY = os.getenv("HEYROUTE_IMAGE_API_KEY")  # SMAI-Image
+    HEYROUTE_VIDEO_API_KEY = os.getenv("HEYROUTE_VIDEO_API_KEY")  # SMAI-Video
+    HEYROUTE_LLM_MODEL = os.getenv("HEYROUTE_LLM_MODEL", "gpt-5.6-terra")
+    # none / minimal / low / medium / high - "low" keeps agent calls fast; the
+    # model still reasons before answering.
+    HEYROUTE_REASONING_EFFORT = os.getenv("HEYROUTE_REASONING_EFFORT", "low")
+    HEYROUTE_IMAGE_MODEL = os.getenv("HEYROUTE_IMAGE_MODEL", "gemini-3.1-flash-image")
+    # Video is generated ONLY through HeyRoute (HEYROUTE_VIDEO_API_KEY) - no
+    # other video provider is tried. grok-video: text-to-video, 6/10/15 s only,
+    # no reference image. Optionally a second HeyRoute model to try if the
+    # first fails (e.g. grok-imagine-video-1.5); empty = none.
+    HEYROUTE_VIDEO_MODEL = os.getenv("HEYROUTE_VIDEO_MODEL", "grok-video")
+    HEYROUTE_VIDEO_FALLBACK_MODEL = os.getenv("HEYROUTE_VIDEO_FALLBACK_MODEL", "")
+    HEYROUTE_VIDEO_RESOLUTION = os.getenv("HEYROUTE_VIDEO_RESOLUTION", "720p")
+    HEYROUTE_VIDEO_SECONDS = int(os.getenv("HEYROUTE_VIDEO_SECONDS", "8"))
+    HEYROUTE_VIDEO_TIMEOUT = int(os.getenv("HEYROUTE_VIDEO_TIMEOUT", "900"))
+
     # SMTP - approval-notification emails
     SMTP_HOST = os.getenv("SMTP_HOST")
     SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
@@ -44,6 +69,9 @@ class Config:
 
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
     GEMINI_VIDEO_MODEL = os.getenv("GEMINI_VIDEO_MODEL", "veo-3.1-generate-preview")
+    # Veo 3.1 accepts only 4, 6 or 8 seconds (8 when a reference image is
+    # given); any other value is rejected, e.g. the 5 previously hard-coded.
+    GEMINI_VIDEO_DURATION = int(os.getenv("GEMINI_VIDEO_DURATION", "8"))
     GENERATE_NATIVE_AUDIO = os.getenv("GENERATE_NATIVE_AUDIO", "true").lower() == "true"
 
     # Mock LLM Mode toggle (true/false)
