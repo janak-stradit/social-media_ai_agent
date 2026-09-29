@@ -190,7 +190,8 @@ $(document).ready(function () {
     // Loads previously-scraped posts already saved in the DB (no external scan).
     // onComplete (optional) fires once the feed has been rendered, so callers
     // like useSuggestedCollection() can act on the resulting checkboxes.
-    window.loadStoredPosts = function (onComplete) {
+    // days (optional) overrides the server's default lookback window; 0 = no cutoff.
+    window.loadStoredPosts = function (onComplete, days) {
         const platform = $('#dashboardPlatformSelect').val();
         if (!platform) return;
         const competitor = $('#dashboardCompetitorSelect').val();
@@ -201,6 +202,9 @@ $(document).ready(function () {
         let url = '/api/competitor-posts-db?platform=' + encodeURIComponent(platform);
         if (competitor && competitor !== 'all') {
             url += '&competitor=' + encodeURIComponent(competitor);
+        }
+        if (days !== undefined) {
+            url += '&days=' + encodeURIComponent(days);
         }
 
         $.ajax({
@@ -578,13 +582,22 @@ $(document).ready(function () {
         $('#dashboardPlatformSelect').val('all');
         $('#dashboardCompetitorSelect').val('all');
 
+        // Load without the default 15-day cutoff - a saved storyline can
+        // reference posts that have since aged out of the normal feed window.
         window.loadStoredPosts(function () {
+            let matched = 0;
             $('.comp-master-checkbox').each(function () {
-                $(this).prop('checked', targetUrls.has($(this).data('post-url')));
+                const hit = targetUrls.has($(this).attr('data-post-url'));
+                $(this).prop('checked', hit);
+                if (hit) matched++;
             });
             updateSelection();
-            showToast(`Selected ${collection.post_count} posts from "${collection.label}".`, 'success');
-        });
+            if (matched === 0) {
+                showToast(`None of the posts from "${collection.label}" are available any more.`, 'warning');
+                return;
+            }
+            showToast(`Selected ${matched} posts from "${collection.label}".`, 'success');
+        }, 0);
     };
 
     // #centerFeedPanel uses Bootstrap's auto-layout column (col-xl/col-lg with no

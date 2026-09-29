@@ -93,6 +93,14 @@ class User(Base):
     password_reset_token_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     password_reset_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
+    # Website brand-analysis scan state (services/brand_profile_service.py).
+    # Kept on the user rather than UserBrandProfile because a first scan has
+    # no profile row yet. status: running / ready / failed; error is a
+    # website_scraper_service.FAILURE_REASONS code (or "analysis_failed").
+    brand_scan_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    brand_scan_error: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    brand_scan_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
 
 class SalesContactRequest(Base):
     """An Enterprise-tier signup's "Contact Sales" submission - see
@@ -140,6 +148,24 @@ class UserBrandProfile(Base):
     visual_style: Mapped[str | None] = mapped_column(Text, nullable=True)
     fonts: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of font-family names
     logo_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # Facts read straight off the site (website_scraper_service) - inputs to
+    # the industry/region compliance layer. All JSON.
+    schema_types: Mapped[str | None] = mapped_column(Text, nullable=True)  # schema.org @types the site declares
+    social_links: Mapped[str | None] = mapped_column(Text, nullable=True)  # {platform: url}
+    legal_pages: Mapped[str | None] = mapped_column(Text, nullable=True)  # [{type, url}]
+    region_signals: Mapped[str | None] = mapped_column(Text, nullable=True)  # evidence dict
+    regions_detected: Mapped[str | None] = mapped_column(Text, nullable=True)  # ["US", "UAE/GCC", "India"] subset
+    site_disclaimers: Mapped[str | None] = mapped_column(Text, nullable=True)  # verbatim sentences
+    certifications: Mapped[str | None] = mapped_column(Text, nullable=True)  # e.g. ["ISO 27001", "SOC 2"]
+    # Compliance profile (services/compliance_rules.py). industry_category and
+    # compliance_regions are what rules are selected by: the detected values
+    # until the user confirms them, then the user's choice - a re-scan updates
+    # industry_category_detected but never overwrites a confirmed choice.
+    industry_category: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    industry_category_detected: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    compliance_regions: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list, subset of REGIONS
+    compliance_excluded_rules: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of rule ids
+    compliance_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     analyzed_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
@@ -354,6 +380,10 @@ class ApprovalRequest(Base):
     comments: Mapped[str | None] = mapped_column(Text, nullable=True)
     decided_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Compliance review of the caption at request time (services/compliance_service.py) -
+    # JSON {rules_checked, flags, disclaimers_added, needs_attention, suggested_caption}; null
+    # when the requester has no compliance profile.
+    compliance: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
@@ -428,6 +458,9 @@ def init_db():
             f"ALTER TABLE {usr_tbl} ADD COLUMN is_active BOOLEAN DEFAULT TRUE",
             f"ALTER TABLE {usr_tbl} ADD COLUMN password_reset_token_hash VARCHAR(64)",
             f"ALTER TABLE {usr_tbl} ADD COLUMN password_reset_sent_at TIMESTAMP",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN brand_scan_status VARCHAR(16)",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN brand_scan_error VARCHAR(32)",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN brand_scan_updated_at TIMESTAMP",
         ]:
             try:
                 with engine.begin() as sub_conn:
@@ -436,6 +469,7 @@ def init_db():
                 pass
 
         profile_tbl = f'"{SCHEMA}".user_brand_profiles' if not IS_SQLITE else "user_brand_profiles"
+        approval_tbl = f'"{SCHEMA}".approval_requests' if not IS_SQLITE else "approval_requests"
         for alter_cmd in [
             f"ALTER TABLE {profile_tbl} ADD COLUMN company_name VARCHAR(255)",
             f"ALTER TABLE {profile_tbl} ADD COLUMN suggested_post_ideas TEXT",
@@ -444,6 +478,19 @@ def init_db():
             f"ALTER TABLE {profile_tbl} ADD COLUMN fonts TEXT",
             f"ALTER TABLE {profile_tbl} ADD COLUMN logo_url VARCHAR(1000)",
             f"ALTER TABLE {profile_tbl} ADD COLUMN core_products TEXT",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN schema_types TEXT",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN social_links TEXT",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN legal_pages TEXT",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN region_signals TEXT",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN regions_detected TEXT",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN site_disclaimers TEXT",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN certifications TEXT",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN industry_category VARCHAR(64)",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN industry_category_detected VARCHAR(64)",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN compliance_regions TEXT",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN compliance_excluded_rules TEXT",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN compliance_confirmed_at TIMESTAMP",
+            f"ALTER TABLE {approval_tbl} ADD COLUMN compliance TEXT",
         ]:
             try:
                 with engine.begin() as sub_conn:
@@ -763,9 +810,13 @@ def save_user_brand_profile(
     fonts: list | None = None,
     logo_url: str | None = None,
     core_products: list | None = None,
+    website_signals: dict | None = None,
+    industry_category_detected: str | None = None,
 ) -> dict:
     """Upsert - see agents/website_analysis_agent.py for how these fields are
-    derived. One row per user (unique on user_id)."""
+    derived. One row per user (unique on user_id). website_signals holds the
+    facts read off the site (see _WEBSITE_SIGNAL_FIELDS) - omitted for a
+    manual-description analysis, which then leaves them empty."""
     with Session(engine) as session:
         row = session.query(UserBrandProfile).filter(UserBrandProfile.user_id == user_id).first()
         if row is None:
@@ -787,10 +838,30 @@ def save_user_brand_profile(
         row.visual_style = visual_style
         row.fonts = json.dumps(fonts or [])
         row.logo_url = logo_url
+        signals = website_signals or {}
+        for field, empty in _WEBSITE_SIGNAL_FIELDS.items():
+            setattr(row, field, json.dumps(signals.get(field) or empty))
+        row.industry_category_detected = industry_category_detected
+        if row.compliance_confirmed_at is None:
+            # Not confirmed by the user yet - follow the latest detection
+            row.industry_category = industry_category_detected
+            row.compliance_regions = json.dumps(signals.get("regions_detected") or [])
         row.analyzed_at = _utcnow()
         session.commit()
         session.refresh(row)
         return {"id": row.id, "user_id": row.user_id, "website": row.website}
+
+
+# UserBrandProfile JSON columns holding facts read off the website -> empty value
+_WEBSITE_SIGNAL_FIELDS = {
+    "schema_types": [],
+    "social_links": {},
+    "legal_pages": [],
+    "region_signals": {},
+    "regions_detected": [],
+    "site_disclaimers": [],
+    "certifications": [],
+}
 
 
 _BRAND_PROFILE_TEXT_FIELDS = {
@@ -829,6 +900,56 @@ def update_user_brand_profile_fields(user_id: int, **fields) -> dict | None:
         return {"id": row.id, "user_id": row.user_id}
 
 
+def set_brand_post_ideas(user_id: int, ideas: list[dict]) -> None:
+    """Replaces the "Start from an idea" pool (newest first) - see
+    brand_profile_service.generate_post_ideas."""
+    with Session(engine) as session:
+        row = session.query(UserBrandProfile).filter(UserBrandProfile.user_id == user_id).first()
+        if row is not None:
+            row.suggested_post_ideas = json.dumps(ideas)
+            session.commit()
+
+
+def update_compliance_profile(
+    user_id: int, industry_category: str, regions: list[str], excluded_rule_ids: list[str]
+) -> bool:
+    """The user's confirmed compliance settings (see services/compliance_rules.py).
+    Returns False if the user has no brand profile yet."""
+    with Session(engine) as session:
+        row = session.query(UserBrandProfile).filter(UserBrandProfile.user_id == user_id).first()
+        if row is None:
+            return False
+        row.industry_category = industry_category
+        row.compliance_regions = json.dumps(regions)
+        row.compliance_excluded_rules = json.dumps(excluded_rule_ids)
+        row.compliance_confirmed_at = _utcnow()
+        session.commit()
+        return True
+
+
+def set_brand_scan_status(user_id: int, status: str, error: str | None = None) -> None:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if user is None:
+            return
+        user.brand_scan_status = status
+        user.brand_scan_error = error
+        user.brand_scan_updated_at = _utcnow()
+        session.commit()
+
+
+def get_brand_scan_status(user_id: int) -> dict:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if user is None:
+            return {"status": None, "error": None, "updated_at": None}
+        return {
+            "status": user.brand_scan_status,
+            "error": user.brand_scan_error,
+            "updated_at": user.brand_scan_updated_at.strftime("%Y-%m-%d %H:%M:%S") if user.brand_scan_updated_at else None,
+        }
+
+
 def get_user_brand_profile(user_id: int) -> dict | None:
     with Session(engine) as session:
         row = session.query(UserBrandProfile).filter(UserBrandProfile.user_id == user_id).first()
@@ -850,6 +971,17 @@ def get_user_brand_profile(user_id: int) -> dict | None:
             "visual_style": row.visual_style,
             "fonts": json.loads(row.fonts) if row.fonts else [],
             "logo_url": row.logo_url,
+            **{
+                field: json.loads(getattr(row, field)) if getattr(row, field, None) else empty
+                for field, empty in _WEBSITE_SIGNAL_FIELDS.items()
+            },
+            "industry_category": row.industry_category,
+            "industry_category_detected": row.industry_category_detected,
+            "compliance_regions": json.loads(row.compliance_regions) if row.compliance_regions else [],
+            "compliance_excluded_rules": json.loads(row.compliance_excluded_rules) if row.compliance_excluded_rules else [],
+            "compliance_confirmed_at": (
+                row.compliance_confirmed_at.strftime("%Y-%m-%d %H:%M:%S") if row.compliance_confirmed_at else None
+            ),
             "analyzed_at": row.analyzed_at.strftime("%Y-%m-%d %H:%M:%S"),
         }
 
@@ -1861,6 +1993,7 @@ def _approval_request_to_dict(r: "ApprovalRequest") -> dict:
         "comments": r.comments,
         "decided_by": r.decided_by,
         "decided_at": r.decided_at.isoformat() if r.decided_at else None,
+        "compliance": json.loads(r.compliance) if getattr(r, "compliance", None) else None,
         "created_at": r.created_at.isoformat() if r.created_at else None,
     }
 
@@ -1874,6 +2007,7 @@ def create_approval_request(
     story_context: str | None = None,
     competitors: list[str] | None = None,
     image_urls: list[str] | None = None,
+    compliance: dict | None = None,
 ) -> dict:
     """Creates a new pending approval request for a pipeline's generated
     content, superseding any earlier pending request for the same pipeline
@@ -1893,6 +2027,7 @@ def create_approval_request(
             story_context=story_context,
             competitors=", ".join(competitors or []),
             image_urls=json.dumps(image_urls or []),
+            compliance=json.dumps(compliance) if compliance else None,
         )
         session.add(req)
         session.commit()

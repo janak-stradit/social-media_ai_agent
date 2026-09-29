@@ -20,6 +20,8 @@ from agents.strategy_agent import StrategyAgent
 from agents.vision_agent import VisionAgent
 from auth.utils import admin_required_api, get_current_user_id, login_required_api
 from config import Config
+from services.compliance_service import active_rules_for_user, check_caption
+from services.llm_service import LLMService
 from services.memory_service import MemoryService
 from services.scraper_service import ScraperService
 
@@ -99,12 +101,22 @@ def _public_upload_url(filepath: str | None) -> str | None:
     return normalized if normalized.startswith("/") else f"/{normalized}"
 
 
+def _is_logo_asset(path: str) -> bool:
+    """True if path is the dashboard's "logo" brand asset image."""
+    try:
+        asset = get_brand_asset("logo")
+    except Exception:
+        return False
+    return bool(asset and asset.get("filename") and os.path.basename(str(path).split("?")[0]) == asset["filename"])
+
+
 def _persist_generated_media(run_id: int | None, platform: str, media_type: str, result: dict, user_id: int) -> None:
     if not DB_AVAILABLE or not run_id or not result.get("success"):
         return
 
     media_payload = {
         "url": result.get("url"),
+        "clean_url": result.get("clean_url"),
         "prompt": result.get("prompt"),
         "type": result.get("type", media_type),
         "duration": result.get("duration"),
@@ -176,6 +188,7 @@ def allowed_file(filename):
 
 
 # Initialize agents
+refine_llm = LLMService()
 story_agent = StoryAgent()
 vision_agent = VisionAgent()
 caption_agent = CaptionAgent()
@@ -411,6 +424,13 @@ def analyze_story():
                 else:
                     story = f"Focus Company: {target_company}\n\n{story}\n\n{intelligence}".strip()
                     suggested_brief = story
+
+        # A follow-up in an existing Studio Chat thread - research it in the
+        # context of what was already generated, same framing /generate uses,
+        # instead of as a standalone topic.
+        previous_context = data.get("previous_context")
+        if previous_context:
+            story = f"Follow-up Refinement Request: {story}\n\n[PREVIOUS TURN CONTEXT & OUTPUTS]:\n{previous_context}"
 
         user_id = get_current_user_id()
         retrieved_memories = memory_service.retrieve_context(story, user_id=user_id, n_results=2)
@@ -681,6 +701,7 @@ def generate_content():
 
         # Step 6: ReviewerAgent Self-Correction Loop
         quality_evaluations = {}
+        compliance_results: dict[str, dict] = {}
         refinements_count = 0
 
         if generate_text:
@@ -769,6 +790,38 @@ def generate_content():
                 }
             )
 
+            # Step 8: Compliance check against the user's confirmed industry/
+            # market rules (services/compliance_service.py) - fixes what it can
+            # in the caption and flags what needs a human. Skipped (no cost)
+            # for users without a compliance profile.
+            rules = active_rules_for_user(user_id)
+            if rules:
+                flag_total = 0
+                for platform in platforms:
+                    cap = captions.get(platform)
+                    if not cap:
+                        continue
+                    try:
+                        result, c_usage = check_caption(cap.get("primary_caption", ""), platform, rules, refine_llm)
+                    except Exception as c_err:  # never fail a generation over the check
+                        current_app.logger.warning(f"[Compliance] Check failed for {platform}: {c_err}")
+                        continue
+                    total_tokens += c_usage.get("total_tokens", 0)
+                    total_cost_usd += c_usage.get("cost_usd", 0.0)
+                    if result:
+                        cap["primary_caption"] = result.pop("caption")
+                        compliance_results[platform] = result
+                        flag_total += len(result["flags"])
+                agents_executed.append(
+                    {
+                        "agent": "ComplianceAgent",
+                        "name": "Compliance Checker",
+                        "role": f"Checked against {len(rules)} advertising rules for your industry and markets "
+                        f"({flag_total} issue{'s' if flag_total != 1 else ''} found)",
+                        "status": "completed",
+                    }
+                )
+
         # Calculate average overall quality score
         avg_score = round(
             sum(q.get("overall_score", 8.5) for q in quality_evaluations.values()) / max(1, len(quality_evaluations)), 1
@@ -806,7 +859,13 @@ def generate_content():
                 media_prompt_parts.append("Visual elements to include: " + "; ".join(imagery_desc))
             research_notes_list = story_analysis.get("research_notes")
             if research_notes_list:
-                media_prompt_parts.append("Key facts/data to visualize where relevant: " + "; ".join(research_notes_list[:3]))
+                # Conveyed visually, not printed: image models garble dense
+                # small text, and printed stats/citations read as brand claims.
+                media_prompt_parts.append(
+                    "Context to convey visually (do not print these figures or sources as text): "
+                    + "; ".join(research_notes_list[:3])
+                )
+        media_prompt_parts.append(IMAGE_TEXT_RULE)
         media_prompt_suffix = " ".join(media_prompt_parts)
 
         for platform in platforms:
@@ -819,6 +878,7 @@ def generate_content():
                 "strategy": strategies.get(platform, {}) if include_strategy else None,
                 "quality": quality_evaluations.get(platform, {}),
                 "media_prompt": media_prompt,
+                "compliance": compliance_results.get(platform),
             }
 
         # ── Persist to PostgreSQL ──────────────────────────────────────────
@@ -855,6 +915,290 @@ def generate_content():
 
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# ── Studio Chat Refinement ─────────────────────────────────────────────────
+# A follow-up in an existing Studio Chat thread ("fix the spelling in the
+# image", "make the caption shorter") is applied surgically to the post the
+# user is looking at - only the targeted parts change, and an image is edited
+# (previous image as reference) rather than regenerated from scratch. The full
+# 6-agent pipeline only runs again when the follow-up is a genuinely new post.
+
+# Shared on-image text discipline: image models misspell small or dense text,
+# so keep it to one short headline and never print stats or citations.
+IMAGE_TEXT_RULE = (
+    "On-image text: at most one short headline (max 8 words) and one short subline, spelled exactly; "
+    "no statistics, percentages, citations, source names or small print."
+)
+
+REFINE_SYSTEM_PROMPT = """You are the Refinement Editor of a social media content studio.
+The user already has a finished post (caption, hashtags, and possibly an image or video) and is sending a
+follow-up message about it. Apply ONLY what the user asked for, surgically, and leave everything else exactly
+as it is - like a designer iterating with a client, where every new message builds on the current version.
+
+Decide:
+- intent: "refine" when the message changes, fixes, or adds to the existing post - including creating an
+  image or video for it for the first time. "new_content" ONLY when the user clearly wants a different post
+  on a different topic.
+- targets: which parts change - any of "caption", "hashtags", "image", "video". Infer from the message:
+  "fix the spelling in the image" -> image; "make it shorter" / "add a CTA" -> caption; "change the headline"
+  -> caption, plus image if the image shows that headline. If ambiguous, the user's selected output types are a hint.
+
+Rules:
+- Do not touch parts that are not targeted. Only return revised content for targeted parts.
+- Keep brand names, facts and figures exactly as in the existing post. Never invent statistics, sources or citations.
+- image_instruction: a precise, literal instruction for an image-editing model describing only the change,
+  e.g. "Replace all text with the exact text below; keep the layout, colors, truck and people unchanged".
+- on_image_text: the exact text that should appear on the image, correctly spelled - a headline (max 10 words,
+  the caption's opening hook verbatim when it fits) and optionally one subline (max 12 words) taken from the
+  caption. Never put statistics, percentages, research figures or source names (McKinsey, Gartner, ...) in
+  on_image_text, even if the old image had them. When the user reports wrong, garbled or misspelled text,
+  always fill this in, and keep it to headline + at most one subline.
+- video_prompt: a concise visual scene description (no dialogue, no on-screen statistics).
+
+Return ONLY this JSON:
+{"intent": "refine", "targets": ["image"],
+ "captions": {"<platform>": "<full revised caption>"},
+ "hashtags": {"<platform>": ["#Tag"]},
+ "image_instruction": "", "on_image_text": {"headline": "", "subline": ""},
+ "video_prompt": "", "change_summary": "<one short sentence describing what changed>"}"""
+
+
+def _build_image_edit_prompt(plan: dict, platform: str, base_media_prompt: str, has_reference: bool) -> str:
+    """Deterministic image prompt for a refinement turn: the planner's literal
+    instruction plus the exact on-image text, so spelling fixes are explicit
+    (the model is told the correct words) instead of "check the spelling"."""
+    instruction = (plan.get("image_instruction") or "").strip()
+    text = plan.get("on_image_text") or {}
+    headline = (text.get("headline") or "").strip()
+    subline = (text.get("subline") or "").strip()
+    # Backstop for the planner rule: a stat line is exactly the dense, easily
+    # garbled (and unsourced-claim) text this path exists to remove.
+    if "%" in subline:
+        subline = ""
+
+    if has_reference:
+        parts = [
+            "Edit the provided image. Keep the layout, composition, color palette, people, vehicles and "
+            "brand elements exactly as they are, except for the change below.",
+            f"Change to make: {instruction}" if instruction else "",
+        ]
+    else:
+        parts = [
+            f"Create a professional {platform.capitalize()} social media image. {base_media_prompt[:800]}",
+            instruction,
+        ]
+
+    if headline:
+        lines = [f'Headline: "{headline}"'] + ([f'Subline: "{subline}"'] if subline else [])
+        parts.append(
+            "The ONLY text allowed on the image is the following, spelled exactly letter for letter:\n"
+            + "\n".join(lines)
+            + "\nRemove every other word, number, statistic, label and small print. "
+            "Use large, clean, high-contrast sans-serif type."
+        )
+    else:
+        parts.append(IMAGE_TEXT_RULE)
+    return "\n\n".join(p for p in parts if p)
+
+
+@api_bp.route("/refine", methods=["POST"])
+@login_required_api
+def refine_post():
+    """Apply a Studio Chat follow-up to an existing post.
+
+    Body: instruction, platforms, tone, previous_context, selected_outputs,
+    base_run_id, reference_image_path (an image the user attached to this
+    follow-up), and base: {platform: {caption, hashtags, media_prompt,
+    image_url, image_prompt, video_url}}.
+    Returns {"intent": "new_content"} when the follow-up is a different post,
+    so the client runs the normal /generate pipeline instead.
+    """
+    data = request.get_json() or {}
+    instruction = (data.get("instruction") or "").strip()
+    base = data.get("base") or {}
+    platforms = [p for p in (data.get("platforms") or []) if p in base]
+    if not instruction or not platforms:
+        return jsonify({"error": "instruction and an existing post to refine are required"}), 400
+
+    tone = data.get("tone")
+    user_id = get_current_user_id()
+
+    if DB_AVAILABLE and user_id:
+        try:
+            stats = get_user_usage_stats(user_id)
+            if stats.get("remaining_credits", 0.0) <= 0.0:
+                limit_val = stats.get("credit_limit", 10.0)
+                return (
+                    jsonify(
+                        {
+                            "error": f"Credit limit reached (${limit_val:.2f}). Please request a credit extension from admin.",
+                            "credit_limit_exceeded": True,
+                        }
+                    ),
+                    402,
+                )
+        except Exception as _cred_err:
+            current_app.logger.warning(f"[Credits] Check error: {_cred_err}")
+
+    post_lines = []
+    for p in platforms:
+        b = base[p] or {}
+        post_lines.append(
+            f"[{p.upper()}]\nCaption: {b.get('caption') or '(none)'}\n"
+            f"Hashtags: {' '.join(b.get('hashtags') or []) or '(none)'}\n"
+            f"Image: {'exists - generated from: ' + (b.get('image_prompt') or b.get('media_prompt') or '')[:600] if b.get('image_url') else 'none yet'}\n"
+            f"Video: {'exists' if b.get('video_url') else 'none yet'}"
+        )
+    user_prompt = (
+        f"CONVERSATION SO FAR:\n{data.get('previous_context') or '(none)'}\n\n"
+        f"CURRENT POST:\n" + "\n\n".join(post_lines) + "\n\n"
+        f"USER'S SELECTED OUTPUT TYPES: {', '.join(data.get('selected_outputs') or []) or '(none)'}\n\n"
+        f"USER'S FOLLOW-UP MESSAGE: {instruction}"
+    )
+
+    try:
+        plan, usage = refine_llm.generate_json(
+            REFINE_SYSTEM_PROMPT, user_prompt, temperature=0.3, max_tokens=1500, return_usage=True
+        )
+    except Exception as e:
+        return jsonify({"error": f"Refinement failed: {e}"}), 500
+
+    if plan.get("intent") == "new_content":
+        return jsonify({"success": True, "intent": "new_content"})
+
+    targets = {str(t).lower() for t in (plan.get("targets") or [])}
+    # The model echoes platform keys in whatever case it saw them ("LINKEDIN")
+    plan_captions = {str(k).lower(): v for k, v in (plan.get("captions") or {}).items()}
+    plan_hashtags = {str(k).lower(): v for k, v in (plan.get("hashtags") or {}).items()}
+    if not targets:
+        return jsonify({"error": "Could not tell what to change - try naming the caption, hashtags or image."}), 422
+    extra_reference = data.get("reference_image_path")
+    media_errors = []
+    content: dict[str, typing.Any] = {}
+    compliance_rules_active = active_rules_for_user(user_id)
+    extra_tokens, extra_cost = 0, 0.0
+    from services.brand_logo_service import resolve_logo_path
+
+    logo_path = resolve_logo_path(user_id) if targets & {"image", "video"} else None
+
+    for p in platforms:
+        b = base[p] or {}
+        entry: dict[str, typing.Any] = {
+            "caption": {"primary_caption": b.get("caption") or ""},
+            "hashtags": {"hashtags": b.get("hashtags") or []},
+            "media_prompt": b.get("media_prompt") or "",
+            "media": {},
+        }
+        if b.get("image_url"):
+            entry["media"]["image"] = {
+                "url": b["image_url"],
+                "clean_url": b.get("image_clean_url"),
+                "prompt": b.get("image_prompt"),
+            }
+        if b.get("video_url"):
+            entry["media"]["video"] = {"url": b["video_url"]}
+
+        new_caption = plan_captions.get(p)
+        if "caption" in targets and new_caption:
+            entry["caption"] = {"primary_caption": new_caption.strip(), "refined_by_critic": False}
+            # A rewritten caption is re-checked, so an edit can't slip past the rules
+            if compliance_rules_active:
+                try:
+                    result, c_usage = check_caption(new_caption.strip(), p, compliance_rules_active, refine_llm)
+                    extra_tokens += c_usage.get("total_tokens", 0)
+                    extra_cost += c_usage.get("cost_usd", 0.0)
+                    if result:
+                        entry["caption"]["primary_caption"] = result.pop("caption")
+                        entry["compliance"] = result
+                except Exception as c_err:
+                    current_app.logger.warning(f"[Compliance] Refine check failed for {p}: {c_err}")
+        new_tags = plan_hashtags.get(p)
+        if "hashtags" in targets and new_tags:
+            entry["hashtags"] = {"hashtags": new_tags}
+
+        if "image" in targets and MEDIA_AVAILABLE:
+            # Edit the unbranded copy when there is one - the logo is stamped on
+            # again afterwards, so the model never redraws or duplicates it
+            base_image = b.get("image_clean_url") or b.get("image_url")
+            references = [r for r in (base_image, extra_reference) if r]
+            prompt = _build_image_edit_prompt(plan, p, entry["media_prompt"], bool(base_image))
+            result = media_service.edit_image(prompt, p, references or None, logo_path=logo_path)
+            if result.get("success"):
+                entry["media"]["image"] = {
+                    "url": result["url"],
+                    "clean_url": result.get("clean_url"),
+                    "prompt": result.get("prompt"),
+                    "resolution": result.get("size"),
+                    "model": result.get("model"),
+                }
+                entry["media_prompt"] = prompt
+            else:
+                media_errors.append(f"{p} image: {result.get('error')}")
+
+        if "video" in targets and MEDIA_AVAILABLE and plan.get("video_prompt"):
+            image_media = entry["media"].get("image") or {}
+            video_ref = image_media.get("clean_url") or image_media.get("url") or extra_reference
+            result = media_service.generate_video(
+                plan["video_prompt"], p, tone, image_path=video_ref, logo_path=logo_path
+            )
+            if result.get("success"):
+                entry["media"]["video"] = {"url": result["url"], "resolution": result.get("resolution")}
+            else:
+                media_errors.append(f"{p} video: {result.get('error')}")
+
+        content[p] = entry
+
+    usage = {
+        "total_tokens": usage.get("total_tokens", 0) + extra_tokens,
+        "cost_usd": round(usage.get("cost_usd", 0.0) + extra_cost, 6),
+    }
+    agents_executed = [
+        {
+            "name": "Refinement Editor",
+            "agent": "RefineAgent",
+            "role": plan.get("change_summary") or f"Applied the requested change to: {', '.join(sorted(targets))}",
+        }
+    ]
+    if any(entry.get("compliance") for entry in content.values()):
+        agents_executed.append(
+            {
+                "name": "Compliance Checker",
+                "agent": "ComplianceAgent",
+                "role": f"Re-checked the revised caption against {len(compliance_rules_active)} advertising rules",
+            }
+        )
+    run_id = None
+    if DB_AVAILABLE and user_id is not None:
+        try:
+            content_to_save: dict[str, typing.Any] = dict(content)
+            content_to_save["_agents"] = agents_executed
+            content_to_save["_meta"] = {"refined_from_run_id": data.get("base_run_id")}
+            run_id = save_run(
+                story=instruction,
+                tone=tone,
+                platforms=platforms,
+                content=content_to_save,
+                user_id=user_id,
+                tokens_used=usage.get("total_tokens", 0),
+                cost_usd=usage.get("cost_usd", 0.0),
+            )
+        except Exception as db_err:
+            current_app.logger.warning(f"[DB] Could not save refinement run: {db_err}")
+
+    return jsonify(
+        {
+            "success": True,
+            "intent": "refine",
+            "targets": sorted(targets),
+            "change_summary": plan.get("change_summary"),
+            "content": content,
+            "run_id": run_id,
+            "usage": {"total_tokens": usage.get("total_tokens", 0), "cost_usd": usage.get("cost_usd", 0.0)},
+            "agents_executed": agents_executed,
+            "media_errors": media_errors,
+        }
+    )
 
 
 # ── History Endpoints ──────────────────────────────────────────────────────
@@ -1069,10 +1413,19 @@ def generate_media():
     # stays a single string (used for video gen / source_image_url, which only
     # support one reference); image_path is a str or list[str] only where
     # generate_image's kie.ai path can use multiple references.
-    image_paths = [p for p in (data.get("image_paths") or []) if p]
-    image_path = data.get("image_path") or (image_paths[0] if image_paths else None)
+    # The logo is never an AI reference image - the model would redraw it
+    # (wrong spelling/colors); the real file is stamped on afterwards instead
+    # (brand_logo_service). Drop it from the references here.
+    image_paths = [p for p in (data.get("image_paths") or []) if p and not _is_logo_asset(p)]
+    image_path = data.get("image_path")
+    if image_path and _is_logo_asset(image_path):
+        image_path = None
+    image_path = image_path or (image_paths[0] if image_paths else None)
     image_path_for_gen = image_paths if len(image_paths) > 1 else image_path
     user_id = get_current_user_id()
+    from services.brand_logo_service import resolve_logo_path
+
+    logo_path = resolve_logo_path(user_id)
 
     # Credit Limit Check
     if DB_AVAILABLE and user_id:
@@ -1128,7 +1481,9 @@ def generate_media():
         if media_type == "video":
             if video_prompt:
                 caption_to_use = video_prompt
-            result = media_service.generate_video(caption_to_use, platform, tone, image_path=image_path)
+            result = media_service.generate_video(
+                caption_to_use, platform, tone, image_path=image_path, logo_path=logo_path
+            )
         else:
             ai_model = data.get("ai_model", "kie")
             # If the client sent context, use it as tone to guide the style
@@ -1137,7 +1492,7 @@ def generate_media():
             if image_prompt:
                 caption_to_use = image_prompt
             result = media_service.generate_image(
-                caption_to_use, platform, tone, image_path=image_path_for_gen, ai_model=ai_model
+                caption_to_use, platform, tone, image_path=image_path_for_gen, ai_model=ai_model, logo_path=logo_path
             )
 
         if image_path:
@@ -1216,8 +1571,22 @@ def create_approval_request_route():
     is_image = (data.get("asset_type") or "").lower() == "image"
     image_urls = [u for u in (data.get("image_urls") or []) if u] if is_image else []
 
+    # Compliance review for the reviewer (requester's active rules) - the
+    # caption itself is stored as submitted; the fix is only suggested.
+    compliance = None
+    rules = active_rules_for_user(user_id)
+    if rules and data.get("caption"):
+        try:
+            result, _usage = check_caption(data["caption"], data.get("platform") or "", rules, refine_llm)
+            if result:
+                result["suggested_caption"] = result.pop("caption")
+                compliance = result
+        except Exception as c_err:
+            current_app.logger.warning(f"[Compliance] Approval check failed: {c_err}")
+
     try:
         req = create_approval_request(
+            compliance=compliance,
             user_id=user_id,
             pipeline_client_id=pipeline_client_id,
             platform=data.get("platform") or "",
@@ -2259,11 +2628,14 @@ def competitor_posts_db():
     competitor = request.args.get("competitor")
     if not platform:
         return jsonify({"error": "No platform provided"}), 400
+    # Optional lookback override; days=0 disables the cutoff (used when a
+    # Suggested Storyline references posts older than the default window).
+    days = request.args.get("days", default=15, type=int)
 
     try:
         from db import get_competitor_posts
 
-        posts = get_competitor_posts(platform=platform, competitor=competitor)
+        posts = get_competitor_posts(platform=platform, competitor=competitor, days=days)
         return jsonify({"success": True, "posts": posts})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -2576,19 +2948,46 @@ def onboarding_account_type():
 
     complete_user_onboarding(user_id, account_type, website)
 
-    # Best-effort: scrape the homepage and derive a brand profile (industry,
-    # voice, colors) that future Studio Chat generation follows - see
-    # services/brand_profile_service.py::run_brand_analysis. Never blocks
-    # onboarding: a slow/unreachable/bot-blocking site just means no brand
-    # profile gets saved, logged and swallowed.
+    # Scrape the site and derive a brand profile (industry, voice, colors)
+    # that future Studio Chat generation follows - in the background, so
+    # onboarding never waits on it. The onboarding page polls
+    # GET /api/brand-profile/status to show real progress and, on failure,
+    # why (see services/brand_profile_service.py).
+    scan_started = False
     try:
-        from services.brand_profile_service import run_brand_analysis
+        from services.brand_profile_service import start_brand_analysis_async
 
-        run_brand_analysis(user_id, website)
+        scan_started = start_brand_analysis_async(user_id, website)
     except Exception as e:  # noqa: BLE001
-        current_app.logger.warning(f"[onboarding] Website brand analysis failed for {website}: {e}")
+        current_app.logger.warning(f"[onboarding] Could not start brand analysis for {website}: {e}")
 
-    return jsonify({"success": True, "redirect": "/dashboard"})
+    return jsonify({"success": True, "redirect": "/dashboard", "scan_started": scan_started})
+
+
+@api_bp.route("/brand-profile/status", methods=["GET"])
+@login_required_api
+def brand_profile_scan_status():
+    """Website brand-analysis scan state: running / ready / failed (with a
+    user-facing message explaining a failure) - polled by onboarding and the
+    "My Brand Configuration" page."""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({"success": True, "status": None})
+
+    from db import get_brand_scan_status, get_user_brand_profile
+    from services.brand_profile_service import failure_message
+
+    scan = get_brand_scan_status(user_id)
+    return jsonify(
+        {
+            "success": True,
+            "status": scan["status"],
+            "reason": scan["error"],
+            "message": failure_message(scan["error"]) if scan["status"] == "failed" else None,
+            "updated_at": scan["updated_at"],
+            "has_profile": get_user_brand_profile(user_id) is not None,
+        }
+    )
 
 
 @api_bp.route("/brand-profile/quick-prompts", methods=["GET"])
@@ -2608,6 +3007,36 @@ def brand_profile_quick_prompts():
     profile = get_user_brand_profile(user_id)
     ideas = (profile or {}).get("suggested_post_ideas") or []
     return jsonify({"success": True, "post_ideas": ideas, "company_name": (profile or {}).get("company_name")})
+
+
+@api_bp.route("/brand-profile/quick-prompts/generate", methods=["POST"])
+@login_required_api
+def generate_brand_quick_prompts():
+    """Studio Chat's regenerate button: writes genuinely NEW "Start from an
+    idea" cards from the user's whole brand profile (see
+    brand_profile_service.generate_post_ideas) instead of reshuffling the
+    onboarding-time pool. Body: {exclude_titles: [titles currently shown]}."""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({"error": "Database not available"}), 503
+
+    try:
+        stats = get_user_usage_stats(user_id)
+        if stats.get("remaining_credits", 0.0) <= 0.0:
+            return jsonify({"error": "Credit limit reached. Please request a credit extension.", "credit_limit_exceeded": True}), 402
+    except Exception as _cred_err:
+        current_app.logger.warning(f"[Credits] Check error: {_cred_err}")
+
+    from services.brand_profile_service import generate_post_ideas
+
+    data = request.get_json(silent=True) or {}
+    try:
+        ideas, greeting, _usage = generate_post_ideas(user_id, exclude_titles=data.get("exclude_titles") or [])
+    except Exception as e:
+        return jsonify({"error": f"Could not generate new ideas: {e}"}), 500
+    if not ideas:
+        return jsonify({"error": "No brand profile to generate ideas from - analyze your website first."}), 404
+    return jsonify({"success": True, "post_ideas": ideas, "greeting": greeting})
 
 
 @api_bp.route("/brand-profile", methods=["GET"])
@@ -2676,21 +3105,121 @@ def rescan_brand_profile():
 
     data = request.get_json() or {}
     website = (data.get("website") or user.company_website or "").strip()
-    if not website:
+    # The user's own description of their business - the fallback when their
+    # site blocks automated access or has no readable text.
+    manual_text = (data.get("manual_text") or "").strip()
+    if not website and not manual_text:
         return jsonify({"error": "No website on file - enter one to analyze"}), 400
+    if manual_text and len(manual_text) < 80:
+        return jsonify({"error": "Please write at least a few sentences about your business."}), 400
 
     try:
-        from services.brand_profile_service import run_brand_analysis
+        from services.brand_profile_service import failure_message, run_brand_analysis
 
-        ok = run_brand_analysis(user_id, website)
+        ok, reason = run_brand_analysis(user_id, website, manual_text=manual_text or None)
+        if reason == "already_running":
+            return jsonify({"error": "An analysis is already running - it'll appear here when it finishes."}), 409
         if not ok:
-            return jsonify({"error": "Could not fetch or analyze that website. Check the URL and try again."}), 502
+            return jsonify({"error": failure_message(reason), "reason": reason}), 502
 
         from db import get_user_brand_profile
 
         return jsonify({"success": True, "profile": get_user_brand_profile(user_id)})
     except Exception as e:
         return jsonify({"error": str(e), "success": False}), 500
+
+
+COMPLIANCE_NOTICE = (
+    "Compliance guidance only - not legal advice. Rules are summaries of the cited sources and are "
+    "pending legal review; confirm requirements with your counsel before publishing."
+)
+
+
+def _compliance_payload(industry: str | None, regions: list, excluded: list) -> dict:
+    from services.compliance_rules import RULES_VERSION, applicable_rules
+
+    return {"rules": applicable_rules(industry, regions, excluded), "rules_version": RULES_VERSION}
+
+
+@api_bp.route("/compliance-profile", methods=["GET"])
+@login_required_api
+def get_compliance_profile():
+    """The user's compliance settings (industry + markets, detected until
+    they confirm them) and the rules those select - see
+    services/compliance_rules.py. Backs the Compliance card on the
+    "My Brand Configuration" page."""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({"error": "Database not available"}), 503
+
+    from db import get_user_brand_profile
+    from services.compliance_rules import INDUSTRIES, REGIONS, normalize_industry, normalize_regions
+
+    profile = get_user_brand_profile(user_id)
+    if not profile:
+        return jsonify({"error": "No brand profile found - run a website analysis first"}), 404
+
+    industry = normalize_industry(profile.get("industry_category") or profile.get("industry_category_detected"))
+    regions = normalize_regions(profile.get("compliance_regions") or profile.get("regions_detected"))
+    excluded = profile.get("compliance_excluded_rules") or []
+    return jsonify(
+        {
+            "success": True,
+            "industries": [{"key": k, "label": v} for k, v in INDUSTRIES.items()],
+            "regions_available": list(REGIONS),
+            "industry_category": industry,
+            "industry_category_detected": profile.get("industry_category_detected"),
+            "regions": regions,
+            "regions_detected": profile.get("regions_detected") or [],
+            "excluded_rule_ids": excluded,
+            "confirmed_at": profile.get("compliance_confirmed_at"),
+            "notice": COMPLIANCE_NOTICE,
+            **_compliance_payload(industry, regions, excluded),
+        }
+    )
+
+
+@api_bp.route("/compliance-profile/preview", methods=["GET"])
+@login_required_api
+def preview_compliance_rules():
+    """Rules for an industry/markets selection the user hasn't saved yet -
+    live preview as they change the Compliance card's dropdown/checkboxes."""
+    from services.compliance_rules import normalize_industry, normalize_regions
+
+    industry = normalize_industry(request.args.get("industry"))
+    regions = normalize_regions([r for r in (request.args.get("regions") or "").split(",") if r])
+    excluded = [r for r in (request.args.get("excluded") or "").split(",") if r]
+    return jsonify({"success": True, **_compliance_payload(industry, regions, excluded)})
+
+
+@api_bp.route("/compliance-profile", methods=["PUT"])
+@login_required_api
+def update_compliance_settings():
+    """Confirms the user's industry, markets and not-applicable rules - from
+    then on a website re-scan no longer overwrites them."""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({"error": "Database not available"}), 503
+
+    user = get_user_by_id(user_id)
+    if not user or user.account_type not in VALID_SELF_SERVE_ACCOUNT_TYPES:
+        return jsonify({"error": "Brand configuration is only available for Individual/Small/Medium accounts"}), 403
+
+    from db import update_compliance_profile
+    from services.compliance_rules import INDUSTRIES, normalize_regions, rule_by_id
+
+    data = request.get_json() or {}
+    industry = data.get("industry_category")
+    if industry not in INDUSTRIES:
+        return jsonify({"error": "Please choose an industry from the list"}), 400
+    regions = normalize_regions(data.get("regions"))
+    if not regions:
+        return jsonify({"error": "Select at least one market"}), 400
+    excluded = [rid for rid in (data.get("excluded_rule_ids") or []) if rule_by_id(rid)]
+
+    if not update_compliance_profile(user_id, industry, regions, excluded):
+        return jsonify({"error": "No brand profile found - run a website analysis first"}), 404
+    return jsonify({"success": True, **_compliance_payload(industry, regions, excluded)})
 
 
 @api_bp.route("/onboarding/contact-sales", methods=["POST"])

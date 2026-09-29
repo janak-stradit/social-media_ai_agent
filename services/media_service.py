@@ -15,13 +15,29 @@ import openai
 import requests
 
 from config import Config
+from services.brand_logo_service import NO_AI_LOGO_RULE, overlay_logo
 from services.llm_service import LLMService
+
+_PROMPT_LIMIT = 2000  # kie.ai's prompt cap (see _generate_image_kie)
+
+
+def _with_no_logo_rule(prompt: str) -> str:
+    """Every image prompt ends with the no-AI-logo rule (the real logo is
+    stamped on afterwards) - trimmed so the rule itself survives the cap."""
+    if NO_AI_LOGO_RULE in prompt:
+        return prompt
+    return f"{prompt[: _PROMPT_LIMIT - len(NO_AI_LOGO_RULE) - 2]}\n\n{NO_AI_LOGO_RULE}"
 
 
 class MediaGenerationService:
     """Generates social media images and videos via Z.AI, OpenRouter, or OpenAI."""
 
     OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+    IMAGE_SIZES = {
+        "instagram": "1024x1024",
+        "facebook": "1792x1024",
+        "linkedin": "1792x1024",
+    }
 
     def __init__(self):
         self.llm_service = LLMService()
@@ -993,9 +1009,12 @@ class MediaGenerationService:
         tone: str | None = None,
         image_path: str | list[str] | None = None,
         ai_model: str = "kie",
+        logo_path: str | None = None,
     ) -> dict:
         """
-        Generate a social media image.
+        Generate a social media image. The model is told never to draw a
+        logo; when logo_path is given, the real logo is stamped on afterwards
+        (see _stamp_logo) and the result also carries clean_url.
         Returns: { url, local_path, prompt, size, platform }
         """
         if caption and ("CONTENT GENERATION BLOCKED" in caption or "No Strong Match" in caption):
@@ -1010,12 +1029,7 @@ class MediaGenerationService:
             print("[Media Service] USE_MOCK_LLM is enabled. Generating mock image asset...")
             return self._generate_mock_media(platform, "image", caption)
 
-        size_map = {
-            "instagram": "1024x1024",
-            "facebook": "1792x1024",
-            "linkedin": "1792x1024",
-        }
-        size = size_map.get(platform, "1024x1024")
+        size = self.IMAGE_SIZES.get(platform, "1024x1024")
 
         resolved_references = self._resolve_image_paths(image_path)
         has_reference = bool(resolved_references)
@@ -1045,8 +1059,8 @@ class MediaGenerationService:
                     f"Brief: {caption[:200]}. "
                     f"Style: {platform_style}{tone_hint}. "
                     f'Render the bold headline text "{headline}" in large clean sans-serif typography, high contrast against '
-                    f"the background, positioned so it does not cover the subject's face, plus a small 'STRAD IT' wordmark in "
-                    f"one corner as a subtle brand tag. Do not add any other text, captions, or watermarks. "
+                    f"the background, positioned so it does not cover the subject's face. Do not add any other text, "
+                    f"captions, or watermarks. {NO_AI_LOGO_RULE} "
                     f"Premium quality, highly detailed."
                 )
         else:
@@ -1056,6 +1070,7 @@ class MediaGenerationService:
             else:
                 prompt = self._enhance_image_prompt(caption, platform, tone)
 
+        prompt = _with_no_logo_rule(prompt)
         try:
             if ai_model == "google_gemini":
                 result = self._generate_google_gemini_image(prompt, platform, size, single_reference)
@@ -1091,6 +1106,63 @@ class MediaGenerationService:
             "provider": result.get("model", "bedrock"),
             "cost": result.get("cost", 0.03),
             "model": result.get("model", "bedrock"),
+            **self._stamp_logo(result["url"], logo_path),
+        }
+
+    def _stamp_logo(self, url: str, logo_path: str | None) -> dict:
+        """Stamps the real logo onto a generated image (brand_logo_service),
+        keeping an unbranded copy - {"clean_url": ...} - so a follow-up edit
+        works from the clean image instead of redrawing/duplicating the logo.
+        {} when there's no logo or stamping failed (image left as-is)."""
+        if not logo_path or not url:
+            return {}
+        import shutil
+
+        local = os.path.join(self.upload_folder, os.path.basename(url))
+        if not os.path.exists(local):
+            return {}
+        stem, ext = os.path.splitext(os.path.basename(url))
+        clean_name = f"{stem}_clean{ext}"
+        shutil.copyfile(local, os.path.join(self.upload_folder, clean_name))
+        if not overlay_logo(local, logo_path):
+            return {}
+        return {"clean_url": f"/static/uploads/{clean_name}", "logo_applied": True}
+
+    def edit_image(
+        self, prompt: str, platform: str, image_path: str | list[str] | None = None, logo_path: str | None = None
+    ) -> dict:
+        """
+        Surgical follow-up edit of an existing image (Studio Chat refinement).
+        Unlike generate_image(), the prompt is sent verbatim - no headline or
+        "preserve facial features" wrapping - so a precise edit instruction
+        ("replace the headline with exactly ...") isn't diluted. Uses kie.ai's
+        edit model with the previous image as reference; with no usable
+        reference it generates from the prompt instead.
+        Returns the same shape as generate_image().
+        """
+        if getattr(Config, "USE_MOCK_LLM", False):
+            return self._generate_mock_media(platform, "image", prompt)
+
+        size = self.IMAGE_SIZES.get(platform, "1024x1024")
+        try:
+            result = self._generate_image_kie(
+                _with_no_logo_rule(prompt), platform, size, self._resolve_image_paths(image_path)
+            )
+        except Exception as e:
+            return {"success": False, "type": "image", "platform": platform, "error": str(e)}
+
+        return {
+            "success": True,
+            "type": "image",
+            "platform": platform,
+            "url": result["url"],
+            "original_url": result.get("original_url"),
+            "prompt": result["prompt"],
+            "size": size,
+            "provider": result.get("model"),
+            "cost": result.get("cost", 0.02),
+            "model": result.get("model"),
+            **self._stamp_logo(result["url"], logo_path),
         }
 
     def generate_carousel_images(
@@ -1134,7 +1206,7 @@ class MediaGenerationService:
                     "Preserve the main subject's exact facial features, hair, skin tone, and visual "
                     "identity from the uploaded reference image."
                 )
-            prompt_parts.append("Include a small 'STRAD IT' wordmark in one corner as a subtle brand tag.")
+            prompt_parts.append(NO_AI_LOGO_RULE)
             slide_prompt = " ".join(prompt_parts)[:2000]
 
             try:
@@ -1332,9 +1404,16 @@ class MediaGenerationService:
 
     # ── Video Generation ───────────────────────────────────────────────────
     def generate_video(
-        self, caption: str, platform: str, tone: str | None = None, image_path: str | None = None
+        self,
+        caption: str,
+        platform: str,
+        tone: str | None = None,
+        image_path: str | None = None,
+        logo_path: str | None = None,
     ) -> dict:
-        """Generate an actual MP4 video from caption/story text and optional reference image."""
+        """Generate an actual MP4 video from caption/story text and optional
+        reference image. logo_path: the company's real logo, shown at the end
+        of the video (see _apply_video_watermark); None -> no logo."""
         if caption and ("CONTENT GENERATION BLOCKED" in caption or "No Strong Match" in caption):
             return {
                 "success": False,
@@ -1407,7 +1486,7 @@ class MediaGenerationService:
                 local_name = result["url"].split("/")[-1]
                 local_path = os.path.join(self.upload_folder, local_name)
                 if os.path.exists(local_path):
-                    self._apply_video_watermark(local_path)
+                    self._apply_video_watermark(local_path, logo_path)
 
                 return {
                     "success": True,
@@ -1552,7 +1631,7 @@ class MediaGenerationService:
                             )
                     # Apply watermark after processing/saving
                     if silent_video_path is not None:
-                        self._apply_video_watermark(silent_video_path)
+                        self._apply_video_watermark(silent_video_path, logo_path)
 
                 except Exception as merge_err:
                     print(f"[Media Service] Video post-processing failed: {merge_err}")
@@ -1624,16 +1703,13 @@ Return JSON with keys:
                 "error": str(e),
             }
 
-    def _apply_video_watermark(self, video_path: str) -> None:
-        """Overlays Logo.png at the end of the video."""
+    def _apply_video_watermark(self, video_path: str, logo_path: str | None) -> None:
+        """Overlays the company's real logo (brand_logo_service.resolve_logo_path)
+        at the end of the video. No logo -> no branding, rather than stamping
+        another company's (this used to always use StradIT's Logo.png)."""
         try:
-            import os
-
-            # Use absolute path based on this file's location
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            logo_path = os.path.join(base_dir, "Logo.png")
-            if not os.path.exists(logo_path):
-                print(f"[Media Service] Logo.png not found at {logo_path}, skipping video watermark.")
+            if not logo_path or not os.path.exists(logo_path):
+                print("[Media Service] No brand logo for this user, skipping video watermark.")
                 return
 
             try:
@@ -1759,9 +1835,9 @@ Return JSON with keys:
             "TEXT OVERLAY: Extract a short, punchy headline (under 8 words) that captures the core message of the request. "
             "Explicitly instruct the image to render that exact headline as bold, clearly legible text integrated into the "
             "composition (large clean sans-serif typography, high contrast against the background, positioned so it doesn't "
-            "cover the main subject's face). Also instruct a small 'STRAD IT' wordmark to appear subtly in one corner of the "
-            "image, in a small clean font - a brand tag, not the main focus. Do not add any other text, captions, or watermarks "
-            "beyond that one headline and the brand tag. "
+            "cover the main subject's face). Do not add any other text, captions, or watermarks beyond that one headline. "
+            "BRANDING: the prompt must explicitly state that no logo, wordmark or company name is drawn anywhere in the "
+            "image (the real logo is added afterwards) and that the bottom-right corner stays free of important content. "
             "SOURCE OF TRUTH ENFORCEMENT: The visual prompt must exactly represent the project and problem context given in the request. Do NOT invent or hallucinate features, projects, or problems. "
             "Output ONLY the final enhanced prompt in a single paragraph, under 600 characters."
         )
@@ -1787,7 +1863,7 @@ Return JSON with keys:
             return (
                 f"A professional, photorealistic social media image for {platform.capitalize()}: {user_caption}. "
                 f'Render the bold headline text "{headline}" in large clean sans-serif typography, high contrast, '
-                f"not covering the main subject's face, plus a small 'STRAD IT' wordmark in one corner. "
+                f"not covering the main subject's face. {NO_AI_LOGO_RULE} "
                 f"Sleek visual composition, shallow depth of field, studio lighting, highly detailed."
             )
 

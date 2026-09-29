@@ -221,13 +221,11 @@
             $('#websiteInput').trigger('focus');
         });
 
-        // Real work happens in one blocking backend call (account-type save
-        // + website scrape + brand analysis), but the user shouldn't just
-        // stare at a static "Saving..." spinner for however long that
-        // takes - this steps a plausible, honestly-labelled sequence
-        // through the actual pipeline stages while the real request is in
-        // flight, and only shows "Complete!" once the real response comes
-        // back (never claims done before the backend actually is).
+        // The account-type save returns immediately and the website scrape +
+        // brand analysis run in the background (GET /api/brand-profile/status).
+        // This steps an honestly-labelled sequence through the pipeline
+        // stages while polling that status, and only shows "Complete!" once
+        // the scan has really finished (never claims done before it is).
         const STEP_INTERVAL_MS = 1100;
         let stepTimer = null;
         let currentStep = -1;
@@ -288,6 +286,49 @@
             $('#websiteStep').removeClass('d-none');
         }
 
+        // Polls the background website scan. Ready -> "Complete!". Failed ->
+        // stop and explain why (e.g. the site's bot protection blocked us),
+        // pointing at Brand Configuration, where they can paste a description
+        // instead. Still running after SCAN_WAIT_MS -> continue anyway; the
+        // scan finishes in the background and the profile appears when done.
+        const SCAN_POLL_MS = 1500;
+        const SCAN_WAIT_MS = 45000;
+
+        function waitForBrandScan(onDone) {
+            const startedAt = Date.now();
+            (function poll() {
+                $.getJSON('/api/brand-profile/status').done(function (s) {
+                    if (s.status === 'ready') {
+                        finishProgressCard(onDone);
+                    } else if (s.status === 'failed') {
+                        showScanFailure(s.message, onDone);
+                    } else if (Date.now() - startedAt > SCAN_WAIT_MS) {
+                        $('#progressCardSub').text('Still analyzing - we\'ll finish in the background.');
+                        setTimeout(onDone, 1500);
+                    } else {
+                        setTimeout(poll, SCAN_POLL_MS);
+                    }
+                }).fail(function () {
+                    // Status is informational - never trap the user on onboarding
+                    finishProgressCard(onDone);
+                });
+            })();
+        }
+
+        function showScanFailure(message, onDone) {
+            clearInterval(stepTimer);
+            if (currentStep >= 0) {
+                $(`.progress-step[data-step="${currentStep}"] .step-icon`).html('<i class="fas fa-exclamation-triangle text-warning"></i>');
+            }
+            $('#progressCardSub').text('Your account is ready, but we couldn\'t analyze your website.');
+            $('#onboardProgressCard').append(
+                $('<div class="alert-inline alert-inline-danger mt-3" role="alert"></div>')
+                    .text((message || 'Website analysis failed.') + ' You can add your brand details in Brand Configuration.')
+                    .show(),
+                $('<button type="button" class="btn-primary-blue mt-3">Continue to dashboard</button>').on('click', onDone)
+            );
+        }
+
         $('#continueBtn').on('click', function () {
             if (!selectedType) return;
             const website = $('#websiteInput').val().trim();
@@ -301,9 +342,12 @@
 
             submitAccountType(selectedType, website).done(function (res) {
                 if (res.success) {
-                    finishProgressCard(function () {
-                        window.location.href = res.redirect || '/dashboard';
-                    });
+                    const goToDashboard = function () { window.location.href = res.redirect || '/dashboard'; };
+                    if (!res.scan_started) {
+                        finishProgressCard(goToDashboard);
+                        return;
+                    }
+                    waitForBrandScan(goToDashboard);
                 } else {
                     resetProgressCard();
                     $btn.prop('disabled', false);

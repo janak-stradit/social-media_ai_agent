@@ -3,8 +3,104 @@ $(document).ready(function () {
     let threadActiveImagePath = null;
     let lastRunId = null;
     let lastAssistantContext = null;
+    // The thread's first brief - kept for every follow-up so the original
+    // topic isn't lost once the user has sent more than one refinement.
+    let threadRootBrief = null;
+    // Platforms used by the thread's last generation - a follow-up that
+    // doesn't pick any platform continues on these instead of detouring
+    // through standalone research (which has no thread context).
+    let lastThreadPlatforms = [];
+    // The assistant message whose post the next follow-up refines (the latest
+    // output by default, or whichever version "Refine this version" picked).
+    let refineBaseMsgId = null;
     let messageCounter = 0;
     window.chatHistory = {}; // Store generations per msgId
+
+    // Builds the multi-turn context sent as previous_context: the original
+    // brief, the latest refinement, each platform's caption and the visual
+    // direction used for its image/video, so a follow-up like "enhance the
+    // image" knows what was actually generated last turn.
+    function buildThreadContext(latestBrief, platforms, content) {
+        if (!threadRootBrief) threadRootBrief = latestBrief;
+        let summary = `Original Brief: ${threadRootBrief}\n`;
+        if (latestBrief && latestBrief !== threadRootBrief) {
+            summary += `Latest Refinement Request: ${latestBrief}\n`;
+        }
+        summary += 'Generated Captions:\n';
+        platforms.forEach(p => {
+            if (content[p]?.caption?.primary_caption) {
+                summary += `[${p.toUpperCase()}]: ${content[p].caption.primary_caption}\n`;
+            }
+        });
+        platforms.forEach(p => {
+            const visual = content[p]?.media_prompt;
+            if (visual) {
+                summary += `[${p.toUpperCase()} VISUAL DIRECTION]: ${visual.substring(0, 600)}\n`;
+            }
+        });
+        return summary;
+    }
+
+    // Hashtags are a single curated set (see agents/hashtag_agent.py); also
+    // tolerate the old reach_hashtags key from older runs in history.
+    function getTagList(rawTags) {
+        rawTags = rawTags || {};
+        return Array.isArray(rawTags.hashtags) ? rawTags.hashtags
+            : Array.isArray(rawTags) ? rawTags
+            : Array.isArray(rawTags.reach_hashtags) ? rawTags.reach_hashtags
+            : [];
+    }
+
+    // Makes the currently displayed version of msgId the post that the next
+    // follow-up refines, and re-seeds the thread context from it.
+    function adoptAsRefineBase(msgId) {
+        const h = window.chatHistory[msgId];
+        if (!h) return;
+        const content = h.responses[h.currentIndex].content;
+        refineBaseMsgId = msgId;
+        lastThreadPlatforms = h.platforms.slice();
+        lastAssistantContext = buildThreadContext(h.requestBody.story, h.platforms, content);
+        // Unbranded copy first - the real logo is stamped on again after generation
+        const image = h.platforms.map(p => content[p]?.media?.image?.clean_url || content[p]?.media?.image?.url).find(Boolean);
+        if (image) threadActiveImagePath = image;
+
+        $('.btn-refine-base').each(function () {
+            const isBase = $(this).attr('data-msg') === msgId;
+            $(this).html(`<i class="fas fa-wand-magic-sparkles me-1"></i>${isBase ? 'Refining this version' : 'Refine this version'}`);
+        });
+    }
+
+    // Frozen copy of the base post at send time, so a later Regenerate of the
+    // refinement re-applies it to the same version.
+    function snapshotRefineBase(msgId) {
+        const h = window.chatHistory[msgId];
+        const rData = h.responses[h.currentIndex];
+        return {
+            msgId: msgId,
+            runId: rData.runId,
+            platforms: h.platforms.slice(),
+            content: JSON.parse(JSON.stringify(rData.content || {})),
+            qualitySummary: rData.qualitySummary,
+            context: lastAssistantContext
+        };
+    }
+
+    function toRefinePayload(content, platforms) {
+        const out = {};
+        platforms.forEach(p => {
+            const d = content[p] || {};
+            out[p] = {
+                caption: d.caption?.primary_caption || '',
+                hashtags: getTagList(d.hashtags),
+                media_prompt: d.media_prompt || '',
+                image_url: d.media?.image?.url || null,
+                image_clean_url: d.media?.image?.clean_url || null,
+                image_prompt: d.media?.image?.prompt || null,
+                video_url: d.media?.video?.url || null
+            };
+        });
+        return out;
+    }
 
     $.ajaxSetup({
         xhrFields: { withCredentials: true }
@@ -261,17 +357,47 @@ $(document).ready(function () {
         return pick;
     }
 
-    // Picks a fresh subset of cards from the already-fetched idea pool
-    // (up to 8, from a single onboarding-time analysis) and a new greeting
-    // line - no network round-trip needed, so the regenerate button next to
-    // the welcome title responds instantly. Pools of 4 or fewer (accounts
-    // analyzed before this pool feature existed) just get their order
-    // reshuffled - there's nothing genuinely new to draw from until they
-    // re-analyze their site from /brand-profile.
+    // Writes genuinely NEW idea cards (and a greeting) from the user's whole
+    // brand profile - products, audience, dos/don'ts, markets, credentials,
+    // compliance rules - avoiding what's shown and recently posted (POST
+    // /api/brand-profile/quick-prompts/generate). If that fails, falls back
+    // to drawing a different subset from the existing pool.
     window.regenerateGreeting = function () {
         if (!_brandProfileCompanyName || !_brandProfileIdeaPool) return;
-        $('.welcome-title').text(pickGreeting(_brandProfileCompanyName));
-        renderQuickPromptCards(pickIdeaSubset(_brandProfileIdeaPool));
+        const $btn = $('#regenerateGreetingBtn');
+        if ($btn.prop('disabled')) return;
+
+        const shownTitles = $('.quick-prompt-card .quick-prompt-header span').map(function () { return $(this).text(); }).get();
+        $btn.prop('disabled', true).find('i').addClass('fa-spin');
+        $('.quick-prompts-grid').addClass('is-loading').css('opacity', 0.5);
+
+        $.ajax({
+            url: '/api/brand-profile/quick-prompts/generate',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ exclude_titles: shownTitles }),
+            success: function (r) {
+                const ideas = (r && r.post_ideas) || [];
+                if (!ideas.length) return fallbackShuffle();
+                _brandProfileIdeaPool = ideas.concat(_brandProfileIdeaPool.filter(i => !ideas.some(n => n.title === i.title)));
+                renderQuickPromptCards(ideas);
+                $('.welcome-title').text(r.greeting || pickGreeting(_brandProfileCompanyName));
+            },
+            error: function (xhr) {
+                const res = xhr.responseJSON || {};
+                if (res.credit_limit_exceeded) showToast(res.error, 'warning');
+                fallbackShuffle();
+            },
+            complete: function () {
+                $btn.prop('disabled', false).find('i').removeClass('fa-spin');
+                $('.quick-prompts-grid').removeClass('is-loading').css('opacity', '');
+            }
+        });
+
+        function fallbackShuffle() {
+            $('.welcome-title').text(pickGreeting(_brandProfileCompanyName));
+            renderQuickPromptCards(pickIdeaSubset(_brandProfileIdeaPool));
+        }
     };
 
     function loadBrandProfileQuickPrompts() {
@@ -283,7 +409,8 @@ $(document).ready(function () {
                 if (!ideas.length) return;
 
                 _brandProfileIdeaPool = ideas;
-                renderQuickPromptCards(pickIdeaSubset(ideas));
+                // Pool is newest-first (regenerated ideas are prepended), so lead with the latest
+                renderQuickPromptCards(ideas.slice(0, QUICK_PROMPT_CARD_COUNT));
 
                 if (r.company_name) {
                     _brandProfileCompanyName = r.company_name;
@@ -329,6 +456,9 @@ $(document).ready(function () {
         clearAttachment();
         threadActiveImagePath = null;
         lastAssistantContext = null;
+        threadRootBrief = null;
+        lastThreadPlatforms = [];
+        refineBaseMsgId = null;
         showToast('Started a new conversation', 'info');
     }
 
@@ -522,15 +652,6 @@ $(document).ready(function () {
                 clearInterval(iv);
                 lastRunId = r.run_id || null;
 
-                // Cache summary context for multi-turn edits
-                let contextSummary = `Brief: ${requestBody.story}\nGenerated Captions:\n`;
-                platforms.forEach(p => {
-                    if (r.content[p]?.caption?.primary_caption) {
-                        contextSummary += `[${p.toUpperCase()}]: ${r.content[p].caption.primary_caption}\n`;
-                    }
-                });
-                lastAssistantContext = contextSummary;
-
                 if (!window.chatHistory[msgId]) {
                     window.chatHistory[msgId] = { responses: [], currentIndex: 0, requestBody, platforms, activeImgPath, mediaType, selectedOutputs };
                 }
@@ -538,6 +659,9 @@ $(document).ready(function () {
                 const rData = { content: r.content, runId: lastRunId, usage: r.usage, agentsExecuted: r.agents_executed, qualitySummary: r.quality_summary };
                 window.chatHistory[msgId].responses.push(rData);
                 window.chatHistory[msgId].currentIndex = window.chatHistory[msgId].responses.length - 1;
+
+                // This output is what the next follow-up refines
+                adoptAsRefineBase(msgId);
 
                 // Render finished Assistant Response inside Assistant Card
                 renderAssistantResponse(msgId);
@@ -612,6 +736,25 @@ $(document).ready(function () {
         const tone = $('#toneSelect').val();
         const brandVoice = $('#brandVoiceSelect').val() || 'Standard Enterprise';
         const selectedOutputs = Array.from(document.querySelectorAll('input[name="outputOptions"]:checked')).map(el => el.value);
+        const pickedPlatforms = platforms.slice();
+        const pickedOutputs = selectedOutputs.slice();
+
+        // A follow-up on an existing post is refined surgically (only what the
+        // message asks for changes, images are edited not regenerated) - unless
+        // it targets a platform the post doesn't have yet, which needs the full
+        // pipeline to write for that platform.
+        const refineBase = refineBaseMsgId ? window.chatHistory[refineBaseMsgId] : null;
+        const canRefine = !!(refineBase && lastAssistantContext && story &&
+            pickedPlatforms.every(p => refineBase.platforms.includes(p)));
+
+        // A follow-up in an existing thread continues on the same platforms
+        // (and at least a caption) when none are picked, rather than falling
+        // into research-then-ask, which would treat the follow-up ("generate
+        // an image of this post") as a brand new, context-free topic.
+        if (lastAssistantContext) {
+            if (!platforms.length) platforms.push(...lastThreadPlatforms);
+            if (!selectedOutputs.length) selectedOutputs.push('text');
+        }
         const mediaType = selectedOutputs.join(', ') || 'none';
         const hasImage = !!(uploadedImagePath || threadActiveImagePath);
         const activeImgPath = uploadedImagePath || threadActiveImagePath;
@@ -623,13 +766,30 @@ $(document).ready(function () {
         messageCounter++;
         const msgId = 'msg_' + Date.now() + '_' + messageCounter;
 
+        const refinePlatforms = canRefine ? (pickedPlatforms.length ? pickedPlatforms : refineBase.platforms.slice()) : null;
+        const attachedImage = uploadedImagePath;
+
         // 1. Append User Chat Message Bubble
-        appendUserMessage(story, uploadedImagePath, platforms, tone, mediaType, brandVoice);
+        appendUserMessage(story, uploadedImagePath, refinePlatforms || platforms, tone, mediaType, brandVoice);
 
         // Clear input area
         storyInput.val('').trigger('input');
         clearAttachment();
         scrollToBottom();
+
+        if (canRefine) {
+            runRefine(msgId, {
+                instruction: story,
+                platforms: refinePlatforms,
+                tone: tone,
+                brandVoice: brandVoice,
+                selectedOutputs: pickedOutputs,
+                attachedImage: attachedImage,
+                targetCompany: targetCompany,
+                base: snapshotRefineBase(refineBaseMsgId)
+            });
+            return;
+        }
 
         // No platform and/or no output type picked yet - don't block with a
         // validation error. Research the brief first and let the user decide
@@ -690,6 +850,37 @@ $(document).ready(function () {
         `;
 
         $('#chatThread').append(html);
+    }
+
+    // Compliance result for one platform's caption (services/compliance_service.py):
+    // what was checked, issues auto-fixed, issues needing a human (e.g. a
+    // permit number), and disclaimers appended verbatim. Nothing when the
+    // user has no compliance profile.
+    function buildComplianceHtml(compliance) {
+        if (!compliance) return '';
+        const flags = compliance.flags || [];
+        const attention = compliance.needs_attention || 0;
+        const headerIcon = attention ? 'fa-triangle-exclamation text-warning' : 'fa-scale-balanced text-success';
+        const headerText = attention
+            ? `${attention} compliance item${attention > 1 ? 's' : ''} need${attention > 1 ? '' : 's'} your attention`
+            : flags.length ? `${flags.length} compliance issue${flags.length > 1 ? 's' : ''} auto-fixed` : 'Compliance checked - no issues';
+        const flagsHtml = flags.map(f => `
+            <li class="mb-1">
+                <span class="badge ${f.auto_fixed ? 'bg-success-subtle text-success' : 'bg-warning-subtle text-warning'} me-1">${f.auto_fixed ? 'Fixed' : 'Action needed'}</span>
+                <strong>${escapeHtml(f.framework)}</strong> - ${escapeHtml(f.issue)}
+                ${f.fix ? `<div class="text-muted small">${escapeHtml(f.fix)}</div>` : ''}
+            </li>`).join('');
+        const disclaimersHtml = (compliance.disclaimers_added || []).map(d =>
+            `<li class="mb-1"><span class="badge bg-primary-subtle text-primary me-1">Disclaimer added</span>${escapeHtml(d)}</li>`).join('');
+        return `
+            <div class="post-box-card">
+                <div class="post-box-header">
+                    <span class="post-box-title"><i class="fas ${headerIcon} me-1"></i>${headerText}</span>
+                    <span class="text-muted small">${compliance.rules_checked} rules checked</span>
+                </div>
+                ${flagsHtml || disclaimersHtml ? `<ul class="list-unstyled small mb-1">${flagsHtml}${disclaimersHtml}</ul>` : ''}
+                <div class="text-muted" style="font-size: 0.7rem;">Guidance only, not legal advice.</div>
+            </div>`;
     }
 
     // Renders a finished image/video card - shared by triggerMediaGenInChat
@@ -848,6 +1039,136 @@ $(document).ready(function () {
         return elem;
     }
 
+    function appendRefineThinking(msgId) {
+        const html = `
+            <div class="chat-message-assistant" id="${msgId}">
+                <div class="assistant-avatar">${assistantAvatarSvg()}</div>
+                <div class="assistant-card">
+                    <div class="assistant-header">
+                        <div class="assistant-title"><i class="fas fa-wand-magic-sparkles"></i>Refining Your Post</div>
+                        <button type="button" class="btn btn-sm btn-outline-danger" onclick="cancelGeneration('${msgId}')">
+                            <i class="fas fa-stop me-1"></i>Stop
+                        </button>
+                    </div>
+                    <div class="agent-stepper">
+                        <div class="agent-stepper-title"><i class="fas fa-cogs me-1"></i>Autonomous Agent Working:</div>
+                        <div class="agent-step-item active">
+                            <div class="agent-step-icon"><div class="spinner-border spinner-border-sm text-primary" role="status"></div></div>
+                            <span class="agent-step-name"><i class="fas fa-pen-ruler me-1 text-purple"></i>Refinement Editor</span>
+                            <span class="agent-step-desc">Applying only your requested change to the current version</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        const elem = $(html);
+        $('#chatThread').append(elem);
+        return elem;
+    }
+
+    // Applies a follow-up to opts.base (a snapshotRefineBase() copy) via
+    // /api/refine. Untargeted parts carry over unchanged; if the server says
+    // the message is actually a new post, falls back to the full pipeline.
+    function runRefine(msgId, opts, assistantElem) {
+        assistantElem = assistantElem || appendRefineThinking(msgId);
+        scrollToBottom();
+        setChatDockDisabled(true);
+        const base = opts.base;
+
+        window.currentGenerationRequest = $.ajax({
+            url: '/api/refine',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                instruction: opts.instruction,
+                platforms: opts.platforms,
+                tone: opts.tone,
+                previous_context: base.context,
+                selected_outputs: opts.selectedOutputs,
+                base_run_id: base.runId,
+                reference_image_path: opts.attachedImage,
+                base: toRefinePayload(base.content, opts.platforms)
+            }),
+            success: function (r) {
+                window.currentGenerationRequest = null;
+                setChatDockDisabled(false);
+
+                if (r.intent === 'new_content') {
+                    // A different post, not an edit - start it fresh.
+                    threadRootBrief = null;
+                    const outputs = opts.selectedOutputs.length ? opts.selectedOutputs : ['text'];
+                    const hasImage = !!opts.attachedImage;
+                    assistantElem.replaceWith(appendAssistantThinking(msgId, hasImage));
+                    executeGeneration(msgId, {
+                        story: opts.instruction,
+                        image_path: opts.attachedImage,
+                        platforms: opts.platforms,
+                        tone: opts.tone,
+                        brand_voice: opts.brandVoice,
+                        include_strategy: true,
+                        previous_context: null,
+                        selected_outputs: outputs,
+                        target_company: opts.targetCompany
+                    }, $(`#${msgId}`), opts.platforms, opts.attachedImage, outputs.join(', '), outputs);
+                    return;
+                }
+
+                const targets = r.targets || [];
+                const content = {};
+                opts.platforms.forEach(p => {
+                    const prev = base.content[p] || {};
+                    const merged = Object.assign({}, prev, r.content[p] || {});
+                    if (!targets.includes('caption')) merged.caption = prev.caption;
+                    merged.compliance = targets.includes('caption') ? (r.content[p]?.compliance || null) : prev.compliance;
+                    if (!targets.includes('hashtags')) merged.hashtags = prev.hashtags;
+                    content[p] = merged;
+                });
+
+                if (!window.chatHistory[msgId]) {
+                    window.chatHistory[msgId] = {
+                        responses: [],
+                        currentIndex: 0,
+                        requestBody: { story: opts.instruction, tone: opts.tone, brand_voice: opts.brandVoice },
+                        platforms: opts.platforms,
+                        activeImgPath: null,
+                        mediaType: 'none',
+                        selectedOutputs: [],
+                        refine: opts
+                    };
+                }
+                const h = window.chatHistory[msgId];
+                h.responses.push({ content: content, runId: r.run_id, usage: r.usage, agentsExecuted: r.agents_executed, qualitySummary: base.qualitySummary });
+                h.currentIndex = h.responses.length - 1;
+                lastRunId = r.run_id || lastRunId;
+
+                renderAssistantResponse(msgId);
+                adoptAsRefineBase(msgId);
+                (r.media_errors || []).forEach(e => showToast('Media refinement failed - ' + e, 'error'));
+                renderHistory();
+                loadUserUsageMetrics();
+                scrollToBottom();
+            },
+            error: function (xhr, status) {
+                window.currentGenerationRequest = null;
+                setChatDockDisabled(false);
+                if (status === 'abort') {
+                    assistantElem.remove();
+                    showToast('Refinement cancelled', 'info');
+                    return;
+                }
+                const res = xhr.responseJSON || {};
+                const errText = res.error || 'Refinement failed';
+                assistantElem.find('.assistant-card').html(`
+                    <div class="alert alert-${res.credit_limit_exceeded ? 'warning' : 'danger'} mb-0">
+                        <i class="fas fa-exclamation-triangle me-2"></i><strong>Error:</strong> ${escapeHtml(errText)}
+                    </div>
+                `);
+                if (res.credit_limit_exceeded) openCreditRequestModal();
+                showToast('Refinement error: ' + errText, 'error');
+            }
+        });
+    }
+
     function runResearchThenAsk(msgId, story, targetCompany, activeImgPath, tone, brandVoice) {
         const assistantElem = appendResearchThinking(msgId);
 
@@ -855,7 +1176,7 @@ $(document).ready(function () {
             url: '/api/analyze-story',
             type: 'POST',
             contentType: 'application/json',
-            data: JSON.stringify({ story: story, target_company: targetCompany }),
+            data: JSON.stringify({ story: story, target_company: targetCompany, previous_context: lastAssistantContext }),
             success: function (r) {
                 renderResearchResult(msgId, assistantElem, r, story, targetCompany, activeImgPath, tone, brandVoice);
                 scrollToBottom();
@@ -1026,14 +1347,7 @@ $(document).ready(function () {
             const primaryCap = pData.caption?.primary_caption || 'No caption generated.';
             const isRefined = pData.caption?.refined_by_critic || pData.quality?.self_corrected;
 
-            // Hashtags - a single curated set (see agents/hashtag_agent.py);
-            // tolerate the old reach_hashtags key too in case a cached/older
-            // run's content is being re-rendered from history.
-            const rawTags = pData.hashtags || {};
-            const tagList = Array.isArray(rawTags.hashtags) ? rawTags.hashtags
-                : Array.isArray(rawTags) ? rawTags
-                : Array.isArray(rawTags.reach_hashtags) ? rawTags.reach_hashtags
-                : [];
+            const tagList = getTagList(pData.hashtags);
             const tagsHtml = tagList.map(t => `<span class="hashtag-pill">${escapeHtml(t)}</span>`).join(' ') || '<em>No hashtags</em>';
             const tagsStr = tagList.join(' ');
 
@@ -1057,6 +1371,8 @@ $(document).ready(function () {
 
                         <div class="post-caption-text" id="${cardId}">${escapeHtml(primaryCap)}</div>
                     </div>
+
+                    ${buildComplianceHtml(pData.compliance)}
 
                     <!-- Hashtags Card -->
                     <div class="post-box-card">
@@ -1145,6 +1461,10 @@ $(document).ready(function () {
                 <button class="btn btn-sm btn-outline-primary btn-regenerate" data-msg="${msgId}">
                     <i class="fas fa-sync-alt me-1"></i>Regenerate
                 </button>
+                <button class="btn btn-sm btn-outline-secondary btn-refine-base" data-msg="${msgId}"
+                    title="Your next message will edit this version">
+                    <i class="fas fa-wand-magic-sparkles me-1"></i>${refineBaseMsgId === msgId ? 'Refining this version' : 'Refine this version'}
+                </button>
             </div>
         `;
 
@@ -1170,6 +1490,7 @@ $(document).ready(function () {
             const h = window.chatHistory[mId];
             if (h && h.currentIndex > 0) {
                 h.currentIndex--;
+                if (refineBaseMsgId === mId) adoptAsRefineBase(mId);
                 renderAssistantResponse(mId);
             }
         });
@@ -1179,14 +1500,30 @@ $(document).ready(function () {
             const h = window.chatHistory[mId];
             if (h && h.currentIndex < h.responses.length - 1) {
                 h.currentIndex++;
+                if (refineBaseMsgId === mId) adoptAsRefineBase(mId);
                 renderAssistantResponse(mId);
             }
+        });
+
+        // Pick which version the next follow-up message edits (e.g. go back
+        // to an earlier image if the latest refinement made it worse).
+        elem.find('.btn-refine-base').on('click', function () {
+            adoptAsRefineBase($(this).attr('data-msg'));
+            storyInput.focus();
+            showToast('Your next message will refine this version.', 'info');
         });
 
         // Bind Regenerate
         elem.find('.btn-regenerate').on('click', function () {
             const mId = $(this).attr('data-msg');
             const h = window.chatHistory[mId];
+            if (h && h.refine) {
+                // A refinement re-applies the same instruction to the same base version
+                const assistantElem = $(`#${mId}`);
+                assistantElem.replaceWith(appendRefineThinking(mId));
+                runRefine(mId, h.refine, $(`#${mId}`));
+                return;
+            }
             if (h) {
                 const assistantElem = $(`#${mId}`);
                 const hasImage = !!h.activeImgPath;
@@ -1237,10 +1574,10 @@ $(document).ready(function () {
                 // to the user - not just the short social caption text.
                 const pMediaPrompt = pData.media_prompt || pCaption;
                 if (selectedOutputs.includes('image') && !pData.media?.image?.url) {
-                    triggerMediaGenInChat(p, pCaption, 'image', requestBody.tone, runId, historyObj.activeImgPath, `${msgId}_media_image_${p}`, pMediaPrompt);
+                    triggerMediaGenInChat(p, pCaption, 'image', requestBody.tone, runId, historyObj.activeImgPath, `${msgId}_media_image_${p}`, pMediaPrompt, msgId);
                 }
                 if (selectedOutputs.includes('video') && !pData.media?.video?.url) {
-                    triggerMediaGenInChat(p, pCaption, 'video', requestBody.tone, runId, historyObj.activeImgPath, `${msgId}_media_video_${p}`, pMediaPrompt);
+                    triggerMediaGenInChat(p, pCaption, 'video', requestBody.tone, runId, historyObj.activeImgPath, `${msgId}_media_video_${p}`, pMediaPrompt, msgId);
                 }
             });
         }
@@ -1288,7 +1625,7 @@ $(document).ready(function () {
             });
     };
 
-    function triggerMediaGenInChat(platform, caption, mediaType, tone, runId, imagePath, targetSlotId, mediaPrompt) {
+    function triggerMediaGenInChat(platform, caption, mediaType, tone, runId, imagePath, targetSlotId, mediaPrompt, msgId) {
         $.ajax({
             url: '/api/generate-media',
             type: 'POST',
@@ -1306,6 +1643,16 @@ $(document).ready(function () {
             success: function (res) {
                 const slot = $('#' + targetSlotId);
                 if (res.success && res.url) {
+                    // Record the media on the message's own content, so a
+                    // follow-up edits this image instead of regenerating it,
+                    // and paging between versions doesn't re-trigger generation.
+                    const h = msgId && window.chatHistory[msgId];
+                    const pContent = h && h.responses[h.currentIndex].content[platform];
+                    if (pContent) {
+                        pContent.media = pContent.media || {};
+                        pContent.media[mediaType] = { url: res.url, clean_url: res.clean_url || null, prompt: res.prompt, resolution: res.resolution || res.size };
+                        if (refineBaseMsgId === msgId) adoptAsRefineBase(msgId);
+                    }
                     const mediaHtml = mediaType === 'video' ? `
                         <div class="media-output-card">
                             <div class="media-output-header">
@@ -1573,13 +1920,7 @@ $(document).ready(function () {
                 // so the next message the user sends continues refining this
                 // run instead of starting from scratch.
                 lastRunId = run.id;
-                let contextSummary = `Brief: ${run.story}\nGenerated Captions:\n`;
-                platforms.forEach(p => {
-                    if (content[p]?.caption?.primary_caption) {
-                        contextSummary += `[${p.toUpperCase()}]: ${content[p].caption.primary_caption}\n`;
-                    }
-                });
-                lastAssistantContext = contextSummary;
+                adoptAsRefineBase(msgId);
 
                 scrollToBottom();
                 showToast('Loaded past conversation - send a message to keep refining it.', 'info');

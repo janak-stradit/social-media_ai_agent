@@ -226,6 +226,7 @@ $(document).ready(function () {
                         <label class="guideline-field-label">Story / Strategy Context</label>
                         <div class="ap-context">${escapeHtml(req.story_context || 'No context captured.')}</div>
                     </div>
+                    ${complianceCardHtml(req.compliance)}
                     <div class="brand-config-card">
                         <h6><div class="card-icon-circle"><i class="fas fa-gavel"></i></div> Decision</h6>
                         <div class="brand-config-card-desc">${status === 'pending' ? 'Accept to clear it for publishing, or reject with feedback.' : 'This request has already been decided.'}</div>
@@ -234,6 +235,38 @@ $(document).ready(function () {
                 </div>
             </div>
         `);
+    }
+
+    // Compliance review captured when approval was requested (see
+    // services/compliance_service.py) - so the reviewer sees regulatory risks
+    // before accepting. Absent when the requester has no compliance profile.
+    function complianceCardHtml(compliance) {
+        if (!compliance) return '';
+        const flags = compliance.flags || [];
+        const flagsHtml = flags.length
+            ? `<ul class="list-unstyled small mb-2">${flags.map(f => `
+                <li class="mb-2">
+                    <span class="badge ${f.severity === 'high' ? 'bg-danger-subtle text-danger' : 'bg-warning-subtle text-warning'} text-uppercase me-1">${escapeHtml(f.severity)}</span>
+                    <strong>${escapeHtml(f.framework)}</strong>
+                    <div>${escapeHtml(f.issue)}</div>
+                    ${f.fix ? `<div class="text-muted">Suggested fix: ${escapeHtml(f.fix)}</div>` : ''}
+                </li>`).join('')}</ul>`
+            : '<p class="small text-success mb-2"><i class="fas fa-check-circle me-1"></i>No issues found against the applicable rules.</p>';
+        const disclaimers = compliance.disclaimers_added || [];
+        const disclaimerHtml = disclaimers.length
+            ? `<label class="guideline-field-label">Required disclaimers missing from the caption</label>
+               <ul class="small mb-2">${disclaimers.map(d => `<li>${escapeHtml(d)}</li>`).join('')}</ul>`
+            : '';
+        const suggestedHtml = (flags.length || disclaimers.length) && compliance.suggested_caption
+            ? `<label class="guideline-field-label">Compliant version (suggested)</label>
+               <div class="ap-context">${escapeHtml(compliance.suggested_caption)}</div>`
+            : '';
+        return `
+            <div class="brand-config-card">
+                <h6><div class="card-icon-circle"><i class="fas fa-scale-balanced"></i></div> Compliance review</h6>
+                <div class="brand-config-card-desc">Checked against ${compliance.rules_checked} advertising rules for this business's industry and markets. Guidance only, not legal advice.</div>
+                ${flagsHtml}${disclaimerHtml}${suggestedHtml}
+            </div>`;
     }
 
     window.submitApprovalDecision = function (decision) {

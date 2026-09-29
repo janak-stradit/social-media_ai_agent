@@ -1,4 +1,9 @@
+from services.compliance_rules import INDUSTRIES, RULES, industry_from_schema_types, normalize_industry
 from services.llm_service import LLMService
+
+# Industries with their own compliance rules (beyond the every-industry ones) -
+# a misclassification into a generic category would silently drop those rules.
+_REGULATED_INDUSTRIES = {i for rule in RULES for i in rule["industries"] if i != "*"}
 
 
 class WebsiteAnalysisAgent:
@@ -52,6 +57,20 @@ From this, infer:
       products/services/industry (from the page content) that could be pasted directly into a
       content generator - not a placeholder, an actually usable brief
 
+14. industry_category: exactly one key from this list - it selects which advertising regulations
+    apply, so choose by what the business actually DOES and sells, and prefer the more specific
+    regulated category when one fits (a hospital is "healthcare", not "professional_services"; a
+    mutual fund distributor is "investment_wealth", not "financial_services"):
+{INDUSTRY_LIST}
+
+You may also get facts read directly off the site: the schema.org structured data it publishes about
+itself (organization name and declared business types), credentials it claims, and disclaimers it
+already uses. Treat these as ground truth: prefer the structured-data organization name for
+company_name when it's a real name (not a page title), and use the declared types to inform industry.
+In content_dos, when credentials were found, say future content may cite ONLY those credentials; in
+content_donts, always include never inventing statistics, certifications or awards the company hasn't
+published.
+
 If the page content is too thin/generic to infer something confidently, make a reasonable
 best-effort guess from what's given rather than leaving fields empty - only primary_colors, fonts, and
 tagline should ever legitimately be empty/null.
@@ -59,12 +78,15 @@ tagline should ever legitimately be empty/null.
 Return ONLY a JSON object with keys: company_name, industry, target_audience,
 brand_voice_summary, tagline, visual_style, key_themes (list), core_products (list), primary_colors (list),
 fonts (list), content_dos (list), content_donts (list), suggested_post_ideas (list of the objects described
-above)"""
+above), industry_category""".replace(
+        "{INDUSTRY_LIST}", "\n".join(f"    - {key}: {label}" for key, label in INDUSTRIES.items())
+    )
 
     def __init__(self):
         self.llm = LLMService()
 
     def analyze(self, scraped: dict) -> dict:
+        structured = scraped.get("structured_data") or {}
         description = scraped.get("meta_description") or scraped.get("og_description") or "N/A"
         site_name = scraped.get("og_site_name") or ""
         pages_note = (
@@ -81,6 +103,11 @@ Theme color meta tag (if the site declared one explicitly): {scraped.get("theme_
 Declared brand colors (from CSS variables like --primary/--brand): {scraped.get("declared_colors") or []}
 Other colors found on page: {scraped.get("colors") or []}
 Fonts detected in the site's CSS: {scraped.get("fonts") or []}
+Structured data organization name: {structured.get("name") or "N/A"}
+Structured data declared types: {scraped.get("schema_types") or []}
+Credentials the site claims: {scraped.get("certifications") or []}
+Disclaimers the site uses: {scraped.get("site_disclaimers") or []}
+Markets detected: {scraped.get("regions_detected") or []}
 
 Website text excerpt{pages_note}:
 {scraped.get("text_excerpt") or "N/A"}
@@ -127,6 +154,14 @@ Website text excerpt{pages_note}:
         if not primary_colors:
             primary_colors = scraped.get("declared_colors") or []
 
+        # The site's own schema.org declaration (MedicalOrganization,
+        # BankOrCreditUnion, ...) outranks an LLM guess that lands in a
+        # generic category, so regulated businesses don't lose their rules.
+        industry_category = normalize_industry(result.get("industry_category"))
+        declared_industry = industry_from_schema_types(scraped.get("schema_types"))
+        if declared_industry in _REGULATED_INDUSTRIES and industry_category not in _REGULATED_INDUSTRIES:
+            industry_category = declared_industry
+
         return {
             "company_name": result.get("company_name") or None,
             "industry": result.get("industry") or None,
@@ -141,5 +176,14 @@ Website text excerpt{pages_note}:
             "content_donts": result.get("content_donts") if isinstance(result.get("content_donts"), list) else [],
             "suggested_post_ideas": post_ideas[:8],
             "fonts": scraped.get("fonts") or [],
-            "logo_url": scraped.get("og_image") or scraped.get("favicon") or None,
+            "logo_url": scraped.get("logo") or scraped.get("og_image") or scraped.get("favicon") or None,
+            "industry_category": industry_category,
+            # Passed through untouched - facts from the site, not LLM output
+            "website_signals": {
+                key: scraped.get(key)
+                for key in (
+                    "schema_types", "social_links", "legal_pages", "region_signals",
+                    "regions_detected", "site_disclaimers", "certifications",
+                )
+            },
         }

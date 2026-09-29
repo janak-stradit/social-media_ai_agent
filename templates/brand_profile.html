@@ -413,6 +413,25 @@
         /* Empty state: a normal-height centred card, not a full-height
            stretched one (.brand-config-card sets height:100% for the grid
            cards - reset here). */
+        .bp-signal-value { display: flex; flex-wrap: wrap; gap: 0.4rem; font-size: 0.85rem; color: var(--text-primary); }
+        .bp-signal-value .badge { font-weight: 600; }
+        .bp-signal-value a { text-decoration: none; }
+        .bp-signal-list { font-size: 0.85rem; color: var(--text-primary); padding-left: 1.1rem; }
+        .bp-signal-list li { margin-bottom: 0.3rem; }
+        .bp-signal-empty { color: var(--text-secondary, #64748b); font-style: italic; }
+
+        .bp-compliance-rules { display: flex; flex-direction: column; gap: 0.6rem; }
+        .bp-rule { border: 1px solid var(--border-color); border-radius: var(--radius-sm, 8px); padding: 0.75rem 0.9rem; background: var(--bg-card); }
+        .bp-rule.excluded { opacity: 0.55; }
+        .bp-rule-head { display: flex; align-items: flex-start; gap: 0.6rem; }
+        .bp-rule-title { font-weight: 700; font-size: 0.88rem; color: var(--text-primary); }
+        .bp-rule-meta { font-size: 0.75rem; color: var(--text-secondary, #64748b); }
+        .bp-rule-summary { font-size: 0.83rem; margin: 0.3rem 0 0; color: var(--text-primary); }
+        .bp-rule details { margin-top: 0.4rem; font-size: 0.8rem; }
+        .bp-rule details ul { margin: 0.3rem 0 0.3rem 1rem; padding: 0; }
+        .bp-rule-disclaimer { background: var(--bg-hover, #f8fafc); border-left: 3px solid var(--primary); padding: 0.35rem 0.6rem; margin: 0.3rem 0; }
+        .bp-rule-toggle { margin-left: auto; white-space: nowrap; font-size: 0.78rem; }
+
         .bp-empty-state {
             height: auto;
             align-items: center;
@@ -712,6 +731,8 @@
                 <a href="#bpColors" class="bc-nav-item"><i data-feather="droplet"></i> Colors &amp; Fonts</a>
                 <a href="#bpProducts" class="bc-nav-item"><i data-feather="package"></i> Products &amp; Services</a>
                 <a href="#bpRules" class="bc-nav-item"><i data-feather="list"></i> Content Rules</a>
+                <a href="#bpSignals" class="bc-nav-item"><i data-feather="shield"></i> Website Signals</a>
+                <a href="#bpCompliance" class="bc-nav-item"><i data-feather="check-square"></i> Compliance</a>
             </nav>
             <div class="promo-card mt-auto p-3 text-white rounded-3 position-relative overflow-hidden" style="background: linear-gradient(135deg, #f4f3fe, #e9d5ff); border: 1px solid #d8b4fe; margin-top: auto;">
                 <div style="position: relative; z-index: 1;">
@@ -727,12 +748,22 @@
                 <!-- EMPTY STATE -->
                 <div id="bpEmptyState" class="brand-config-card bp-empty-state d-none mb-4">
                     <div class="card-icon-circle bp-empty-icon"><i data-feather="globe"></i></div>
-                    <h5>No brand profile yet</h5>
-                    <p>We couldn't analyze your website during signup, or it hasn't been analyzed yet. Enter your website below and we'll fetch your industry, voice, and brand colors automatically.</p>
+                    <h5 id="bpEmptyTitle">No brand profile yet</h5>
+                    <p id="bpEmptyDesc">We couldn't analyze your website during signup, or it hasn't been analyzed yet. Enter your website below and we'll fetch your industry, voice, and brand colors automatically.</p>
+                    <div id="bpScanFailure" class="alert alert-warning text-start small d-none" role="alert"></div>
                     <div class="bp-empty-form">
                         <input type="text" id="bpEmptyWebsiteInput" class="form-control" placeholder="https://yourwebsite.com">
                         <button type="button" class="btn-primary-save" id="bpEmptyAnalyzeBtn" onclick="rescanBrandProfile('empty')">
                             <i data-feather="search" class="me-2"></i>Analyze Website
+                        </button>
+                    </div>
+                    <!-- Fallback when the site blocks automated access or has no readable text -->
+                    <div class="bp-manual-fallback text-start mt-4">
+                        <label for="bpManualText" class="form-label small fw-semibold mb-1">Or describe your business instead</label>
+                        <textarea id="bpManualText" class="form-control" rows="4"
+                            placeholder="What you sell or do, who your customers are, where you operate, and how you like to sound - a few sentences or your About page text."></textarea>
+                        <button type="button" class="btn-primary-save mt-2" id="bpManualAnalyzeBtn" onclick="rescanBrandProfile('manual')">
+                            <i data-feather="file-text" class="me-2"></i>Analyze Description
                         </button>
                     </div>
                 </div>
@@ -905,6 +936,73 @@
                                         <textarea id="bpContentDonts" class="form-control form-control-sm semantic-card-dont" rows="6" placeholder="One rule per line"></textarea>
                                     </div>
                                 </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 6: Website Signals (Full Width, read-only) - facts read
+                             straight off the site, used to keep content accurate and compliant -->
+                        <div class="brand-config-card" id="bpSignals" style="grid-column: 1 / -1;">
+                            <h6><div class="card-icon-circle"><i data-feather="shield"></i></div> Detected From Your Website</h6>
+                            <div class="brand-config-card-desc">Facts found on your site. Generated content cites only these credentials and reuses your own disclaimers. Re-analyze to refresh.</div>
+                            <div class="row g-3 mt-1">
+                                <div class="col-md-6">
+                                    <label class="guideline-field-label">Markets</label>
+                                    <div id="bpSignalRegions" class="bp-signal-value"></div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="guideline-field-label">Business type (declared by your site)</label>
+                                    <div id="bpSignalTypes" class="bp-signal-value"></div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="guideline-field-label">Credentials</label>
+                                    <div id="bpSignalCredentials" class="bp-signal-value"></div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="guideline-field-label">Social profiles</label>
+                                    <div id="bpSignalSocial" class="bp-signal-value"></div>
+                                </div>
+                                <div class="col-12">
+                                    <label class="guideline-field-label">Your disclaimers</label>
+                                    <ul id="bpSignalDisclaimers" class="bp-signal-list mb-0"></ul>
+                                </div>
+                                <div class="col-12">
+                                    <label class="guideline-field-label">Legal pages</label>
+                                    <div id="bpSignalLegal" class="bp-signal-value"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 7: Compliance (Full Width) - industry + markets select the
+                             advertising rules content must follow (services/compliance_rules.py).
+                             Saved separately via its own Confirm button. -->
+                        <div class="brand-config-card" id="bpCompliance" style="grid-column: 1 / -1;">
+                            <h6><div class="card-icon-circle"><i data-feather="check-square"></i></div> Compliance</h6>
+                            <div class="brand-config-card-desc">Your industry and markets decide which advertising regulations your content follows. We detected these from your website - review and confirm.</div>
+                            <div class="alert alert-warning small py-2 mt-2 mb-3" id="bpComplianceNotice" role="note"></div>
+
+                            <div class="row g-3 align-items-start">
+                                <div class="col-md-6">
+                                    <label class="guideline-field-label" for="bpComplianceIndustry">Industry</label>
+                                    <select id="bpComplianceIndustry" class="form-select form-select-sm"></select>
+                                    <div class="guideline-field-hint" id="bpComplianceIndustryHint"></div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="guideline-field-label">Markets you publish to</label>
+                                    <div id="bpComplianceRegions" class="d-flex flex-wrap gap-3 pt-1"></div>
+                                    <div class="guideline-field-hint" id="bpComplianceRegionsHint"></div>
+                                </div>
+                            </div>
+
+                            <div class="d-flex align-items-center justify-content-between mt-4 mb-2">
+                                <label class="guideline-field-label mb-0">Applicable rules <span class="text-muted fw-normal" id="bpComplianceRuleCount"></span></label>
+                                <span class="small" id="bpComplianceStatus"></span>
+                            </div>
+                            <div id="bpComplianceRules" class="bp-compliance-rules"></div>
+
+                            <div class="d-flex justify-content-end mt-3">
+                                <button type="button" class="btn-primary-save" id="bpComplianceSaveBtn" onclick="saveComplianceProfile()">
+                                    <i data-feather="check" class="me-2"></i>Confirm Compliance Settings
+                                </button>
                             </div>
                         </div>
 
