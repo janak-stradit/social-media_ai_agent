@@ -24,6 +24,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     create_engine,
+    or_,
     text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
@@ -100,6 +101,9 @@ class User(Base):
     brand_scan_status: Mapped[str | None] = mapped_column(String(16), nullable=True)
     brand_scan_error: Mapped[str | None] = mapped_column(String(32), nullable=True)
     brand_scan_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Who this user's "Send for Approval" requests go to (set on the Brand
+    # Configuration pages); falls back to Config.APPROVAL_NOTIFY_EMAIL.
+    approval_reviewer_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 
 class SalesContactRequest(Base):
@@ -384,6 +388,9 @@ class ApprovalRequest(Base):
     # JSON {rules_checked, flags, disclaimers_added, needs_attention, suggested_caption}; null
     # when the requester has no compliance profile.
     compliance: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Where the "Review & Decide" email was sent - that reviewer (signed in
+    # with this email) can see and decide the request alongside its owner.
+    reviewer_email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
@@ -461,6 +468,7 @@ def init_db():
             f"ALTER TABLE {usr_tbl} ADD COLUMN brand_scan_status VARCHAR(16)",
             f"ALTER TABLE {usr_tbl} ADD COLUMN brand_scan_error VARCHAR(32)",
             f"ALTER TABLE {usr_tbl} ADD COLUMN brand_scan_updated_at TIMESTAMP",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN approval_reviewer_email VARCHAR(255)",
         ]:
             try:
                 with engine.begin() as sub_conn:
@@ -491,6 +499,7 @@ def init_db():
             f"ALTER TABLE {profile_tbl} ADD COLUMN compliance_excluded_rules TEXT",
             f"ALTER TABLE {profile_tbl} ADD COLUMN compliance_confirmed_at TIMESTAMP",
             f"ALTER TABLE {approval_tbl} ADD COLUMN compliance TEXT",
+            f"ALTER TABLE {approval_tbl} ADD COLUMN reviewer_email VARCHAR(255)",
         ]:
             try:
                 with engine.begin() as sub_conn:
@@ -898,6 +907,14 @@ def update_user_brand_profile_fields(user_id: int, **fields) -> dict | None:
         session.commit()
         session.refresh(row)
         return {"id": row.id, "user_id": row.user_id}
+
+
+def set_approval_reviewer_email(user_id: int, email: str | None) -> None:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if user is not None:
+            user.approval_reviewer_email = (email or "").strip().lower() or None
+            session.commit()
 
 
 def set_brand_post_ideas(user_id: int, ideas: list[dict]) -> None:
@@ -1994,6 +2011,7 @@ def _approval_request_to_dict(r: "ApprovalRequest") -> dict:
         "decided_by": r.decided_by,
         "decided_at": r.decided_at.isoformat() if r.decided_at else None,
         "compliance": json.loads(r.compliance) if getattr(r, "compliance", None) else None,
+        "reviewer_email": getattr(r, "reviewer_email", None),
         "created_at": r.created_at.isoformat() if r.created_at else None,
     }
 
@@ -2008,14 +2026,17 @@ def create_approval_request(
     competitors: list[str] | None = None,
     image_urls: list[str] | None = None,
     compliance: dict | None = None,
+    reviewer_email: str | None = None,
 ) -> dict:
     """Creates a new pending approval request for a pipeline's generated
-    content, superseding any earlier pending request for the same pipeline
-    (re-sending for approval after edits shouldn't leave stale duplicates)."""
+    content, superseding the same user's earlier pending request for that
+    pipeline (re-sending for approval after edits shouldn't leave stale
+    duplicates) - never another user's."""
     with Session(engine) as session:
         session.query(ApprovalRequest).filter(
             ApprovalRequest.pipeline_client_id == pipeline_client_id,
             ApprovalRequest.status == "pending",
+            ApprovalRequest.user_id == user_id,
         ).delete()
 
         req = ApprovalRequest(
@@ -2028,6 +2049,7 @@ def create_approval_request(
             competitors=", ".join(competitors or []),
             image_urls=json.dumps(image_urls or []),
             compliance=json.dumps(compliance) if compliance else None,
+            reviewer_email=(reviewer_email or "").strip().lower() or None,
         )
         session.add(req)
         session.commit()
@@ -2041,24 +2063,37 @@ def get_approval_request(request_id: int) -> dict | None:
         return _approval_request_to_dict(req) if req else None
 
 
-def get_latest_approval_request_for_pipeline(pipeline_client_id: str) -> dict | None:
+def _visible_to(query, user_id: int | None, email: str | None):
+    """Restricts an ApprovalRequest query to requests the user owns or was
+    sent as reviewer. user_id None = no restriction (admins)."""
+    if user_id is None:
+        return query
+    condition = ApprovalRequest.user_id == user_id
+    if email:
+        condition = or_(condition, ApprovalRequest.reviewer_email == email.strip().lower())
+    return query.filter(condition)
+
+
+def get_latest_approval_request_for_pipeline(
+    pipeline_client_id: str, user_id: int | None = None, email: str | None = None
+) -> dict | None:
     """The most recent approval request for a pipeline (pending or decided) -
-    used by the dashboard's "Approval" pipeline stage to show current status."""
+    used by the dashboard's "Approval" pipeline stage to show current status.
+    user_id/email restrict it to requests that user owns or reviews."""
     with Session(engine) as session:
-        req = (
-            session.query(ApprovalRequest)
-            .filter(ApprovalRequest.pipeline_client_id == pipeline_client_id)
-            .order_by(ApprovalRequest.created_at.desc())
-            .first()
-        )
+        query = session.query(ApprovalRequest).filter(ApprovalRequest.pipeline_client_id == pipeline_client_id)
+        req = _visible_to(query, user_id, email).order_by(ApprovalRequest.created_at.desc()).first()
         return _approval_request_to_dict(req) if req else None
 
 
-def list_approval_requests(status: str | None = None, limit: int = 200) -> list[dict]:
-    """All approval requests (past and current), newest first - powers the
-    /approve dashboard. Optionally filtered to a single status."""
+def list_approval_requests(
+    status: str | None = None, limit: int = 200, user_id: int | None = None, email: str | None = None
+) -> list[dict]:
+    """Approval requests (past and current), newest first - powers the
+    /approve dashboard. Optionally filtered to a single status; user_id/email
+    restrict it to requests that user owns or was sent as reviewer."""
     with Session(engine) as session:
-        query = session.query(ApprovalRequest)
+        query = _visible_to(session.query(ApprovalRequest), user_id, email)
         if status:
             query = query.filter(ApprovalRequest.status == status)
         rows = query.order_by(ApprovalRequest.created_at.desc()).limit(limit).all()

@@ -1540,15 +1540,75 @@ def send_approval_email():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _approval_viewer(user_id: int | None) -> tuple[int | None, str | None]:
+    """(owner filter, reviewer email) for approval queries. Admins see every
+    request -> (None, None); everyone else sees requests they created plus
+    those sent to their email as reviewer."""
+    user = get_user_by_id(user_id) if user_id else None
+    if user and getattr(user, "is_admin", False):
+        return None, None
+    return (user_id if user_id else -1), ((user.email or "").lower() if user else None)
+
+
+def _can_access_approval(req: dict | None, user_id: int | None) -> bool:
+    if not req:
+        return False
+    owner_filter, email = _approval_viewer(user_id)
+    return owner_filter is None or req.get("user_id") == user_id or (bool(email) and req.get("reviewer_email") == email)
+
+
+def _reviewer_email_for(user_id: int | None) -> str | None:
+    """Where a user's approval requests go: their own setting (Brand
+    Configuration pages), else the deployment-wide APPROVAL_NOTIFY_EMAIL."""
+    user = get_user_by_id(user_id) if user_id else None
+    return (getattr(user, "approval_reviewer_email", None) if user else None) or Config.APPROVAL_NOTIFY_EMAIL
+
+
+@api_bp.route("/approval-settings", methods=["GET"])
+@login_required_api
+def get_approval_settings():
+    """The current user's approval reviewer email (see _reviewer_email_for)."""
+    user = get_user_by_id(get_current_user_id())
+    return jsonify(
+        {
+            "success": True,
+            "reviewer_email": getattr(user, "approval_reviewer_email", None) if user else None,
+            "default_reviewer_email": Config.APPROVAL_NOTIFY_EMAIL or None,
+        }
+    )
+
+
+@api_bp.route("/approval-settings", methods=["PUT"])
+@login_required_api
+def update_approval_settings():
+    """Sets (or clears, with an empty value) who this user's "Send for
+    Approval" requests are emailed to."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    email = ((request.get_json(silent=True) or {}).get("reviewer_email") or "").strip()
+    if email and not _EMAIL_RE.match(email):
+        return jsonify({"error": "Please enter a valid email address"}), 400
+
+    from db import set_approval_reviewer_email
+
+    set_approval_reviewer_email(get_current_user_id(), email or None)
+    return jsonify({"success": True, "reviewer_email": email.lower() or None})
+
+
 @api_bp.route("/approval-requests", methods=["GET"])
 @login_required_api
 def list_approval_requests_route():
-    """All approval requests (past and current) - powers the /approve list
-    dashboard. Optional ?status=pending|approved|rejected filter."""
+    """Approval requests (past and current) - powers the /approve list
+    dashboard. Each user sees only requests they created or were sent as
+    reviewer; admins see all. Optional ?status=pending|approved|rejected."""
     if not DB_AVAILABLE:
         return jsonify({"error": "Database not available"}), 503
     status = request.args.get("status")
-    requests_list = list_approval_requests(status=status)
+    owner_filter, email = _approval_viewer(get_current_user_id())
+    requests_list = list_approval_requests(status=status, user_id=owner_filter, email=email)
     return jsonify({"success": True, "requests": requests_list})
 
 
@@ -1571,6 +1631,13 @@ def create_approval_request_route():
     is_image = (data.get("asset_type") or "").lower() == "image"
     image_urls = [u for u in (data.get("image_urls") or []) if u] if is_image else []
 
+    reviewer_email = _reviewer_email_for(user_id)
+    if not reviewer_email:
+        return (
+            jsonify({"error": "No approval reviewer set - add a reviewer email in Brand Configuration first."}),
+            400,
+        )
+
     # Compliance review for the reviewer (requester's active rules) - the
     # caption itself is stored as submitted; the fix is only suggested.
     compliance = None
@@ -1587,6 +1654,7 @@ def create_approval_request_route():
     try:
         req = create_approval_request(
             compliance=compliance,
+            reviewer_email=reviewer_email,
             user_id=user_id,
             pipeline_client_id=pipeline_client_id,
             platform=data.get("platform") or "",
@@ -1613,6 +1681,7 @@ def create_approval_request_route():
                 caption=req["caption"],
                 asset_type=req["asset_type"],
                 image_paths=req["image_urls"],
+                to_email=reviewer_email,
             )
         except Exception as email_err:
             email_result = {"success": False, "error": str(email_err)}
@@ -1628,7 +1697,8 @@ def get_approval_request_route(request_id):
     if not DB_AVAILABLE:
         return jsonify({"error": "Database not available"}), 503
     req = get_approval_request(request_id)
-    if not req:
+    # Same 404 for "not yours" as for "doesn't exist" - no probing other users' request ids
+    if not _can_access_approval(req, get_current_user_id()):
         return jsonify({"error": "Approval request not found"}), 404
     return jsonify({"success": True, "request": req})
 
@@ -1640,7 +1710,8 @@ def get_approval_request_by_pipeline_route(pipeline_client_id):
     "Approval" pipeline stage to show pending/accepted/rejected + comments."""
     if not DB_AVAILABLE:
         return jsonify({"error": "Database not available"}), 503
-    req = get_latest_approval_request_for_pipeline(pipeline_client_id)
+    owner_filter, email = _approval_viewer(get_current_user_id())
+    req = get_latest_approval_request_for_pipeline(pipeline_client_id, user_id=owner_filter, email=email)
     return jsonify({"success": True, "request": req})
 
 
@@ -1656,6 +1727,8 @@ def decide_approval_request_route(request_id):
         return jsonify({"error": "decision must be 'approved' or 'rejected'"}), 400
 
     user_id = get_current_user_id()
+    if not _can_access_approval(get_approval_request(request_id), user_id):
+        return jsonify({"error": "Approval request not found"}), 404
     user = get_user_by_id(user_id) if user_id else None
     decided_by = (user.name or user.email) if user else None
 

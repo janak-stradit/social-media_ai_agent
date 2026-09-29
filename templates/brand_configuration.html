@@ -148,6 +148,9 @@
                 <button type="button" class="bc-nav-item" data-tab="assets" onclick="switchBrandConfigTab('assets')">
                     <i class="fas fa-images"></i>Logo &amp; Character
                 </button>
+                <button type="button" class="bc-nav-item" data-tab="approvals" onclick="switchBrandConfigTab('approvals')">
+                    <i class="fas fa-user-check"></i>Approvals
+                </button>
             </nav>
             <div class="promo-card mt-auto p-3 rounded-3 position-relative overflow-hidden" style="background: linear-gradient(135deg, #f4f3fe, #e9d5ff); border: 1px solid #d8b4fe;">
                 <div style="position: relative; z-index: 1;">
@@ -231,12 +234,25 @@
                     <div class="row g-4" id="brandAssetsGrid"></div>
                 </div>
 
+                <!-- APPROVALS -->
+                <div id="brandConfigPaneApprovals" class="d-none">
+                    <div class="bc-pane-header">
+                        <div>
+                            <h5>Approvals</h5>
+                            <p>Who reviews your content before it's published.</p>
+                        </div>
+                    </div>
+                    <!-- Filled by approval_settings.js -->
+                    <div class="brand-config-card" id="approvalSettingsCard"></div>
+                </div>
+
             </div>
         </div>
     </main>
 
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="{{ url_for('static', filename='js/brand_configuration.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/approval_settings.js') }}"></script>
 <script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
 </body>
 
