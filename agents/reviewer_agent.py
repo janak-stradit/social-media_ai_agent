@@ -1,59 +1,102 @@
-from services.llm_service import LLMService
+import re
+
+from agents.caption_agent import CaptionAgent
 
 
 class ReviewerAgent:
     """
-    Autonomous Critic & Self-Correction Agent.
-    Evaluates generated content for hook strength, CTA punchiness, readability, and platform rules.
-    Refines content if quality score < 8/10.
+    Quality checks for a generated post - deterministic code, no LLM call.
+
+    It replaced an LLM "critic" that took ~80 s per platform, scored posts on
+    "CTA effectiveness" although the Caption Agent is told never to include a
+    CTA (so it penalised captions for following their own rules and triggered
+    needless rewrites), and returned made-up scores when it failed.
+
+    Each check either passes, is fixed here directly (hashtag count), or yields
+    concrete feedback for ONE caption rewrite (caption_agent.refine_caption).
     """
 
-    SYSTEM_PROMPT = """You are a Senior Social Media Quality Reviewer & Copy Critic.
-    Your task is to critically evaluate a social media post (caption, hashtags, strategy) for a target platform.
+    MIN_CAPTION_LENGTH = 40
+    # Same numbers as HashtagAgent.PLATFORM_HASHTAG_LIMITS
+    MAX_HASHTAGS = {"facebook": 3, "instagram": 30, "linkedin": 5}
 
-    Evaluation Rubric:
-    1. Hook Strength (1-10): Is the first sentence scroll-stopping and compelling?
-    2. CTA Effectiveness (1-10): Is there a clear, action-oriented call to action?
-    3. Readability & Formatting (1-10): Good spacing, emojis, line breaks, bullet points?
-    4. Platform Fit (1-10): Does it obey length, tone, and formatting conventions for the platform?
-
-    Calculate an overall_score (1.0 to 10.0).
-    If overall_score < 8.0, set needs_refinement to True and provide actionable feedback on how to fix it.
-
-    Return ONLY a JSON object with keys:
-    hook_score (float), cta_score (float), readability_score (float), platform_fit_score (float),
-    overall_score (float), needs_refinement (bool), reviewer_feedback (string), summary (string)"""
-
-    def __init__(self):
-        self.llm = LLMService()
+    # The Caption Agent's own rules: no sales CTAs, links or placeholders
+    _CTA_PATTERNS = [
+        r"\bvisit our (web)?site\b",
+        r"\bclick (the|this) link\b",
+        r"\blink in (the )?bio\b",
+        r"\bbook a (demo|call)\b",
+        r"\b(request|schedule) a demo\b",
+        r"\bsign up (now|today)\b",
+        r"\bdm (us|me)\b",
+        r"\breach out to (us|me)\b",
+        r"\bdownload (the|our) (whitepaper|guide|document)\b",
+        r"\bcontact us\b",
+    ]
+    _PLACEHOLDER = re.compile(r"\[(insert|link|cta|your|company|name)[^\]]*\]", re.IGNORECASE)
+    _MARKDOWN = re.compile(r"\*\*|__|^#{1,6}\s", re.MULTILINE)
 
     def evaluate(self, platform, caption, hashtags, story_analysis=None, brand_voice=None):
-        """Evaluate a post and return structured quality metrics"""
-        user_prompt = f"""Target Platform: {platform}
-        Brand Voice Persona: {brand_voice or "Standard"}
-        Story Themes: {story_analysis.get("themes", []) if story_analysis else "N/A"}
+        """Run the checks. Returns:
+        {checks_total, checks_passed, passed, issues: [str],
+         needs_refinement: bool, reviewer_feedback: str|None, hashtags: [str]}
+        `hashtags` is the (possibly trimmed) list to use. story_analysis and
+        brand_voice are accepted for call compatibility."""
+        caption = caption or ""
+        hashtags = list(hashtags or [])
+        issues = []  # shown to the user
+        feedback = []  # sent to the caption rewrite (only for caption problems)
+        checks = 0
 
-        Caption to Evaluate:
-        \"\"\"{caption}\"\"\"
+        if "CONTENT GENERATION BLOCKED" in caption:
+            # Intentional block message - nothing to check or rewrite
+            return self._result(1, 1, [], [], hashtags)
 
-        Hashtags:
-        {hashtags}
+        checks += 1
+        # Same limit the Caption Agent was prompted with
+        max_len = CaptionAgent.PLATFORM_CONFIGS.get(platform, {}).get("max_length")
+        if max_len and len(caption) > max_len:
+            issues.append(f"Caption is {len(caption)} characters; {platform} allows {max_len}.")
+            feedback.append(f"Shorten the caption to under {max_len} characters, keeping the key point.")
 
-        Evaluate against the quality rubric and return structured JSON."""
+        checks += 1
+        if len(caption.strip()) < self.MIN_CAPTION_LENGTH:
+            issues.append("Caption is too short to be a complete post.")
+            feedback.append("Write a complete post of at least two or three sentences.")
 
-        try:
-            result, usage = self.llm.generate_json(self.SYSTEM_PROMPT, user_prompt, temperature=0.3, return_usage=True)
-            result["_usage"] = usage
-            return result
-        except Exception as e:
-            print(f"[ReviewerAgent] Evaluation fallback due to: {e}")
-            return {
-                "hook_score": 8.5,
-                "cta_score": 8.5,
-                "readability_score": 9.0,
-                "platform_fit_score": 9.0,
-                "overall_score": 8.8,
-                "needs_refinement": False,
-                "reviewer_feedback": "Content meets high quality standards.",
-                "summary": "Validated by Reviewer Agent.",
-            }
+        checks += 1
+        found_cta = [p for p in self._CTA_PATTERNS if re.search(p, caption, re.IGNORECASE)]
+        if found_cta:
+            issues.append("Caption contains a sales call-to-action.")
+            feedback.append("Remove every call-to-action, link request or sales pitch; end on the insight instead.")
+
+        checks += 1
+        if self._PLACEHOLDER.search(caption):
+            issues.append("Caption contains a placeholder like [Insert link].")
+            feedback.append("Remove all bracketed placeholders such as [Insert link] or [Company name].")
+
+        checks += 1
+        if self._MARKDOWN.search(caption):
+            issues.append("Caption contains Markdown formatting.")
+            feedback.append("Use plain text only - no Markdown, asterisks or headings.")
+
+        checks += 1
+        max_tags = self.MAX_HASHTAGS.get(platform)
+        if max_tags and len(hashtags) > max_tags:
+            issues.append(f"{len(hashtags)} hashtags trimmed to {platform}'s {max_tags}.")
+            hashtags = hashtags[:max_tags]  # fixed here, no rewrite needed
+
+        failed_checks = len(issues)  # one issue per failed check
+        return self._result(checks, checks - failed_checks, issues, feedback, hashtags)
+
+    @staticmethod
+    def _result(total, passed, issues, feedback, hashtags):
+        return {
+            "checks_total": total,
+            "checks_passed": passed,
+            "passed": not issues,
+            "issues": issues,
+            "needs_refinement": bool(feedback),
+            "reviewer_feedback": " ".join(feedback) if feedback else None,
+            "hashtags": hashtags,
+        }

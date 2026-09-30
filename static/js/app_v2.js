@@ -611,35 +611,54 @@ $(document).ready(function () {
         $('#storyInput, #generateBtn, #analyzeBtn, #attachBtn').prop('disabled', disabled);
     }
 
+    // crypto.randomUUID only exists on HTTPS/localhost; the site may run on plain HTTP
+    function newProgressId() {
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') return window.crypto.randomUUID();
+        return 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 12);
+    }
+
+    function setAgentStep(msgId, step, state) {
+        const $item = $(`#${msgId}_step_${step}`);
+        if (!$item.length || $item.data('state') === state) return;
+        $item.data('state', state).removeClass('active completed');
+        const $icon = $item.find('.agent-step-icon');
+        if (state === 'active') {
+            $item.addClass('active');
+            $icon.html('<div class="spinner-border spinner-border-sm text-primary" role="status"></div>');
+        } else if (state === 'done') {
+            $item.addClass('completed');
+            $icon.html('<i class="fas fa-check-circle text-success"></i>');
+        }
+    }
+
+    // Polls the server's step states every second until stop() is called.
+    function pollGenerationProgress(msgId, progressId) {
+        let stopped = false;
+        let timer = null;
+        (function poll() {
+            if (stopped) return;
+            $.getJSON(`/api/generate/progress/${encodeURIComponent(progressId)}`)
+                .done(function (res) {
+                    Object.entries((res && res.steps) || {}).forEach(([step, state]) => setAgentStep(msgId, step, state));
+                })
+                .always(function () {
+                    if (!stopped) timer = setTimeout(poll, 1000);
+                });
+        })();
+        return function stop() {
+            stopped = true;
+            clearTimeout(timer);
+        };
+    }
+
     function executeGeneration(msgId, requestBody, assistantElem, platforms, activeImgPath, mediaType, selectedOutputs) {
         setChatDockDisabled(true);
-        const hasImage = !!activeImgPath;
-        const stepIds = hasImage
-            ? ['step_story', 'step_vision', 'step_caption', 'step_hashtag', 'step_strategy', 'step_reviewer', 'step_guardrail']
-            : ['step_story', 'step_caption', 'step_hashtag', 'step_strategy', 'step_reviewer', 'step_guardrail'];
-        let currentStep = 0;
-
-        const iv = setInterval(() => {
-            if (currentStep < stepIds.length) {
-                const prevId = currentStep > 0 ? stepIds[currentStep - 1] : null;
-                const currId = stepIds[currentStep];
-
-                if (prevId) {
-                    $(`#${msgId}_${prevId}`)
-                        .removeClass('active')
-                        .addClass('completed')
-                        .find('.agent-step-icon')
-                        .html('<i class="fas fa-check-circle text-success"></i>');
-                }
-
-                $(`#${msgId}_${currId}`)
-                    .addClass('active')
-                    .find('.agent-step-icon')
-                    .html('<div class="spinner-border spinner-border-sm text-primary" role="status"></div>');
-
-                currentStep++;
-            }
-        }, 750);
+        // Step states come from the server (GET /api/generate/progress/<id>),
+        // so the stepper shows what is really running - captions and hashtags
+        // run at the same time, so both can be active together.
+        const progressId = newProgressId();
+        requestBody = Object.assign({}, requestBody, { progress_id: progressId });
+        const stopProgress = pollGenerationProgress(msgId, progressId);
 
         window.currentGenerationRequest = $.ajax({
             url: '/api/generate',
@@ -649,7 +668,7 @@ $(document).ready(function () {
             success: function (r) {
                 window.currentGenerationRequest = null;
                 setChatDockDisabled(false);
-                clearInterval(iv);
+                stopProgress();
                 lastRunId = r.run_id || null;
 
                 if (!window.chatHistory[msgId]) {
@@ -672,7 +691,7 @@ $(document).ready(function () {
             error: function (xhr, status, error) {
                 window.currentGenerationRequest = null;
                 setChatDockDisabled(false);
-                clearInterval(iv);
+                stopProgress();
                 
                 if (status === 'abort') {
                     assistantElem.remove();
@@ -809,7 +828,7 @@ $(document).ready(function () {
             platforms: platforms,
             tone: tone,
             brand_voice: brandVoice,
-            include_strategy: true,
+            include_strategy: false,
             previous_context: lastAssistantContext,
             selected_outputs: selectedOutputs,
             target_company: targetCompany
@@ -956,7 +975,7 @@ $(document).ready(function () {
                     <i class="fas fa-cogs me-1"></i>Autonomous Agents Orchestrating Request:
                 </div>
 
-                <div class="agent-step-item active" id="${msgId}_step_story">
+                <div class="agent-step-item active" id="${msgId}_step_story" data-state="active">
                     <div class="agent-step-icon"><div class="spinner-border spinner-border-sm text-primary" role="status"></div></div>
                     <span class="agent-step-name"><i class="fas fa-brain me-1 text-purple"></i>Story &amp; RAG Agent</span>
                     <span class="agent-step-desc">Analyzing narrative themes &amp; retrieving past brand memory</span>
@@ -967,25 +986,19 @@ $(document).ready(function () {
                 <div class="agent-step-item" id="${msgId}_step_caption">
                     <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
                     <span class="agent-step-name"><i class="fas fa-pen-nib me-1 text-primary"></i>Caption Agent</span>
-                    <span class="agent-step-desc">Crafting 3 psychological hook variations per platform</span>
+                    <span class="agent-step-desc">Writing the caption for each platform</span>
                 </div>
 
                 <div class="agent-step-item" id="${msgId}_step_hashtag">
                     <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
                     <span class="agent-step-name"><i class="fas fa-hashtag me-1 text-warning"></i>Hashtag Agent</span>
-                    <span class="agent-step-desc">Curating high-converting trending &amp; niche hashtags</span>
-                </div>
-
-                <div class="agent-step-item" id="${msgId}_step_strategy">
-                    <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
-                    <span class="agent-step-name"><i class="fas fa-chart-line me-1 text-success"></i>Strategy Agent</span>
-                    <span class="agent-step-desc">Optimizing posting schedules &amp; reach forecasts</span>
+                    <span class="agent-step-desc">Curating broad, niche &amp; brand hashtags (runs alongside captions)</span>
                 </div>
 
                 <div class="agent-step-item" id="${msgId}_step_reviewer">
                     <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
-                    <span class="agent-step-name"><i class="fas fa-shield-check me-1 text-danger"></i>Critic Agent</span>
-                    <span class="agent-step-desc">Evaluating quality, hook rating &amp; applying self-corrections</span>
+                    <span class="agent-step-name"><i class="fas fa-shield-check me-1 text-danger"></i>Quality Checks</span>
+                    <span class="agent-step-desc">Length, no CTAs or placeholders, plain text, hashtag limits - rewrites a caption only if a check fails</span>
                 </div>
 
                 <div class="agent-step-item" id="${msgId}_step_guardrail">
@@ -1105,7 +1118,7 @@ $(document).ready(function () {
                         platforms: opts.platforms,
                         tone: opts.tone,
                         brand_voice: opts.brandVoice,
-                        include_strategy: true,
+                        include_strategy: false,
                         previous_context: null,
                         selected_outputs: outputs,
                         target_company: opts.targetCompany
@@ -1243,7 +1256,7 @@ $(document).ready(function () {
                     <div class="media-chips-inline" id="${msgId}_researchOutputs">
                         <label class="media-chip-sm"><input type="checkbox" value="text" checked><span class="chip-content">Text (Caption)</span></label>
                         <label class="media-chip-sm"><input type="checkbox" value="image"><span class="chip-content"><i class="fas fa-image me-1 text-primary"></i>Image</span></label>
-                        <label class="media-chip-sm"><input type="checkbox" value="video"><span class="chip-content"><i class="fas fa-video me-1 text-purple"></i>Video</span></label>
+                        <span class="coming-soon" title="Coming soon"><label class="media-chip-sm"><input type="checkbox" value="video" disabled><span class="chip-content"><i class="fas fa-video me-1 text-purple"></i>Video<span class="soon-tag">Soon</span></span></label></span>
                     </div>
                 </div>
                 <button type="button" class="btn btn-primary btn-sm mt-2 research-generate-btn" id="${msgId}_researchGenerateBtn">
@@ -1277,7 +1290,7 @@ $(document).ready(function () {
                 platforms: platforms,
                 tone: tone,
                 brand_voice: brandVoice,
-                include_strategy: true,
+                include_strategy: false,
                 previous_context: lastAssistantContext,
                 selected_outputs: selectedOutputs,
                 target_company: targetCompany,
@@ -1295,15 +1308,23 @@ $(document).ready(function () {
         const { content, runId, usage, agentsExecuted, qualitySummary } = rData;
         const elem = $(`#${msgId}`);
         // Badges for Token Usage & Memory Context
-        const totalTokens = usage?.total_tokens ? Number(usage.total_tokens).toLocaleString() : '1,560';
-        const costUsd = usage?.cost_usd ? '$' + Number(usage.cost_usd).toFixed(4) : '$0.0003';
+        // Only real numbers - nothing is shown when a value isn't known (e.g. history items)
+        const hasUsage = usage && usage.total_tokens;
+        const totalTokens = hasUsage ? Number(usage.total_tokens).toLocaleString() : '';
+        const costUsd = hasUsage ? '$' + Number(usage.cost_usd || 0).toFixed(4) : '';
         const memCount = usage?.memories_referenced || 0;
-        const agentsCount = agentsExecuted?.length || 5;
-        const qualityScore = qualitySummary?.overall_score || 9.5;
+        const agentsCount = agentsExecuted?.length || 0;
+        const checksTotal = qualitySummary?.checks_total || 0;
 
-        const qualityBadgeHtml = `<span class="badge-quality-tag me-1" title="Autonomous Quality Score"><i class="fas fa-star text-warning me-1"></i>${qualityScore}/10 Quality</span>`;
-        const pipelineBadgeHtml = `<button class="btn-agent-pipeline-toggle me-1" id="${msgId}_pipeline_btn" title="View executed agents"><i class="fas fa-network-wired me-1"></i>${agentsCount} Agents Active</button>`;
-        const costBadgeHtml = `<span class="badge-cost-tag me-1" title="Tokens & USD Cost"><i class="fas fa-bolt text-warning me-1"></i>${totalTokens} tok | ${costUsd}</span>`;
+        const qualityBadgeHtml = checksTotal
+            ? `<span class="badge-quality-tag me-1" title="Automated quality checks: length, no CTAs or placeholders, plain text, hashtag limits"><i class="fas fa-check-double text-success me-1"></i>${qualitySummary.checks_passed}/${checksTotal} checks passed</span>`
+            : '';
+        const pipelineBadgeHtml = agentsCount
+            ? `<button class="btn-agent-pipeline-toggle me-1" id="${msgId}_pipeline_btn" title="View executed agents"><i class="fas fa-network-wired me-1"></i>${agentsCount} Agents Active</button>`
+            : '';
+        const costBadgeHtml = hasUsage
+            ? `<span class="badge-cost-tag me-1" title="Tokens & USD Cost"><i class="fas fa-bolt text-warning me-1"></i>${totalTokens} tok | ${costUsd}</span>`
+            : '';
         const memBadgeHtml = memCount > 0 ? `<span class="badge-memory-tag me-1" title="ChromaDB RAG Memory Context"><i class="fas fa-brain me-1"></i>${memCount} Memories</span>` : '';
 
         // Build Agents Breakdown Panel - visible by default (was hidden
@@ -1455,9 +1476,11 @@ $(document).ready(function () {
             ${tabsHtml}
             ${panelsHtml}
             <div class="assistant-card-footer">
-                <button class="btn btn-sm btn-outline-success btn-schedule-post" data-msg="${msgId}">
-                    <i class="fas fa-calendar-plus me-1"></i>Schedule
-                </button>
+                <span class="coming-soon" title="Coming soon">
+                    <button class="btn btn-sm btn-outline-success btn-schedule-post" data-msg="${msgId}" disabled>
+                        <i class="fas fa-calendar-plus me-1"></i>Schedule<span class="soon-tag">Soon</span>
+                    </button>
+                </span>
                 <button class="btn btn-sm btn-outline-primary btn-regenerate" data-msg="${msgId}">
                     <i class="fas fa-sync-alt me-1"></i>Regenerate
                 </button>

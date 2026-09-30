@@ -32,6 +32,10 @@ class CaptionAgent:
         },
     }
 
+    # A caption is short, focused writing - "low" keeps it well-written without
+    # the minutes a "medium" reasoning pass can take (HeyRoute reasoning model).
+    REASONING_EFFORT = "low"
+
     def __init__(self):
         self.llm = LLMService()
 
@@ -340,6 +344,7 @@ primary_caption
                 user_prompt,
                 temperature=0.8,
                 return_usage=True,
+                reasoning_effort=self.REASONING_EFFORT,
             )
 
             primary = parsed.get("primary_caption", "")
@@ -352,6 +357,7 @@ primary_caption
                 user_prompt,
                 temperature=0.8,
                 return_usage=True,
+                reasoning_effort=self.REASONING_EFFORT,
             )
 
         # ---------------------------------------------------------
@@ -466,6 +472,7 @@ Rewrite and return ONLY the improved plain-text caption.
             user_prompt,
             temperature=0.6,
             return_usage=True,
+            reasoning_effort=self.REASONING_EFFORT,
         )
 
         # ---------------------------------------------------------

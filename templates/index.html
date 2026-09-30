@@ -259,10 +259,12 @@
                                 <input type="checkbox" name="outputOptions" value="image" id="mediaImage">
                                 <span class="chip-content"><i class="fas fa-image me-1 text-primary"></i>Image</span>
                             </label>
-                            <label class="media-chip-sm" for="mediaVideo">
-                                <input type="checkbox" name="outputOptions" value="video" id="mediaVideo">
-                                <span class="chip-content"><i class="fas fa-video me-1 text-purple"></i>Video</span>
-                            </label>
+                            <span class="coming-soon" title="Coming soon">
+                                <label class="media-chip-sm" for="mediaVideo">
+                                    <input type="checkbox" name="outputOptions" value="video" id="mediaVideo" disabled>
+                                    <span class="chip-content"><i class="fas fa-video me-1 text-purple"></i>Video<span class="soon-tag">Soon</span></span>
+                                </label>
+                            </span>
                         </div>
                     </div>
 
@@ -359,9 +361,11 @@
             </div>
             <div class="modal-footer ent-modal-footer">
                 <button type="button" class="btn-secondary-ent" data-bs-dismiss="modal">Close</button>
-                <button type="button" class="btn-submit-emerald ms-2" id="modalScheduleBtn">
-                    <i class="fas fa-calendar-plus me-1"></i>Schedule Campaign Post
-                </button>
+                <span class="coming-soon ms-2" title="Coming soon">
+                    <button type="button" class="btn-submit-emerald" id="modalScheduleBtn" disabled>
+                        <i class="fas fa-calendar-plus me-1"></i>Schedule Campaign Post<span class="soon-tag">Soon</span>
+                    </button>
+                </span>
             </div>
         </div>
     </div>

@@ -689,17 +689,14 @@ class MediaGenerationService:
     def _generate_image_primary(
         self, prompt: str, platform: str, size: str, image_path: str | list[str] | None = None
     ) -> dict:
-        """The default image provider: HeyRoute when its image key is set
-        (falling back to kie.ai if HeyRoute fails and a kie.ai key exists),
-        kie.ai otherwise -- exactly as before HeyRoute was added."""
-        if Config.HEYROUTE_IMAGE_API_KEY:
-            try:
-                return self._generate_image_heyroute(prompt, platform, size, image_path)
-            except Exception as err:
-                if not Config.KIE_API_KEY:
-                    raise
-                print(f"[Media Service] HeyRoute image failed ({err}); falling back to kie.ai...")
-        return self._generate_image_kie(prompt, platform, size, image_path)
+        """The default image provider: HeyRoute only (HEYROUTE_IMAGE_API_KEY),
+        like video and text. No kie.ai fallback - a fallback failure used to
+        replace HeyRoute's real error, so the user saw a misleading kie.ai
+        message. Other providers are only used when chosen explicitly via
+        generate_image(ai_model=...)."""
+        if not Config.HEYROUTE_IMAGE_API_KEY:
+            raise RuntimeError("HEYROUTE_IMAGE_API_KEY is not configured - image generation runs on HeyRoute.")
+        return self._generate_image_heyroute(prompt, platform, size, image_path)
 
     def _file_to_data_uri(self, path: str) -> str:
         mime = mimetypes.guess_type(path)[0] or "image/jpeg"
@@ -1299,7 +1296,7 @@ class MediaGenerationService:
             elif ai_model == "openrouter":
                 result = self._generate_image_openrouter(prompt, platform, size, single_reference)
             elif ai_model == "kie":
-                # The default: HeyRoute when configured, kie.ai otherwise
+                # The default ("kie" is the frontend's historical name for it): HeyRoute
                 result = self._generate_image_primary(prompt, platform, size, resolved_references)
             else:
                 # Default to pollinations

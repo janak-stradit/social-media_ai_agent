@@ -53,7 +53,10 @@ class HashtagAgent:
         if brand_profile_block:
             user_prompt += f"\n{brand_profile_block}"
 
-        result, usage = self.llm.generate_json(system_prompt, user_prompt, return_usage=True)
+        # A hashtag list needs no deep reasoning - "minimal" answers in seconds
+        result, usage = self.llm.generate_json(
+            system_prompt, user_prompt, return_usage=True, reasoning_effort="minimal"
+        )
 
         if not isinstance(result, dict):
             result = {}

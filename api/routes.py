@@ -485,6 +485,35 @@ def _scrub_brand_voice_leak(text: str, brand_voice: str | None, company_name: st
     return corrected, (n1 + n2) > 0
 
 
+def _mark_done_when_finished(futures, on_done):
+    """Calls on_done() once, when the last of `futures` finishes (progress
+    display for steps that run in parallel)."""
+    import threading
+
+    lock = threading.Lock()
+    remaining = [len(futures)]
+
+    def _one_finished(_future):
+        with lock:
+            remaining[0] -= 1
+            last = remaining[0] == 0
+        if last:
+            on_done()
+
+    for future in futures:
+        future.add_done_callback(_one_finished)
+
+
+@api_bp.route("/generate/progress/<progress_id>", methods=["GET"])
+@login_required_api
+def generate_progress(progress_id):
+    """Live step states of a running /api/generate call (by the progress_id
+    the page sent with it): {"steps": {"story": "done", "caption": "active", ...}}"""
+    from services import progress_store
+
+    return jsonify({"steps": progress_store.get(get_current_user_id(), progress_id)})
+
+
 @api_bp.route("/generate", methods=["POST"])
 @login_required_api
 def generate_content():
@@ -507,7 +536,9 @@ def generate_content():
     platforms = data.get("platforms", ["facebook", "instagram", "linkedin"])
     tone = data.get("tone")
     brand_voice = data.get("brand_voice", "Standard Enterprise")
-    include_strategy = data.get("include_strategy", True)
+    # Off by default: the strategy output (posting schedule/forecast) isn't
+    # shown anywhere, and it was the slowest LLM call of the whole pipeline.
+    include_strategy = data.get("include_strategy", False)
     previous_context = data.get("previous_context")
     target_company = data.get("target_company")
     selected_outputs = data.get("selected_outputs", ["text", "image", "video"])
@@ -519,6 +550,14 @@ def generate_content():
     # caption generated" just because Text wasn't checked.
     generate_text = True
     user_id = get_current_user_id()
+
+    # Live step progress for the page (GET /api/generate/progress/<id>)
+    from services import progress_store
+
+    progress_id = data.get("progress_id")
+
+    def _progress(step, state):
+        progress_store.set_step(user_id, progress_id, step, state)
 
     # Studio Chat user's own brand context, derived from their onboarding
     # website (see services/brand_profile_service.py) - "" when they don't
@@ -579,6 +618,7 @@ def generate_content():
     agents_executed = []
 
     try:
+        _progress("story", "active")
         # Step 0: RAG Memory Context Retrieval from ChromaDB
         retrieved_memories = memory_service.retrieve_context(story, user_id=user_id, n_results=3)
         mem_prompt = memory_service.format_memory_prompt(retrieved_memories)
@@ -601,6 +641,7 @@ def generate_content():
         if story_usage:
             total_tokens += story_usage.get("total_tokens", 0)
             total_cost_usd += story_usage.get("cost_usd", 0.0)
+        _progress("story", "done")
 
         agents_executed.append(
             {
@@ -618,7 +659,9 @@ def generate_content():
         # Step 2: Analyze image if provided
         vision_analysis = None
         if image_path and os.path.exists(image_path):
+            _progress("vision", "active")
             vision_analysis = vision_agent.analyze_image(image_path)
+            _progress("vision", "done")
             agents_executed.append(
                 {
                     "agent": "VisionAgent",
@@ -628,56 +671,79 @@ def generate_content():
                 }
             )
 
-        # Step 3: Generate captions with A/B Hook Variations
+        # Step 3+4: Captions and hashtags
         # A brief is only treated as tied to a specific StradIT project/service
         # when it came from a competitor Strategy Synthesis or a target company
         # was explicitly selected - a plain Studio Chat brief with neither is
         # general thought leadership and shouldn't be forced to pitch a product.
         has_project_context = bool("STRATEGY SYNTHESIS:" in story_prompt or (target_company and target_company != "None"))
+        # Captions and hashtags don't depend on each other, so every platform's
+        # caption and hashtag set is generated at the same time instead of
+        # one LLM call after another.
         captions = {}
+        hashtags = {}
         if generate_text:
-            captions = caption_agent.generate_all_platforms(
-                caption_input,
-                vision_analysis,
-                tone,
-                memory_context=mem_prompt,
-                brand_voice=brand_voice,
-                platforms=platforms,
-                has_project_context=has_project_context,
-                brand_profile_block=brand_profile_block,
-            )
-            cap_usage = captions.pop("_usage", {})
-            total_tokens += cap_usage.get("total_tokens", 0)
-            total_cost_usd += cap_usage.get("cost_usd", 0.0)
+            from concurrent.futures import ThreadPoolExecutor
+
+            def _caption_for(platform):
+                return caption_agent.generate_caption(
+                    platform,
+                    caption_input,
+                    vision_analysis,
+                    tone,
+                    mem_prompt,
+                    brand_voice,
+                    has_project_context,
+                    brand_profile_block,
+                )
+
+            def _hashtags_for(platform):
+                try:
+                    return hashtag_agent.generate_hashtags(
+                        platform,
+                        story_analysis,
+                        vision_analysis,
+                        memory_context=mem_prompt,
+                        brand_profile_block=brand_profile_block,
+                    )
+                except Exception as tag_err:  # a post without hashtags beats no post at all
+                    print(f"[Hashtags] {platform} failed: {tag_err}")
+                    return {"hashtags": [], "_usage": {}}
+
+            _progress("caption", "active")
+            _progress("hashtag", "active")
+            with ThreadPoolExecutor(max_workers=min(8, 2 * len(platforms)), thread_name_prefix="gen") as pool:
+                caption_futures = {p: pool.submit(_caption_for, p) for p in platforms}
+                hashtag_futures = {p: pool.submit(_hashtags_for, p) for p in platforms}
+                _mark_done_when_finished(list(caption_futures.values()), lambda: _progress("caption", "done"))
+                _mark_done_when_finished(list(hashtag_futures.values()), lambda: _progress("hashtag", "done"))
+
+                for platform, future in caption_futures.items():
+                    res = future.result()
+                    usage = res.pop("usage", None) or {}
+                    total_tokens += usage.get("total_tokens", 0)
+                    total_cost_usd += usage.get("cost_usd", 0.0)
+                    captions[platform] = res
+                for platform, future in hashtag_futures.items():
+                    res = future.result()
+                    usage = res.pop("_usage", None) or {}
+                    total_tokens += usage.get("total_tokens", 0)
+                    total_cost_usd += usage.get("cost_usd", 0.0)
+                    hashtags[platform] = res
 
             agents_executed.append(
                 {
                     "agent": "CaptionAgent",
                     "name": "Caption Agent",
-                    "role": f"Generated 3 psychological hook angles for {', '.join(platforms)} ('{brand_voice}' voice)",
+                    "role": f"Wrote the caption for {', '.join(platforms)} ('{brand_voice}' voice)",
                     "status": "completed",
                 }
             )
-
-        # Step 4: Generate hashtags
-        hashtags = {}
-        if generate_text:
-            hashtags = hashtag_agent.generate_all_platforms(
-                story_analysis,
-                vision_analysis,
-                memory_context=mem_prompt,
-                platforms=platforms,
-                brand_profile_block=brand_profile_block,
-            )
-            hash_usage = hashtags.pop("_usage", {})
-            total_tokens += hash_usage.get("total_tokens", 0)
-            total_cost_usd += hash_usage.get("cost_usd", 0.0)
-
             agents_executed.append(
                 {
                     "agent": "HashtagAgent",
                     "name": "Hashtag Agent",
-                    "role": "Curated broad, niche & trending hashtag sets",
+                    "role": "Curated broad, niche & brand hashtags for each platform",
                     "status": "completed",
                 }
             )
@@ -705,59 +771,82 @@ def generate_content():
                 }
             )
 
-        # Step 6: ReviewerAgent Self-Correction Loop
+        # Step 6: Quality checks (code, no LLM - see agents/reviewer_agent.py).
+        # A caption that fails a check gets ONE rewrite with the concrete
+        # feedback; all rewrites run at the same time.
         quality_evaluations = {}
         compliance_results: dict[str, dict] = {}
         refinements_count = 0
 
         if generate_text:
+            _progress("reviewer", "active")
             for platform in platforms:
-                primary_cap = captions.get(platform, {}).get("primary_caption", "")
-                p_hashtags = (hashtags.get(platform, {}) or {}).get("hashtags", [])
-
-                # Reviewer evaluates post quality
-                eval_res = reviewer_agent.evaluate(
+                tags = hashtags.get(platform) or {}
+                result = reviewer_agent.evaluate(
                     platform=platform,
-                    caption=primary_cap,
-                    hashtags=p_hashtags,
-                    story_analysis=story_analysis,
-                    brand_voice=brand_voice,
+                    caption=(captions.get(platform) or {}).get("primary_caption", ""),
+                    hashtags=tags.get("hashtags", []),
                 )
+                trimmed = result.pop("hashtags")
+                if tags:
+                    tags["hashtags"] = trimmed
+                quality_evaluations[platform] = result
 
-                rev_usage = eval_res.pop("_usage", {})
-                total_tokens += rev_usage.get("total_tokens", 0)
-                total_cost_usd += rev_usage.get("cost_usd", 0.0)
+            to_fix = [p for p in platforms if quality_evaluations[p]["needs_refinement"] and p in captions]
+            if to_fix:
+                from concurrent.futures import ThreadPoolExecutor
 
-                # Trigger self-correction if score < 8.0
-                if eval_res.get("needs_refinement"):
-                    refinements_count += 1
-                    refined_cap, ref_usage = caption_agent.refine_caption(
-                        platform=platform,
-                        original_caption=primary_cap,
-                        reviewer_feedback=eval_res.get("reviewer_feedback"),
-                        brand_voice=brand_voice,
-                        brand_profile_block=brand_profile_block,
-                    )
-                    captions[platform]["primary_caption"] = refined_cap
-                    captions[platform]["refined_by_critic"] = True
-                    eval_res["self_corrected"] = True
-                    eval_res["overall_score"] = min(9.8, round(eval_res.get("overall_score", 7.5) + 1.5, 1))
+                def _rewrite(platform):
+                    try:
+                        return platform, caption_agent.refine_caption(
+                            platform=platform,
+                            original_caption=captions[platform]["primary_caption"],
+                            reviewer_feedback=quality_evaluations[platform]["reviewer_feedback"],
+                            brand_voice=brand_voice,
+                            brand_profile_block=brand_profile_block,
+                        )
+                    except Exception as ref_err:  # keep the original caption
+                        print(f"[Quality] Rewrite for {platform} failed: {ref_err}")
+                        return platform, None
 
-                    if ref_usage:
-                        total_tokens += ref_usage.get("total_tokens", 0)
-                        total_cost_usd += ref_usage.get("cost_usd", 0.0)
+                with ThreadPoolExecutor(max_workers=min(4, len(to_fix)), thread_name_prefix="fix") as pool:
+                    for platform, outcome in pool.map(_rewrite, to_fix):
+                        if not outcome:
+                            continue
+                        refined_cap, ref_usage = outcome
+                        refinements_count += 1
+                        captions[platform]["primary_caption"] = refined_cap
+                        captions[platform]["refined_by_critic"] = True
+                        if ref_usage:
+                            total_tokens += ref_usage.get("total_tokens", 0)
+                            total_cost_usd += ref_usage.get("cost_usd", 0.0)
+                        # Report the state after the fix, honestly
+                        before = quality_evaluations[platform]
+                        after = reviewer_agent.evaluate(
+                            platform=platform,
+                            caption=refined_cap,
+                            hashtags=(hashtags.get(platform) or {}).get("hashtags", []),
+                        )
+                        after.pop("hashtags", None)
+                        after["self_corrected"] = True
+                        after["fixed_issues"] = before["issues"]
+                        quality_evaluations[platform] = after
 
-                quality_evaluations[platform] = eval_res
-
+            checks_total = sum(q["checks_total"] for q in quality_evaluations.values())
+            checks_passed = sum(q["checks_passed"] for q in quality_evaluations.values())
+            _progress("reviewer", "done")
+            rewrites = f"{refinements_count} caption rewrite{'s' if refinements_count != 1 else ''}"
             agents_executed.append(
                 {
                     "agent": "ReviewerAgent",
-                    "name": "Critic & Self-Correction Agent",
-                    "role": f"Evaluated quality, hook strength & applied {refinements_count} self-corrections",
+                    "name": "Quality Checks",
+                    "role": f"{checks_passed}/{checks_total} checks passed (length, no CTAs/placeholders, "
+                    f"plain text, hashtag limits); {rewrites}",
                     "status": "completed",
                 }
             )
 
+            _progress("guardrail", "active")
             # Step 7: Brand Guardrail - deterministic final scrub for the
             # brand-voice-persona-used-as-company-name failure mode (see
             # _scrub_brand_voice_leak). Runs after refinement so it also
@@ -781,6 +870,7 @@ def generate_content():
                             guardrail_corrections += 1
                         fixed_list.append(fixed_tag)
                     tags["hashtags"] = fixed_list
+            _progress("guardrail", "done")
 
             agents_executed.append(
                 {
@@ -828,10 +918,8 @@ def generate_content():
                     }
                 )
 
-        # Calculate average overall quality score
-        avg_score = round(
-            sum(q.get("overall_score", 8.5) for q in quality_evaluations.values()) / max(1, len(quality_evaluations)), 1
-        )
+        checks_total = sum(q.get("checks_total", 0) for q in quality_evaluations.values())
+        checks_passed = sum(q.get("checks_passed", 0) for q in quality_evaluations.values())
 
         # Compile response
         response = {
@@ -839,7 +927,8 @@ def generate_content():
             "request_id": str(uuid.uuid4()),
             "story_analysis": story_analysis,
             "quality_summary": {
-                "overall_score": avg_score,
+                "checks_passed": checks_passed,
+                "checks_total": checks_total,
                 "refinements_applied": refinements_count,
                 "brand_voice_applied": brand_voice,
             },
