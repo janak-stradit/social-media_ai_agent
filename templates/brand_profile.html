@@ -229,6 +229,14 @@
             margin-bottom: 1.5rem;
         }
 
+        /* Cards in a row share one height. Content starts right under the
+           description, and the card's last field grows into any spare height -
+           instead of the fields being pushed to the bottom and leaving a gap. */
+        .brand-config-card > .bp-card-body { flex: 1; display: flex; flex-direction: column; }
+        .bp-card-body > .bp-form-row:last-child { flex: 1; display: flex; flex-direction: column; }
+        .bp-card-body > .bp-form-row:last-child > textarea:not(.d-none),
+        .bp-card-body > .bp-form-row:last-child > .ui-tag-input { flex: 1; align-content: flex-start; }
+
         .brand-config-card .bp-form-row:last-child {
             margin-bottom: 0;
         }
@@ -740,7 +748,6 @@
                     <h6 class="text-dark fw-bold mb-1 fs-6">Create AI content<br>that feels like you</h6>
                     <p class="text-muted mb-0" style="font-size: 0.75rem; line-height: 1.4;">Set up your brand once,<br>use it everywhere.</p>
                 </div>
-                <div class="promo-wave" style="position:absolute; bottom:-10px; left:0; width:100%; height:40px; background: linear-gradient(to right, #a855f7, #6366f1); border-radius: 40% 40% 0 0; opacity: 0.8; transform: scaleX(1.5);"></div>
             </div>
         </aside>
 
@@ -831,7 +838,7 @@
                             <h6><div class="card-icon-circle"><i data-feather="home"></i></div> Brand Overview</h6>
                             <div class="brand-config-card-desc">Core identity and audience information used to guide generated content.</div>
 
-                            <div class="mt-auto">
+                            <div class="bp-card-body">
                                 <div class="row">
                                     <div class="col-md-6 bp-form-row">
                                         <label class="guideline-field-label">Company Name</label>
@@ -864,7 +871,7 @@
                             <h6><div class="card-icon-circle"><i data-feather="message-square"></i></div> Voice & Themes</h6>
                             <div class="brand-config-card-desc">Defines how your brand sounds and the topics you frequently discuss.</div>
 
-                            <div class="mt-auto">
+                            <div class="bp-card-body">
                                 <div class="bp-form-row">
                                     <label class="guideline-field-label">Brand Voice Summary</label>
                                     <textarea id="bpVoiceSummary" class="form-control form-control-sm" rows="5"></textarea>
@@ -882,7 +889,7 @@
                             <h6><div class="card-icon-circle"><i data-feather="droplet"></i></div> Colors & Fonts</h6>
                             <div class="brand-config-card-desc">Visual assets extracted from your website's stylesheets.</div>
 
-                            <div class="mt-auto">
+                            <div class="bp-card-body">
                                 <div class="row">
                                     <div class="col-md-6 bp-form-row">
                                         <label class="guideline-field-label">Primary Colors</label>
@@ -891,7 +898,7 @@
                                     </div>
                                     <div class="col-md-6 bp-form-row">
                                         <label class="guideline-field-label">Fonts Detected</label>
-                                        <textarea id="bpFonts" class="form-control form-control-sm theme-textarea" rows="1" placeholder="One font name per line" oninput="renderFontPreview()"></textarea>
+                                        <textarea id="bpFonts" class="form-control form-control-sm theme-textarea" rows="3" placeholder="One font name per line" oninput="renderFontPreview()"></textarea>
                                         <div class="guideline-field-hint" id="bpFontsHint">One font name per line.</div>
                                         <div class="bp-fonts-preview" id="bpFontsPreview"></div>
                                     </div>
@@ -904,7 +911,7 @@
                             <h6><div class="card-icon-circle"><i data-feather="package"></i></div> Products & Services</h6>
                             <div class="brand-config-card-desc">Key offerings and product lines to highlight in content.</div>
 
-                            <div class="mt-auto">
+                            <div class="bp-card-body">
                                 <div class="bp-form-row">
                                     <label class="guideline-field-label">Core Products/Services</label>
                                     <textarea id="bpCoreProducts" class="form-control form-control-sm theme-textarea" rows="4" placeholder="One product/service per line"></textarea>
@@ -918,7 +925,7 @@
                             <h6><div class="card-icon-circle"><i data-feather="list"></i></div> Content Rules</h6>
                             <div class="brand-config-card-desc">Specific instructions for AI generation behaviors.</div>
 
-                            <div class="mt-auto">
+                            <div class="bp-card-body">
                                 <div class="row">
                                     <div class="col-md-6 bp-form-row mb-0">
                                         <div class="content-rules-header">

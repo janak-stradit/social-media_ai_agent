@@ -445,7 +445,7 @@ $(document).ready(function () {
     });
 
     // ── New Chat / Reset Thread ────────────────────────────────────────
-    $('#newChatBtn, #headerNewChatBtn').on('click', function () {
+    $('#newChatBtn').on('click', function () {
         startNewChat();
     });
 
@@ -1555,10 +1555,9 @@ $(document).ready(function () {
             }
         });
 
-        // Bind Schedule - opens the same schedulePostModal the History detail
-        // modal uses (see $('#modalScheduleBtn')/$('#confirmSchedulePostBtn')
-        // below), just pointed at this chat message's run/story instead of
-        // whichever run the History modal last had open. Also always
+        // Bind Schedule - opens the schedulePostModal (see
+        // $('#confirmSchedulePostBtn') below) for this chat message's
+        // run/story. Currently disabled in the UI ("Coming soon"). Also always
         // pre-fills the date/time field with a sensible default (tomorrow),
         // since the field only shows a value once something sets it - opening
         // the modal any other way left it blank.
@@ -1820,7 +1819,6 @@ $(document).ready(function () {
                     <div class="history-card-header">
                         <div class="history-card-title">${escapeHtml(item.story)}</div>
                         <div class="history-card-actions">
-                            <button class="btn-history-icon btn-view-details-item" data-id="${item.id}" title="View run details"><i class="fas fa-circle-info"></i></button>
                             ${actionBtn}
                         </div>
                     </div>
@@ -1843,12 +1841,6 @@ $(document).ready(function () {
             $(this).addClass('active');
             const id = $(this).data('id');
             loadHistoryIntoChat(id);
-        });
-
-        $('.btn-view-details-item').on('click', function (e) {
-            e.stopPropagation();
-            const id = $(this).data('id');
-            openHistoryDetails(id);
         });
 
         $('.btn-archive-item').on('click', function (e) {
@@ -1950,47 +1942,6 @@ $(document).ready(function () {
             },
             error: function () {
                 showToast('Could not load that conversation.', 'error');
-            }
-        });
-    }
-
-    function openHistoryDetails(runId) {
-        $.ajax({
-            url: `/api/history/${runId}`,
-            type: 'GET',
-            success: function (r) {
-                const run = r.run;
-                if (!run) return;
-
-                $('#modalTimestamp').text(run.timestamp || '');
-                $('#modalTone').text(run.tone || 'Auto');
-                $('#modalPlatforms').text(Array.isArray(run.platforms) ? run.platforms.join(', ') : run.platforms);
-                $('#modalUsage').text(`${Number(run.tokens_used || 0).toLocaleString()} Tokens | $${Number(run.cost_usd || 0).toFixed(4)}`);
-                $('#modalStory').text(run.story);
-
-                let detailsHtml = '<div class="row g-3">';
-                const content = run.content || {};
-
-                Object.keys(content).forEach(platform => {
-                    if (platform.startsWith('_')) return;
-                    const pData = content[platform] || {};
-                    const rawH = pData.hashtags;
-                    const hTags = Array.isArray(rawH) ? rawH : (Array.isArray(rawH?.hashtags) ? rawH.hashtags : (Array.isArray(rawH?.primary_hashtags) ? rawH.primary_hashtags : []));
-                    detailsHtml += `
-                        <div class="col-md-6 col-lg-4">
-                            <div class="ent-card h-100 p-3">
-                                <h6 class="text-primary text-uppercase font-weight-bold mb-2">${platform}</h6>
-                                <p class="small mb-2"><strong>Caption:</strong> ${escapeHtml(pData.caption?.primary_caption || 'N/A')}</p>
-                                <p class="small text-muted mb-0"><strong>Tags:</strong> ${escapeHtml(hTags.join(' '))}</p>
-                            </div>
-                        </div>
-                    `;
-                });
-                detailsHtml += '</div>';
-
-                $('#modalDetails').html(detailsHtml);
-                const modal = new bootstrap.Modal(document.getElementById('historyModal'));
-                modal.show();
             }
         });
     }
@@ -2579,19 +2530,6 @@ $(document).ready(function () {
             }
         });
     };
-
-    $('#modalScheduleBtn').on('click', function () {
-        const modalElem = document.getElementById('historyModal');
-        if (modalElem) bootstrap.Modal.getInstance(modalElem)?.hide();
-
-        const tomorrow = new Date();
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        const isoString = tomorrow.toISOString().slice(0, 16);
-        $('#schedDateTimeInput').val(isoString);
-
-        const schedModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('schedulePostModal'));
-        schedModal.show();
-    });
 
     $('#confirmSchedulePostBtn').on('click', function () {
         const scheduledAt = $('#schedDateTimeInput').val();

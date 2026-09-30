@@ -3097,8 +3097,9 @@ VALID_SELF_SERVE_ACCOUNT_TYPES = {"individual", "small", "medium"}
 @login_required_api
 def onboarding_account_type():
     """Second onboarding step (after email verification) - see
-    templates/onboarding_account_type.html. Individual/Small/Medium require a
-    website and complete onboarding immediately; Enterprise records the
+    templates/onboarding_account_type.html. Individual/Small/Medium complete
+    onboarding immediately - with a website (starts the brand analysis) or with
+    skip_website=true (no website yet); Enterprise records the
     selection but does NOT complete onboarding - the frontend sends those
     users on to /onboarding/contact-sales instead."""
     data = request.get_json() or {}
@@ -3115,10 +3116,14 @@ def onboarding_account_type():
         set_user_account_type_enterprise(user_id)
         return jsonify({"success": True, "redirect": "/onboarding/contact-sales"})
 
-    if not website:
+    # "Skip for now": finish onboarding without a website - the brand profile
+    # can be added later on the My Brand Configuration page.
+    if not website and not data.get("skip_website"):
         return jsonify({"success": False, "error": "Please enter your website"}), 400
 
-    complete_user_onboarding(user_id, account_type, website)
+    complete_user_onboarding(user_id, account_type, website or None)
+    if not website:
+        return jsonify({"success": True, "redirect": "/dashboard", "scan_started": False})
 
     # Scrape the site and derive a brand profile (industry, voice, colors)
     # that future Studio Chat generation follows - in the background, so

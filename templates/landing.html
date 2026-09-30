@@ -119,6 +119,7 @@
         .hero-quickstart:hover { box-shadow: var(--shadow-md); border-color: var(--border-hover); }
         .qs-field { display: flex; align-items: center; gap: 8px; flex: 1 1 200px; min-height: 44px; padding: 0 0.85rem; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: var(--radius-sm); transition: border-color 0.15s ease, box-shadow 0.15s ease; }
         .qs-field:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(138, 43, 226, 0.15); }
+        .qs-field-type { flex-basis: 150px; }
         .qs-field i { color: var(--text-muted); font-size: 14px; }
         .qs-field input, .qs-field select { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font-family: inherit; font-size: 0.9rem; color: var(--text-primary); }
         .qs-field input::placeholder { color: var(--text-muted); }
@@ -227,7 +228,15 @@
 
         @media (max-width: 640px) {
             .app-header { padding: 0 16px; }
-            .brand-tagline, .header-actions .btn-outline { display: none; }
+            .brand-tagline { display: none; }
+            /* Keep Sign In reachable on phones - as a compact text link next to a smaller Get Started */
+            .header-actions { gap: 2px; }
+            .header-actions .btn-outline { border: none; box-shadow: none; background: transparent; padding: 0.5rem 0.65rem; min-height: 40px; font-size: 0.875rem; }
+            .header-actions .btn-primary-save { padding: 0.5rem 0.9rem; min-height: 40px; font-size: 0.875rem; }
+            /* Stacked quick-start form: fields keep their natural 44px height (the
+               desktop flex-basis of 200px would otherwise become their HEIGHT) */
+            .hero-quickstart .qs-field { flex: 0 0 auto; }
+            .hero-quickstart .btn-primary-save { width: 100%; }
             .hero { padding: calc(var(--header-h) + 16px) 16px 24px; }
             .brand-hero-card { padding: 2rem 1.25rem 0; border-radius: var(--radius-lg); }
             .hero-panel { margin: 2rem -1.25rem 0; height: 340px; }
@@ -319,6 +328,16 @@
         .hero .hero-card-1 { translate: calc(var(--px, 0) * 28px) calc(var(--py, 0) * 28px); }
         .hero .hero-card-2 { translate: calc(var(--px, 0) * 40px) calc(var(--py, 0) * 40px); }
 
+        /* Narrow phones (360px): make room for logo + name + Beta + both header buttons */
+        @media (max-width: 380px) {
+            .app-header { padding: 0 12px; }
+            .header-brand { gap: 8px; }
+            .brand-logo { width: 32px; height: 32px; }
+            .header-actions .btn-outline { padding: 0.5rem 0.45rem; }
+            .header-actions .btn-primary-save { padding: 0.5rem 0.7rem; }
+            .hero-title, .hero .hero-title { font-size: 2.25rem; }
+        }
+
         @media (max-width: 640px) {
             .hero .hero-mock { animation: hero-pop 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 0.5s both; }
             .hero .hero-panel { animation-name: hero-rise; }
@@ -378,7 +397,7 @@
                         <i class="fas fa-globe" aria-hidden="true"></i>
                         <input type="text" name="website" placeholder="https://yourwebsite.com" autocomplete="off" aria-label="Website URL">
                     </label>
-                    <label class="qs-field" style="flex-basis: 150px;">
+                    <label class="qs-field qs-field-type">
                         <i class="fas fa-building" aria-hidden="true"></i>
                         <select name="account_type" aria-label="Business type">
                             <option value="individual">Individual</option>
