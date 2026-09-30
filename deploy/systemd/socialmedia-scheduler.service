@@ -1,0 +1,19 @@
+# The ONLY scheduled-post publisher (the web service runs with
+# SCHEDULER_ENABLED=false). Installed by deploy/setup_server.sh.
+[Unit]
+Description=Social Media AI Agent - scheduled post publisher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=__APP_USER__
+Group=__APP_USER__
+WorkingDirectory=/opt/socialmedia/app
+Environment=PYTHONUNBUFFERED=1
+Environment=HF_HOME=/opt/socialmedia/hf-cache
+ExecStart=/opt/socialmedia/venv/bin/python scripts/run_scheduler.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

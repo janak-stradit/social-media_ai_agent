@@ -1440,7 +1440,7 @@ $(document).ready(function () {
         const cardContent = `
             <div class="assistant-header">
                 <div class="assistant-title d-flex align-items-center">
-                    <div><i class="fas fa-sparkles text-primary me-1"></i>VortexSocial Studio Output</div>
+                    <div><i class="fas fa-sparkles text-primary me-1"></i>AVIR Studio Output</div>
                     ${paginationHtml}
                 </div>
                 <div class="assistant-meta-tags">

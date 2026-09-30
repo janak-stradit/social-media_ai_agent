@@ -5,6 +5,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _key_prefix(value: str) -> str:
+    """S3 key prefix with one trailing slash: 'uploads' -> 'uploads/', '' -> '' (bucket root)."""
+    value = (value or "").strip().strip("/")
+    return f"{value}/" if value else ""
+
+
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key")
     UPLOAD_FOLDER = "static/uploads"
@@ -39,15 +45,18 @@ class Config:
     HEYROUTE_IMAGE_API_KEY = os.getenv("HEYROUTE_IMAGE_API_KEY")  # SMAI-Image
     HEYROUTE_VIDEO_API_KEY = os.getenv("HEYROUTE_VIDEO_API_KEY")  # SMAI-Video
     HEYROUTE_LLM_MODEL = os.getenv("HEYROUTE_LLM_MODEL", "gpt-5.6-terra")
+    # Seconds one LLM request may take before it is abandoned (1 retry).
+    HEYROUTE_LLM_TIMEOUT = int(os.getenv("HEYROUTE_LLM_TIMEOUT", "120"))
     # none / minimal / low / medium / high - "low" keeps agent calls fast; the
     # model still reasons before answering.
-    HEYROUTE_REASONING_EFFORT = os.getenv("HEYROUTE_REASONING_EFFORT", "low")
-    HEYROUTE_IMAGE_MODEL = os.getenv("HEYROUTE_IMAGE_MODEL", "gemini-3.1-flash-image")
+    HEYROUTE_REASONING_EFFORT = os.getenv("HEYROUTE_REASONING_EFFORT", "medium")
+    HEYROUTE_IMAGE_MODEL = os.getenv("HEYROUTE_IMAGE_MODEL", "gemini-3.1-flash-lite-preview")
+    #gemini-3.1-flash-lite-preview , gemini-3.1-flash-image
     # Video is generated ONLY through HeyRoute (HEYROUTE_VIDEO_API_KEY) - no
     # other video provider is tried. grok-video: text-to-video, 6/10/15 s only,
     # no reference image. Optionally a second HeyRoute model to try if the
     # first fails (e.g. grok-imagine-video-1.5); empty = none.
-    HEYROUTE_VIDEO_MODEL = os.getenv("HEYROUTE_VIDEO_MODEL", "grok-video")
+    HEYROUTE_VIDEO_MODEL = os.getenv("HEYROUTE_VIDEO_MODEL", "gemini-3.1-flash-lite")
     HEYROUTE_VIDEO_FALLBACK_MODEL = os.getenv("HEYROUTE_VIDEO_FALLBACK_MODEL", "")
     HEYROUTE_VIDEO_RESOLUTION = os.getenv("HEYROUTE_VIDEO_RESOLUTION", "720p")
     HEYROUTE_VIDEO_SECONDS = int(os.getenv("HEYROUTE_VIDEO_SECONDS", "8"))
@@ -84,6 +93,13 @@ class Config:
     AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
     AWS_S3_BUCKET = os.getenv("AWS_S3_BUCKET")
     AWS_BUCKET_OWNER = os.getenv("AWS_BUCKET_OWNER")  # Optional 12-digit account ID
+
+    # S3 copy of generated content + user uploads (services/storage_service.py).
+    # Files stay under static/uploads/ locally and keep their /static/uploads/
+    # URLs; S3 is the durable copy and refills the disk when a file is missing.
+    # Empty = disabled.
+    S3_MEDIA_BUCKET = os.getenv("S3_MEDIA_BUCKET", "")
+    S3_MEDIA_PREFIX = _key_prefix(os.getenv("S3_MEDIA_PREFIX", "uploads"))
 
     # Media provider selection: 'bedrock', 'zai', 'openrouter', 'openai'
     MEDIA_PROVIDER = os.getenv("MEDIA_PROVIDER")

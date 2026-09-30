@@ -68,7 +68,7 @@ class HashtagAgent:
             clean_themes = [f"#{str(t).replace(' ', '').replace('-', '')}" for t in themes[:3]]
             result["hashtags"] = clean_themes + [
                 f"#{platform.capitalize()}Strategy",
-                "#VortexSocial",
+                "#AVIRAI",
                 "#ContentAI",
             ]
 

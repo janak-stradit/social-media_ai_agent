@@ -1,0 +1,142 @@
+name: Deploy to EC2
+
+# Deploys a branch to the EC2 instance of a GitHub Environment.
+#  - Manual: Actions -> "Deploy to EC2" -> Run workflow -> pick the branch in
+#    the "Use workflow from" dropdown and the environment (production/staging).
+#    The branch comes from that dropdown on purpose: GitHub checks it against the
+#    Environment's "Deployment branches" rule, so e.g. only main can reach production.
+#  - Automatic: every push to main deploys main to production.
+# All configuration lives in the Environment's secrets (see DEPLOYMENT.md):
+#   EC2_HOST, EC2_USER, EC2_SSH_KEY, ENV_FILE, and optionally EC2_KNOWN_HOSTS.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target environment (its secrets decide which server and .env are used)"
+        required: true
+        default: production
+        type: choice
+        options:
+          - production
+          - staging
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy ${{ github.ref_name }} -> ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'production' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'production' }}
+    # One deploy per environment at a time; a second one waits instead of
+    # interrupting a half-finished deploy.
+    concurrency:
+      group: deploy-${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'production' }}
+      cancel-in-progress: false
+    env:
+      DEPLOY_BRANCH: ${{ github.ref_name }}
+      DEPLOY_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'production' }}
+      EC2_HOST: ${{ secrets.EC2_HOST }}
+      EC2_USER: ${{ secrets.EC2_USER }}
+      APP_DIR: /opt/socialmedia/app
+
+    steps:
+      - name: Validate branch name
+        run: |
+          if ! printf '%s' "$DEPLOY_BRANCH" | grep -Eq '^[A-Za-z0-9._/-]+$'; then
+            echo "::error::Invalid branch name: $DEPLOY_BRANCH"
+            exit 1
+          fi
+          echo "Deploying branch: $DEPLOY_BRANCH"
+
+      # Checks out the exact commit that triggered this run (github.sha).
+      - name: Check out ${{ env.DEPLOY_BRANCH }}
+        uses: actions/checkout@v4
+
+      - name: Check required secrets
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          missing=""
+          for name in EC2_HOST EC2_USER EC2_SSH_KEY ENV_FILE; do
+            [ -n "${!name}" ] || missing="$missing $name"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing secrets in the '$DEPLOY_ENV' environment:$missing"
+            exit 1
+          fi
+          grep -Eq '^[[:space:]]*(export[[:space:]]+)?DATABASE_URL=' <<< "$ENV_FILE" || { echo "::error::ENV_FILE has no DATABASE_URL line"; exit 1; }
+          grep -Eq '^[[:space:]]*(export[[:space:]]+)?SECRET_KEY=' <<< "$ENV_FILE" || { echo "::error::ENV_FILE has no SECRET_KEY line"; exit 1; }
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Syntax check
+        run: python -m compileall -q -x '(^|/)(soical-media-ai|venv|\.venv|scratch)/' .
+
+      - name: Configure SSH
+        env:
+          EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
+          EC2_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$EC2_SSH_KEY" | tr -d '\r' > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          if [ -n "$EC2_KNOWN_HOSTS" ]; then
+            printf '%s\n' "$EC2_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          else
+            echo "::warning::EC2_KNOWN_HOSTS not set - trusting the host key found by ssh-keyscan."
+            ssh-keyscan -T 15 -H "$EC2_HOST" > ~/.ssh/known_hosts
+          fi
+          chmod 600 ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host ec2
+            HostName $EC2_HOST
+            User $EC2_USER
+            IdentityFile ~/.ssh/deploy_key
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+            ServerAliveInterval 30
+            ConnectTimeout 20
+          EOF
+          ssh ec2 'echo "Connected to $(hostname) as $(id -un)"'
+
+      - name: Prepare app directory
+        run: |
+          ssh ec2 "command -v rsync >/dev/null || { sudo apt-get update -y && sudo apt-get install -y rsync; }"
+          ssh ec2 "sudo mkdir -p '$APP_DIR' && sudo chown \"\$(id -un):\$(id -gn)\" /opt/socialmedia '$APP_DIR'"
+
+      - name: Upload code
+        run: |
+          rsync -az --delete --exclude-from=deploy/rsync-exclude.txt \
+            ./ "ec2:$APP_DIR/"
+          # Brand assets are uploaded/replaced from the app into static/img/brand/
+          # (excluded above, so never deleted). Only copy the repo's default
+          # assets when they're missing - never overwrite a user's replacement.
+          rsync -az --ignore-existing static/img/brand/ "ec2:$APP_DIR/static/img/brand/"
+
+      - name: Install, configure and restart
+        env:
+          ENV_FILE: ${{ secrets.ENV_FILE }}
+        run: |
+          printf '%s\n' "$ENV_FILE" | ssh ec2 \
+            "bash '$APP_DIR/deploy/remote_deploy.sh' '$GITHUB_SHA' '$DEPLOY_BRANCH'"
+
+      - name: Summary
+        if: success()
+        run: |
+          {
+            echo "### Deployed \`$DEPLOY_BRANCH\` (\`${GITHUB_SHA::7}\`)"
+            echo "Environment: **$DEPLOY_ENV**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove SSH key
+        if: always()
+        run: rm -f ~/.ssh/deploy_key

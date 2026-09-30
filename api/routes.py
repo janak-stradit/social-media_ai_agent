@@ -24,6 +24,7 @@ from services.compliance_service import active_rules_for_user, check_caption
 from services.llm_service import LLMService
 from services.memory_service import MemoryService
 from services.scraper_service import ScraperService
+from services import storage_service
 
 try:
     from db import (
@@ -384,6 +385,7 @@ def upload_image():
         unique_name = f"{uuid.uuid4()}_{secure_name}"
         filepath = os.path.join(current_app.config["UPLOAD_FOLDER"], unique_name)
         file.save(filepath)
+        storage_service.upload(filepath)
 
         # Analyze image
         try:
@@ -683,9 +685,13 @@ def generate_content():
         # Step 5: Generate strategy
         strategies = {}
         if include_strategy and generate_text:
-            strategies = strategy_agent.generate_all_strategies(
-                story_analysis, memory_context=mem_prompt, platforms=platforms
-            )
+            try:
+                strategies = strategy_agent.generate_all_strategies(
+                    story_analysis, memory_context=mem_prompt, platforms=platforms
+                )
+            except Exception as strat_err:  # not shown in Studio Chat - never fail the post over it
+                current_app.logger.warning(f"[Strategy] Skipped: {strat_err}")
+                strategies = {}
             strat_usage = strategies.pop("_usage", {})
             total_tokens += strat_usage.get("total_tokens", 0)
             total_cost_usd += strat_usage.get("cost_usd", 0.0)
@@ -1353,6 +1359,8 @@ def publish_pipeline_asset():
         rel_path = str(content).lstrip("/").replace("/", os.sep)
         candidate = os.path.join(current_app.root_path, rel_path)
         if not os.path.exists(candidate):
+            candidate = storage_service.ensure_local(str(content))
+        if not candidate:
             return jsonify({"error": "Generated media file could not be located on the server"}), 404
         abs_media_path = candidate
 
@@ -2489,6 +2497,7 @@ def create_manual_scheduled_post_endpoint():
         file_path = os.path.join(upload_folder, unique_name)
         file.save(file_path)
         image_url = f"/static/uploads/{unique_name}"
+        storage_service.upload(image_url)
 
     from datetime import datetime, timezone
 
@@ -2518,8 +2527,7 @@ def create_manual_scheduled_post_endpoint():
         if image_url:
             rel_path = image_url.lstrip("/").replace("/", os.sep)
             candidate = os.path.join(current_app.root_path, rel_path)
-            if os.path.exists(candidate):
-                abs_image_path = candidate
+            abs_image_path = candidate if os.path.exists(candidate) else storage_service.ensure_local(image_url)
 
         pub_results = publisher_service.publish_post_to_connected_accounts(
             user_id=user_id, platforms=platforms, caption=caption, image_path=abs_image_path
@@ -2981,6 +2989,8 @@ def download_zip():
             # not be the project root depending on how the app was launched.
             rel_path = url.split("?")[0].lstrip("/").replace("/", os.sep)
             path = os.path.join(current_app.root_path, rel_path)
+            if not os.path.exists(path):
+                path = storage_service.ensure_local(url) or path
             if os.path.exists(path):
                 filename = os.path.basename(path)
                 zf.write(path, arcname=filename)

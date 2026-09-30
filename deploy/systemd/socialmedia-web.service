@@ -1,0 +1,33 @@
+# Flask app under gunicorn. Installed by deploy/setup_server.sh
+# (__APP_USER__ is replaced with the deploy user).
+[Unit]
+Description=Social Media AI Agent - web (gunicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=__APP_USER__
+Group=__APP_USER__
+WorkingDirectory=/opt/socialmedia/app
+# The app loads /opt/socialmedia/app/.env itself (python-dotenv); values set
+# here win over .env because load_dotenv never overrides existing variables.
+Environment=PYTHONUNBUFFERED=1
+Environment=SCHEDULER_ENABLED=false
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/socialmedia/ms-playwright
+Environment=HF_HOME=/opt/socialmedia/hf-cache
+# --timeout 900: one generation (LLM + image/video) can run for several minutes;
+# gunicorn's default 30 s would kill it. gthread lets a worker serve other
+# requests while one waits on an API.
+ExecStart=/opt/socialmedia/venv/bin/gunicorn \
+    --workers 2 --worker-class gthread --threads 4 \
+    --timeout 900 --graceful-timeout 60 \
+    --bind 127.0.0.1:8000 \
+    --access-logfile - --error-logfile - \
+    'app:create_app("production")'
+Restart=always
+RestartSec=5
+KillMode=mixed
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target

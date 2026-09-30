@@ -1,7 +1,7 @@
 import os
 import sys
 
-from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, abort, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 from flask_cors import CORS
 
 from api.routes import api_bp
@@ -47,8 +47,12 @@ def create_app(config_name="development"):
         print("[DB] Schema 'social_media_agent' initialised.")
 
         # Start background scheduler thread (skip the reloader's monitor process,
-        # otherwise app.py runs twice under debug=True and posts get published twice)
-        if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        # otherwise app.py runs twice under debug=True and posts get published twice).
+        # Under gunicorn every worker would start its own thread and publish each post
+        # once per worker, so production sets SCHEDULER_ENABLED=false and runs the
+        # scheduler as its own single process instead (scripts/run_scheduler.py).
+        scheduler_enabled = os.environ.get("SCHEDULER_ENABLED", "true").lower() in ("1", "true", "yes")
+        if scheduler_enabled and (not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true"):
             from scheduler_thread import start_background_scheduler
 
             start_background_scheduler(app.root_path)
@@ -219,6 +223,18 @@ def create_app(config_name="development"):
         session.clear()
         session.modified = True
         return redirect(url_for("login_route"))
+
+    @app.route("/static/uploads/<path:filename>")
+    def uploaded_file(filename):
+        """Generated content and uploads. Same as Flask's own /static route,
+        except that a file missing on this server's disk (new or rebuilt
+        instance) is fetched from its S3 copy first (services/storage_service.py).
+        In production nginx serves files that exist and only sends misses here."""
+        from services import storage_service
+
+        if not storage_service.ensure_local(f"{storage_service.UPLOAD_URL_PREFIX}{filename}"):
+            abort(404)
+        return send_from_directory(app.config["UPLOAD_FOLDER"], filename, max_age=0)
 
     @app.route("/favicon.ico")
     def favicon():

@@ -34,6 +34,32 @@ class LLMService:
         return head.startswith(self._REASONING_LEAKAGE_PREFIXES)
 
     def __init__(self):
+        # HeyRoute configured -> it is the ONLY LLM provider: no Bedrock, Gemini,
+        # OpenRouter or OpenAI client is created or called. Without a HeyRoute
+        # key the original provider chain below is used unchanged.
+        heyroute_key = getattr(Config, "HEYROUTE_API_KEY", None)
+        if heyroute_key and not getattr(Config, "USE_MOCK_LLM", False):
+            self.openrouter_key = None
+            self.openai_key = None
+            self.bedrock_client = None
+            self.bedrock_model = None
+            self.providers = [
+                {
+                    "name": "heyroute",
+                    # A bounded wait: the OpenAI SDK default (600 s, 2 retries)
+                    # let one stuck request hold a generation for over 10 minutes.
+                    "client": openai.OpenAI(
+                        api_key=heyroute_key,
+                        base_url=Config.HEYROUTE_BASE_URL,
+                        timeout=float(getattr(Config, "HEYROUTE_LLM_TIMEOUT", 120)),
+                        max_retries=1,
+                    ),
+                    "model": Config.HEYROUTE_LLM_MODEL,
+                    "reasoning": True,
+                }
+            ]
+            return
+
         api_key = Config.OPENAI_API_KEY
         # Prefer a dedicated OPENROUTER_API_KEY when set; otherwise fall back to
         # sniffing OPENAI_API_KEY for an OpenRouter-shaped key (sk-or-...), which
@@ -77,21 +103,7 @@ class LLMService:
 
         self.providers = []
 
-        # HeyRoute's gpt-5.6-terra is tried first when its key is set; every
-        # provider below stays as automatic failover. A reasoning model: see
-        # _chat_kwargs for how its request differs.
-        heyroute_key = getattr(Config, "HEYROUTE_API_KEY", None)
-        if heyroute_key:
-            self.providers.append(
-                {
-                    "name": "heyroute",
-                    "client": openai.OpenAI(api_key=heyroute_key, base_url=Config.HEYROUTE_BASE_URL),
-                    "model": Config.HEYROUTE_LLM_MODEL,
-                    "reasoning": True,
-                }
-            )
-
-        # OpenRouter is tried next when configured (currently a free model);
+        # OpenRouter is tried first when configured (currently a free model);
         # Bedrock/OpenAI/Gemini remain as automatic failover if it errors or
         # rate-limits.
         if self.openrouter_key:
@@ -196,8 +208,8 @@ class LLMService:
                         "time": "05:00 PM",
                         "platforms": ["linkedin", "facebook"],
                         "content_type": "Case Study & Testimonial",
-                        "story": "How top agencies scaled their client social engagement by 300% using VortexSocial AI.",
-                        "caption": "How top agencies scaled client social engagement by 300% using VortexSocial AI 📊 Read the full case study to optimize your strategy today. #CaseStudy #B2B #DigitalGrowth",
+                        "story": "How top agencies scaled their client social engagement by 300% using AVIR AI.",
+                        "caption": "How top agencies scaled client social engagement by 300% using AVIR AI 📊 Read the full case study to optimize your strategy today. #CaseStudy #B2B #DigitalGrowth",
                         "image_prompt": "Professional corporate infographic showing upward growth chart with vibrant green metrics",
                     },
                 ],
@@ -206,7 +218,7 @@ class LLMService:
 
         # 2. Hashtags / Captions
         elif "hashtag" in prompt_lower or "caption" in prompt_lower:
-            return "🚀 Boost your social presence with AI automation! #VortexSocialAI #GrowthHacks #DigitalMarketing #AI #Tech2026 #SocialMediaStrategy"
+            return "🚀 Boost your social presence with AI automation! #AVIRAI #GrowthHacks #DigitalMarketing #AI #Tech2026 #SocialMediaStrategy"
 
         # 3. Visual Prompt
         elif "prompt" in prompt_lower or "image" in prompt_lower or "video" in prompt_lower:
@@ -214,7 +226,7 @@ class LLMService:
 
         # 4. Default Text
         else:
-            return "VortexSocial AI Studio is ready! Generate, schedule, and publish high-converting social content across Facebook, Instagram, and LinkedIn."
+            return "AVIR AI Studio is ready! Generate, schedule, and publish high-converting social content across Facebook, Instagram, and LinkedIn."
 
     # Reasoning models spend part of their completion budget thinking before
     # they answer; a budget sized for a plain model (e.g. 700 tokens for an

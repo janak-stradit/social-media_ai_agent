@@ -23,7 +23,12 @@ def _resolve_local_path(url_or_path: str | None) -> str | None:
     if os.path.exists(url_or_path):
         return url_or_path
     candidate = os.path.join(Config.UPLOAD_FOLDER, os.path.basename(url_or_path))
-    return candidate if os.path.exists(candidate) else None
+    if os.path.exists(candidate):
+        return candidate
+    # Not on this server's disk - fetch the S3 copy (services/storage_service.py)
+    from services import storage_service
+
+    return storage_service.ensure_local(storage_service.UPLOAD_URL_PREFIX + os.path.basename(url_or_path))
 
 
 def _load_image_slides(paths: list[str]) -> list[tuple[str, bytes, str]]:
@@ -155,7 +160,7 @@ def _build_html(
                                     <td style="vertical-align: middle;">
                                         <span style="color: #ffffff; font-size: 20px; font-weight: 700;">Content Approved</span>
                                         <div style="color: rgba(255,255,255,0.85); font-size: 13px; margin-top: 2px;">
-                                            VortexSocial AI &mdash; Analysis Dashboard
+                                            AVIR AI &mdash; Analysis Dashboard
                                         </div>
                                     </td>
                                 </tr>
@@ -271,7 +276,7 @@ def _build_request_html(
                                     <td style="vertical-align: middle;">
                                         <span style="color: #ffffff; font-size: 20px; font-weight: 700;">Review Requested</span>
                                         <div style="color: rgba(255,255,255,0.85); font-size: 13px; margin-top: 2px;">
-                                            VortexSocial AI &mdash; Analysis Dashboard
+                                            AVIR AI &mdash; Analysis Dashboard
                                         </div>
                                     </td>
                                 </tr>
@@ -348,7 +353,7 @@ def _build_verification_html(name: str, verify_url: str) -> str:
                     </tr>
                     <tr>
                         <td style="background-color: #4f46e5; background-image: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); padding: 32px; text-align: center;">
-                            <span style="color: #ffffff; font-size: 22px; font-weight: 700;">Welcome to VortexSocial AI</span>
+                            <span style="color: #ffffff; font-size: 22px; font-weight: 700;">Welcome to AVIR AI</span>
                         </td>
                     </tr>
                     <tr>
@@ -397,7 +402,7 @@ def _build_password_reset_html(name: str, reset_url: str, ttl_minutes: int) -> s
                     <tr>
                         <td style="padding: 32px 32px 8px 32px; color: #172033; font-size: 15px; line-height: 1.6;">
                             Hi {_escape(name)},<br><br>
-                            We received a request to reset the password for your VortexSocial AI account. Click the button below to choose a new one.
+                            We received a request to reset the password for your AVIR AI account. Click the button below to choose a new one.
                         </td>
                     </tr>
                     <tr>
@@ -456,7 +461,7 @@ def _build_sales_lead_html(user_name: str, user_email: str, company_name: str, p
                     <tr>
                         <td style="background-color: #4f46e5; background-image: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); padding: 26px 32px;">
                             <span style="color: #ffffff; font-size: 20px; font-weight: 700;">New Enterprise Lead</span>
-                            <div style="color: rgba(255,255,255,0.85); font-size: 13px; margin-top: 2px;">VortexSocial AI &mdash; Onboarding</div>
+                            <div style="color: rgba(255,255,255,0.85); font-size: 13px; margin-top: 2px;">AVIR AI &mdash; Onboarding</div>
                         </td>
                     </tr>
                     <tr>
@@ -585,7 +590,7 @@ class EmailService:
             )
 
         msg = MIMEMultipart("mixed")
-        msg["Subject"] = "Verify your email - VortexSocial AI"
+        msg["Subject"] = "Verify your email - AVIR AI"
         msg["From"] = self.from_email
         msg["To"] = to_email
         msg.attach(MIMEText(_build_verification_html(name, verify_url), "html"))
@@ -605,7 +610,7 @@ class EmailService:
             )
 
         msg = MIMEMultipart("mixed")
-        msg["Subject"] = "Reset your password - VortexSocial AI"
+        msg["Subject"] = "Reset your password - AVIR AI"
         msg["From"] = self.from_email
         msg["To"] = to_email
         msg.attach(MIMEText(_build_password_reset_html(name, reset_url, ttl_minutes), "html"))

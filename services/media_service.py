@@ -15,8 +15,10 @@ import openai
 import requests
 
 from config import Config
+from services import storage_service
 from services.brand_logo_service import NO_AI_LOGO_RULE, overlay_logo
 from services.llm_service import LLMService
+from services.storage_service import mirror_to_s3
 
 _PROMPT_LIMIT = 2000  # kie.ai's prompt cap (see _generate_image_kie)
 
@@ -316,7 +318,8 @@ class MediaGenerationService:
         candidate = os.path.join(Config.UPLOAD_FOLDER, os.path.basename(image_path))
         if os.path.exists(candidate):
             return candidate
-        return None
+        # Not on this server's disk (e.g. a rebuilt instance) - fetch the S3 copy
+        return storage_service.ensure_local(storage_service.UPLOAD_URL_PREFIX + os.path.basename(image_path))
 
     def _resolve_image_paths(self, image_path: str | list[str] | None) -> list[str]:
         """Normalizes the single-image-or-list reference param (multiple
@@ -1214,6 +1217,7 @@ class MediaGenerationService:
     # ── Image Generation ───────────────────────────────────────────────────
     # The linter flags that not every path through this function returns a dict (some fall
     # through, implicitly returning None). Worth tracing properly; not done as part of lint adoption.
+    @mirror_to_s3
     def generate_image(  # pylint: disable=inconsistent-return-statements
         self,
         caption: str,
@@ -1341,6 +1345,7 @@ class MediaGenerationService:
             return {}
         return {"clean_url": f"/static/uploads/{clean_name}", "logo_applied": True}
 
+    @mirror_to_s3
     def edit_image(
         self, prompt: str, platform: str, image_path: str | list[str] | None = None, logo_path: str | None = None
     ) -> dict:
@@ -1378,6 +1383,7 @@ class MediaGenerationService:
             **self._stamp_logo(result["url"], logo_path),
         }
 
+    @mirror_to_s3
     def generate_carousel_images(
         self, image_prompt: str, platform: str, reference_image_path: str | list[str] | None = None
     ) -> list[dict]:
@@ -1618,6 +1624,7 @@ class MediaGenerationService:
             raise RuntimeError(f"Pollinations returned status code {response.status_code}")
 
     # ── Video Generation ───────────────────────────────────────────────────
+    @mirror_to_s3
     def generate_video(
         self,
         caption: str,

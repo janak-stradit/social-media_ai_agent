@@ -136,11 +136,11 @@ class MemoryService:
     def get_trending_hashtags(self, category=None):
         """Retrieve trending hashtags from memory or return default niche recommendations"""
         if not self.enabled or not self.embedding_service:
-            return ["#VortexSocial", "#ViralMarketing", "#SocialStrategy"]
+            return ["#AVIRAI", "#ViralMarketing", "#SocialStrategy"]
         try:
             query_embedding = self.embedding_service.get_embedding(category or "trending hashtags")
             if not query_embedding:
-                return ["#VortexSocial", "#AIStrategy", "#GrowthMarketing", "#DigitalGrowth"]
+                return ["#AVIRAI", "#AIStrategy", "#GrowthMarketing", "#DigitalGrowth"]
             
             query_vector = np.array(query_embedding)
             
@@ -165,7 +165,7 @@ class MemoryService:
                     return docs
         except Exception as e:
             print(f"[MemoryService] get_trending_hashtags notice: {e}")
-        return ["#VortexSocial", "#AIStrategy", "#GrowthMarketing", "#DigitalGrowth"]
+        return ["#AVIRAI", "#AIStrategy", "#GrowthMarketing", "#DigitalGrowth"]
 
     def get_stats(self):
         """Return basic statistics about the memory store."""
