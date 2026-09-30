@@ -17,6 +17,8 @@ REGISTRY="${2:?registry required}"
 SHA="${3:-unknown}"
 BRANCH="${4:-unknown}"
 COMPOSE=(docker compose -f "$DEPLOY/docker-compose.prod.yml")
+# Rough space one image pull needs (compressed layers + unpacked copy)
+MIN_FREE_GB=8
 
 IFS= read -r ECR_PASSWORD || true
 [ -n "${ECR_PASSWORD:-}" ] || { echo "No ECR login password received on stdin." >&2; exit 1; }
@@ -42,6 +44,22 @@ fi
 
 # Readable only by the container's app user
 sudo install -m 600 -o "$APP_UID" -g "$APP_UID" "$ENV_TMP" "$BASE/.env"
+
+echo "==> Freeing disk space before the pull"
+# Keep only the image the running containers use (the rollback target); every
+# other image, stopped container and build cache is removed. Older versions
+# stay in ECR and can be redeployed with the workflow's image_tag input.
+sudo docker container prune -f >/dev/null || true
+sudo docker image prune -af >/dev/null || true
+sudo docker builder prune -af >/dev/null 2>&1 || true
+FREE_GB="$(df --output=avail -BG / | tail -1 | tr -dc '0-9')"
+echo "Free disk space: ${FREE_GB} GB"
+sudo docker system df || true
+if [ "${FREE_GB:-0}" -lt "$MIN_FREE_GB" ]; then
+    echo "Only ${FREE_GB} GB free - pulling the new image needs about ${MIN_FREE_GB} GB." >&2
+    echo "Grow the EBS volume (see DEPLOYMENT.md -> Troubleshooting -> no space left on device)." >&2
+    exit 1
+fi
 
 echo "==> Pulling $IMAGE"
 printf '%s' "$ECR_PASSWORD" | sudo docker login --username AWS --password-stdin "$REGISTRY" >/dev/null
@@ -86,8 +104,10 @@ echo "==> Health check"
 if healthy "$IMAGE"; then
     echo "$IMAGE" | sudo tee "$BASE/CURRENT_IMAGE" >/dev/null
     echo "$IMAGE $SHA $BRANCH $(date -u +%Y-%m-%dT%H:%M:%SZ)" | sudo tee -a "$BASE/DEPLOY_HISTORY" >/dev/null
-    # Free disk: drop unused images older than 3 days (older versions stay in ECR)
-    sudo docker image prune -af --filter "until=72h" >/dev/null || true
+    # Only the new image stays on the server; the previous one is removed now
+    # that the new version is healthy (it stays in ECR for rollbacks).
+    sudo docker image prune -af >/dev/null || true
+    echo "Disk after cleanup: $(df -h --output=avail / | tail -1 | tr -d ' ') free"
     echo "Deployed $IMAGE ($BRANCH)"
     exit 0
 fi
