@@ -425,11 +425,35 @@ $(document).ready(function () {
         }
     };
 
+    // No brand profile yet (website skipped at onboarding): posts can't match
+    // the user's brand, so point them to My Brand Configuration. Dismissable.
+    function showBrandProfileNudge() {
+        let dismissed = false;
+        try { dismissed = localStorage.getItem('brand_nudge_dismissed') === '1'; } catch (e) { /* storage blocked */ }
+        if (dismissed || $('#brandProfileNudge').length) return;
+        $('.welcome-hero-card').after(`
+            <div class="brand-nudge" id="brandProfileNudge" role="status">
+                <div class="brand-nudge-icon"><i class="fas fa-wand-magic-sparkles"></i></div>
+                <div class="brand-nudge-copy">
+                    <div class="brand-nudge-title">Make every post sound like your brand</div>
+                    <div class="brand-nudge-text">Add your website and we'll learn your voice, colors and products - every caption and image follows them.</div>
+                </div>
+                <a href="/brand-profile" class="btn-chat-send brand-nudge-cta">Add my website<i class="fas fa-arrow-right ms-2"></i></a>
+                <button type="button" class="brand-nudge-close" title="Dismiss" aria-label="Dismiss"><i class="fas fa-xmark"></i></button>
+            </div>
+        `);
+        $('#brandProfileNudge .brand-nudge-close').on('click', function () {
+            try { localStorage.setItem('brand_nudge_dismissed', '1'); } catch (e) { /* storage blocked */ }
+            $('#brandProfileNudge').remove();
+        });
+    }
+
     function loadBrandProfileQuickPrompts() {
         $.ajax({
             url: '/api/brand-profile/quick-prompts',
             type: 'GET',
             success: function (r) {
+                if (r && r.needs_brand_profile) showBrandProfileNudge();
                 const ideas = (r && r.post_ideas) || [];
                 if (!ideas.length) return;
 
@@ -663,7 +687,8 @@ $(document).ready(function () {
         if (!$list.length || !text) return;
         const key = String(platform).replace(/[^a-z0-9_-]/gi, '');
         if ($list.find(`[data-platform="${key}"]`).length) return;
-        const label = key.charAt(0).toUpperCase() + key.slice(1);
+        const names = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', twitter: 'X', x: 'X', tiktok: 'TikTok' };
+        const label = names[key.toLowerCase()] || key.charAt(0).toUpperCase() + key.slice(1);
         $list.removeClass('d-none').append(`
             <div class="caption-preview" data-platform="${key}">
                 <div class="caption-preview-label"><i class="fas fa-eye me-1"></i>${escapeHtml(label)} caption - finishing touches in progress</div>

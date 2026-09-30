@@ -3967,3 +3967,21 @@ body.captcha-open { overflow: hidden; }
 }
 .image-lightbox-btn:hover, .image-lightbox-btn:focus-visible { background: rgba(255, 255, 255, 0.28); color: #fff; outline: none; }
 body.lightbox-open { overflow: hidden; }
+
+/* Studio Chat: reminder to add a website when there's no brand profile */
+.brand-nudge {
+  display: flex; align-items: center; gap: 14px; margin: -0.5rem 0 1.5rem; padding: 14px 16px; position: relative;
+  background: linear-gradient(135deg, #f5f3ff, #eef2ff); border: 1px solid #ddd6fe; border-radius: 14px;
+}
+.brand-nudge-icon { width: 40px; height: 40px; flex-shrink: 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; background: linear-gradient(135deg, #8A2BE2, #4169E1); }
+.brand-nudge-copy { flex: 1; min-width: 0; }
+.brand-nudge-title { font-weight: 700; color: #172033; font-size: 14.5px; }
+.brand-nudge-text { font-size: 13px; color: #475569; }
+.brand-nudge-cta { text-decoration: none; white-space: nowrap; flex-shrink: 0; }
+.brand-nudge-close { border: none; background: transparent; color: #94a3b8; width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; cursor: pointer; }
+.brand-nudge-close:hover { background: rgba(15, 23, 42, 0.06); color: #475569; }
+@media (max-width: 768px) {
+  .brand-nudge { flex-wrap: wrap; }
+  .brand-nudge-cta { width: 100%; justify-content: center; }
+  .brand-nudge-close { position: absolute; top: 8px; right: 8px; }
+}

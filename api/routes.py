@@ -3194,7 +3194,19 @@ def brand_profile_quick_prompts():
 
     profile = get_user_brand_profile(user_id)
     ideas = (profile or {}).get("suggested_post_ideas") or []
-    return jsonify({"success": True, "post_ideas": ideas, "company_name": (profile or {}).get("company_name")})
+    user = get_user_by_id(user_id)
+    return jsonify(
+        {
+            "success": True,
+            "post_ideas": ideas,
+            "company_name": (profile or {}).get("company_name"),
+            # Studio Chat nudges self-serve users without a brand profile (e.g.
+            # they skipped the website at onboarding) to add one
+            "needs_brand_profile": bool(
+                profile is None and user and user.account_type in VALID_SELF_SERVE_ACCOUNT_TYPES
+            ),
+        }
+    )
 
 
 @api_bp.route("/brand-profile/quick-prompts/generate", methods=["POST"])
