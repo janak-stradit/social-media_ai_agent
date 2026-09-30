@@ -3196,6 +3196,18 @@ def rescan_brand_profile():
     if manual_text and len(manual_text) < 80:
         return jsonify({"error": "Please write at least a few sentences about your business."}), 400
 
+    # "background": onboarding's Retry button - start the scan and return at
+    # once; the page polls GET /api/brand-profile/status for progress, exactly
+    # like the first attempt. scan_started=False means one is already running,
+    # which the page simply keeps polling.
+    if data.get("background") and website and not manual_text:
+        try:
+            from services.brand_profile_service import start_brand_analysis_async
+
+            return jsonify({"success": True, "scan_started": start_brand_analysis_async(user_id, website)})
+        except Exception as e:
+            return jsonify({"error": str(e), "success": False}), 500
+
     try:
         from services.brand_profile_service import failure_message, run_brand_analysis
 
