@@ -200,7 +200,7 @@
             right: 0;
             height: 100%;
             width: 380px;
-            max-width: 92vw;
+            max-width: calc(92vw / var(--ui-zoom, 1));
             background: #ffffff;
             box-shadow: -12px 0 30px rgba(0, 0, 0, 0.12);
             transform: translateX(100%);
@@ -297,6 +297,147 @@
             padding: 1rem 1.5rem;
             border-top: 1px solid #e5e7eb;
         }
+
+        /* ── Admin UI refresh ─────────────────────────────────────────── */
+        /* Closed side panels: no shadow strip along the right edge */
+        .admin-side-panel { visibility: hidden; transition: transform 0.25s ease, visibility 0s linear 0.25s; }
+        .admin-side-panel.open { visibility: visible; transition: transform 0.25s ease, visibility 0s; }
+
+        /* KPI cards (Users + Cost History) */
+        .admin-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.9rem; margin-bottom: 1.1rem; }
+        .admin-kpi {
+            background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 1rem 1.1rem;
+            display: flex; align-items: center; gap: 0.85rem; min-width: 0;
+        }
+        .admin-kpi-icon {
+            width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+            font-size: 16px; color: #8A2BE2; background: #F3F0FF;
+        }
+        .admin-kpi-icon.green { color: #3f9536; background: #eaf7e8; }
+        .admin-kpi-icon.amber { color: #c2780f; background: #fff4e5; }
+        .admin-kpi-icon.blue { color: #2563eb; background: #eff6ff; }
+        .admin-kpi-label { font-size: 0.72rem; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.03em; }
+        .admin-kpi-value { font-size: 1.35rem; font-weight: 800; color: #172033; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .admin-kpi-sub { font-size: 0.75rem; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        /* Users table cells */
+        .admin-user-cell { display: flex; align-items: center; gap: 0.7rem; min-width: 220px; }
+        .admin-avatar {
+            width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+            font-size: 12.5px; font-weight: 700; color: #fff; background: linear-gradient(135deg, #8A2BE2, #4169E1);
+        }
+        .admin-user-name { font-weight: 700; color: #172033; display: flex; align-items: center; gap: 0.4rem; }
+        .admin-user-email { font-size: 0.78rem; color: #6b7280; }
+        .admin-tag-admin { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; background: #F3F0FF; color: #8A2BE2; border: 1px solid #D8B4FE; }
+        .admin-credit { min-width: 190px; }
+        .admin-brand { min-width: 170px; max-width: 240px; }
+        .admin-brand-badge {
+            display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px;
+            font-size: 11px; font-weight: 700; white-space: nowrap;
+        }
+        .admin-brand-badge.ok { background: #eaf7e8; color: #3f9536; }
+        .admin-brand-badge.busy { background: #eff6ff; color: #2563eb; }
+        .admin-brand-badge.fail { background: #ffe9e7; color: #d6362b; }
+        .admin-brand-badge.todo { background: #fff4e5; color: #c2780f; }
+        .admin-brand-badge.none { background: #f3f4f6; color: #6b7280; }
+        .admin-brand-badge.company { background: #F3F0FF; color: #8A2BE2; }
+        .admin-brand-detail { font-size: 0.74rem; color: #6b7280; margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .admin-brand-detail a { color: #6b7280; text-decoration: none; }
+        .admin-brand-detail a:hover { color: #8A2BE2; text-decoration: underline; }
+        .admin-credit-top { display: flex; justify-content: space-between; gap: 0.5rem; font-size: 0.78rem; color: #4b5563; margin-bottom: 4px; }
+        .admin-credit-top strong { color: #172033; }
+        .admin-credit-bar { height: 6px; border-radius: 99px; background: #eef0f4; overflow: hidden; }
+        .admin-credit-bar span { display: block; height: 100%; border-radius: 99px; background: #54ba4a; }
+        .admin-credit-bar span.warn { background: #f0a020; }
+        .admin-credit-bar span.full { background: #d6362b; }
+        .admin-credit-note { font-size: 0.72rem; margin-top: 4px; color: #6b7280; }
+        .admin-credit-note .pending { color: #b45309; font-weight: 700; }
+        .admin-status { display: inline-flex; align-items: center; gap: 6px; font-size: 0.78rem; font-weight: 600; color: #3f9536; }
+        .admin-status::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+        .admin-status.off { color: #d6362b; }
+        .admin-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 0.35rem; }
+        .admin-kebab { width: 30px; height: 28px; padding: 0; }
+        .admin-menu { font-size: 0.83rem; border-radius: 10px; border-color: #e5e7eb; box-shadow: 0 12px 30px rgba(15, 23, 42, 0.12); padding: 0.35rem; min-width: 190px; }
+        .admin-menu .dropdown-item { border-radius: 6px; padding: 0.45rem 0.7rem; display: flex; align-items: center; gap: 0.55rem; }
+        .admin-menu .dropdown-item i { width: 16px; text-align: center; color: #6b7280; }
+        .admin-menu .dropdown-item.text-danger i { color: #d6362b; }
+        .admin-table-light tbody tr:last-child td { border-bottom: none; }
+        .admin-search { min-width: 260px; }
+
+        /* Users table: the ⋯ menu is placed by CSS (data-bs-display="static") -
+           Popper mis-positions it under the app-wide zoom - so the table must
+           not clip it. It never needs sideways scrolling (phones get cards). */
+        #adminPaneUsers .admin-table-wrap, #adminPaneUsers .admin-table-scroll { overflow: visible; }
+        #adminUsersTable thead th:first-child { border-top-left-radius: 14px; }
+        #adminUsersTable thead th:last-child { border-top-right-radius: 14px; }
+        .admin-row-actions .dropdown-menu { margin-top: 4px; z-index: 1030; }
+
+        /* Global Cost History: media thumbnails + clickable rows */
+        #adminCostHistoryTbody tr.run-row { cursor: pointer; }
+        .run-excerpt { max-width: 340px; font-size: 0.82rem; color: #334155; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .run-thumbs { display: flex; align-items: center; gap: 4px; }
+        .run-thumb { width: 38px; height: 38px; border-radius: 8px; object-fit: cover; border: 1px solid #e5e7eb; background: #f3f4f6; }
+        .run-thumb-more, .run-video-badge {
+            height: 38px; min-width: 38px; padding: 0 6px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center;
+            font-size: 11px; font-weight: 700; color: #6b7280; background: #f3f4f6; border: 1px solid #e5e7eb;
+        }
+        .run-video-badge { color: #8A2BE2; background: #F3F0FF; border-color: #D8B4FE; }
+        .run-no-media { font-size: 0.75rem; color: #9ca3af; }
+
+        /* Run details panel */
+        .admin-side-panel.wide { width: 620px; }
+        .run-meta { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.6rem; margin-bottom: 1rem; }
+        .run-meta > div { background: #f9fafb; border: 1px solid #eef0f4; border-radius: 10px; padding: 0.55rem 0.7rem; min-width: 0; }
+        .run-meta span { display: block; font-size: 0.68rem; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.03em; }
+        .run-meta strong { display: block; font-size: 0.85rem; color: #172033; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .run-section-title { font-size: 0.72rem; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.04em; margin: 1rem 0 0.45rem; }
+        .run-brief { white-space: pre-wrap; font-size: 0.85rem; line-height: 1.55; color: #1f2937; background: #f9fafb; border: 1px solid #eef0f4; border-radius: 10px; padding: 0.75rem 0.85rem; max-height: 220px; overflow-y: auto; }
+        .run-output { border: 1px solid #e5e7eb; border-radius: 12px; padding: 0.85rem; margin-bottom: 0.8rem; }
+        .run-output-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.6rem; }
+        .run-platform { font-weight: 700; font-size: 0.88rem; color: #172033; display: inline-flex; align-items: center; gap: 0.4rem; }
+        .run-chip { font-size: 10.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: #eaf7e8; color: #3f9536; }
+        .run-chip.warn { background: #fff4e5; color: #c2780f; }
+        .run-output-image { display: block; width: 100%; max-height: 320px; object-fit: contain; border-radius: 10px; background: #f3f4f6; cursor: zoom-in; border: 1px solid #eef0f4; }
+        .run-caption { white-space: pre-wrap; font-size: 0.84rem; line-height: 1.55; color: #1f2937; margin-top: 0.6rem; }
+        .run-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 0.5rem; }
+        .run-tags span { font-size: 11px; font-weight: 600; color: #8A2BE2; background: #F3F0FF; border-radius: 999px; padding: 1px 8px; }
+        .run-prompt { font-size: 0.75rem; color: #6b7280; margin-top: 0.5rem; }
+        .run-prompt summary { cursor: pointer; font-weight: 600; }
+        .run-agents { list-style: none; padding: 0; margin: 0; font-size: 0.8rem; color: #4b5563; }
+        .run-agents li { padding: 0.3rem 0; border-bottom: 1px dashed #eef0f4; }
+        .run-agents strong { color: #172033; }
+        @media (max-width: 640px) { .run-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+        /* Request decisions side by side */
+        #adminReqTbody .btn-xs + .btn-xs { margin-top: 0; }
+        #adminReqTbody td:last-child { white-space: nowrap; }
+
+        @media (max-width: 992px) { .admin-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 640px) {
+            .admin-kpis { gap: 0.6rem; }
+            .admin-kpi { padding: 0.75rem; gap: 0.6rem; }
+            .admin-kpi-icon { width: 34px; height: 34px; font-size: 14px; }
+            .admin-kpi-value { font-size: 1.1rem; }
+            .admin-search { min-width: 0; width: 100% !important; }
+            .bc-pane-header > div:last-child { width: 100%; }
+
+            /* Users table becomes one card per user (no sideways scrolling) */
+            #adminUsersTable thead { display: none; }
+            #adminUsersTable, #adminUsersTable tbody { display: block; }
+            #adminUsersTable tbody tr {
+                display: grid; grid-template-columns: 1fr auto; gap: 10px 12px; align-items: center;
+                padding: 14px; border-bottom: 1px solid #f1f5f9;
+            }
+            #adminUsersTable tbody td { display: block; padding: 0; border: none; }
+            #adminUsersTable tbody td[colspan] { grid-column: 1 / -1; }
+            #adminUsersTable tbody td:nth-child(1) { grid-column: 1 / -1; }
+            #adminUsersTable tbody td:nth-child(2) { grid-column: 1; }
+            #adminUsersTable tbody td:nth-child(5) { grid-column: 2; grid-row: 2; justify-self: end; }
+            #adminUsersTable tbody td:nth-child(3), #adminUsersTable tbody td:nth-child(4),
+            #adminUsersTable tbody td:nth-child(6) { grid-column: 1 / -1; }
+            #adminUsersTable .admin-user-cell, #adminUsersTable .admin-credit { min-width: 0; }
+            #adminUsersTable .admin-row-actions { justify-content: flex-start; }
+        }
     </style>
 </head>
 <body>
@@ -343,6 +484,10 @@
                 <button type="button" class="bc-nav-item" data-admin-tab="cost" onclick="switchAdminTab('cost')">
                     <i class="fas fa-chart-line"></i> Global Cost History
                 </button>
+                <button type="button" class="bc-nav-item" data-admin-tab="invites" onclick="switchAdminTab('invites')">
+                    <i class="fas fa-envelope-open-text"></i> Invitations
+                    <span class="bc-nav-badge d-none" id="adminInvitesBadge">0</span>
+                </button>
             </nav>
         </aside>
 
@@ -355,18 +500,11 @@
                         <p>Manage per-user credit limits and account access.</p>
                     </div>
                     <div class="d-flex gap-2">
-                        <select id="adminAccountTypeFilter" class="form-select form-select-sm w-auto">
-                            <option value="">All Account Types</option>
-                            <option value="individual">Individual</option>
-                            <option value="small">Small Industry</option>
-                            <option value="medium">Medium Industry</option>
-                            <option value="enterprise">Enterprise</option>
-                            <option value="none">Not Set</option>
-                        </select>
-                        <input type="text" id="adminUserSearchInput" class="form-control form-control-sm w-auto" placeholder="Search by name or email...">
+                        <input type="search" id="adminUserSearchInput" class="form-control form-control-sm admin-search" placeholder="Search by name or email...">
                     </div>
                 </div>
 
+                <div class="admin-kpis" id="adminUserKpis"></div>
                 <div class="admin-account-summary" id="adminAccountSummary"></div>
 
                 <div class="admin-table-wrap">
@@ -374,21 +512,17 @@
                         <table class="admin-table-light" id="adminUsersTable">
                             <thead>
                                 <tr>
-                                    <th>ID</th>
-                                    <th>User Name</th>
-                                    <th>Email</th>
-                                    <th>Role</th>
-                                    <th>Credit Limit</th>
-                                    <th>Used Cost</th>
-                                    <th>Remaining</th>
-                                    <th>Status</th>
+                                    <th>User</th>
                                     <th>Account</th>
-                                    <th>Actions / Add Credits</th>
+                                    <th>Brand</th>
+                                    <th>Credits</th>
+                                    <th>Status</th>
+                                    <th class="text-end">Actions</th>
                                 </tr>
                             </thead>
                             <tbody id="adminUsersTbody">
                                 <tr>
-                                    <td colspan="10" class="text-center py-4 text-muted">Loading user credits...</td>
+                                    <td colspan="6" class="text-center py-4 text-muted">Loading users...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -442,18 +576,26 @@
                     </div>
                 </div>
 
-                <div class="row mb-3 g-3">
-                    <div class="col-md-6">
-                        <div class="admin-stat-card-light">
-                            <span class="stat-label">Total System Accumulated Cost</span>
-                            <h3 class="stat-value text-success" id="adminTotalSystemCost">$0.0000</h3>
-                        </div>
+                <div class="admin-kpis">
+                    <div class="admin-kpi">
+                        <div class="admin-kpi-icon green"><i class="fas fa-dollar-sign"></i></div>
+                        <div class="min-w-0"><div class="admin-kpi-label">Total spend</div>
+                            <div class="admin-kpi-value" id="adminTotalSystemCost">$0.00</div><div class="admin-kpi-sub">All users, all time</div></div>
                     </div>
-                    <div class="col-md-6">
-                        <div class="admin-stat-card-light">
-                            <span class="stat-label">Total LLM Tokens Consumed</span>
-                            <h3 class="stat-value text-warning" id="adminTotalSystemTokens">0</h3>
-                        </div>
+                    <div class="admin-kpi">
+                        <div class="admin-kpi-icon"><i class="fas fa-layer-group"></i></div>
+                        <div class="min-w-0"><div class="admin-kpi-label">Runs</div>
+                            <div class="admin-kpi-value" id="adminTotalRuns">0</div><div class="admin-kpi-sub">Posts generated</div></div>
+                    </div>
+                    <div class="admin-kpi">
+                        <div class="admin-kpi-icon blue"><i class="fas fa-calculator"></i></div>
+                        <div class="min-w-0"><div class="admin-kpi-label">Avg. per run</div>
+                            <div class="admin-kpi-value" id="adminAvgRunCost">$0.00</div><div class="admin-kpi-sub">Spend ÷ runs</div></div>
+                    </div>
+                    <div class="admin-kpi">
+                        <div class="admin-kpi-icon amber"><i class="fas fa-bolt"></i></div>
+                        <div class="min-w-0"><div class="admin-kpi-label">LLM tokens</div>
+                            <div class="admin-kpi-value" id="adminTotalSystemTokens">0</div><div class="admin-kpi-sub">Text generation</div></div>
                     </div>
                 </div>
 
@@ -466,6 +608,7 @@
                                     <th>User Email</th>
                                     <th>Timestamp</th>
                                     <th>Prompt Excerpt</th>
+                                    <th>Media</th>
                                     <th>Tone &amp; Channels</th>
                                     <th>Tokens</th>
                                     <th>Cost ($USD)</th>
@@ -473,8 +616,42 @@
                             </thead>
                             <tbody id="adminCostHistoryTbody">
                                 <tr>
-                                    <td colspan="7" class="text-center py-4 text-muted">Loading global cost log...</td>
+                                    <td colspan="8" class="text-center py-4 text-muted">Loading global cost log...</td>
                                 </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PANE: INVITATIONS -->
+            <div class="admin-pane d-none" id="adminPaneInvites">
+                <div class="bc-pane-header">
+                    <div>
+                        <h5><i class="fas fa-envelope-open-text text-primary me-2"></i>Invitations</h5>
+                        <p>Invite people by email. The link lets them sign up with that address - no separate email verification needed.</p>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn-xs btn-xs-solid-success" onclick="openInvitePanel()">
+                            <i class="fas fa-user-plus me-1"></i>Invite user
+                        </button>
+                    </div>
+                </div>
+                <div class="admin-table-wrap">
+                    <div class="admin-table-scroll">
+                        <table class="admin-table-light" id="adminInvitesTable">
+                            <thead>
+                                <tr>
+                                    <th>Invitee</th>
+                                    <th>Status</th>
+                                    <th>Invited by</th>
+                                    <th>Sent</th>
+                                    <th>Joined / Expires</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="adminInvitesTbody">
+                                <tr><td colspan="6" class="text-center py-4 text-muted">Loading invitations...</td></tr>
                             </tbody>
                         </table>
                     </div>
@@ -482,6 +659,56 @@
             </div>
         </main>
     </div>
+
+    <!-- Run details panel (Global Cost History row) -->
+    <div class="admin-panel-backdrop" id="runDetailsBackdrop" onclick="closeRunDetails()"></div>
+    <aside class="admin-side-panel wide" id="runDetailsPanel" aria-labelledby="runDetailsTitle">
+        <div class="admin-side-panel-header">
+            <h5 id="runDetailsTitle"><i class="fas fa-layer-group text-primary me-2"></i>Run details</h5>
+            <button type="button" class="admin-side-panel-close" onclick="closeRunDetails()" aria-label="Close">
+                <i class="fas fa-xmark"></i>
+            </button>
+        </div>
+        <div class="admin-side-panel-body" id="runDetailsBody"></div>
+    </aside>
+
+    <!-- Invite User panel - slides in from the right -->
+    <div class="admin-panel-backdrop" id="inviteBackdrop" onclick="closeInvitePanel()"></div>
+    <aside class="admin-side-panel" id="invitePanel" aria-labelledby="invitePanelTitle">
+        <div class="admin-side-panel-header">
+            <h5 id="invitePanelTitle"><i class="fas fa-user-plus text-primary me-2"></i>Invite a User</h5>
+            <button type="button" class="admin-side-panel-close" onclick="closeInvitePanel()" aria-label="Close">
+                <i class="fas fa-xmark"></i>
+            </button>
+        </div>
+        <div class="admin-side-panel-body">
+            <p class="small text-muted mb-3">We'll email a branded invitation with a sign-up link. It works once and expires in 7 days.</p>
+            <div class="admin-form-group">
+                <label for="inviteEmailInput">Email address <span class="text-danger">*</span></label>
+                <input type="email" id="inviteEmailInput" class="form-control form-control-sm" placeholder="name@company.com" autocomplete="off">
+            </div>
+            <div class="admin-form-group">
+                <label for="inviteNameInput">Full name <span class="text-muted fw-normal">(optional)</span></label>
+                <input type="text" id="inviteNameInput" class="form-control form-control-sm" placeholder="Used to greet them and pre-fill sign-up">
+            </div>
+            <div class="admin-form-group">
+                <label for="inviteFromInput">Your name <span class="text-muted fw-normal">(shown in the email)</span></label>
+                <input type="text" id="inviteFromInput" class="form-control form-control-sm" placeholder="e.g. Janak" maxlength="255">
+                <div class="small text-muted mt-1">The email reads "<span id="inviteFromPreview">Janak</span> has invited you to join AVIR AI".</div>
+            </div>
+            <div class="admin-form-group">
+                <label for="inviteMessageInput">Personal message <span class="text-muted fw-normal">(optional)</span></label>
+                <textarea id="inviteMessageInput" class="form-control form-control-sm" rows="4" maxlength="1000" placeholder="e.g. Welcome aboard! Use AVIR AI to plan our Q4 LinkedIn campaign."></textarea>
+            </div>
+            <div class="alert-inline alert-inline-danger d-none" id="inviteFormError"></div>
+        </div>
+        <div class="admin-side-panel-footer">
+            <button type="button" class="btn-xs btn-xs-outline-neutral" onclick="closeInvitePanel()">Cancel</button>
+            <button type="button" class="btn-xs btn-xs-solid-success" id="inviteSendBtn" onclick="submitInvitation()">
+                <i class="fas fa-paper-plane me-1"></i>Send Invitation
+            </button>
+        </div>
+    </aside>
 
     <!-- Edit User panel - slides in from the right -->
     <div class="admin-panel-backdrop" id="editUserBackdrop" onclick="closeEditUserPanel()"></div>
@@ -589,7 +816,7 @@
             document.querySelectorAll('.admin-pane').forEach(function (pane) {
                 pane.classList.add('d-none');
             });
-            var paneMap = { users: 'adminPaneUsers', requests: 'adminPaneRequests', cost: 'adminPaneCost' };
+            var paneMap = { users: 'adminPaneUsers', requests: 'adminPaneRequests', cost: 'adminPaneCost', invites: 'adminPaneInvites' };
             var pane = document.getElementById(paneMap[tab]);
             if (pane) pane.classList.remove('d-none');
         }

@@ -48,6 +48,7 @@ try:
         get_history,
         get_latest_approval_request_for_pipeline,
         get_run_by_id,
+        get_user_by_email,
         get_user_by_id,
         get_user_credit_requests,
         get_user_scheduled_posts,
@@ -1633,6 +1634,21 @@ def generate_media():
                         add_run_cost(run_id, float(result.get("cost") or 0), user_id)
                     except Exception as cost_err:
                         current_app.logger.warning(f"[Credits] Could not record media cost: {cost_err}")
+        elif user_id is not None and result.get("success") and DB_AVAILABLE:
+            # Not part of a saved run (e.g. Analysis Dashboard): still charge it
+            try:
+                from db import record_media_charge
+
+                record_media_charge(
+                    user_id,
+                    float(result.get("cost") or 0),
+                    kind=media_type,
+                    platform=platform,
+                    description=(image_prompt or video_prompt or caption)[:300],
+                    media_url=result.get("url"),
+                )
+            except Exception as cost_err:
+                current_app.logger.warning(f"[Credits] Could not record media charge: {cost_err}")
 
         return jsonify(result)
 
@@ -2111,6 +2127,127 @@ def admin_get_all_users():
         return jsonify({"error": str(e), "success": False}), 500
 
 
+# ── Admin: email invitations ─────────────────────────────────────────────
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _send_invitation(invitation: dict, token: str) -> None:
+    """Emails an invitation (raises on SMTP failure). The link opens /signup
+    with the email pre-filled; signing up through it verifies the email."""
+    from services.email_service import EmailService
+
+    base = (Config.APP_BASE_URL or request.host_url).rstrip("/")
+    EmailService().send_invitation_email(
+        to_email=invitation["email"],
+        name=invitation.get("name"),
+        inviter_name=invitation.get("invited_by"),
+        accept_url=f"{base}/signup?invite={token}",
+        message=invitation.get("message"),
+        expires_days=7,
+    )
+
+
+@api_bp.route("/admin/invitations", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_list_invitations():
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import list_invitations
+
+    me = get_user_by_id(get_current_user_id())
+    # Pre-fills "Your name (shown in the email)" in the Invite panel
+    return jsonify({"success": True, "invitations": list_invitations(), "default_inviter_name": me.name if me else ""})
+
+
+@api_bp.route("/admin/invitations", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_create_invitation():
+    """Invite someone by email. Re-inviting a pending address refreshes its
+    link (the old one stops working) and sends the email again."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    name = (data.get("name") or "").strip()[:255]
+    message = (data.get("message") or "").strip()[:1000]
+    inviter_name = (data.get("inviter_name") or "").strip()[:255]
+    if not _EMAIL_RE.match(email):
+        return jsonify({"success": False, "error": "Enter a valid email address."}), 400
+    if get_user_by_email(email):
+        return jsonify({"success": False, "error": "This email already has an AVIR AI account."}), 409
+
+    import secrets
+
+    from db import upsert_invitation
+
+    token = secrets.token_urlsafe(32)
+    invitation = upsert_invitation(email, name, message, get_current_user_id(), token, inviter_name=inviter_name)
+    try:
+        _send_invitation(invitation, token)
+    except Exception as e:
+        current_app.logger.warning(f"[Invite] Could not email {email}: {e}")
+        return jsonify(
+            {
+                "success": False,
+                "invitation": invitation,
+                "error": f"The invitation was saved but the email couldn't be sent: {e}",
+            }
+        ), 502
+    return jsonify({"success": True, "invitation": invitation})
+
+
+@api_bp.route("/admin/invitations/<int:invitation_id>/resend", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_resend_invitation(invitation_id):
+    """New link + 7 more days, emailed again (also revives an expired/revoked invite)."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import get_invitation
+
+    existing = get_invitation(invitation_id)
+    if not existing:
+        return jsonify({"success": False, "error": "Invitation not found."}), 404
+    if existing["status"] == "accepted" or get_user_by_email(existing["email"]):
+        return jsonify({"success": False, "error": "This person has already joined."}), 409
+
+    import secrets
+
+    from db import upsert_invitation
+
+    token = secrets.token_urlsafe(32)
+    # Keeps the name the original invitation was signed with
+    invitation = upsert_invitation(
+        existing["email"],
+        existing.get("name"),
+        existing.get("message"),
+        get_current_user_id(),
+        token,
+        inviter_name=existing.get("invited_by"),
+    )
+    try:
+        _send_invitation(invitation, token)
+    except Exception as e:
+        return jsonify({"success": False, "error": f"The email couldn't be sent: {e}"}), 502
+    return jsonify({"success": True, "invitation": invitation})
+
+
+@api_bp.route("/admin/invitations/<int:invitation_id>/revoke", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_revoke_invitation(invitation_id):
+    """The emailed link stops working immediately."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import revoke_invitation
+
+    if not revoke_invitation(invitation_id):
+        return jsonify({"success": False, "error": "Invitation not found or already accepted."}), 404
+    return jsonify({"success": True})
+
+
 @api_bp.route("/admin/users/<int:target_user_id>/active", methods=["POST"])
 @login_required_api
 @admin_required_api
@@ -2286,6 +2423,79 @@ def admin_reject_request(req_id):
         return jsonify({"error": str(e), "success": False}), 500
 
 
+@api_bp.route("/admin/runs/<int:run_id>", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_get_run_details(run_id):
+    """Everything one run produced (Admin -> Global Cost History -> row): the
+    full brief, and per platform the caption, hashtags, image/video with the
+    prompt used, quality checks and compliance flags."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    run = get_run_by_id(run_id)
+    if not run:
+        return jsonify({"success": False, "error": "Run not found"}), 404
+    owner = get_user_by_id(run["user_id"]) if run.get("user_id") else None
+    content = run.get("content") or {}
+
+    def _caption(value):
+        if isinstance(value, dict):
+            return value.get("primary_caption") or value.get("caption") or ""
+        return value or ""
+
+    def _hashtags(value):
+        if isinstance(value, dict):
+            value = value.get("hashtags") or value.get("primary_hashtags") or []
+        return [str(t) for t in value] if isinstance(value, list) else []
+
+    platforms = [p for p in (run.get("platforms") or []) if isinstance(content.get(p), dict)]
+    platforms += [k for k, v in content.items() if not str(k).startswith("_") and isinstance(v, dict) and k not in platforms]
+    outputs = []
+    for p in platforms:
+        d = content.get(p) or {}
+        media = d.get("media") or {}
+        image = media.get("image") if isinstance(media.get("image"), dict) else None
+        video = media.get("video") if isinstance(media.get("video"), dict) else None
+        quality = d.get("quality") if isinstance(d.get("quality"), dict) else {}
+        compliance = d.get("compliance") if isinstance(d.get("compliance"), dict) else {}
+        outputs.append(
+            {
+                "platform": p,
+                "caption": _caption(d.get("caption")),
+                "hashtags": _hashtags(d.get("hashtags")),
+                "image": {"url": image.get("url"), "prompt": image.get("prompt")} if image and image.get("url") else None,
+                "video": {"url": video.get("url")} if video and video.get("url") else None,
+                "media_prompt": d.get("media_prompt"),
+                "quality": {
+                    "checks_passed": quality.get("checks_passed"),
+                    "checks_total": quality.get("checks_total"),
+                    "issues": quality.get("fixed_issues") or quality.get("issues") or [],
+                    "rewritten": bool(quality.get("self_corrected")),
+                },
+                "compliance_flags": len(compliance.get("flags") or []),
+            }
+        )
+    agents = [a for a in (content.get("_agents") or []) if isinstance(a, dict)]
+    return jsonify(
+        {
+            "success": True,
+            "run": {
+                "id": run["id"],
+                "timestamp": run.get("timestamp"),
+                "story": run.get("story") or "",
+                "tone": run.get("tone"),
+                "platforms": run.get("platforms") or [],
+                "tokens_used": run.get("tokens_used", 0),
+                "cost_usd": run.get("cost_usd", 0.0),
+                "user_name": owner.name if owner else "Unknown",
+                "user_email": owner.email if owner else "N/A",
+                "outputs": outputs,
+                "agents": [{"name": a.get("name"), "role": a.get("role")} for a in agents],
+            },
+        }
+    )
+
+
 @api_bp.route("/admin/cost-history", methods=["GET"])
 @login_required_api
 @admin_required_api
@@ -2297,18 +2507,10 @@ def admin_get_global_cost_history():
         limit = min(int(request.args.get("limit", 100)), 500)
         history = get_global_cost_history(limit=limit)
 
-        # Calculate total aggregate cost across history
-        total_system_cost = sum(h.get("cost_usd", 0.0) for h in history)
-        total_tokens = sum(h.get("tokens_used", 0) for h in history)
+        # All-time totals from the database - not just the rows listed here
+        from db import get_system_usage_totals
 
-        return jsonify(
-            {
-                "success": True,
-                "history": history,
-                "count": len(history),
-                "summary": {"total_system_cost_usd": round(total_system_cost, 6), "total_tokens": total_tokens},
-            }
-        )
+        return jsonify({"success": True, "history": history, "count": len(history), "summary": get_system_usage_totals()})
     except Exception as e:
         return jsonify({"error": str(e), "success": False}), 500
 

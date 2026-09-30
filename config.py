@@ -56,7 +56,7 @@ class Config:
     # none / minimal / low / medium / high - "low" keeps agent calls fast; the
     # model still reasons before answering.
     HEYROUTE_REASONING_EFFORT = os.getenv("HEYROUTE_REASONING_EFFORT", "medium")
-    HEYROUTE_IMAGE_MODEL = os.getenv("HEYROUTE_IMAGE_MODEL", "gemini-3.1-flash-lite-preview")
+    HEYROUTE_IMAGE_MODEL = os.getenv("HEYROUTE_IMAGE_MODEL", "gemini-3.1-flash-image")
     #gemini-3.1-flash-lite-preview , gemini-3.1-flash-image
     # Video is generated ONLY through HeyRoute (HEYROUTE_VIDEO_API_KEY) - no
     # other video provider is tried. grok-video: text-to-video, 6/10/15 s only,

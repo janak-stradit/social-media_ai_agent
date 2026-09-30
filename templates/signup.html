@@ -40,21 +40,31 @@
             <div class="auth-card-header">
                 <div class="card-icon-circle"><i class="fas fa-user-plus"></i></div>
                 <div>
+                    {% if invite %}
+                    <h1 class="auth-heading">Accept your invitation</h1>
+                    <p class="auth-subheading">{{ invite.invited_by or 'The AVIR AI team' }} invited you to AVIR AI</p>
+                    {% else %}
                     <h1 class="auth-heading">Create account</h1>
                     <p class="auth-subheading">Welcome to AVIR AI</p>
+                    {% endif %}
                 </div>
             </div>
 
+        {% if invite_invalid %}
+        <div class="alert-inline alert-inline-danger" style="margin-bottom: 14px;" role="alert">
+            This invitation link has expired or was already used. Ask the person who invited you for a new one - or sign up below.
+        </div>
+        {% endif %}
         <form id="signupForm" novalidate>
             <div class="auth-form-group">
                 <label class="auth-form-label" for="signupName">Full Name</label>
-                <input id="signupName" type="text" class="auth-form-input" placeholder="e.g. Alex Morgan" autocomplete="name" required>
+                <input id="signupName" type="text" class="auth-form-input" placeholder="e.g. Alex Morgan" autocomplete="name" required value="{{ invite.name if invite and invite.name else '' }}">
                 <div class="field-error" id="nameError"></div>
             </div>
 
             <div class="auth-form-group">
                 <label class="auth-form-label" for="signupEmail">Email</label>
-                <input id="signupEmail" type="email" class="auth-form-input" placeholder="name@email.com" autocomplete="email" required>
+                <input id="signupEmail" type="email" class="auth-form-input" placeholder="name@email.com" autocomplete="email" required{% if invite %} value="{{ invite.email }}" readonly title="This is the email address you were invited with"{% endif %}>
                 <div class="field-error" id="emailError"></div>
             </div>
 
@@ -169,6 +179,8 @@
 <script src="{{ url_for('static', filename='js/captcha.js') }}"></script>
 <script>
     const CAPTCHA_ENABLED = {{ 'true' if captcha_enabled|default(true) else 'false' }};
+    // Set when this page was opened from an invitation email (/signup?invite=...)
+    const INVITE_TOKEN = {{ invite_token|tojson }};
 
     // Rotating right-pane showcase
     (function () {
@@ -344,6 +356,12 @@
             password: $('#signupPassword').val()
         };
 
+        // An invitation link already proves the email is theirs - no puzzle needed
+        if (INVITE_TOKEN) {
+            payload.invite_token = INVITE_TOKEN;
+            register(payload, null);
+            return;
+        }
         if (!CAPTCHA_ENABLED) {
             register(payload, null);
             return;
@@ -371,7 +389,8 @@
             data: JSON.stringify($.extend({ captcha_token: captchaToken }, payload)),
             success: function (res) {
                 if (res.success) {
-                    window.location.href = '/verify-pending?email=' + encodeURIComponent(payload.email);
+                    // Invited users are verified and signed in already
+                    window.location.href = res.redirect || ('/verify-pending?email=' + encodeURIComponent(payload.email));
                 } else {
                     resetSubmit();
                     $('#signupError').text(res.error || 'Something went wrong.').show();

@@ -122,6 +122,9 @@
         els.handle.focus();
         const startX = e.clientX;
         const startY = e.clientY;
+        // The app is scaled with CSS zoom (style.css --ui-zoom); convert mouse
+        // movement into the slider's own pixels so the handle tracks the pointer 1:1
+        const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
         const startLeft = state.frac * maxHandleLeft();
         state.track = [];
         state.source = 'pointer';
@@ -131,7 +134,7 @@
 
         function move(ev) {
             const max = maxHandleLeft();
-            setFraction(max > 0 ? (startLeft + ev.clientX - startX) / max : 0);
+            setFraction(max > 0 ? (startLeft + (ev.clientX - startX) / zoom) / max : 0);
             record(ev.clientY - startY);
         }
         function up(ev) {

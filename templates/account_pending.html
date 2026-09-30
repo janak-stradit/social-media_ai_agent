@@ -9,7 +9,7 @@
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
         body {
-            min-height: 100vh; display: flex; align-items: center; justify-content: center;
+            min-height: var(--vh100, 100vh); display: flex; align-items: center; justify-content: center;
             background: linear-gradient(135deg, #F8FAFC 0%, #F3F0FF 50%, #F3F0FF 100%);
             font-family: 'Inter', system-ui, sans-serif; margin: 0; padding: 24px;
         }
