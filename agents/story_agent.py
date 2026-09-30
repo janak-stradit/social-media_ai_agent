@@ -5,26 +5,54 @@ try:
 except Exception:  # pragma: no cover - DB optional in some test contexts
     get_brand_asset = None
 
+# When the StradIT logo is selected: image models can't reproduce a logo
+# faithfully, so the real file is stamped onto the finished image/video
+# (services/brand_logo_service.py) and the prompt keeps the model off it.
+_LOGO_STAMPED_INSTRUCTION = (
+    "\nThe real StradIT logo is stamped onto the final image and video afterwards. Do NOT draw, write, describe "
+    "or imitate any logo, wordmark or brand name anywhere (screens, badges, documents, signage), and keep the "
+    "bottom-right corner free of important content so the logo sits cleanly there."
+)
+
 
 class StoryAgent:
     """Agent that analyzes story text and extracts key themes, emotions, and hooks"""
 
-    SYSTEM_PROMPT = """You are a Story Analysis Agent. Your job is to deeply analyze a given story or text and extract:
+    SYSTEM_PROMPT = """You are a Story & Research Agent. The input you're given can be anything from a full
+    narrative to a short brief, a bare topic/headline, or even a single question - be flexible about its
+    shape and length rather than expecting a complete story every time.
+
+    When the input is short, abstract, or under-specified, do not just mechanically restate or extract
+    keywords from its literal words. Instead, research the topic using your own subject-matter knowledge:
+    think about real, concrete facts, statistics, trends, examples, or expert angles relevant to it, and use
+    that research to inform a substantive analysis - the way a well-read industry analyst would, not a
+    keyword extractor. This matters most for short inputs, which have little to mechanically extract from.
+
+    If a "RELEVANT BRAND & CAMPAIGN MEMORY" block is included below, treat it as a MINOR input - roughly
+    20% weight, for tone/style consistency only. The remaining ~80% of your analysis must come from your
+    own independent research and reasoning about THIS topic - do not let past memory substitute for that,
+    and do not just repeat patterns from it because they're convenient. Fresh, substantive research on the
+    actual topic given is the priority every time.
+
+    From the (possibly researched) input, extract and return:
     1. Core themes (3-5 main themes)
     2. Emotional tone (joy, sadness, excitement, inspiration, etc.)
     3. Key hooks (attention-grabbing elements)
     4. Target audience segments
     5. Visual imagery descriptions
     6. Call-to-action opportunities
+    7. research_notes: 3-5 concrete, substantive facts, statistics, trends, or examples about the topic that a
+       writer could actually use in the content - grounded in real knowledge, not vague restatements of the
+       input. Leave this an empty list only if the input is already a complete, detailed story with nothing to add.
 
-    Return ONLY a JSON object with these keys: themes, emotions, hooks, audience, imagery, cta_opportunities"""
+    Return ONLY a JSON object with these keys: themes, emotions, hooks, audience, imagery, cta_opportunities, research_notes"""
 
     def __init__(self):
         self.llm = LLMService()
 
     @staticmethod
     def _resolve_asset_label(key: str) -> str:
-        """Looks up a brand asset's display label (e.g. 'aden' -> 'Aden') from
+        """Looks up a brand asset's display label (e.g. 'aiden' -> 'Aiden') from
         the brand_assets table so any character added in Brand Configuration
         gets named correctly here, instead of relying on a hardcoded map that
         only knew about the original 'aiden'/'logo' pair."""
@@ -37,11 +65,16 @@ class StoryAgent:
                 pass
         return key.capitalize()
 
-    def analyze(self, story_text, memory_context=None, return_usage=False):
-        """Analyze story and return structured insights + usage"""
+    def analyze(self, story_text, memory_context=None, return_usage=False, brand_profile_block=None):
+        """Analyze story and return structured insights + usage.
+        brand_profile_block (see services/brand_profile_service.py) is the
+        Studio Chat user's own brand context derived from their onboarding
+        website - "" or None when they don't have one."""
         user_prompt = f"Analyze this story and return structured insights:\n\n{story_text}"
         if memory_context:
             user_prompt += f"\n\n{memory_context}"
+        if brand_profile_block:
+            user_prompt += f"\n\n{brand_profile_block}"
 
         result, usage = self.llm.generate_json(self.SYSTEM_PROMPT, user_prompt, return_usage=True)
         if return_usage:
@@ -186,7 +219,7 @@ class StoryAgent:
         validation_prompt = ""
 
         if mode == "with_character":
-            # "characters" (plural) supports selecting more than one brand asset at
+            # the prompt. It's safe to assume we won't need to select multiple at
             # once (e.g. Aiden AND the StradIT logo together). Falls back to the
             # older singular "character" field for callers that haven't switched.
             raw_selection = character_config.get("characters")
@@ -200,12 +233,7 @@ class StoryAgent:
 
             if human_assets:
                 selected_char = " and ".join(self._resolve_asset_label(a) for a in human_assets)
-                logo_instruction = (
-                    "\nAlso feature the StradIT logo mark naturally integrated into the composition "
-                    "(e.g. on a screen, badge, document header, or corner element) alongside the character."
-                    if include_logo
-                    else ""
-                )
+                logo_instruction = _LOGO_STAMPED_INSTRUCTION if include_logo else ""
                 char_rules_prompt = f"""### CHARACTER GENERATION
 The user has explicitly requested to include a specific brand character: '{selected_char}'.
 You MUST use this exact character in your visual prompts (both image and video). Do not invent a new character.
@@ -241,7 +269,7 @@ Image: Deep navy background... [Describe '{selected_char}' here, plus the key me
 
 BRANDING RULE:
 - Aspect Ratio: 1080x1080 (1:1 aspect ratio).
-- Text Overlays & Typography: Include a short headline and a brief summary sentence directly in the image, plus a small 'STRAD IT' wordmark in one corner as a subtle brand tag. The typography MUST be highly professional, soft, minimalist, and pleasant to the eye (mimicking refined corporate fonts like Inter or Helvetica). Keep the font size small and elegant; do NOT make the text massive or overly vibrant. The text MUST be placed carefully in empty negative space (e.g., in a clean corner or side) and MUST NOT overlap the character or key visual elements. Use a soft, sophisticated color palette that meets high-end company standards. It must look like a premium, restrained corporate graphic.
+- Text Overlays & Typography: Include a short headline and a brief summary sentence directly in the image. Do NOT draw any logo, wordmark or brand name anywhere - the real logo is added afterwards, so keep the bottom-right corner clear. The typography MUST be highly professional, soft, minimalist, and pleasant to the eye (mimicking refined corporate fonts like Inter or Helvetica). Keep the font size small and elegant; do NOT make the text massive or overly vibrant. The text MUST be placed carefully in empty negative space (e.g., in a clean corner or side) and MUST NOT overlap the character or key visual elements. Use a soft, sophisticated color palette that meets high-end company standards. It must look like a premium, restrained corporate graphic.
 Ensure these specific styling and positioning rules are explicitly mentioned.
 """
 
@@ -288,32 +316,32 @@ DO NOT generate any text, logos, or brand names (like "StradIT" or the tagline) 
 * The specific brand character '{selected_char}' is present
 * Character performs a meaningful action
 * Character fits the business environment
-* Character is consistent across video scenes{"" if not include_logo else chr(10) + "* The StradIT logo mark is naturally integrated into the composition"}"""
+* Character is consistent across video scenes{"" if not include_logo else chr(10) + "* No logo, wordmark or brand name is drawn (the real logo is added afterwards)"}"""
 
             elif include_logo:
                 # Logo only - no human character selected. Feature the brand
                 # mark itself rather than inventing a decorative person.
-                char_rules_prompt = """### BRAND MARK GENERATION
-The user has requested the StradIT logo be featured as a reference visual element, without a human character.
-Do not invent or describe any human character. Integrate the StradIT logo naturally into the composition (e.g. on a screen, document header, badge, or subtle corner placement) as the visual anchor instead."""
+                char_rules_prompt = f"""### BRAND MARK GENERATION
+The user has requested the StradIT logo on this content, without a human character.
+Do not invent or describe any human character. Build the composition around environments, objects, data or visual metaphors.{_LOGO_STAMPED_INSTRUCTION}"""
 
-                image_prompt = """### IMAGE GENERATION
+                image_prompt = f"""### IMAGE GENERATION
 Create a highly detailed prompt for a SINGLE image (not a multi-slide carousel) that directly represents the specific storyline in one cohesive, information-dense composition.
 Mimic high-end, colorful, professional layouts (clean typography, data visualization, cohesive vibrant color palette).
 
-Do not include human characters in the image. Integrate the StradIT logo naturally into the composition (e.g. on a screen, document header, badge, or corner element) as the visual anchor for the brand.
+Do not include human characters in the image.{_LOGO_STAMPED_INSTRUCTION}
 Use appropriate: Business environments, Financial data, Technology, Market visualizations, Documents, Product interfaces, Objects, Abstract visual metaphors.
 
 Follow this exact formatting style:
 
 --- EXAMPLE SINGLE IMAGE FORMAT ---
 Overall Aesthetic/Style: Premium institutional financial technology...
-Image: Deep navy background... [reference the StradIT logo placement here, plus the key message/data points the storyline needs to communicate]
+Image: Deep navy background... [the key message/data points the storyline needs to communicate; bottom-right corner left clear]
 ----------------------
 
 BRANDING RULE:
 - Aspect Ratio: 1080x1080 (1:1 aspect ratio).
-- Text Overlays & Typography: Include a short headline and a brief summary sentence directly in the image, plus a small 'STRAD IT' wordmark in one corner as a subtle brand tag. The typography MUST be highly professional, sleek, and premium (mimicking modern corporate fonts like Inter, Roboto, or Helvetica). Use proper visual hierarchy: bold, clean titles with smaller, elegant subtitle text. Ensure text is perfectly aligned, uses appropriate negative space, and blends harmoniously with the color palette. It must look like a high-end agency-designed graphic.
+- Text Overlays & Typography: Include a short headline and a brief summary sentence directly in the image. Do NOT draw any logo, wordmark or brand name anywhere - the real logo is added afterwards, so keep the bottom-right corner clear. The typography MUST be highly professional, sleek, and premium (mimicking modern corporate fonts like Inter, Roboto, or Helvetica). Use proper visual hierarchy: bold, clean titles with smaller, elegant subtitle text. Ensure text is perfectly aligned, uses appropriate negative space, and blends harmoniously with the color palette. It must look like a high-end agency-designed graphic.
 Ensure these specific styling and positioning rules are explicitly mentioned.
 """
 
@@ -321,25 +349,25 @@ Ensure these specific styling and positioning rules are explicitly mentioned.
 Create a video narrative directly derived from the storyline.
 
 Create a 10-second premium corporate technology video in a single continuous narrative flow.
-Do not introduce human characters. Integrate the StradIT logo naturally into the visual composition. Build the narrative using environments, objects, data, technology, or visual metaphors.
+Do not introduce human characters. Do not show any logo, wordmark or brand name - the real StradIT logo is added to the video programmatically afterwards. Build the narrative using environments, objects, data, technology, or visual metaphors.
 
 Follow this exact formatting style:
 --- EXAMPLE NON-CHARACTER VIDEO FORMAT ---
 [Overall style description] A premium corporate technology video...
 
-0:00-0:04 [Extremely detailed shot description of a visual metaphor, referencing the StradIT logo placement...]
+0:00-0:04 [Extremely detailed shot description of a visual metaphor...]
 0:04-0:08 [Extremely detailed shot description progressing the metaphor...]
 0:08-0:10 [Extremely detailed shot description concluding the metaphor...]
 
 Audio: A calm, authoritative voiceover saying: "[Voiceover script]".
 
 BRANDING RULE:
-DO NOT generate any additional text or brand names beyond the referenced logo mark itself. The video must be otherwise free of text overlays, as further branding will be added programmatically post-generation.
+DO NOT generate any text, logos, or brand names in the video. The video must be completely free of text overlays, as branding will be added programmatically post-generation.
 ----------------------"""
 
                 validation_prompt = """### FINAL CHARACTER VALIDATION
 * Are there absolutely no human characters?
-* Is the StradIT logo naturally integrated into the composition?"""
+* Is the image and video free of any drawn logo, wordmark or brand name (the real logo is added afterwards)?"""
 
             else:
                 char_rules_prompt = """### CHARACTER GENERATION
@@ -392,7 +420,7 @@ Image: Deep navy background... [Describe character here, plus the key message/da
 
 BRANDING RULE:
 - Aspect Ratio: 1080x1080 (1:1 aspect ratio).
-- Text Overlays & Typography: Include a short headline and a brief summary sentence directly in the image, plus a small 'STRAD IT' wordmark in one corner as a subtle brand tag. The typography MUST be highly professional, soft, minimalist, and pleasant to the eye (mimicking refined corporate fonts like Inter or Helvetica). Keep the font size small and elegant; do NOT make the text massive or overly vibrant. The text MUST be placed carefully in empty negative space (e.g., in a clean corner or side) and MUST NOT overlap the character or key visual elements. Use a soft, sophisticated color palette that meets high-end company standards. It must look like a premium, restrained corporate graphic.
+- Text Overlays & Typography: Include a short headline and a brief summary sentence directly in the image. Do NOT draw any logo, wordmark or brand name anywhere - the real logo is added afterwards, so keep the bottom-right corner clear. The typography MUST be highly professional, soft, minimalist, and pleasant to the eye (mimicking refined corporate fonts like Inter or Helvetica). Keep the font size small and elegant; do NOT make the text massive or overly vibrant. The text MUST be placed carefully in empty negative space (e.g., in a clean corner or side) and MUST NOT overlap the character or key visual elements. Use a soft, sophisticated color palette that meets high-end company standards. It must look like a premium, restrained corporate graphic.
 Ensure these specific styling and positioning rules are explicitly mentioned.
 """
 
@@ -465,7 +493,7 @@ Image: Deep navy background... [describe the key message/data points the storyli
 
 BRANDING RULE:
 - Aspect Ratio: 1080x1080 (1:1 aspect ratio).
-- Text Overlays & Typography: Include a short headline and a brief summary sentence directly in the image, plus a small 'STRAD IT' wordmark in one corner as a subtle brand tag. The typography MUST be highly professional, sleek, and premium (mimicking modern corporate fonts like Inter, Roboto, or Helvetica). Use proper visual hierarchy: bold, clean titles with smaller, elegant subtitle text. Ensure text is perfectly aligned, uses appropriate negative space, and blends harmoniously with the color palette (e.g., crisp white or gold accents on dark navy backgrounds). Avoid basic, clumsy, or overly thick fonts. It must look like a high-end agency-designed graphic.
+- Text Overlays & Typography: Include a short headline and a brief summary sentence directly in the image. Do NOT draw any logo, wordmark or brand name anywhere - the real logo is added afterwards, so keep the bottom-right corner clear. The typography MUST be highly professional, sleek, and premium (mimicking modern corporate fonts like Inter, Roboto, or Helvetica). Use proper visual hierarchy: bold, clean titles with smaller, elegant subtitle text. Ensure text is perfectly aligned, uses appropriate negative space, and blends harmoniously with the color palette (e.g., crisp white or gold accents on dark navy backgrounds). Avoid basic, clumsy, or overly thick fonts. It must look like a high-end agency-designed graphic.
 Ensure these specific styling and positioning rules are explicitly mentioned.
 """
 
@@ -540,9 +568,9 @@ problem.
 
 Set:
 * selected_project = the exact project or service name from <OUR_PROJECT_CONTEXT>, OR the literal
-  string "No Strong Match" if nothing genuinely fits.
+  string "No Strong Match" if nothing genuinely fits. EXCEPTION: If the posts are competitor recruitment or job postings, YOU MUST frame our AI automation capabilities (like Applied AI or Data Analytics) as the counter-strategy to reduce manual headcount, and select that capability instead of "No Strong Match".
 * connection_strength = "Strong", "Moderate", or "No Strong Match" (matching selected_project when
-  there's no fit).
+  there's no fit). For recruitment posts mapped to AI automation, use "Strong".
 
 If selected_project is "No Strong Match", the caption instructions (Step 3) MUST say so explicitly
 and MUST NOT invent a connection to any project or service - downstream generation blocks entirely
@@ -617,6 +645,7 @@ since it's what downstream generation uses to block output when there's no real 
 Respond with exactly this JSON structure and nothing else:
 
 {{
+  "storyline_title": "A short, 4-5 word descriptive title summarizing the overall topic/angle (e.g. 'Financial Data Security Solutions')",
   "selected_project": "The exact project or service name from OUR_PROJECT_CONTEXT, or \\"No Strong Match\\"",
   "connection_strength": "Strong, Moderate, or No Strong Match",
   "observed_facts": ["concise fact 1", "concise fact 2"],
@@ -668,7 +697,9 @@ Respond with exactly this JSON structure and nothing else:
                 "- do not describe them performing any product-related or work task."
             )
         else:
-            character_line = "Do not include human characters; use festive visual motifs, colors, and StradIT branding instead."
+            character_line = (
+                "Do not include human characters; use festive visual motifs, colors, and StradIT branding instead."
+            )
 
         guidelines_block = self._build_guidelines_block()
 
@@ -687,11 +718,12 @@ only if it doesn't make the greeting feel like an advertisement.
 
 Respond with exactly this JSON structure and nothing else:
 {{
+  "storyline_title": "A short, 4-5 word descriptive title for the greeting (e.g. 'Diwali Festival Greeting')",
   "selected_project": "N/A (Festive Greeting)",
   "connection_strength": "N/A",
   "observed_facts": ["the festival/holiday name and date, and its cultural/business significance"],
   "caption": "Instructions for the social media writer: warm, culturally appropriate greeting tone, mention the occasion by name, genuine and not promotional, no CTA or sales language.",
-  "image_prompt": "One rich, festive scene description - colors, motifs, setting appropriate to the occasion - with a small STRAD IT wordmark. No product UI, dashboards, or office/work environments.",
+  "image_prompt": "One rich, festive scene description - colors, motifs, setting appropriate to the occasion - with no logo, wordmark or brand name drawn (the real logo is added afterwards) and the bottom-right corner kept clear. No product UI, dashboards, or office/work environments.",
   "video_prompt": "A short 8-10 second warm festive video script - no product pitch, no work environment."
 }}
 """

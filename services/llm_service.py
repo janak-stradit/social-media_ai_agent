@@ -34,6 +34,32 @@ class LLMService:
         return head.startswith(self._REASONING_LEAKAGE_PREFIXES)
 
     def __init__(self):
+        # HeyRoute configured -> it is the ONLY LLM provider: no Bedrock, Gemini,
+        # OpenRouter or OpenAI client is created or called. Without a HeyRoute
+        # key the original provider chain below is used unchanged.
+        heyroute_key = getattr(Config, "HEYROUTE_API_KEY", None)
+        if heyroute_key and not getattr(Config, "USE_MOCK_LLM", False):
+            self.openrouter_key = None
+            self.openai_key = None
+            self.bedrock_client = None
+            self.bedrock_model = None
+            self.providers = [
+                {
+                    "name": "heyroute",
+                    # A bounded wait: the OpenAI SDK default (600 s, 2 retries)
+                    # let one stuck request hold a generation for over 10 minutes.
+                    "client": openai.OpenAI(
+                        api_key=heyroute_key,
+                        base_url=Config.HEYROUTE_BASE_URL,
+                        timeout=float(getattr(Config, "HEYROUTE_LLM_TIMEOUT", 120)),
+                        max_retries=1,
+                    ),
+                    "model": Config.HEYROUTE_LLM_MODEL,
+                    "reasoning": True,
+                }
+            ]
+            return
+
         api_key = Config.OPENAI_API_KEY
         # Prefer a dedicated OPENROUTER_API_KEY when set; otherwise fall back to
         # sniffing OPENAI_API_KEY for an OpenRouter-shaped key (sk-or-...), which
@@ -77,9 +103,9 @@ class LLMService:
 
         self.providers = []
 
-        # OpenRouter is tried first when configured (currently a free model), so
-        # it's the effective default; Bedrock/OpenAI/Gemini remain as automatic
-        # failover if it errors or rate-limits.
+        # OpenRouter is tried first when configured (currently a free model);
+        # Bedrock/OpenAI/Gemini remain as automatic failover if it errors or
+        # rate-limits.
         if self.openrouter_key:
             self.providers.append(
                 {
@@ -182,8 +208,8 @@ class LLMService:
                         "time": "05:00 PM",
                         "platforms": ["linkedin", "facebook"],
                         "content_type": "Case Study & Testimonial",
-                        "story": "How top agencies scaled their client social engagement by 300% using VortexSocial AI.",
-                        "caption": "How top agencies scaled client social engagement by 300% using VortexSocial AI 📊 Read the full case study to optimize your strategy today. #CaseStudy #B2B #DigitalGrowth",
+                        "story": "How top agencies scaled their client social engagement by 300% using AVIR AI.",
+                        "caption": "How top agencies scaled client social engagement by 300% using AVIR AI 📊 Read the full case study to optimize your strategy today. #CaseStudy #B2B #DigitalGrowth",
                         "image_prompt": "Professional corporate infographic showing upward growth chart with vibrant green metrics",
                     },
                 ],
@@ -192,7 +218,7 @@ class LLMService:
 
         # 2. Hashtags / Captions
         elif "hashtag" in prompt_lower or "caption" in prompt_lower:
-            return "🚀 Boost your social presence with AI automation! #VortexSocialAI #GrowthHacks #DigitalMarketing #AI #Tech2026 #SocialMediaStrategy"
+            return "🚀 Boost your social presence with AI automation! #AVIRAI #GrowthHacks #DigitalMarketing #AI #Tech2026 #SocialMediaStrategy"
 
         # 3. Visual Prompt
         elif "prompt" in prompt_lower or "image" in prompt_lower or "video" in prompt_lower:
@@ -200,7 +226,46 @@ class LLMService:
 
         # 4. Default Text
         else:
-            return "VortexSocial AI Studio is ready! Generate, schedule, and publish high-converting social content across Facebook, Instagram, and LinkedIn."
+            return "AVIR AI Studio is ready! Generate, schedule, and publish high-converting social content across Facebook, Instagram, and LinkedIn."
+
+    # Reasoning models spend part of their completion budget thinking before
+    # they answer; a budget sized for a plain model (e.g. 700 tokens for an
+    # image prompt) can be used up entirely by reasoning, leaving an empty
+    # answer. Billing is per token actually used, so headroom costs nothing.
+    _REASONING_MIN_COMPLETION_TOKENS = 4096
+
+    def _chat_kwargs(self, provider, system_prompt, user_prompt, temperature, max_tokens):
+        """Chat-completions arguments for an OpenAI-compatible provider. A
+        reasoning model (HeyRoute gpt-5.6-terra) takes max_completion_tokens and
+        reasoning_effort, and only its default temperature -- the gpt-5 family
+        rejects any other value -- so temperature is left out for it."""
+        kwargs = {
+            "model": provider["model"],
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        }
+        if provider.get("reasoning"):
+            kwargs["max_completion_tokens"] = max(int(max_tokens or 0) * 4, self._REASONING_MIN_COMPLETION_TOKENS)
+            effort = getattr(Config, "HEYROUTE_REASONING_EFFORT", None)
+            if effort:
+                kwargs["reasoning_effort"] = effort
+        else:
+            kwargs["temperature"] = temperature
+            kwargs["max_tokens"] = max_tokens
+        return kwargs
+
+    def _first_choice_text(self, response, provider_name):
+        """Text of the first completion choice. A gateway (OpenRouter, HeyRoute)
+        can answer HTTP 200 with an error body instead of choices (rate limit,
+        upstream model down), which surfaced as the opaque "'NoneType' object
+        is not subscriptable" - raise the provider's actual error instead so the
+        retry/fallback log says why."""
+        if not getattr(response, "choices", None):
+            error = getattr(response, "error", None) or (getattr(response, "model_extra", None) or {}).get("error")
+            raise Exception(f"{provider_name} returned no choices: {error or 'empty response'}")
+        return response.choices[0].message.content or ""
 
     def _calculate_cost(self, provider_name, model_name, in_tokens, out_tokens):
         """Calculate estimated cost USD based on provider and model rates"""
@@ -284,15 +349,9 @@ class LLMService:
                         usage_metrics = self._calculate_cost("bedrock", provider["model"], in_t, out_t)
                     else:
                         response = provider["client"].chat.completions.create(
-                            model=provider["model"],
-                            messages=[
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_prompt},
-                            ],
-                            temperature=temperature,
-                            max_tokens=max_tokens,
+                            **self._chat_kwargs(provider, system_prompt, user_prompt, temperature, max_tokens)
                         )
-                        text_out = response.choices[0].message.content
+                        text_out = self._first_choice_text(response, provider["name"])
 
                         usage_raw = getattr(response, "usage", None)
                         in_t = (
@@ -418,18 +477,10 @@ class LLMService:
                         content = self._generate_mock_response(system_prompt, user_prompt)
                         usage_metrics = self._calculate_cost("mock", "mock-llm-v1", 0, 0)
                     else:
-                        kwargs = {
-                            "model": provider["model"],
-                            "messages": [
-                                {"role": "system", "content": system_prompt},
-                                {"role": "user", "content": user_prompt},
-                            ],
-                            "temperature": temperature,
-                            "max_tokens": max_tokens,
-                        }
+                        kwargs = self._chat_kwargs(provider, system_prompt, user_prompt, temperature, max_tokens)
                         kwargs["response_format"] = {"type": "json_object"}
                         response = provider["client"].chat.completions.create(**kwargs)
-                        content = response.choices[0].message.content
+                        content = self._first_choice_text(response, provider["name"])
 
                         usage_raw = getattr(response, "usage", None)
                         in_t = (

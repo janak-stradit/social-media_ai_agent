@@ -47,6 +47,11 @@ def process_due_posts(app_root_path):
                 candidate = os.path.join(app_root_path, rel_path)
                 if os.path.exists(candidate):
                     abs_image_path = candidate
+                else:
+                    # Not on this server's disk - fetch the S3 copy
+                    from services import storage_service
+
+                    abs_image_path = storage_service.ensure_local(image_url)
 
             # Publish!
             results = publisher.publish_post_to_connected_accounts(

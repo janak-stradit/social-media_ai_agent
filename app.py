@@ -1,12 +1,19 @@
 import os
 import sys
 
-from flask import Flask, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, abort, jsonify, redirect, render_template, request, send_from_directory, session, url_for
 from flask_cors import CORS
 
 from api.routes import api_bp
+from auth.captcha import captcha_bp
 from auth.routes import auth_bp
-from auth.utils import get_current_user_id, login_required_page
+from auth.utils import (
+    admin_required_page,
+    enterprise_required_page,
+    get_current_user_id,
+    login_required_page,
+    self_serve_required_page,
+)
 from config import config_map
 
 # LLM responses (captions, image/video prompts, error messages) can contain
@@ -40,8 +47,12 @@ def create_app(config_name="development"):
         print("[DB] Schema 'social_media_agent' initialised.")
 
         # Start background scheduler thread (skip the reloader's monitor process,
-        # otherwise app.py runs twice under debug=True and posts get published twice)
-        if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        # otherwise app.py runs twice under debug=True and posts get published twice).
+        # Under gunicorn every worker would start its own thread and publish each post
+        # once per worker, so production sets SCHEDULER_ENABLED=false and runs the
+        # scheduler as its own single process instead (scripts/run_scheduler.py).
+        scheduler_enabled = os.environ.get("SCHEDULER_ENABLED", "true").lower() in ("1", "true", "yes")
+        if scheduler_enabled and (not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true"):
             from scheduler_thread import start_background_scheduler
 
             start_background_scheduler(app.root_path)
@@ -51,8 +62,9 @@ def create_app(config_name="development"):
     # Register blueprints
     app.register_blueprint(api_bp, url_prefix="/api")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
+    app.register_blueprint(captcha_bp, url_prefix="/api/auth/captcha")
 
-    @app.route("/")
+    @app.route("/dashboard")
     @login_required_page
     def index():
         return render_template("index.html")
@@ -62,16 +74,34 @@ def create_app(config_name="development"):
     def settings_route():
         return render_template("settings.html")
 
+    @app.route("/brand-profile")
+    @login_required_page
+    @self_serve_required_page
+    def brand_profile_page():
+        """"My Brand Configuration" - shows/edits the per-user brand
+        profile scraped from an Individual/Small/Medium account's website
+        during onboarding (see db.UserBrandProfile,
+        services/brand_profile_service.py). Not to be confused with
+        /brand-configuration below, which edits StradIT's own global
+        Content Guidelines."""
+        return render_template("brand_profile.html")
+
     @app.route("/brand-configuration")
     @login_required_page
+    @enterprise_required_page
     def brand_configuration_page():
         """Editable Content Guidelines + Products & Service text (see
         AppSetting in db.py) read live by generation, so edits here actually
-        change what gets generated without touching code."""
+        change what gets generated without touching code. This is StradIT's
+        own single global brand profile (AppSetting is a global key-value
+        store, not per-user) - Enterprise/admin only. Individual/Small/Medium
+        accounts have their own per-user equivalent at /brand-profile
+        instead (see db.UserBrandProfile)."""
         return render_template("brand_configuration.html")
 
     @app.route("/competitor-dashboard")
     @login_required_page
+    @enterprise_required_page
     def competitor_dashboard():
         # Backward compatibility: approval-request emails sent before the
         # dedicated /approve/<id> page existed link here as ?approve=<id>.
@@ -79,6 +109,18 @@ def create_app(config_name="development"):
         if approve_id and approve_id.isdigit():
             return redirect(url_for("approval_review_page", request_id=int(approve_id)))
         return render_template("competitor_dashboard.html")
+
+    @app.route("/admin")
+    @login_required_page
+    @admin_required_page
+    def admin_page():
+        """Admin Control Center - user credit management, extension
+        requests, global cost history. Was previously a modal on the Studio
+        Chat page (unreachable via any button that actually existed in the
+        header, and the one working entry point - the user-menu dropdown -
+        never triggered its data-loading calls either); now a standalone,
+        admin-gated page."""
+        return render_template("admin.html")
 
     @app.route("/approve")
     @login_required_page
@@ -102,11 +144,97 @@ def create_app(config_name="development"):
             return redirect(url_for("index"))
         return render_template("login.html")
 
+    @app.route("/signup")
+    def signup_route():
+        """Dedicated registration page (posts to /api/auth/register, same
+        endpoint login.html's old register-mode toggle used) - a real page
+        instead of a same-page mode switch, with its own client-side
+        validation (name/email format/password strength/confirm-password
+        match) layered on top of the server-side checks in
+        auth/routes.py's register(), which remain the actual source of
+        truth."""
+        if get_current_user_id():
+            return redirect(url_for("index"))
+        return render_template("signup.html", captcha_enabled=app.config.get("CAPTCHA_ENABLED", True))
+
+    @app.route("/forgot-password")
+    def forgot_password_page():
+        """Asks for an email and posts to /api/auth/forgot-password, which
+        emails a single-use reset link (see auth/routes.py)."""
+        return render_template("forgot_password.html")
+
+    @app.route("/reset-password/<token>")
+    def reset_password_page(token):
+        """Opened from the reset email. The token is checked up front so an
+        expired/used link shows that straight away instead of after the user
+        has typed a new password; /api/auth/reset-password re-checks it."""
+        from auth.routes import get_user_for_reset_token
+
+        return render_template(
+            "reset_password.html", token=token, token_valid=get_user_for_reset_token(token) is not None
+        )
+
+    @app.route("/verify-pending")
+    def verify_pending_page():
+        """Shown right after registration - reachable with no session, since
+        registration no longer logs the user in (see auth/routes.py's
+        register()). Also rendered directly (with an error/email context) by
+        auth/routes.py's verify_email() on an invalid/expired token."""
+        return render_template("verify_pending.html", email=request.args.get("email"))
+
+    @app.route("/onboarding")
+    @login_required_page
+    def onboarding_page():
+        """Account-type selection (Individual/Small/Medium/Enterprise) - the
+        first step after email verification. See
+        POST /api/onboarding/account-type."""
+        return render_template("onboarding_account_type.html")
+
+    @app.route("/onboarding/contact-sales")
+    @login_required_page
+    def onboarding_contact_sales_page():
+        """Enterprise's path instead of self-serve dashboard access. See
+        POST /api/onboarding/contact-sales."""
+        return render_template("onboarding_contact_sales.html")
+
+    @app.route("/account-pending")
+    @login_required_page
+    def account_pending_page():
+        """Shown for any onboarded-but-inactive account - Enterprise users
+        awaiting sales activation, or any account an admin has deactivated
+        (see is_active / set_user_active in db.py)."""
+        return render_template("account_pending.html")
+
+    @app.route("/upgrade-required")
+    @login_required_page
+    def upgrade_required_page():
+        """Shown when a non-Enterprise account tries to reach the Analysis
+        Dashboard (see @enterprise_required_page in auth/utils.py)."""
+        return render_template("upgrade_required.html")
+
+    @app.route("/")
+    def landing_page():
+        if get_current_user_id():
+            return redirect(url_for("index"))
+        return render_template("landing.html")
+
     @app.route("/logout")
     def logout_route():
         session.clear()
         session.modified = True
         return redirect(url_for("login_route"))
+
+    @app.route("/static/uploads/<path:filename>")
+    def uploaded_file(filename):
+        """Generated content and uploads. Same as Flask's own /static route,
+        except that a file missing on this server's disk (new or rebuilt
+        instance) is fetched from its S3 copy first (services/storage_service.py).
+        In production nginx serves files that exist and only sends misses here."""
+        from services import storage_service
+
+        if not storage_service.ensure_local(f"{storage_service.UPLOAD_URL_PREFIX}{filename}"):
+            abort(404)
+        return send_from_directory(app.config["UPLOAD_FOLDER"], filename, max_age=0)
 
     @app.route("/favicon.ico")
     def favicon():

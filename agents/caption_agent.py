@@ -177,19 +177,83 @@ class CaptionAgent:
         tone=None,
         memory_context=None,
         brand_voice=None,
+        has_project_context=True,
+        brand_profile_block=None,
     ):
-        """Generate a platform-specific caption."""
+        """Generate a platform-specific caption.
+
+        has_project_context: True when this brief is tied to a specific StradIT
+        project/competitor storyline (e.g. from Analysis Dashboard counter-strategy
+        or Studio Chat with a target company selected) - in that case the caption
+        must stay grounded in that project and hide competitor identities. False
+        for a generic Studio Chat brief with no project/company selected - that
+        content should stand on its own as general thought leadership and is NOT
+        required to force a StradIT product/service pitch into every post.
+        """
 
         config = self.PLATFORM_CONFIGS.get(platform, self.PLATFORM_CONFIGS["instagram"])
+
+        if has_project_context:
+            project_rules_block = """
+CONTENT AND PRIVACY RULES:
+1. NEVER mention competitor names in public-facing content. Competitor names are for internal reference only.
+2. PRESERVE THE SPECIFIC TOPIC: Do NOT lose the underlying strategic topic (e.g., fundamental research, private market due diligence, portfolio construction) when removing the competitor name. You MUST discuss the exact strategic problems mentioned in the Story Analysis. Do not replace the specific topic with a generic "operational efficiency" or "workflow automation" storyline.
+3. The final caption must remain faithful to the selected projects and their verified capabilities.
+4. STRICT BAN ON GENERIC BUZZWORDS: Do not introduce unrelated themes such as "headcount reduction", "operational efficiency", "workflow automation", "operational friction", or "manual workflows" unless they are explicitly the core subject of the Story Analysis. Focus on the specific financial or technical challenge provided.
+
+For example:
+BAD: "BlackRock and Northern Trust have highlighted..."
+BAD: "Following BlackRock's approach..."
+BAD: "Like Northern Trust, leading firms..."
+
+GOOD: "Across today's investment landscape..."
+GOOD: "As investment teams navigate increasingly complex markets..."
+GOOD: "Modern investment firms are placing greater emphasis on..."
+
+The final caption must stand on its own as StradIT's thought leadership and must not reveal which competitors were used as source inspiration.
+
+PUBLIC CONTENT RULE:
+The competitor analysis is an internal strategic input.
+Do not expose:
+- competitor names
+- competitor-specific post references
+- competitor-specific claims
+- statements such as "Competitor X recently..."
+- comparisons that explicitly identify a competitor
+
+Use the competitor's topic or industry insight, but rewrite it as a broader market trend or industry challenge.
+CRITICAL: You must hide competitor identities WITHOUT replacing their actual strategic topics with a generic operational-efficiency storyline. Ensure the original strategic meaning is preserved.
+"""
+            project_tone_line = "Be objective when describing the StradIT project."
+        elif brand_profile_block:
+            # A Studio Chat user with their own onboarding-derived brand
+            # context (see services/brand_profile_service.py) - this is
+            # almost certainly NOT StradIT, so don't name StradIT here at
+            # all; the brand context appended in _build_prompt already tells
+            # the model who the actual company is.
+            project_rules_block = ""
+            project_tone_line = (
+                "This is a general thought-leadership brief for the user's own brand - it is NOT tied "
+                "to StradIT or any StradIT product. Write it as a standalone industry insight grounded "
+                "in the Story Analysis and the user's brand context (see below) - only reference the "
+                "user's own company/brand when it genuinely adds value, never StradIT."
+            )
+        else:
+            project_rules_block = ""
+            project_tone_line = (
+                "This is a general thought-leadership brief - it is NOT tied to any specific StradIT "
+                "product/project. Write it as a standalone industry insight grounded in the Story "
+                "Analysis (including its research_notes). You MAY mention StradIT naturally if it "
+                "genuinely fits, but do NOT force a product/service pitch, an invented capability "
+                'claim, or an unwarranted "At StradIT, we..." tie-in into every post - only bring the '
+                "company up when it actually adds value to the point being made."
+            )
 
         system_prompt = f"""
 You are a {platform.capitalize()} Content Specialist.
 
-Generate THREE distinct narrative social media post variations based STRICTLY
-on the instructions in the Story Analysis.
-- Primary Hook: Direct and value-driven.
-- Story Hook: Narrative-driven and engaging.
-- Contrarian Hook: Bold and thought-provoking.
+Generate ONE direct, value-driven social media post based STRICTLY on the
+instructions in the Story Analysis.
 
 PRIMARY REQUIREMENT:
 The final caption must be natural, human-written, and suitable
@@ -230,7 +294,7 @@ greeting caption normally in that case; do not treat "N/A" as a block condition.
 
 9. Do NOT ask the reader to "visit our website", "read our whitepaper", "reach out to me", "see a demonstration", or "download the document".
 
-10. You SHOULD include hashtags at the very end of the post. You MUST ensure every hashtag starts with a '#' symbol. IMPORTANT: You must provide UNIQUE and DIFFERENT hashtags tailored to each specific variation. Do NOT reuse the exact same set of hashtags across the three variations.
+10. You SHOULD include hashtags at the very end of the post. You MUST ensure every hashtag starts with a '#' symbol.
 
 FINAL VALIDATION:
 Before returning the answer, scan the complete caption.
@@ -243,40 +307,11 @@ pitches, demo requests, or promotional calls to action.
 
 IGNORE any part of the Story Analysis that asks you to include
 a link, CTA, demo request, or sales pitch.
-
-CONTENT AND PRIVACY RULES:
-1. NEVER mention competitor names in public-facing content. Competitor names are for internal reference only.
-2. PRESERVE THE SPECIFIC TOPIC: Do NOT lose the underlying strategic topic (e.g., fundamental research, private market due diligence, portfolio construction) when removing the competitor name. You MUST discuss the exact strategic problems mentioned in the Story Analysis. Do not replace the specific topic with a generic "operational efficiency" or "workflow automation" storyline.
-3. The final caption must remain faithful to the selected projects and their verified capabilities.
-4. STRICT BAN ON GENERIC BUZZWORDS: Do not introduce unrelated themes such as "headcount reduction", "operational efficiency", "workflow automation", "operational friction", or "manual workflows" unless they are explicitly the core subject of the Story Analysis. Focus on the specific financial or technical challenge provided.
-
-For example:
-BAD: "BlackRock and Northern Trust have highlighted..."
-BAD: "Following BlackRock's approach..."
-BAD: "Like Northern Trust, leading firms..."
-
-GOOD: "Across today's investment landscape..."
-GOOD: "As investment teams navigate increasingly complex markets..."
-GOOD: "Modern investment firms are placing greater emphasis on..."
-
-The final caption must stand on its own as StradIT's thought leadership and must not reveal which competitors were used as source inspiration.
-
-PUBLIC CONTENT RULE:
-The competitor analysis is an internal strategic input.
-Do not expose:
-- competitor names
-- competitor-specific post references
-- competitor-specific claims
-- statements such as "Competitor X recently..."
-- comparisons that explicitly identify a competitor
-
-Use the competitor's topic or industry insight, but rewrite it as a broader market trend or industry challenge.
-CRITICAL: You must hide competitor identities WITHOUT replacing their actual strategic topics with a generic operational-efficiency storyline. Ensure the original strategic meaning is preserved.
-
+{project_rules_block}
 TONE:
 Write like a real human industry professional sharing an insight.
 
-Be objective when describing the StradIT project.
+{project_tone_line}
 
 Do not sound like a marketer.
 
@@ -285,11 +320,9 @@ Maximum length: {config["max_length"]} characters
 Tone: {config["tone"]}
 Optimal length: {config["optimal_length"]}
 
-Return ONLY a JSON object with the following keys:
+Return ONLY a JSON object with the following key:
 
 primary_caption
-story_hook_caption
-contrarian_hook_caption
 """
 
         user_prompt = self._build_prompt(
@@ -298,6 +331,7 @@ contrarian_hook_caption
             tone,
             memory_context,
             brand_voice,
+            brand_profile_block,
         )
 
         try:
@@ -309,8 +343,6 @@ contrarian_hook_caption
             )
 
             primary = parsed.get("primary_caption", "")
-            story = parsed.get("story_hook_caption", "")
-            contrarian = parsed.get("contrarian_hook_caption", "")
 
         except Exception as e:
             print(f"[CaptionAgent] JSON generation fallback: {e}")
@@ -321,16 +353,12 @@ contrarian_hook_caption
                 temperature=0.8,
                 return_usage=True,
             )
-            story = primary
-            contrarian = primary
 
         # ---------------------------------------------------------
         # FINAL CLEANING
         # ---------------------------------------------------------
 
         primary = self._clean_caption(primary)
-        story = self._clean_caption(story)
-        contrarian = self._clean_caption(contrarian)
 
         # ---------------------------------------------------------
         # Return result
@@ -339,8 +367,6 @@ contrarian_hook_caption
         return {
             "platform": platform,
             "primary_caption": primary,
-            "story_hook_caption": story,
-            "contrarian_hook_caption": contrarian,
             "character_count": len(primary),
             "estimated_read_time": f"{len(primary.split()) // 200 + 1} min read",
             "usage": usage,
@@ -352,8 +378,15 @@ contrarian_hook_caption
         original_caption,
         reviewer_feedback,
         brand_voice=None,
+        brand_profile_block=None,
     ):
-        """Refine caption based on ReviewerAgent feedback."""
+        """Refine caption based on ReviewerAgent feedback.
+        brand_profile_block (see services/brand_profile_service.py): without
+        this, the refinement pass used to hardcode "the company is StradIT"
+        unconditionally - for a Studio Chat user with their own onboarding
+        brand, that reintroduced StradIT into an otherwise-correct caption
+        during the Critic's rewrite, even after generate_caption() got the
+        company name right the first time."""
 
         config = self.PLATFORM_CONFIGS.get(platform, self.PLATFORM_CONFIGS["instagram"])
 
@@ -403,6 +436,12 @@ and "*" do not appear anywhere in the final response.
 Platform maximum length: {config["max_length"]} characters.
 """
 
+        brand_persona_clause = (
+            "Brand Persona (writing style/tone only - NOT a company name; see the Brand Context "
+            "below for the actual company):"
+            if brand_profile_block
+            else "Brand Persona (writing style/tone only - NOT a company name; the company is StradIT):"
+        )
         user_prompt = f"""
 Original Caption:
 
@@ -414,9 +453,10 @@ Critic Feedback:
 
 {reviewer_feedback}
 
-Brand Persona (writing style/tone only - NOT a company name; the company is StradIT):
+{brand_persona_clause}
 
 {brand_voice or "Standard"}
+{brand_profile_block or ""}
 
 Rewrite and return ONLY the improved plain-text caption.
 """
@@ -445,14 +485,24 @@ Rewrite and return ONLY the improved plain-text caption.
         tone,
         memory_context,
         brand_voice,
+        brand_profile_block=None,
     ):
         parts = [f"Story Analysis: {story_analysis}"]
 
         if brand_voice:
-            parts.append(
-                f"Brand Voice Persona: {brand_voice} - this describes the WRITING STYLE/TONE only, "
-                "it is NOT a company name. The company is StradIT; never sign off as or refer to the "
+            # The "the company is StradIT" framing only applies when there's
+            # no per-user brand_profile_block - a Studio Chat user with their
+            # own onboarding-derived brand (see services/brand_profile_service.py)
+            # is very likely NOT StradIT, and asserting that here would
+            # directly contradict the brand context injected below.
+            company_clause = (
+                "not a company name - never sign off as or refer to the company by this label."
+                if brand_profile_block
+                else 'not a company name. The company is StradIT; never sign off as or refer to the '
                 'company by the brand voice label (e.g. never write "From Standard Enterprise").'
+            )
+            parts.append(
+                f"Brand Voice Persona: {brand_voice} - this describes the WRITING STYLE/TONE only, {company_clause}"
             )
 
         if vision_analysis:
@@ -464,6 +514,9 @@ Rewrite and return ONLY the improved plain-text caption.
         if memory_context:
             parts.append(memory_context)
 
+        if brand_profile_block:
+            parts.append(brand_profile_block)
+
         return "\n\n".join(parts)
 
     def generate_all_platforms(
@@ -474,6 +527,8 @@ Rewrite and return ONLY the improved plain-text caption.
         memory_context=None,
         brand_voice=None,
         platforms=None,
+        has_project_context=True,
+        brand_profile_block=None,
     ):
         """Generate captions for all platforms."""
 
@@ -497,6 +552,8 @@ Rewrite and return ONLY the improved plain-text caption.
                 tone,
                 memory_context,
                 brand_voice,
+                has_project_context,
+                brand_profile_block,
             )
 
             usage = res.pop("usage", {})

@@ -15,13 +15,31 @@ import openai
 import requests
 
 from config import Config
+from services import storage_service
+from services.brand_logo_service import NO_AI_LOGO_RULE, overlay_logo
 from services.llm_service import LLMService
+from services.storage_service import mirror_to_s3
+
+_PROMPT_LIMIT = 2000  # kie.ai's prompt cap (see _generate_image_kie)
+
+
+def _with_no_logo_rule(prompt: str) -> str:
+    """Every image prompt ends with the no-AI-logo rule (the real logo is
+    stamped on afterwards) - trimmed so the rule itself survives the cap."""
+    if NO_AI_LOGO_RULE in prompt:
+        return prompt
+    return f"{prompt[: _PROMPT_LIMIT - len(NO_AI_LOGO_RULE) - 2]}\n\n{NO_AI_LOGO_RULE}"
 
 
 class MediaGenerationService:
     """Generates social media images and videos via Z.AI, OpenRouter, or OpenAI."""
 
     OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+    IMAGE_SIZES = {
+        "instagram": "1024x1024",
+        "facebook": "1792x1024",
+        "linkedin": "1792x1024",
+    }
 
     def __init__(self):
         self.llm_service = LLMService()
@@ -300,7 +318,8 @@ class MediaGenerationService:
         candidate = os.path.join(Config.UPLOAD_FOLDER, os.path.basename(image_path))
         if os.path.exists(candidate):
             return candidate
-        return None
+        # Not on this server's disk (e.g. a rebuilt instance) - fetch the S3 copy
+        return storage_service.ensure_local(storage_service.UPLOAD_URL_PREFIX + os.path.basename(image_path))
 
     def _resolve_image_paths(self, image_path: str | list[str] | None) -> list[str]:
         """Normalizes the single-image-or-list reference param (multiple
@@ -559,12 +578,226 @@ class MediaGenerationService:
                     timeout=30,
                 )
             if not upload_resp.ok:
-                print(f"[Media Service] kie.ai file upload failed: {upload_resp.status_code} - {upload_resp.text[:200]}")
+                print(
+                    f"[Media Service] kie.ai file upload failed: {upload_resp.status_code} - {upload_resp.text[:200]}"
+                )
                 return None
             return ((upload_resp.json() or {}).get("data") or {}).get("downloadUrl")
         except Exception as e:
             print(f"[Media Service] kie.ai file upload error: {e}")
             return None
+
+    # ── HeyRoute (https://heyroute.ai/v1, OpenAI-compatible) ─────────────────
+    # Image: gemini-3-pro-image via /images/generations (text-to-image) or
+    # /images/edits (with reference images). n must be 1 (the Gemini models
+    # return 400 otherwise) and size is ignored, so the aspect ratio goes in the
+    # prompt. "stream": false asks for a plain JSON body; an SSE body (the
+    # endpoint's default) is still parsed if the gateway sends one anyway.
+    # Video: /videos creates a task, /videos/{id} is polled, and the finished
+    # file is downloaded from /videos/{id}/content with the same key.
+
+    _HEYROUTE_ASPECT_HINTS = {
+        "instagram": "Square 1:1 aspect ratio.",
+        "facebook": "Landscape 16:9 aspect ratio.",
+        "linkedin": "Landscape 16:9 aspect ratio.",
+    }
+    _HEYROUTE_VIDEO_RATIOS = {"instagram": "9:16", "facebook": "16:9", "linkedin": "16:9"}
+    _HEYROUTE_MAX_REFERENCES = 14  # HeyRoute's documented limit for Gemini edits
+
+    def _heyroute_headers(self, key: str) -> dict:
+        return {"Authorization": f"Bearer {key}"}
+
+    @staticmethod
+    def _heyroute_image_payload(resp) -> dict:
+        """The {"data": [...]} payload from a JSON or SSE images response."""
+        content_type = resp.headers.get("Content-Type", "")
+        if "text/event-stream" not in content_type:
+            return resp.json()
+        import json as _json
+
+        event = None
+        for line in resp.text.splitlines():
+            if line.startswith("event: "):
+                event = line[len("event: "):].strip()
+            elif line.startswith("data: "):
+                data = line[len("data: "):]
+                if event == "error":
+                    raise RuntimeError(f"HeyRoute image error: {data[:300]}")
+                if event == "completed":
+                    return _json.loads(data)
+        raise RuntimeError("HeyRoute image stream ended without a completed event.")
+
+    def _generate_image_heyroute(
+        self, prompt: str, platform: str, size: str, image_path: str | list[str] | None = None
+    ) -> dict:
+        """Same return shape as _generate_image_kie: {url (local), original_url,
+        prompt, model, cost}."""
+        import base64
+
+        key = Config.HEYROUTE_IMAGE_API_KEY
+        if not key:
+            raise RuntimeError("HEYROUTE_IMAGE_API_KEY is not configured.")
+        model = Config.HEYROUTE_IMAGE_MODEL
+        hint = self._HEYROUTE_ASPECT_HINTS.get(platform)
+        full_prompt = f"{prompt}\n\n{hint}" if hint and hint not in prompt else prompt
+        references = self._resolve_image_paths(image_path)[: self._HEYROUTE_MAX_REFERENCES]
+        base = Config.HEYROUTE_BASE_URL
+
+        if references:
+            files = []
+            try:
+                for ref in references:
+                    mime = mimetypes.guess_type(ref)[0] or "image/png"
+                    files.append(("image", (os.path.basename(ref), open(ref, "rb"), mime)))
+                resp = requests.post(
+                    f"{base}/images/edits",
+                    headers=self._heyroute_headers(key),
+                    data={"model": model, "prompt": full_prompt, "n": "1", "stream": "false"},
+                    files=files,
+                    timeout=300,
+                )
+            finally:
+                for _, (_, handle, _) in files:
+                    handle.close()
+        else:
+            resp = requests.post(
+                f"{base}/images/generations",
+                headers={**self._heyroute_headers(key), "Content-Type": "application/json"},
+                json={"model": model, "prompt": full_prompt, "n": 1, "stream": False},
+                timeout=300,
+            )
+        if not resp.ok:
+            raise RuntimeError(f"HeyRoute image request failed: {resp.status_code} - {resp.text[:300]}")
+
+        item = ((self._heyroute_image_payload(resp) or {}).get("data") or [{}])[0]
+        original_url = item.get("url")
+        if item.get("b64_json"):
+            img_data = base64.b64decode(item["b64_json"])
+        elif original_url:
+            img_data = requests.get(original_url, timeout=60).content
+        else:
+            raise RuntimeError("HeyRoute image response had no image data.")
+
+        local_filename, _ = self._save_image_bytes(img_data, platform)
+        return {
+            "url": f"/static/uploads/{local_filename}",
+            "original_url": original_url,
+            "prompt": full_prompt,
+            "model": f"heyroute/{model}",
+        }
+
+    def _generate_image_primary(
+        self, prompt: str, platform: str, size: str, image_path: str | list[str] | None = None
+    ) -> dict:
+        """The default image provider: HeyRoute when its image key is set
+        (falling back to kie.ai if HeyRoute fails and a kie.ai key exists),
+        kie.ai otherwise -- exactly as before HeyRoute was added."""
+        if Config.HEYROUTE_IMAGE_API_KEY:
+            try:
+                return self._generate_image_heyroute(prompt, platform, size, image_path)
+            except Exception as err:
+                if not Config.KIE_API_KEY:
+                    raise
+                print(f"[Media Service] HeyRoute image failed ({err}); falling back to kie.ai...")
+        return self._generate_image_kie(prompt, platform, size, image_path)
+
+    def _file_to_data_uri(self, path: str) -> str:
+        mime = mimetypes.guess_type(path)[0] or "image/jpeg"
+        with open(path, "rb") as f:
+            return f"data:{mime};base64," + base64.b64encode(f.read()).decode()
+
+    def _heyroute_video_task(self, key: str, body: dict) -> bytes:
+        """Create a HeyRoute video task, poll it to completion and return the
+        MP4 bytes. Raises on failure or timeout (never resubmits: every
+        submission is billed separately)."""
+        base = Config.HEYROUTE_BASE_URL
+        headers = self._heyroute_headers(key)
+        created = requests.post(f"{base}/videos", headers={**headers, "Content-Type": "application/json"},
+                                json=body, timeout=60)
+        if not created.ok:
+            raise RuntimeError(f"HeyRoute video create failed ({body.get('model')}): "
+                               f"{created.status_code} - {created.text[:300]}")
+        task_id = (created.json() or {}).get("task_id") or (created.json() or {}).get("id")
+        if not task_id:
+            raise RuntimeError(f"HeyRoute video create returned no task id: {created.text[:300]}")
+
+        deadline = time.time() + Config.HEYROUTE_VIDEO_TIMEOUT
+        while time.time() < deadline:
+            time.sleep(10)
+            task = requests.get(f"{base}/videos/{task_id}", headers=headers, timeout=60).json() or {}
+            status = task.get("status")
+            if status == "completed":
+                video = requests.get(f"{base}/videos/{task_id}/content", headers=headers, timeout=600)
+                video.raise_for_status()
+                return video.content
+            if status == "failed":
+                raise RuntimeError(f"HeyRoute video failed ({body.get('model')}): "
+                                   f"{(task.get('error') or {}).get('message', 'task failed')}")
+        raise RuntimeError(f"HeyRoute video timed out after {Config.HEYROUTE_VIDEO_TIMEOUT}s (task {task_id}).")
+
+    @staticmethod
+    def _heyroute_takes_reference(model: str) -> bool:
+        """grok-imagine-video* accept a first-frame image, ratio and resolution;
+        grok-video accepts none of them (HeyRoute: forwarded but unverified)."""
+        return model.startswith("grok-imagine")
+
+    def _heyroute_video_body(self, model: str, prompt: str, platform: str, image_path: str | None) -> dict:
+        seconds = max(1, min(15, int(Config.HEYROUTE_VIDEO_SECONDS)))
+        if not self._heyroute_takes_reference(model):
+            # grok-video: only 6 / 10 / 15 seconds (anything else is a 400),
+            # and ratio / resolution / reference images are not supported.
+            return {"model": model, "prompt": prompt,
+                    "seconds": str(min((6, 10, 15), key=lambda s: abs(s - seconds)))}
+        body = {
+            "model": model,
+            "prompt": prompt,
+            "seconds": str(seconds),
+            "ratio": self._HEYROUTE_VIDEO_RATIOS.get(platform, "16:9"),
+            "resolution": Config.HEYROUTE_VIDEO_RESOLUTION,
+        }
+        resolved = self._resolve_image_path(image_path)
+        if resolved and os.path.exists(resolved):
+            body["input_reference"] = self._file_to_data_uri(resolved)
+        return body
+
+    def _generate_video_heyroute(self, prompt: str, platform: str, image_path: str | None = None) -> dict:
+        """HEYROUTE_VIDEO_MODEL (grok-video by default), then
+        HEYROUTE_VIDEO_FALLBACK_MODEL if one is set. Same return shape as
+        _generate_google_gemini_video. Raises if every attempt fails."""
+        key = Config.HEYROUTE_VIDEO_API_KEY
+        if not key:
+            raise RuntimeError("HEYROUTE_VIDEO_API_KEY is not configured.")
+
+        models = [m for m in (Config.HEYROUTE_VIDEO_MODEL, Config.HEYROUTE_VIDEO_FALLBACK_MODEL) if m]
+        # grok-imagine generates its own audio; grok-video is treated as silent
+        # so the existing narration step runs.
+        attempts = [
+            (self._heyroute_video_body(m, prompt, platform, image_path), self._heyroute_takes_reference(m))
+            for m in models
+        ]
+
+        last_error = None
+        for body, native_audio in attempts:
+            try:
+                print(f"[Media Service] Generating video via HeyRoute {body['model']}...")
+                content = self._heyroute_video_task(key, body)
+                filename = f"heyroute_video_{uuid.uuid4().hex[:8]}.mp4"
+                with open(os.path.join(self.upload_folder, filename), "wb") as f:
+                    f.write(content)
+                return {
+                    "success": True,
+                    "url": f"/static/uploads/{filename}",
+                    "prompt": prompt,
+                    "model": body["model"],
+                    "provider": f"HeyRoute ({body['model']})",
+                    "duration": int(body["seconds"]),
+                    "has_native_audio": native_audio,
+                    "audio_mode": "single_pass_native" if native_audio else "none",
+                }
+            except Exception as err:
+                last_error = err
+                print(f"[Media Service] HeyRoute {body['model']} failed: {err}")
+        raise RuntimeError(f"HeyRoute video generation failed: {last_error}")
 
     def _generate_image_kie(
         self, prompt: str, platform: str, size: str, image_path: str | list[str] | None = None
@@ -984,6 +1217,7 @@ class MediaGenerationService:
     # ── Image Generation ───────────────────────────────────────────────────
     # The linter flags that not every path through this function returns a dict (some fall
     # through, implicitly returning None). Worth tracing properly; not done as part of lint adoption.
+    @mirror_to_s3
     def generate_image(  # pylint: disable=inconsistent-return-statements
         self,
         caption: str,
@@ -991,9 +1225,12 @@ class MediaGenerationService:
         tone: str | None = None,
         image_path: str | list[str] | None = None,
         ai_model: str = "kie",
+        logo_path: str | None = None,
     ) -> dict:
         """
-        Generate a social media image.
+        Generate a social media image. The model is told never to draw a
+        logo; when logo_path is given, the real logo is stamped on afterwards
+        (see _stamp_logo) and the result also carries clean_url.
         Returns: { url, local_path, prompt, size, platform }
         """
         if caption and ("CONTENT GENERATION BLOCKED" in caption or "No Strong Match" in caption):
@@ -1008,12 +1245,7 @@ class MediaGenerationService:
             print("[Media Service] USE_MOCK_LLM is enabled. Generating mock image asset...")
             return self._generate_mock_media(platform, "image", caption)
 
-        size_map = {
-            "instagram": "1024x1024",
-            "facebook": "1792x1024",
-            "linkedin": "1792x1024",
-        }
-        size = size_map.get(platform, "1024x1024")
+        size = self.IMAGE_SIZES.get(platform, "1024x1024")
 
         resolved_references = self._resolve_image_paths(image_path)
         has_reference = bool(resolved_references)
@@ -1021,7 +1253,12 @@ class MediaGenerationService:
         single_reference = resolved_references[0] if resolved_references else None
 
         if has_reference:
-            if len(caption) > 150 or "midjourney" in caption.lower() or "prompt" in caption.lower() or "slide" in caption.lower():
+            if (
+                len(caption) > 150
+                or "midjourney" in caption.lower()
+                or "prompt" in caption.lower()
+                or "slide" in caption.lower()
+            ):
                 prompt = caption
                 prompt += "\n\nCRITICAL: Use the provided reference image for the character's exact facial features, hair, skin tone, and visual identity. The character in the image MUST look exactly like the reference image."
             else:
@@ -1037,9 +1274,9 @@ class MediaGenerationService:
                     f"Preserve the main subject's exact facial features, hair, skin tone, and visual identity from the reference image. "
                     f"Brief: {caption[:200]}. "
                     f"Style: {platform_style}{tone_hint}. "
-                    f"Render the bold headline text \"{headline}\" in large clean sans-serif typography, high contrast against "
-                    f"the background, positioned so it does not cover the subject's face, plus a small 'STRAD IT' wordmark in "
-                    f"one corner as a subtle brand tag. Do not add any other text, captions, or watermarks. "
+                    f'Render the bold headline text "{headline}" in large clean sans-serif typography, high contrast against '
+                    f"the background, positioned so it does not cover the subject's face. Do not add any other text, "
+                    f"captions, or watermarks. {NO_AI_LOGO_RULE} "
                     f"Premium quality, highly detailed."
                 )
         else:
@@ -1049,6 +1286,7 @@ class MediaGenerationService:
             else:
                 prompt = self._enhance_image_prompt(caption, platform, tone)
 
+        prompt = _with_no_logo_rule(prompt)
         try:
             if ai_model == "google_gemini":
                 result = self._generate_google_gemini_image(prompt, platform, size, single_reference)
@@ -1061,7 +1299,8 @@ class MediaGenerationService:
             elif ai_model == "openrouter":
                 result = self._generate_image_openrouter(prompt, platform, size, single_reference)
             elif ai_model == "kie":
-                result = self._generate_image_kie(prompt, platform, size, resolved_references)
+                # The default: HeyRoute when configured, kie.ai otherwise
+                result = self._generate_image_primary(prompt, platform, size, resolved_references)
             else:
                 # Default to pollinations
                 result = self._generate_pollinations_image(prompt, platform, size)
@@ -1084,8 +1323,67 @@ class MediaGenerationService:
             "provider": result.get("model", "bedrock"),
             "cost": result.get("cost", 0.03),
             "model": result.get("model", "bedrock"),
+            **self._stamp_logo(result["url"], logo_path),
         }
 
+    def _stamp_logo(self, url: str, logo_path: str | None) -> dict:
+        """Stamps the real logo onto a generated image (brand_logo_service),
+        keeping an unbranded copy - {"clean_url": ...} - so a follow-up edit
+        works from the clean image instead of redrawing/duplicating the logo.
+        {} when there's no logo or stamping failed (image left as-is)."""
+        if not logo_path or not url:
+            return {}
+        import shutil
+
+        local = os.path.join(self.upload_folder, os.path.basename(url))
+        if not os.path.exists(local):
+            return {}
+        stem, ext = os.path.splitext(os.path.basename(url))
+        clean_name = f"{stem}_clean{ext}"
+        shutil.copyfile(local, os.path.join(self.upload_folder, clean_name))
+        if not overlay_logo(local, logo_path):
+            return {}
+        return {"clean_url": f"/static/uploads/{clean_name}", "logo_applied": True}
+
+    @mirror_to_s3
+    def edit_image(
+        self, prompt: str, platform: str, image_path: str | list[str] | None = None, logo_path: str | None = None
+    ) -> dict:
+        """
+        Surgical follow-up edit of an existing image (Studio Chat refinement).
+        Unlike generate_image(), the prompt is sent verbatim - no headline or
+        "preserve facial features" wrapping - so a precise edit instruction
+        ("replace the headline with exactly ...") isn't diluted. Uses kie.ai's
+        edit model with the previous image as reference; with no usable
+        reference it generates from the prompt instead.
+        Returns the same shape as generate_image().
+        """
+        if getattr(Config, "USE_MOCK_LLM", False):
+            return self._generate_mock_media(platform, "image", prompt)
+
+        size = self.IMAGE_SIZES.get(platform, "1024x1024")
+        try:
+            result = self._generate_image_primary(
+                _with_no_logo_rule(prompt), platform, size, self._resolve_image_paths(image_path)
+            )
+        except Exception as e:
+            return {"success": False, "type": "image", "platform": platform, "error": str(e)}
+
+        return {
+            "success": True,
+            "type": "image",
+            "platform": platform,
+            "url": result["url"],
+            "original_url": result.get("original_url"),
+            "prompt": result["prompt"],
+            "size": size,
+            "provider": result.get("model"),
+            "cost": result.get("cost", 0.02),
+            "model": result.get("model"),
+            **self._stamp_logo(result["url"], logo_path),
+        }
+
+    @mirror_to_s3
     def generate_carousel_images(
         self, image_prompt: str, platform: str, reference_image_path: str | list[str] | None = None
     ) -> list[dict]:
@@ -1127,11 +1425,11 @@ class MediaGenerationService:
                     "Preserve the main subject's exact facial features, hair, skin tone, and visual "
                     "identity from the uploaded reference image."
                 )
-            prompt_parts.append("Include a small 'STRAD IT' wordmark in one corner as a subtle brand tag.")
+            prompt_parts.append(NO_AI_LOGO_RULE)
             slide_prompt = " ".join(prompt_parts)[:2000]
 
             try:
-                result = self._generate_image_kie(slide_prompt, platform, "1792x1024", reference_image_path)
+                result = self._generate_image_primary(slide_prompt, platform, "1792x1024", reference_image_path)
                 result["success"] = True
                 result["slide_number"] = slide_num
                 result["slide_title"] = slide_title
@@ -1210,13 +1508,15 @@ class MediaGenerationService:
 
         client = genai.Client(api_key=google_key)
         aspect_ratio = "9:16" if platform == "instagram" else "16:9"
+        # Veo accepts only 4 / 6 / 8 seconds -- snap the configured value to one.
+        veo_seconds = min((4, 6, 8), key=lambda s: abs(s - int(getattr(Config, "GEMINI_VIDEO_DURATION", 8))))
 
         gen_kwargs = {
             "model": model_name,
             "prompt": prompt[:512],
             "config": types.GenerateVideosConfig(  # pylint: disable=no-member
                 aspect_ratio=aspect_ratio,
-                duration_seconds=5,
+                duration_seconds=veo_seconds,
                 number_of_videos=1,
                 generate_audio=getattr(Config, "GENERATE_NATIVE_AUDIO", True),
             ),
@@ -1244,7 +1544,7 @@ class MediaGenerationService:
                 native_audio_requested = False
                 gen_kwargs["config"] = types.GenerateVideosConfig(  # pylint: disable=no-member
                     aspect_ratio=aspect_ratio,
-                    duration_seconds=5,
+                    duration_seconds=veo_seconds,
                     number_of_videos=1,
                 )
                 operation = client.models.generate_videos(**gen_kwargs)  # pylint: disable=no-member
@@ -1324,10 +1624,18 @@ class MediaGenerationService:
             raise RuntimeError(f"Pollinations returned status code {response.status_code}")
 
     # ── Video Generation ───────────────────────────────────────────────────
+    @mirror_to_s3
     def generate_video(
-        self, caption: str, platform: str, tone: str | None = None, image_path: str | None = None
+        self,
+        caption: str,
+        platform: str,
+        tone: str | None = None,
+        image_path: str | None = None,
+        logo_path: str | None = None,
     ) -> dict:
-        """Generate an actual MP4 video from caption/story text and optional reference image."""
+        """Generate an actual MP4 video from caption/story text and optional
+        reference image. logo_path: the company's real logo, shown at the end
+        of the video (see _apply_video_watermark); None -> no logo."""
         if caption and ("CONTENT GENERATION BLOCKED" in caption or "No Strong Match" in caption):
             return {
                 "success": False,
@@ -1340,10 +1648,25 @@ class MediaGenerationService:
             print("[Media Service] USE_MOCK_LLM is enabled. Generating mock video asset...")
             return self._generate_mock_media(platform, "video", caption)
 
-        resolved_image = self._resolve_image_path(image_path)
+        # Video is generated ONLY through HeyRoute (HEYROUTE_VIDEO_API_KEY,
+        # HEYROUTE_VIDEO_MODEL = grok-video by default). No other video provider
+        # (Gemini / Veo, Bedrock) is tried: when HeyRoute fails, the request
+        # fails with HeyRoute's own error.
+        if not Config.HEYROUTE_VIDEO_API_KEY:
+            return {
+                "success": False,
+                "type": "video",
+                "platform": platform,
+                "error": "Video generation needs HEYROUTE_VIDEO_API_KEY in .env (HeyRoute is the only video provider).",
+            }
 
-        # Auto-generate a visual keyframe image if no reference image was provided
-        if not resolved_image:
+        video_models = [m for m in (Config.HEYROUTE_VIDEO_MODEL, Config.HEYROUTE_VIDEO_FALLBACK_MODEL) if m]
+        # A keyframe image only helps a model that takes one (grok-imagine);
+        # grok-video ignores reference images, so for it none is generated or
+        # billed.
+        takes_reference = any(self._heyroute_takes_reference(m) for m in video_models)
+        resolved_image = self._resolve_image_path(image_path) if takes_reference else None
+        if takes_reference and not resolved_image:
             print("[Media Service] No user image uploaded for video. Auto-generating keyframe image...")
             keyframe_res = self.generate_image(caption, platform, tone)
             if keyframe_res.get("success") and keyframe_res.get("url"):
@@ -1353,44 +1676,10 @@ class MediaGenerationService:
 
         try:
             try:
-                # Check if Gemini / Google API key is set or media provider is gemini
-                if (
-                    Config.MEDIA_PROVIDER == "gemini"
-                    or os.getenv("MEDIA_PROVIDER") == "gemini"
-                    or Config.GOOGLE_API_KEY
-                    or os.getenv("GOOGLE_API_KEY")
-                ):
-                    print("[Media Service] Attempting video generation via Google Gemini / Veo...")
-                    result = self._generate_google_gemini_video(prompt, platform, image_path=resolved_image)
-                else:
-                    result = self._generate_video_bedrock(prompt, platform, image_path=resolved_image)
-            except Exception as primary_err:
-                err_msg = str(primary_err)
-                print(f"[Media Service] Primary video generation failed: {err_msg}")
-                # Fallback to Bedrock if Gemini failed but Bedrock client is available
-                if (Config.GOOGLE_API_KEY or os.getenv("GOOGLE_API_KEY")) and self.bedrock_client:
-                    print("[Media Service] Falling back to AWS Bedrock Nova Reel...")
-                    try:
-                        result = self._generate_video_bedrock(prompt, platform, image_path=resolved_image)
-                    except Exception as fallback_err:
-                        fallback_msg = str(fallback_err)
-                        print(f"[Media Service] Bedrock video generation fallback failed: {fallback_msg}")
-                        raise fallback_err
-                elif (
-                    "Access denied" in err_msg or "ResourceNotFoundException" in err_msg or "legacy" in err_msg.lower()
-                ):
-                    return {
-                        "success": False,
-                        "type": "video",
-                        "platform": platform,
-                        "error": (
-                            "AWS Bedrock model access denied or model is legacy. "
-                            "Please open your AWS Bedrock Console, navigate to 'Model access' in the left menu, "
-                            "and request access for Amazon Nova Reel (for videos)."
-                        ),
-                    }
-                else:
-                    raise primary_err
+                result = self._generate_video_heyroute(prompt, platform, image_path=resolved_image)
+            except Exception as heyroute_err:
+                print(f"[Media Service] {heyroute_err}")
+                return {"success": False, "type": "video", "platform": platform, "error": str(heyroute_err)}
 
             # --- Single-Pass Native Video + Audio Optimization ---
             if result.get("url") and result.get("has_native_audio"):
@@ -1400,8 +1689,8 @@ class MediaGenerationService:
                 local_name = result["url"].split("/")[-1]
                 local_path = os.path.join(self.upload_folder, local_name)
                 if os.path.exists(local_path):
-                    self._apply_video_watermark(local_path)
-                
+                    self._apply_video_watermark(local_path, logo_path)
+
                 return {
                     "success": True,
                     "type": "video",
@@ -1545,8 +1834,8 @@ class MediaGenerationService:
                             )
                     # Apply watermark after processing/saving
                     if silent_video_path is not None:
-                        self._apply_video_watermark(silent_video_path)
-                    
+                        self._apply_video_watermark(silent_video_path, logo_path)
+
                 except Exception as merge_err:
                     print(f"[Media Service] Video post-processing failed: {merge_err}")
 
@@ -1556,11 +1845,11 @@ class MediaGenerationService:
                 "platform": platform,
                 "url": result["url"],
                 "prompt": result["prompt"],
-                "duration": result["duration"],
+                "duration": result.get("duration"),
                 "resolution": "1080x1420",
                 "model": result["model"],
                 "cost": result.get("cost"),
-                "provider": self.media_provider,
+                "provider": result.get("provider") or self.media_provider,
                 # resolved_image can legitimately be None here (no reference image was provided
                 # or auto-keyframe generation failed) -- video generation still proceeds without
                 # one, so this field is omitted rather than crashing on None.replace().
@@ -1617,16 +1906,13 @@ Return JSON with keys:
                 "error": str(e),
             }
 
-    def _apply_video_watermark(self, video_path: str) -> None:
-        """Overlays Logo.png at the end of the video."""
+    def _apply_video_watermark(self, video_path: str, logo_path: str | None) -> None:
+        """Overlays the company's real logo (brand_logo_service.resolve_logo_path)
+        at the end of the video. No logo -> no branding, rather than stamping
+        another company's (this used to always use StradIT's Logo.png)."""
         try:
-            import os
-            
-            # Use absolute path based on this file's location
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            logo_path = os.path.join(base_dir, "Logo.png")
-            if not os.path.exists(logo_path):
-                print(f"[Media Service] Logo.png not found at {logo_path}, skipping video watermark.")
+            if not logo_path or not os.path.exists(logo_path):
+                print("[Media Service] No brand logo for this user, skipping video watermark.")
                 return
 
             try:
@@ -1641,53 +1927,52 @@ Return JSON with keys:
             with VideoFileClip(video_path) as video:
                 duration = video.duration
                 start_time = max(0, duration - 2.0)
-                
+
                 logo_clip = ImageClip(logo_path)
-                
+
                 target_logo_width = int(video.w * 0.3)
                 aspect = logo_clip.h / logo_clip.w
                 target_logo_height = int(target_logo_width * aspect)
-                
+
                 if hasattr(logo_clip, "resized"):
                     logo_clip = logo_clip.resized((target_logo_width, target_logo_height))
                 elif hasattr(logo_clip, "resize"):
                     logo_clip = logo_clip.resize((target_logo_width, target_logo_height))
                 else:
                     from moviepy.video.fx.resize import resize
+
                     logo_clip = resize(logo_clip, (target_logo_width, target_logo_height))
-                
+
                 pos_x = (video.w - target_logo_width) // 2
                 pos_y = (video.h - target_logo_height) // 2
-                
+
                 if hasattr(logo_clip, "with_start"):
                     # Moviepy v2
-                    logo_clip = (logo_clip
-                                 .with_start(start_time)
-                                 .with_duration(duration - start_time)
-                                 .with_position((pos_x, pos_y)))
+                    logo_clip = (
+                        logo_clip.with_start(start_time)
+                        .with_duration(duration - start_time)
+                        .with_position((pos_x, pos_y))
+                    )
                     try:
                         from moviepy.video.fx import CrossFadeIn
+
                         logo_clip = logo_clip.with_effects([CrossFadeIn(0.5)])
                     except ImportError:
                         pass
                 else:
                     # Moviepy v1
-                    logo_clip = (logo_clip
-                                 .set_start(start_time)
-                                 .set_duration(duration - start_time)
-                                 .set_position((pos_x, pos_y))
-                                 .crossfadein(0.5))
-                             
+                    logo_clip = (
+                        logo_clip.set_start(start_time)
+                        .set_duration(duration - start_time)
+                        .set_position((pos_x, pos_y))
+                        .crossfadein(0.5)
+                    )
+
                 final_video = CompositeVideoClip([video, logo_clip])
-                
+
                 temp_path = video_path.replace(".mp4", "_wm.mp4")
-                final_video.write_videofile(
-                    temp_path,
-                    codec="libx264",
-                    audio_codec="aac",
-                    logger=None
-                )
-                
+                final_video.write_videofile(temp_path, codec="libx264", audio_codec="aac", logger=None)
+
             os.replace(temp_path, video_path)
             print(f"[Media Service] Successfully watermarked video: {video_path}")
         except Exception as e:
@@ -1753,9 +2038,9 @@ Return JSON with keys:
             "TEXT OVERLAY: Extract a short, punchy headline (under 8 words) that captures the core message of the request. "
             "Explicitly instruct the image to render that exact headline as bold, clearly legible text integrated into the "
             "composition (large clean sans-serif typography, high contrast against the background, positioned so it doesn't "
-            "cover the main subject's face). Also instruct a small 'STRAD IT' wordmark to appear subtly in one corner of the "
-            "image, in a small clean font - a brand tag, not the main focus. Do not add any other text, captions, or watermarks "
-            "beyond that one headline and the brand tag. "
+            "cover the main subject's face). Do not add any other text, captions, or watermarks beyond that one headline. "
+            "BRANDING: the prompt must explicitly state that no logo, wordmark or company name is drawn anywhere in the "
+            "image (the real logo is added afterwards) and that the bottom-right corner stays free of important content. "
             "SOURCE OF TRUTH ENFORCEMENT: The visual prompt must exactly represent the project and problem context given in the request. Do NOT invent or hallucinate features, projects, or problems. "
             "Output ONLY the final enhanced prompt in a single paragraph, under 600 characters."
         )
@@ -1780,8 +2065,8 @@ Return JSON with keys:
             headline = trimmed.rsplit(" ", 1)[0] if " " in trimmed else trimmed
             return (
                 f"A professional, photorealistic social media image for {platform.capitalize()}: {user_caption}. "
-                f"Render the bold headline text \"{headline}\" in large clean sans-serif typography, high contrast, "
-                f"not covering the main subject's face, plus a small 'STRAD IT' wordmark in one corner. "
+                f'Render the bold headline text "{headline}" in large clean sans-serif typography, high contrast, '
+                f"not covering the main subject's face. {NO_AI_LOGO_RULE} "
                 f"Sleek visual composition, shallow depth of field, studio lighting, highly detailed."
             )
 

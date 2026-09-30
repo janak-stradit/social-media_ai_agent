@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify your email — AVIR AI</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Rubik:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        body {
+            min-height: 100vh; display: flex; align-items: center; justify-content: center;
+            background: #F8FAFC; font-family: 'Inter', system-ui, sans-serif; margin: 0;
+            position: relative; overflow: hidden;
+        }
+        .bg-mesh {
+            position: absolute; top: -20%; left: -10%; width: 120%; height: 120%; z-index: 0;
+            background-image: radial-gradient(at 40% 20%, hsla(255,100%,85%,1) 0px, transparent 50%),
+                               radial-gradient(at 80% 0%, hsla(189,100%,88%,1) 0px, transparent 50%),
+                               radial-gradient(at 0% 50%, hsla(340,100%,93%,1) 0px, transparent 50%);
+            filter: blur(80px); opacity: 0.6; animation: blob-bounce 22s infinite alternate;
+        }
+        @keyframes blob-bounce {
+            0% { transform: translate(0, 0) scale(1); }
+            33% { transform: translate(30px, -40px) scale(1.08); }
+            66% { transform: translate(-20px, 20px) scale(0.94); }
+            100% { transform: translate(0, 0) scale(1); }
+        }
+        @media (prefers-reduced-motion: reduce) { .bg-mesh { animation: none; } }
+
+        .verify-card {
+            position: relative; z-index: 1;
+            max-width: 440px; width: 100%; background: #fff; border-radius: 16px; padding: 48px 40px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.08); text-align: center; margin: 24px;
+        }
+        .onboard-steps { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 28px; }
+        .onboard-step-dot { width: 8px; height: 8px; border-radius: 50%; background: #E5E7EB; transition: all 0.2s ease; }
+        .onboard-step-dot.active { background: #8A2BE2; width: 22px; border-radius: 4px; }
+        .onboard-step-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #9CA3AF; margin-bottom: 8px; }
+        .verify-icon {
+            width: 64px; height: 64px; border-radius: 16px; margin: 0 auto 24px;
+            background: linear-gradient(135deg, #8A2BE2, #4169E1); display: flex; align-items: center; justify-content: center;
+        }
+        .verify-icon i { color: #fff; font-size: 26px; }
+        .verify-copy { color: #6B7280; font-size: 14px; line-height: 1.6; margin-bottom: 24px; }
+        .verify-email { font-weight: 700; color: #111827; }
+        #resendMsg { font-size: 13px; margin-top: 14px; display: none; }
+    </style>
+</head>
+<body>
+    <div class="bg-mesh" aria-hidden="true"></div>
+    <div class="verify-card">
+        <div class="onboard-step-label">Step 1 of 2</div>
+        <div class="onboard-steps" aria-hidden="true">
+            <span class="onboard-step-dot active"></span>
+            <span class="onboard-step-dot"></span>
+        </div>
+        <div class="auth-brand-logo" style="justify-content: center; margin-bottom: 32px;">
+            <span class="auth-brand-mark" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="17" height="17" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                    <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+                </svg>
+            </span>
+            AVIR AI
+        </div>
+
+        <div class="verify-icon" aria-hidden="true"><i class="fas fa-envelope-open-text"></i></div>
+
+        {% if error %}
+            <h1 class="auth-heading" style="font-size: 22px;">Link problem</h1>
+            <p class="verify-copy">{{ error }}</p>
+        {% else %}
+            <h1 class="auth-heading" style="font-size: 22px;">Check your inbox</h1>
+            <p class="verify-copy">
+                We sent a verification link to
+                {% if email %}<span class="verify-email">{{ email }}</span>{% else %}your email address{% endif %}.
+                Click it to activate your account.
+            </p>
+        {% endif %}
+
+        <div class="auth-form-group" style="text-align: left;">
+            <label class="auth-form-label" for="resendEmail">Didn't get it? Resend to:</label>
+            <input id="resendEmail" type="email" class="auth-form-input" value="{{ email or '' }}" placeholder="name@email.com" autocomplete="email">
+        </div>
+        <button id="resendBtn" type="button" class="btn-primary-blue">Resend verification email</button>
+        <div id="resendMsg" role="status"></div>
+
+        <div class="auth-footer-links" style="margin-top: 24px; align-items: center;">
+            <a href="/login" class="auth-link">Back to sign in</a>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script>
+        const RESEND_COOLDOWN_SECONDS = 60;
+        let cooldownTimer = null;
+
+        function startResendCooldown() {
+            const $btn = $('#resendBtn');
+            let remaining = RESEND_COOLDOWN_SECONDS;
+            clearInterval(cooldownTimer);
+            $btn.prop('disabled', true);
+            const tick = () => {
+                $btn.text(`Resend available in ${remaining}s`);
+                remaining--;
+                if (remaining < 0) {
+                    clearInterval(cooldownTimer);
+                    $btn.prop('disabled', false).text('Resend verification email');
+                }
+            };
+            tick();
+            cooldownTimer = setInterval(tick, 1000);
+        }
+
+        $('#resendBtn').on('click', function () {
+            const email = $('#resendEmail').val().trim();
+            const $msg = $('#resendMsg');
+            if (!email) {
+                $msg.css('color', '#FC4438').text('Enter your email first.').show();
+                return;
+            }
+            const $btn = $(this);
+            $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Sending...');
+            $msg.hide();
+
+            $.ajax({
+                url: '/api/auth/resend-verification',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ email: email }),
+                success: function (res) {
+                    if (res.success) {
+                        $msg.css('color', '#54BA4A').text('Email sent - check your inbox.').show();
+                        startResendCooldown();
+                    } else {
+                        // A 200 with success:false only happens for a genuine
+                        // validation error, not the cooldown (that's a 429,
+                        // handled below) - safe to just re-enable immediately.
+                        $btn.prop('disabled', false).text('Resend verification email');
+                        $msg.css('color', '#FC4438').text(res.error || 'Could not resend.').show();
+                    }
+                },
+                error: function (xhr) {
+                    if (xhr.status === 429) {
+                        // Backend enforces its own 60s cooldown independent of
+                        // this tab's timer (e.g. a page refresh reset ours) -
+                        // start the visible countdown either way so the user
+                        // knows exactly how long to wait instead of a vague
+                        // "please wait" with no indication of when.
+                        $msg.css('color', '#FFA941').text((xhr.responseJSON && xhr.responseJSON.error) || 'Please wait before requesting another email.').show();
+                        startResendCooldown();
+                    } else {
+                        $btn.prop('disabled', false).text('Resend verification email');
+                        $msg.css('color', '#FC4438').text((xhr.responseJSON && xhr.responseJSON.error) || 'Could not resend.').show();
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>

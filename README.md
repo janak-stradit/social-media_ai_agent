@@ -143,7 +143,7 @@ layout used elsewhere in the app.
 
 ---
 
-## Today — Sep 14, 2026
+## Sep 14, 2026
 
 ### [Bug/Feature] Suggested Storylines kept resurfacing the same content
 Three compounding causes: (1) near-duplicate republished wire stories inflated a single
@@ -153,3 +153,22 @@ storylines had already been suggested across "regenerate" runs. Added near-dupli
 before clustering, diversified the labeling sample, and added a persistent (never-cleared)
 seen-storyline table that filters out exact repeats. Verified: a second run against the same
 post set correctly produced 0 new / 10 filtered as repeats.
+
+---
+
+## Today — Sep 16, 2026
+
+### [Feature] Add a public landing/marketing page at "/"
+Previously "/" required an existing login and went straight into Studio Chat. Added a new public
+marketing landing page (`templates/landing.html`) at "/" - animated hero section, an "Autonomous
+Journey" 4-step workflow walkthrough, and a closing CTA - with a "Deploy Your AI Agent" button
+that sends visitors to `/login`. Studio Chat itself moved from "/" to "/dashboard", and an
+already-logged-in visitor hitting "/" is now auto-redirected straight to `/dashboard` instead of
+seeing the marketing page again. `login_required_page` now redirects unauthenticated visitors to
+the new landing page instead of straight to the login form.
+
+### [Feature] Redesign the Sign In / Create Account page
+Replaced the old Bootstrap-based centered auth card with a custom split-screen layout matching the
+new landing page's visual language (left pane: "Hi there! Have we met before?" form; right pane:
+brand visual). Simplified the form styling (custom `.auth-form-input`/`.btn-primary-blue` classes)
+and dropped the Bootstrap CSS dependency from this page entirely.

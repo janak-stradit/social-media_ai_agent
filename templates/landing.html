@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enterprise Social Media AI | AVIR AI</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        /* Design tokens - shared with brand_profile.html so the marketing
+           page and the in-app brand configuration read as one product. */
+        :root {
+            --primary: #8A2BE2;
+            --primary-2: #4169E1;
+            --primary-gradient: linear-gradient(135deg, #8A2BE2 0%, #4169E1 100%);
+            --primary-light: #f3f0ff;
+            --panel-gradient: linear-gradient(135deg, #c4b5fd 0%, #818cf8 100%);
+            --text-primary: #172033;
+            --text-secondary: #667085;
+            --text-muted: #9ca3af;
+            --border-color: #E6E8EF;
+            --border-hover: #C5C9DB;
+            --bg-body: #F8F9FC;
+            --bg-card: #ffffff;
+            --bg-input: #F9FAFB;
+
+            --success-bg: #F0FDF4;
+            --success-border: #BBF7D0;
+            --success-icon: #10B981;
+
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+            --header-h: 68px;
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+            --shadow-md: 0 8px 24px rgba(138, 43, 226, 0.08);
+            --shadow-lg: 0 20px 40px rgba(23, 32, 51, 0.10);
+
+            --font-family: 'Inter', sans-serif;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: var(--font-family);
+            color: var(--text-primary);
+            background-color: var(--bg-body);
+            background-image: radial-gradient(rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+            background-size: 20px 20px;
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+        a { text-decoration: none; color: inherit; }
+
+        /* Typography */
+        .text-gradient { background: var(--primary-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+        .eyebrow { display: inline-block; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 0.6rem; }
+        .section-title { font-size: clamp(2rem, 4vw, 2.75rem); font-weight: 700; letter-spacing: -0.02em; line-height: 1.15; color: var(--text-primary); margin-bottom: 0.75rem; }
+        .section-desc { font-size: 1.05rem; color: var(--text-secondary); max-width: 560px; margin: 0 auto; }
+
+        /* Animations */
+        @keyframes float { 0%, 100% { transform: translateY(-50%) rotate(-3deg); } 50% { transform: translateY(calc(-50% - 12px)) rotate(-3deg); } }
+        @keyframes float-soft { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+        @keyframes pulse-glow { 0% { box-shadow: 0 0 0 0 rgba(138, 43, 226, 0.35); } 70% { box-shadow: 0 0 0 16px rgba(138, 43, 226, 0); } 100% { box-shadow: 0 0 0 0 rgba(138, 43, 226, 0); } }
+        @keyframes typing { from { width: 0; } to { width: 100%; } }
+        @keyframes blink-caret { from, to { border-color: transparent; } 50% { border-color: var(--primary); } }
+        @keyframes fadeIn { to { opacity: 1; } }
+        @keyframes scroll-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
+
+        /* Buttons - same shapes as .btn-primary-save / .btn-xs-outline-info */
+        .btn-primary-save { display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: var(--primary-gradient); color: #fff; border: none; border-radius: var(--radius-sm); padding: 0.6rem 1.25rem; font-family: inherit; font-weight: 600; font-size: 0.95rem; cursor: pointer; white-space: nowrap; transition: all 0.2s ease; box-shadow: 0 4px 10px rgba(138, 43, 226, 0.25); }
+        .btn-primary-save:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(138, 43, 226, 0.35); }
+        .btn-primary-save:focus-visible, .btn-outline:focus-visible { outline: 3px solid rgba(138, 43, 226, 0.35); outline-offset: 2px; }
+        .btn-primary-save.btn-lg { padding: 0.85rem 1.75rem; font-size: 1rem; }
+        .btn-outline { display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.6rem 1.1rem; font-weight: 500; font-size: 0.9rem; box-shadow: var(--shadow-sm); transition: all 0.15s ease; }
+        .btn-outline:hover { background: var(--bg-body); border-color: var(--border-hover); }
+
+        /* Header - mirrors the in-app .app-header */
+        .app-header { position: fixed; top: 0; left: 0; right: 0; z-index: 100; height: var(--header-h); display: flex; align-items: center; justify-content: space-between; padding: 0 32px; background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid var(--border-color); box-shadow: var(--shadow-sm); }
+        .header-brand { display: flex; align-items: center; gap: 12px; }
+        .brand-logo { width: 38px; height: 38px; border-radius: 10px; background: var(--primary-gradient); display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 10px rgba(138, 43, 226, 0.25); }
+        .brand-name { display: block; font-size: 15px; font-weight: 700; color: var(--text-primary); line-height: 1.2; }
+        .brand-tagline { display: block; font-size: 10px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .06em; }
+        .header-nav { display: flex; align-items: center; gap: 4px; }
+        .header-nav-item { padding: 7px 14px; border-radius: var(--radius-sm); font-size: 0.9rem; font-weight: 500; color: var(--text-secondary); transition: all 0.15s ease; }
+        .header-nav-item:hover { background: rgba(138, 43, 226, 0.06); color: var(--primary); }
+        .header-actions { display: flex; align-items: center; gap: 10px; }
+
+        /* Generic card - same as .brand-config-card */
+        .brand-config-card { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-lg); padding: 1.75rem; box-shadow: var(--shadow-sm); transition: transform 0.2s ease, box-shadow 0.2s ease; }
+        .brand-config-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); }
+        .brand-config-card h6 { display: flex; align-items: center; gap: 0.75rem; font-size: 1.15rem; font-weight: 700; color: var(--text-primary); margin-bottom: 0.3rem; }
+        .brand-config-card-desc { font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1.5rem; margin-left: calc(36px + 0.75rem); }
+        .card-icon-circle { width: 36px; height: 36px; border-radius: 50%; background: var(--primary-gradient); color: #fff; display: flex; align-items: center; justify-content: center; flex-shrink: 0; font-size: 15px; box-shadow: 0 4px 10px rgba(138, 43, 226, 0.2); }
+
+        /* HERO - the brand_profile hero card, scaled up */
+        .hero { padding: calc(var(--header-h) + 40px) 24px 40px; }
+        /* Full-screen hero: the section fills the viewport exactly and the
+           card stretches to fill it (edge to edge, minus the gutter), with the
+           scroll cue pinned at the bottom. Scoped to .hero so the CTA card
+           further down keeps its own size. */
+        .hero {
+            min-height: 100vh; min-height: 100svh;
+            display: flex; flex-direction: column;
+            padding: calc(var(--header-h) + 20px) 24px 20px;
+        }
+        .hero .brand-hero-card { flex: 1; width: 100%; max-width: none; min-height: 0; padding: 4rem 5vw; }
+        .hero .hero-copy { max-width: min(50%, 640px); }
+        .hero .hero-title { font-size: clamp(2.5rem, 4.6vw, 4.5rem); }
+        .hero .hero-subtitle { font-size: clamp(1.05rem, 1.3vw, 1.2rem); max-width: 520px; }
+        .hero .hero-mock { width: min(420px, 70%); }
+        .hero .hero-scroll-cue { margin-top: 16px; }
+        .brand-hero-card { position: relative; overflow: hidden; max-width: 1280px; min-height: 560px; margin: 0 auto; display: flex; align-items: center; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 24px; box-shadow: var(--shadow-sm); padding: 4rem 3.5rem; }
+        .hero-copy { position: relative; z-index: 1; max-width: 50%; }
+        .hero-title { font-size: clamp(2.5rem, 4.4vw, 3.75rem); font-weight: 800; letter-spacing: -0.03em; line-height: 1.08; color: var(--text-primary); margin-bottom: 1.1rem; }
+        .hero-subtitle { font-size: 1.05rem; color: var(--text-secondary); line-height: 1.6; max-width: 480px; margin-bottom: 1.75rem; }
+
+        /* Quick-start bar - the .bp-website-bar pattern with real inputs */
+        .hero-quickstart { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.75rem; margin-bottom: 1.5rem; box-shadow: var(--shadow-sm); max-width: 560px; transition: box-shadow 0.2s ease, border-color 0.2s ease; }
+        .hero-quickstart:hover { box-shadow: var(--shadow-md); border-color: var(--border-hover); }
+        .qs-field { display: flex; align-items: center; gap: 8px; flex: 1 1 200px; min-height: 44px; padding: 0 0.85rem; background: var(--bg-input); border: 1px solid var(--border-color); border-radius: var(--radius-sm); transition: border-color 0.15s ease, box-shadow 0.15s ease; }
+        .qs-field:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(138, 43, 226, 0.15); }
+        .qs-field i { color: var(--text-muted); font-size: 14px; }
+        .qs-field input, .qs-field select { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font-family: inherit; font-size: 0.9rem; color: var(--text-primary); }
+        .qs-field input::placeholder { color: var(--text-muted); }
+        .hero-quickstart .btn-primary-save { min-height: 44px; }
+
+        .hero-trust-list { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
+        .hero-trust-list li { display: inline-flex; align-items: center; gap: 6px; font-size: 0.8rem; font-weight: 500; color: var(--text-primary); background: var(--success-bg); border: 1px solid var(--success-border); padding: 0.3rem 0.7rem; border-radius: 99px; }
+        .hero-trust-list i { color: var(--success-icon); font-size: 12px; }
+
+        /* Right-hand clipped gradient panel with mockups */
+        .hero-panel { position: absolute; top: 0; right: 0; width: 50%; height: 100%; background: var(--panel-gradient); clip-path: polygon(15% 0, 100% 0, 100% 100%, 0 100%); }
+        .hero-panel-caption { position: absolute; left: 14%; bottom: 10%; font-size: 0.9rem; font-weight: 500; line-height: 1.35; color: var(--text-primary); }
+        .hero-panel-caption strong { position: relative; display: inline-block; color: var(--primary); padding-bottom: 4px; }
+        .hero-panel-caption strong::after { content: ''; position: absolute; left: 0; bottom: 0; width: 100%; height: 2px; background: var(--primary); }
+
+        .hero-mock { position: absolute; right: 10%; top: 46%; width: min(380px, 70%); background: #fff; border-radius: var(--radius-lg); box-shadow: var(--shadow-lg); padding: 1.5rem; transform: translateY(-50%) rotate(-3deg); animation: float 6s ease-in-out infinite; }
+        .hero-mock-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: 1rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); }
+        .hero-mock-title { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 0.95rem; }
+        .hero-mock-title .card-icon-circle { width: 30px; height: 30px; font-size: 12px; }
+        .mock-avatar-group { display: flex; align-items: center; }
+        .mock-avatar { width: 28px; height: 28px; border-radius: 50%; border: 2px solid #fff; margin-left: -8px; background: var(--primary-gradient); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 10px; font-weight: 700; }
+        .mock-stream { padding: 1rem; background: var(--bg-body); border-radius: var(--radius-md); border-left: 3px solid var(--primary); min-height: 110px; }
+        .typewriter-text { overflow: hidden; white-space: nowrap; border-right: 2px solid var(--primary); animation: typing 4s steps(40, end) infinite, blink-caret .75s step-end infinite; display: inline-block; max-width: 100%; font-family: ui-monospace, monospace; font-size: 12.5px; color: var(--primary); font-weight: 600; }
+        .mock-stream-line { margin-top: 10px; color: var(--text-secondary); font-size: 12.5px; opacity: 0; animation: fadeIn 0.5s forwards; }
+        .mock-skeleton { height: 8px; background: #e2e8f0; border-radius: 4px; margin-top: 12px; }
+
+        .hero-floating-card { position: absolute; z-index: 3; display: flex; align-items: center; gap: 12px; background: #fff; border: 1px solid var(--border-color); border-radius: var(--radius-md); padding: 0.75rem 1rem; box-shadow: var(--shadow-lg); animation: float-soft 6s ease-in-out infinite; }
+        .hero-floating-card .fc-icon { width: 38px; height: 38px; border-radius: var(--radius-sm); display: flex; align-items: center; justify-content: center; font-size: 16px; }
+        .fc-title { font-weight: 700; font-size: 0.85rem; line-height: 1.3; }
+        .fc-sub { font-size: 0.75rem; color: var(--text-secondary); }
+        .hero-card-1 { top: 12%; left: 22%; }
+        .hero-card-2 { bottom: 24%; right: 6%; animation-delay: 1.5s; }
+
+        .hero-scroll-cue { display: flex; flex-direction: column; align-items: center; gap: 6px; margin: 28px auto 0; width: max-content; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-secondary); opacity: 0.8; transition: opacity 0.2s ease, color 0.2s ease; }
+        .hero-scroll-cue:hover { opacity: 1; color: var(--primary); }
+        .hero-scroll-cue i { animation: scroll-bounce 2s ease-in-out infinite; }
+
+        /* Platform strip */
+        .platform-strip { padding: 40px 24px 70px; text-align: center; }
+        .platform-strip-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 14px; max-width: 720px; margin: 0 auto; }
+        .platform-box { width: 64px; height: 56px; display: flex; align-items: center; justify-content: center; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md); color: var(--text-muted); font-size: 20px; box-shadow: var(--shadow-sm); transition: all 0.2s ease; }
+        .platform-box:hover { color: var(--primary); border-color: #d8b4fe; background: var(--primary-light); transform: translateY(-2px); box-shadow: var(--shadow-md); }
+
+        /* Workflow */
+        .workflow-section { padding: 100px 24px 60px; position: relative; overflow: hidden; }
+        .workflow-header { text-align: center; margin-bottom: 90px; }
+        .workflow-container { max-width: 1200px; margin: 0 auto; position: relative; }
+        .workflow-line { position: absolute; left: 50%; top: 0; bottom: 0; width: 3px; background: var(--border-color); transform: translateX(-50%); border-radius: 3px; }
+        .workflow-line-fill { position: absolute; top: 0; left: 0; width: 100%; height: 0%; background: linear-gradient(to bottom, #8A2BE2, #4169E1); border-radius: 3px; box-shadow: 0 0 12px rgba(138, 43, 226, 0.3); transition: height 0.3s ease-out; }
+
+        .step-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 120px; position: relative; z-index: 1; }
+        .step-row:nth-child(even) { flex-direction: row-reverse; }
+        .step-row:last-child { margin-bottom: 40px; }
+
+        .step-node { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(0); width: 56px; height: 56px; border-radius: 50%; background: var(--bg-card); border: 1px solid var(--border-color); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 20px; color: var(--text-muted); opacity: 0; transition: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1); z-index: 2; }
+        .step-row.is-visible .step-node { transform: translate(-50%, -50%) scale(1); opacity: 1; background: var(--primary-gradient); border-color: transparent; color: #fff; box-shadow: 0 0 0 6px var(--primary-light), 0 8px 20px rgba(138, 43, 226, 0.3); }
+
+        .step-text { width: 40%; opacity: 0; transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.1s; }
+        .step-badge { display: inline-block; padding: 0.3rem 0.75rem; border-radius: 99px; font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 0.9rem; background: var(--primary-light); color: var(--primary); border: 1px solid #e9d5ff; }
+        .step-text h3 { font-size: 2rem; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; margin-bottom: 0.75rem; }
+        .step-text p { font-size: 1.05rem; color: var(--text-secondary); line-height: 1.7; }
+
+        .step-visual-wrap { width: 45%; opacity: 0; transition: all 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.2s; }
+        .step-row:nth-child(odd) .step-text, .step-row:nth-child(even) .step-visual-wrap { transform: translateX(-40px); }
+        .step-row:nth-child(odd) .step-visual-wrap, .step-row:nth-child(even) .step-text { transform: translateX(40px); }
+        .step-row.is-visible .step-text, .step-row.is-visible .step-visual-wrap { opacity: 1; transform: translateX(0); }
+
+        .mock-line { height: 10px; background: #F1F3F8; border-radius: 5px; overflow: hidden; position: relative; margin-bottom: 12px; }
+        .mock-fill { position: absolute; left: 0; top: 0; height: 100%; width: 0; background: var(--primary-gradient); transition: width 2s cubic-bezier(0.16, 1, 0.3, 1); }
+        .step-row.is-visible .mock-fill { width: var(--w, 100%); }
+
+        .signal-quote { padding: 1rem; background: var(--primary-light); border-radius: var(--radius-sm); border-left: 3px solid var(--primary); font-size: 0.9rem; color: var(--text-primary); }
+        .ui-tag { display: inline-flex; align-items: center; gap: 0.4rem; background: var(--bg-body); border: 1px solid var(--border-color); padding: 0.3rem 0.6rem; border-radius: 4px; font-size: 0.8rem; font-weight: 500; color: var(--text-primary); }
+        .attach-box { height: 80px; display: flex; align-items: center; justify-content: center; gap: 8px; border: 1px dashed var(--border-hover); border-radius: var(--radius-md); background: var(--bg-body); color: var(--text-secondary); font-size: 0.85rem; }
+        .status-dot { width: 8px; height: 8px; background: var(--success-icon); border-radius: 50%; display: inline-block; }
+
+        /* CTA - reuses the hero card layout */
+        .cta-section { padding: 60px 24px 100px; }
+        .cta-card { min-height: 360px; }
+        .cta-card .hero-copy { max-width: 55%; }
+        .cta-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+        .cta-panel-icons { position: absolute; inset: 0; }
+        .cta-floating-icon { position: absolute; width: 56px; height: 56px; background: #fff; border-radius: var(--radius-md); box-shadow: var(--shadow-lg); display: flex; align-items: center; justify-content: center; font-size: 22px; animation: float-soft 6s ease-in-out infinite; }
+
+        footer { border-top: 1px solid var(--border-color); background: var(--bg-card); padding: 28px 24px; text-align: center; color: var(--text-secondary); font-size: 0.85rem; }
+
+        @media (max-width: 992px) {
+            .header-nav { display: none; }
+            .brand-hero-card { flex-direction: column; align-items: stretch; padding: 2.5rem 1.75rem 0; min-height: 0; }
+            .hero-copy, .cta-card .hero-copy { max-width: 100%; }
+            .hero-panel { position: relative; width: auto; height: 380px; margin: 2.5rem -1.75rem 0; clip-path: polygon(0 12%, 100% 0, 100% 100%, 0 100%); }
+            .cta-card .hero-panel { height: 200px; }
+            .hero-card-1 { left: 6%; }
+            /* Full-screen hero on tablet: copy on top, panel grows to fill the rest. */
+            .hero .brand-hero-card { padding: 2.5rem 1.75rem 0; }
+            .hero .hero-copy { max-width: 100%; }
+            .hero .hero-panel { flex: 1; height: auto; min-height: 380px; }
+
+            .step-row, .step-row:nth-child(even) { flex-direction: column; margin-bottom: 80px; }
+            .workflow-line { left: 28px; }
+            .step-node { left: 28px; top: 0; transform: translate(-50%, 0) scale(0); }
+            .step-row.is-visible .step-node { transform: translate(-50%, 0) scale(1); }
+            .step-text, .step-visual-wrap { width: 100%; padding-left: 72px; }
+            .step-visual-wrap { margin-top: 28px; }
+        }
+
+        @media (max-width: 640px) {
+            .app-header { padding: 0 16px; }
+            .brand-tagline, .header-actions .btn-outline { display: none; }
+            .hero { padding: calc(var(--header-h) + 16px) 16px 24px; }
+            .brand-hero-card { padding: 2rem 1.25rem 0; border-radius: var(--radius-lg); }
+            .hero-panel { margin: 2rem -1.25rem 0; height: 340px; }
+            .hero-quickstart { flex-direction: column; align-items: stretch; }
+            .hero-mock, .hero .hero-mock { right: 50%; transform: translate(50%, -50%) rotate(-2deg); width: 82%; animation: none; }
+            .hero .brand-hero-card { padding: 2rem 1.25rem 0; }
+            .hero .hero-panel { min-height: 340px; }
+            .hero-panel-caption, .hero-card-2 { display: none; }
+            .hero-card-1 { top: auto; bottom: 6%; left: 8%; }
+            .workflow-section { padding: 70px 16px 40px; }
+            .step-text, .step-visual-wrap { padding-left: 60px; }
+            .step-text h3 { font-size: 1.6rem; }
+            .brand-config-card { padding: 1.25rem; }
+            .brand-config-card-desc { margin-left: 0; }
+            .cta-section { padding: 40px 16px 70px; }
+        }
+
+        /* HERO motion - entrance, shimmer, ambient glow, button shine, parallax.
+           Entrance + parallax use the standalone `translate` / `scale`
+           properties so they stack with the existing `transform` float loops
+           on .hero-mock / .hero-floating-card instead of overriding them. */
+        @keyframes hero-rise { from { opacity: 0; translate: 0 24px; } to { opacity: 1; translate: 0 0; } }
+        @keyframes hero-slide-in { from { opacity: 0; translate: 60px 0; } to { opacity: 1; translate: 0 0; } }
+        @keyframes hero-pop { from { opacity: 0; scale: 0.85; } to { opacity: 1; scale: 1; } }
+        @keyframes hero-shimmer { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+        @keyframes hero-drift-a { 0%, 100% { translate: 0 0; scale: 1; } 50% { translate: 60px 40px; scale: 1.15; } }
+        @keyframes hero-drift-b { 0%, 100% { translate: 0 0; scale: 1; } 50% { translate: -50px -30px; scale: 1.1; } }
+        @keyframes hero-shine { 0%, 70% { left: -60%; } 100% { left: 130%; } }
+
+        .hero .brand-hero-card { isolation: isolate; }
+        .hero .brand-hero-card::before,
+        .hero .brand-hero-card::after {
+            content: ''; position: absolute; z-index: -1; border-radius: 50%;
+            filter: blur(60px); pointer-events: none;
+        }
+        .hero .brand-hero-card::before {
+            width: 420px; height: 420px; top: -140px; left: -120px;
+            background: radial-gradient(circle, rgba(138, 43, 226, 0.16), transparent 70%);
+            animation: hero-drift-a 16s ease-in-out infinite;
+        }
+        .hero .brand-hero-card::after {
+            width: 360px; height: 360px; bottom: -140px; left: 30%;
+            background: radial-gradient(circle, rgba(65, 105, 225, 0.14), transparent 70%);
+            animation: hero-drift-b 18s ease-in-out infinite;
+        }
+
+        .hero-copy > .eyebrow,
+        .hero-copy > .hero-title,
+        .hero-copy > .hero-subtitle,
+        .hero-copy > .hero-quickstart,
+        .hero-trust-list li,
+        .hero .hero-scroll-cue {
+            animation: hero-rise 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+            animation-delay: var(--d, 0s);
+        }
+        .hero-copy > .eyebrow { --d: 0.05s; display: inline-block; }
+        .hero-copy > .hero-title { --d: 0.15s; }
+        .hero-copy > .hero-subtitle { --d: 0.3s; }
+        .hero-copy > .hero-quickstart { --d: 0.45s; }
+        .hero-trust-list li:nth-child(1) { --d: 0.6s; }
+        .hero-trust-list li:nth-child(2) { --d: 0.7s; }
+        .hero-trust-list li:nth-child(3) { --d: 0.8s; }
+        .hero .hero-scroll-cue { --d: 1.2s; }
+
+        .hero .hero-panel { animation: hero-slide-in 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both; }
+        .hero .hero-mock { animation: float 6s ease-in-out infinite, hero-pop 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 0.5s both; }
+        .hero .hero-card-1 { animation: float-soft 6s ease-in-out infinite, hero-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.8s both; }
+        .hero .hero-card-2 { animation: float-soft 6s ease-in-out 1.5s infinite, hero-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 1s both; }
+        .hero .hero-panel-caption { animation: hero-rise 0.7s cubic-bezier(0.16, 1, 0.3, 1) 1.1s both; }
+
+        .hero .hero-title .text-gradient {
+            background: linear-gradient(90deg, #8A2BE2, #4169E1, #C026D3, #8A2BE2);
+            background-size: 300% 100%;
+            -webkit-background-clip: text; background-clip: text;
+            animation: hero-shimmer 8s ease-in-out infinite;
+        }
+
+        .hero-quickstart .btn-primary-save { position: relative; overflow: hidden; }
+        .hero-quickstart .btn-primary-save::after {
+            content: ''; position: absolute; top: 0; left: -60%; width: 40%; height: 100%;
+            background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+            transform: skewX(-20deg); pointer-events: none;
+            animation: hero-shine 4.5s ease-in-out 1.6s infinite;
+        }
+
+        /* Parallax offsets come from --px / --py (-0.5..0.5) set by JS on .hero-panel. */
+        .hero .hero-mock, .hero .hero-floating-card { transition: translate 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        .hero .hero-mock { translate: calc(var(--px, 0) * -16px) calc(var(--py, 0) * -16px); }
+        .hero .hero-card-1 { translate: calc(var(--px, 0) * 28px) calc(var(--py, 0) * 28px); }
+        .hero .hero-card-2 { translate: calc(var(--px, 0) * 40px) calc(var(--py, 0) * 40px); }
+
+        @media (max-width: 640px) {
+            .hero .hero-mock { animation: hero-pop 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 0.5s both; }
+            .hero .hero-panel { animation-name: hero-rise; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .hero-mock, .hero-floating-card, .cta-floating-icon, .hero-scroll-cue i, .typewriter-text, .mock-pulse,
+            .hero *, .hero .brand-hero-card::before, .hero .brand-hero-card::after, .hero-quickstart .btn-primary-save::after {
+                animation: none !important;
+            }
+            .hero .hero-mock, .hero .hero-floating-card { translate: none !important; }
+            .hero .mock-stream-line { opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Header -->
+    <header class="app-header">
+        <a href="/" class="header-brand">
+            <div class="brand-logo">
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                    <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+                </svg>
+            </div>
+            <div>
+                <span class="brand-name">AVIR AI</span>
+                <span class="brand-tagline">Autonomous Social Studio</span>
+            </div>
+        </a>
+        <nav class="header-nav">
+            <a href="#workflow" class="header-nav-item">How it works</a>
+            <a href="#platforms" class="header-nav-item">Platforms</a>
+        </nav>
+        <div class="header-actions">
+            <a href="/login" class="btn-outline">Sign In</a>
+            <a href="/signup" class="btn-primary-save">Get Started</a>
+        </div>
+    </header>
+
+    <!-- HERO -->
+    <section class="hero">
+        <div class="brand-hero-card">
+            <div class="hero-copy">
+                <span class="eyebrow">AI Social Media Studio</span>
+                <h1 class="hero-title">
+                    Put your social strategy <span class="text-gradient">on autopilot</span>
+                </h1>
+                <p class="hero-subtitle">
+                    Deploy intelligent agents that analyze your business, predict market trends, and execute full-funnel content campaigns entirely on their own.
+                </p>
+
+                <form class="hero-quickstart" onsubmit="event.preventDefault(); window.location.href='/signup';">
+                    <label class="qs-field">
+                        <i class="fas fa-globe" aria-hidden="true"></i>
+                        <input type="text" name="website" placeholder="https://yourwebsite.com" autocomplete="off" aria-label="Website URL">
+                    </label>
+                    <label class="qs-field" style="flex-basis: 150px;">
+                        <i class="fas fa-building" aria-hidden="true"></i>
+                        <select name="account_type" aria-label="Business type">
+                            <option value="individual">Individual</option>
+                            <option value="small">Small Business</option>
+                            <option value="medium">Medium Business</option>
+                            <option value="enterprise">Enterprise</option>
+                        </select>
+                    </label>
+                    <button type="submit" class="btn-primary-save">
+                        Analyze my brand <i class="fas fa-arrow-right" aria-hidden="true"></i>
+                    </button>
+                </form>
+
+                <ul class="hero-trust-list">
+                    <li><i class="fas fa-circle-check" aria-hidden="true"></i>Multi-Agent Content Pipeline</li>
+                    <li><i class="fas fa-circle-check" aria-hidden="true"></i>Brand-Aware Every Time</li>
+                    <li><i class="fas fa-circle-check" aria-hidden="true"></i>One-Click Scheduling</li>
+                </ul>
+            </div>
+
+            <div class="hero-panel" aria-hidden="true">
+                <div class="hero-mock">
+                    <div class="hero-mock-head">
+                        <div class="hero-mock-title">
+                            <div class="card-icon-circle"><i class="fas fa-terminal"></i></div>
+                            Live Agent Stream
+                        </div>
+                        <div class="mock-avatar-group">
+                            <div class="mock-avatar" style="z-index: 3;">AI</div>
+                            <div class="mock-avatar" style="z-index: 2; background: #4169E1;">UI</div>
+                            <div class="mock-avatar" style="z-index: 1; background: #10B981;">PR</div>
+                        </div>
+                    </div>
+                    <div class="mock-stream">
+                        <div class="typewriter-text">&gt; Analyzing competitor trends...</div>
+                        <div class="mock-stream-line" style="animation-delay: 2s;">✓ Identified gap in "AI Tutorials"</div>
+                        <div class="mock-stream-line" style="animation-delay: 4s;">&gt; Generating 3-part campaign...</div>
+                    </div>
+                    <div class="mock-skeleton" style="width: 100%;"></div>
+                    <div class="mock-skeleton" style="width: 80%;"></div>
+                </div>
+
+                <div class="hero-floating-card hero-card-1">
+                    <div class="fc-icon" style="background: var(--success-bg); color: var(--success-icon);"><i class="fas fa-chart-line"></i></div>
+                    <div>
+                        <div class="fc-title">Engagement</div>
+                        <div class="fc-sub" style="color: var(--success-icon); font-weight: 600;">+342% This Week</div>
+                    </div>
+                </div>
+
+                <div class="hero-floating-card hero-card-2">
+                    <div class="fc-icon" style="background: var(--primary-light); color: var(--primary);"><i class="fab fa-linkedin-in"></i></div>
+                    <div>
+                        <div class="fc-title">Post Scheduled</div>
+                        <div class="fc-sub">For Tomorrow, 9AM</div>
+                    </div>
+                </div>
+
+                <div class="hero-panel-caption">
+                    From your website<br>
+                    <strong>to on-brand content</strong>
+                </div>
+            </div>
+        </div>
+
+        <a href="#workflow" class="hero-scroll-cue" aria-label="Scroll to see how it works">
+            See how it works
+            <i class="fas fa-chevron-down" aria-hidden="true"></i>
+        </a>
+    </section>
+
+    <!-- PLATFORM STRIP -->
+    <section class="platform-strip" id="platforms">
+        <span class="eyebrow">Publish everywhere your audience is</span>
+        <div class="platform-strip-row" style="margin-top: 1rem;">
+            <div class="platform-box" title="LinkedIn"><i class="fab fa-linkedin-in"></i></div>
+            <div class="platform-box" title="Instagram"><i class="fab fa-instagram"></i></div>
+            <div class="platform-box" title="Facebook"><i class="fab fa-facebook-f"></i></div>
+            <div class="platform-box" title="X"><i class="fab fa-x-twitter"></i></div>
+            <div class="platform-box" title="YouTube"><i class="fab fa-youtube"></i></div>
+            <div class="platform-box" title="TikTok"><i class="fab fa-tiktok"></i></div>
+        </div>
+    </section>
+
+    <!-- WORKFLOW -->
+    <section class="workflow-section" id="workflow">
+        <div class="workflow-header">
+            <span class="eyebrow">How it works</span>
+            <h2 class="section-title">The Autonomous Journey</h2>
+            <p class="section-desc">Watch how our agents transform raw brand data into a viral social media presence in four intelligent steps.</p>
+        </div>
+
+        <div class="workflow-container" id="workflowContainer">
+            <div class="workflow-line"><div class="workflow-line-fill" id="progressFill"></div></div>
+
+            <!-- Step 1 -->
+            <div class="step-row">
+                <div class="step-node">1</div>
+                <div class="step-text">
+                    <span class="step-badge">Step 1</span>
+                    <h3>Deep Context Ingestion</h3>
+                    <p>The journey begins with our RAG Memory Engine. It securely digests your websites, PDFs, and brand guidelines to create a foundational understanding of your unique voice and value proposition.</p>
+                </div>
+                <div class="step-visual-wrap">
+                    <div class="brand-config-card">
+                        <h6><div class="card-icon-circle"><i class="fas fa-brain"></i></div> Memory Vectorization</h6>
+                        <div class="brand-config-card-desc">Voice, themes, colors and products extracted from your site.</div>
+                        <div class="mock-line"><div class="mock-fill" style="transition-delay: 0.1s;"></div></div>
+                        <div class="mock-line"><div class="mock-fill" style="--w: 85%; transition-delay: 0.3s;"></div></div>
+                        <div class="mock-line" style="margin-bottom: 0;"><div class="mock-fill" style="--w: 95%; transition-delay: 0.5s;"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2 -->
+            <div class="step-row">
+                <div class="step-node">2</div>
+                <div class="step-text">
+                    <span class="step-badge">Step 2</span>
+                    <h3>Market Trend Analysis</h3>
+                    <p>While you sleep, our agents scrape the web for emerging trends, competitor performance, and audience sentiment to pinpoint exact content gaps ready to be filled.</p>
+                </div>
+                <div class="step-visual-wrap">
+                    <div class="brand-config-card">
+                        <h6><div class="card-icon-circle"><i class="fas fa-satellite-dish"></i></div> Signal Detected</h6>
+                        <div class="brand-config-card-desc">High intent keyword surge</div>
+                        <div class="signal-quote">"Competitors are ignoring video tutorials for this feature."</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3 -->
+            <div class="step-row">
+                <div class="step-node">3</div>
+                <div class="step-text">
+                    <span class="step-badge">Step 3</span>
+                    <h3>Multi-Modal Generation</h3>
+                    <p>Text, images, and video scripts are instantly generated. The platform tailors the exact same core message into platform-native formats for LinkedIn, Twitter, and Instagram.</p>
+                </div>
+                <div class="step-visual-wrap">
+                    <div class="brand-config-card">
+                        <h6><div class="card-icon-circle"><i class="fas fa-wand-magic-sparkles"></i></div> Thread Generated</h6>
+                        <div class="brand-config-card-desc" style="display: flex; gap: 6px; flex-wrap: wrap;">
+                            <span class="ui-tag"><i class="fab fa-x-twitter"></i> X</span>
+                            <span class="ui-tag"><i class="fab fa-linkedin-in"></i> LinkedIn</span>
+                            <span class="ui-tag"><i class="fab fa-instagram"></i> Instagram</span>
+                        </div>
+                        <p style="font-size: 0.95rem; margin-bottom: 1rem; line-height: 1.5;">1/5 The old way of doing content is dead. Here's how autonomous agents are changing the game 👇</p>
+                        <div class="attach-box"><i class="fas fa-image"></i> Attached Graphic</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 4 -->
+            <div class="step-row">
+                <div class="step-node">4</div>
+                <div class="step-text">
+                    <span class="step-badge">Step 4</span>
+                    <h3>Autonomous Publishing</h3>
+                    <p>No more manual posting. Once approved, the AI calculates the optimal engagement window for your specific audience and automatically dispatches the content.</p>
+                </div>
+                <div class="step-visual-wrap">
+                    <div class="brand-config-card" style="text-align: center;">
+                        <div class="card-icon-circle mock-pulse" style="width: 72px; height: 72px; font-size: 28px; margin: 0 auto 1.25rem; animation: pulse-glow 2.5s infinite;">
+                            <i class="fas fa-paper-plane"></i>
+                        </div>
+                        <h4 style="font-size: 1.25rem; font-weight: 700; margin-bottom: 0.4rem;">Campaign Live</h4>
+                        <p style="color: var(--text-secondary); font-size: 0.9rem; display: inline-flex; align-items: center; gap: 8px;">
+                            <span class="status-dot"></span> Successfully dispatched across 3 platforms.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="cta-section">
+        <div class="brand-hero-card cta-card">
+            <div class="hero-copy">
+                <span class="eyebrow">Get started</span>
+                <h2 class="section-title">Ready to unleash <span class="text-gradient">your AI team?</span></h2>
+                <p class="hero-subtitle">Join forward-thinking enterprises scaling their organic reach 10x faster with autonomous AI agents.</p>
+                <div class="cta-actions">
+                    <a href="/signup" class="btn-primary-save btn-lg">Get Started <i class="fas fa-arrow-right" aria-hidden="true"></i></a>
+                    <a href="/login" class="btn-outline" style="padding: 0.85rem 1.5rem;">Sign In</a>
+                </div>
+            </div>
+            <div class="hero-panel" aria-hidden="true">
+                <div class="cta-panel-icons">
+                    <div class="cta-floating-icon" style="top: 18%; left: 32%;"><i class="fab fa-linkedin-in" style="color: #0077b5;"></i></div>
+                    <div class="cta-floating-icon" style="top: 55%; left: 22%; animation-delay: 1s;"><i class="fab fa-x-twitter" style="color: #172033;"></i></div>
+                    <div class="cta-floating-icon" style="top: 28%; right: 16%; animation-delay: 2.5s;"><i class="fab fa-instagram" style="color: #E1306C;"></i></div>
+                    <div class="cta-floating-icon" style="top: 62%; right: 26%; animation-delay: 0.5s;"><i class="fas fa-chart-line" style="color: #10B981;"></i></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        &copy; 2026 AVIR AI. All rights reserved.
+    </footer>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            // Hero parallax: mouse position -> --px/--py on the panel, which
+            // the mock and floating cards read as `translate` offsets.
+            const hero = document.querySelector('.hero');
+            const heroPanel = hero && hero.querySelector('.hero-panel');
+            const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            const finePointer = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+            if (heroPanel && finePointer && !reduceMotion) {
+                let frame = null;
+                hero.addEventListener('pointermove', (e) => {
+                    if (frame) return;
+                    frame = requestAnimationFrame(() => {
+                        frame = null;
+                        const rect = hero.getBoundingClientRect();
+                        heroPanel.style.setProperty('--px', ((e.clientX - rect.left) / rect.width - 0.5).toFixed(3));
+                        heroPanel.style.setProperty('--py', ((e.clientY - rect.top) / rect.height - 0.5).toFixed(3));
+                    });
+                });
+                hero.addEventListener('pointerleave', () => {
+                    heroPanel.style.setProperty('--px', 0);
+                    heroPanel.style.setProperty('--py', 0);
+                });
+            }
+
+            // Intersection Observer for Step Reveal
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('is-visible');
+                    }
+                });
+            }, { threshold: 0.2, rootMargin: "0px 0px -50px 0px" });
+
+            const steps = document.querySelectorAll('.step-row');
+            steps.forEach(step => observer.observe(step));
+
+            // Scroll listener for the center timeline progress
+            const lineFill = document.getElementById('progressFill');
+            const container = document.getElementById('workflowContainer');
+
+            window.addEventListener('scroll', () => {
+                if(!container) return;
+                const rect = container.getBoundingClientRect();
+                const windowHeight = window.innerHeight;
+
+                // Calculate how far we've scrolled through the container
+                if (rect.top < windowHeight / 2) {
+                    let progress = ((windowHeight / 2 - rect.top) / (rect.height - 200)) * 100;
+                    progress = Math.max(0, Math.min(progress, 100));
+                    lineFill.style.height = `${progress}%`;
+                } else {
+                    lineFill.style.height = '0%';
+                }
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,1044 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Brand Configuration — AVIR AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://unpkg.com/feather-icons"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        :root {
+            /* Palette - Vibrant */
+            --primary: #8A2BE2;
+            --primary-gradient: linear-gradient(135deg, #8A2BE2 0%, #4169E1 100%);
+            --primary-light: #f3f0ff;
+            --text-primary: #172033;
+            --text-secondary: #667085;
+            --border-color: #E6E8EF;
+            --border-hover: #C5C9DB;
+            --bg-body: #F8F9FC;
+            --bg-card: #ffffff;
+            --bg-input: #F9FAFB;
+
+            /* Status */
+            --success-bg: #F0FDF4;
+            --success-border: #BBF7D0;
+            --success-icon: #10B981;
+            --danger-bg: #FEF2F2;
+            --danger-border: #FECACA;
+            --danger-icon: #EF4444;
+
+            /* Sizing & Shadow */
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 16px;
+            --header-h: 68px;
+            --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.04);
+            --shadow-md: 0 8px 24px rgba(138, 43, 226, 0.08);
+
+            /* Typography */
+            --font-family: 'Inter', sans-serif;
+            --text-xs: 0.75rem;
+            --text-sm: 0.85rem;
+            --text-base: 0.95rem;
+            --text-lg: 1.15rem;
+            --text-xl: 1.75rem;
+        }
+
+        body {
+            font-family: var(--font-family);
+            color: var(--text-primary);
+            overflow: hidden;
+            background-color: var(--bg-body);
+            background-image: radial-gradient(rgba(0, 0, 0, 0.05) 1px, transparent 1px);
+            background-size: 20px 20px;
+            line-height: 1.6;
+        }
+
+        .bc-main {
+            margin-top: var(--header-h);
+            height: calc(100vh - var(--header-h));
+            display: flex;
+        }
+
+        .bc-sidebar {
+            width: 280px;
+            flex-shrink: 0;
+            background: var(--bg-body);
+            border-right: 1px solid var(--border-color);
+            padding: 2rem 1.25rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .bc-sidebar-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0 0.75rem;
+        }
+
+        .bc-sidebar-header i.feather {
+            width: 32px; height: 32px;
+            padding: 6px;
+            color: #fff;
+            background: var(--primary-gradient);
+            display: flex; align-items: center; justify-content: center;
+            border-radius: var(--radius-sm);
+        }
+
+        .bc-nav {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .bc-nav-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            background: transparent;
+            border: 1px solid transparent;
+            border-left: 3px solid transparent;
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            padding: 0.6rem 0.85rem;
+            font-weight: 500;
+            font-size: var(--text-base);
+            color: var(--text-secondary);
+            text-align: left;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            width: 100%;
+            text-decoration: none;
+        }
+
+        .bc-nav-item svg.feather {
+            width: 18px;
+            height: 18px;
+            text-align: center;
+            color: #9ca3af;
+            transition: color 0.15s ease;
+        }
+
+        .bc-nav-item:hover {
+            background: rgba(138, 43, 226, 0.04);
+            color: var(--text-primary);
+        }
+
+        .bc-nav-item.active {
+            background: var(--primary-light);
+            border-left: 3px solid var(--primary);
+            color: var(--primary);
+            font-weight: 600;
+        }
+
+        .bc-nav-item.active svg.feather {
+            color: var(--primary);
+        }
+
+        .bc-content {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 2.5rem 1.5rem 6rem; /* 1.5rem padding gives ~1cm gap */
+            background: var(--bg-body);
+            display: flex;
+            justify-content: center;
+            scroll-behavior: smooth;
+        }
+
+        .bc-content-inner {
+            width: 100%;
+            max-width: 100%; /* Spans full available width minus padding */
+            position: relative;
+        }
+
+        .brand-config-card {
+            background: var(--bg-card);
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border-color);
+            padding: 1.75rem;
+            scroll-margin-top: 1.5rem;
+            box-shadow: var(--shadow-sm);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            height: 100%; /* Ensure cards stretch to fill row height */
+            display: flex;
+            flex-direction: column;
+        }
+
+        .brand-config-card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .card-icon-circle {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: var(--primary-gradient);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            box-shadow: 0 4px 10px rgba(138, 43, 226, 0.2);
+        }
+        .card-icon-circle svg.feather {
+            width: 18px;
+            height: 18px;
+        }
+
+        .brand-config-card h6 {
+            font-weight: 700;
+            font-size: var(--text-lg);
+            margin-bottom: 0.3rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            color: var(--text-primary);
+        }
+
+        .brand-config-card-desc {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-bottom: 1.5rem;
+            margin-left: calc(36px + 0.75rem);
+        }
+
+        .guideline-field-label {
+            font-size: var(--text-sm);
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+        }
+
+        .guideline-field-hint {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 0.4rem;
+        }
+
+        .bp-form-row {
+            margin-bottom: 1.5rem;
+        }
+
+        .brand-config-card .bp-form-row:last-child {
+            margin-bottom: 0;
+        }
+
+        /* Modern Source Card */
+        .bp-website-bar {
+            display: flex;
+            align-items: center;
+            gap: 1.25rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 1.25rem 1.5rem;
+            margin-bottom: 2.5rem;
+            flex-wrap: wrap;
+            box-shadow: var(--shadow-sm);
+            transition: box-shadow 0.2s ease, border-color 0.2s ease;
+        }
+
+        .bp-website-bar:hover {
+            box-shadow: var(--shadow-md);
+            border-color: var(--border-hover);
+        }
+
+        .bp-website-url {
+            font-weight: 600;
+            font-size: 1rem;
+            color: var(--text-primary);
+            word-break: break-all;
+        }
+
+        .bp-analyzed-at {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background-color: #10B981;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .bp-logo-preview {
+            width: 44px;
+            height: 44px;
+            border-radius: var(--radius-sm);
+            object-fit: contain;
+            background: var(--bg-body);
+            border: 1px solid var(--border-color);
+            flex-shrink: 0;
+            padding: 2px;
+        }
+
+        /* Modern Swatches & Previews */
+        .bp-colors-preview {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .bp-color-swatch {
+            display: inline-flex;
+            flex-direction: column;
+            gap: 0.4rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 8px;
+            font-size: var(--text-sm);
+            font-weight: 500;
+            color: var(--text-primary);
+            background: var(--bg-card);
+            box-shadow: var(--shadow-sm);
+            cursor: pointer;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+            position: relative;
+        }
+        .bp-color-swatch:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .bp-color-dot {
+            width: 48px;
+            height: 48px;
+            border-radius: 4px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            flex-shrink: 0;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.06);
+        }
+
+        .bp-color-hex {
+            text-align: center;
+            font-family: monospace;
+            font-size: 11px;
+            letter-spacing: 0.5px;
+        }
+
+        .bp-fonts-preview {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            margin-top: 1rem;
+        }
+        .bp-font-card {
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 0.75rem 1rem;
+            background: var(--bg-body);
+            min-width: 140px;
+            box-shadow: var(--shadow-sm);
+        }
+        .bp-font-name {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.25rem;
+            font-weight: 600;
+        }
+        .bp-font-sample {
+            font-size: 1.25rem;
+            color: var(--text-primary);
+            white-space: nowrap;
+        }
+
+        /* UI Tag Input */
+        .ui-tag-input {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            padding: 0.6rem 0.85rem;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            min-height: 48px;
+            background: var(--bg-card);
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+            cursor: text;
+        }
+        .ui-tag-input.focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(138, 43, 226, 0.15);
+        }
+        .ui-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: var(--bg-body);
+            border: 1px solid var(--border-color);
+            padding: 0.3rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            color: var(--text-primary);
+            font-weight: 500;
+            transition: all 0.15s ease;
+        }
+        .ui-tag:hover {
+            border-color: var(--border-hover);
+            background: #f1f3f8;
+        }
+        .ui-tag-remove svg.feather {
+            width: 14px;
+            height: 14px;
+        }
+        .ui-tag-remove:hover {
+            color: var(--text-primary);
+        }
+        .ui-tag-input-field {
+            border: none;
+            outline: none;
+            flex-grow: 1;
+            min-width: 120px;
+            background: transparent;
+            font-size: 0.9rem;
+            color: var(--text-primary);
+            padding: 0.2rem 0;
+        }
+
+        /* Empty state: a normal-height centred card, not a full-height
+           stretched one (.brand-config-card sets height:100% for the grid
+           cards - reset here). */
+        .bp-signal-value { display: flex; flex-wrap: wrap; gap: 0.4rem; font-size: 0.85rem; color: var(--text-primary); }
+        .bp-signal-value .badge { font-weight: 600; }
+        .bp-signal-value a { text-decoration: none; }
+        .bp-signal-list { font-size: 0.85rem; color: var(--text-primary); padding-left: 1.1rem; }
+        .bp-signal-list li { margin-bottom: 0.3rem; }
+        .bp-signal-empty { color: var(--text-secondary, #64748b); font-style: italic; }
+
+        .bp-compliance-rules { display: flex; flex-direction: column; gap: 0.6rem; }
+        .bp-rule { border: 1px solid var(--border-color); border-radius: var(--radius-sm, 8px); padding: 0.75rem 0.9rem; background: var(--bg-card); }
+        .bp-rule.excluded { opacity: 0.55; }
+        .bp-rule-head { display: flex; align-items: flex-start; gap: 0.6rem; }
+        .bp-rule-title { font-weight: 700; font-size: 0.88rem; color: var(--text-primary); }
+        .bp-rule-meta { font-size: 0.75rem; color: var(--text-secondary, #64748b); }
+        .bp-rule-summary { font-size: 0.83rem; margin: 0.3rem 0 0; color: var(--text-primary); }
+        .bp-rule details { margin-top: 0.4rem; font-size: 0.8rem; }
+        .bp-rule details ul { margin: 0.3rem 0 0.3rem 1rem; padding: 0; }
+        .bp-rule-disclaimer { background: var(--bg-hover, #f8fafc); border-left: 3px solid var(--primary); padding: 0.35rem 0.6rem; margin: 0.3rem 0; }
+        .bp-rule-toggle { margin-left: auto; white-space: nowrap; font-size: 0.78rem; }
+
+        .bp-empty-state {
+            height: auto;
+            align-items: center;
+            text-align: center;
+            padding: 3.5rem 2rem;
+            max-width: 720px;
+            margin: 2rem auto 0;
+            border: 1px dashed var(--border-hover) !important;
+        }
+        .bp-empty-state:hover { transform: none; }
+
+        .bp-empty-icon {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 1.25rem;
+        }
+        .bp-empty-icon svg.feather { width: 28px; height: 28px; }
+
+        .bp-empty-state h5 {
+            font-weight: 700;
+            font-size: 1.35rem;
+            letter-spacing: -0.01em;
+            margin-bottom: 0.5rem;
+            color: var(--text-primary);
+        }
+
+        .bp-empty-state p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            max-width: 480px;
+            margin: 0 auto 1.75rem;
+            line-height: 1.6;
+        }
+
+        .bp-empty-form {
+            display: flex;
+            gap: 0.75rem;
+            width: 100%;
+            max-width: 480px;
+        }
+        .bp-empty-form .form-control { flex: 1; }
+        .bp-empty-form .btn-primary-save { white-space: nowrap; }
+        .bp-empty-form .btn-primary-save svg.feather { width: 16px; height: 16px; }
+
+        @media (max-width: 560px) {
+            .bp-empty-form { flex-direction: column; }
+        }
+
+        .btn-xs-outline-info {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            padding: 8px 16px;
+            font-weight: 500;
+            font-size: 0.9rem;
+            transition: all 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            box-shadow: var(--shadow-sm);
+        }
+
+        .btn-xs-outline-info:hover {
+            background: var(--bg-body);
+            border-color: var(--border-hover);
+        }
+
+        .btn-xs-outline-info:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-primary-save {
+            background: var(--primary-gradient);
+            color: #fff;
+            border: none;
+            border-radius: var(--radius-sm);
+            padding: 0.6rem 1.25rem;
+            font-weight: 600;
+            font-size: var(--text-base);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            box-shadow: 0 4px 10px rgba(138, 43, 226, 0.25);
+        }
+
+        .btn-primary-save:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 14px rgba(138, 43, 226, 0.35);
+        }
+
+        .btn-primary-save:disabled {
+            background: #d1d5db;
+            box-shadow: none;
+            cursor: not-allowed;
+            color: #9ca3af;
+            transform: none;
+        }
+
+        .bc-content .form-control {
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border-color);
+            font-size: var(--text-base);
+            padding: 0.6rem 0.85rem;
+            color: var(--text-primary);
+            transition: border-color 0.15s ease, box-shadow 0.15s ease;
+            min-height: 48px;
+            background: var(--bg-input);
+        }
+
+        .bc-content .form-control::placeholder {
+            color: #9ca3af;
+        }
+
+        .bc-content .form-control:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(138, 43, 226, 0.15);
+            outline: none;
+        }
+
+        .bc-content textarea.form-control {
+            line-height: 1.6;
+            min-height: auto;
+        }
+
+        .bc-content textarea.form-control::placeholder {
+            font-style: italic;
+            color: #a1a1aa;
+        }
+
+        .theme-textarea {
+            font-family: var(--font-family);
+            background: var(--bg-input) !important;
+        }
+
+        .semantic-card-do {
+            background: var(--success-bg) !important;
+            border-color: var(--success-border) !important;
+        }
+
+        .semantic-card-do:focus {
+            box-shadow: 0 0 0 3px rgba(16, 185, 129, 0.15) !important;
+        }
+
+        .semantic-card-dont {
+            background: var(--danger-bg) !important;
+            border-color: var(--danger-border) !important;
+        }
+
+        .semantic-card-dont:focus {
+            box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15) !important;
+        }
+
+        /* List UI for DO/DONT */
+        .list-ui-wrapper {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .list-ui-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            padding: 0.5rem 0.75rem;
+            border-radius: var(--radius-sm);
+            font-size: var(--text-base);
+            transition: border-color 0.2s ease;
+        }
+        .list-ui-item-do {
+            border-left: 3px solid var(--success-icon);
+        }
+        .list-ui-item-dont {
+            border-left: 3px solid var(--danger-icon);
+        }
+        .list-ui-item svg.feather {
+            width: 18px; height: 18px;
+        }
+        .list-ui-item-do svg.feather {
+            color: var(--success-icon);
+        }
+        .list-ui-item-dont svg.feather {
+            color: var(--danger-icon);
+        }
+        .list-ui-input {
+            flex-grow: 1;
+            border: none;
+            outline: none;
+            background: transparent;
+            color: var(--text-primary);
+        }
+        .list-ui-remove {
+            cursor: pointer;
+            color: var(--text-secondary);
+        }
+        .list-ui-remove:hover {
+            color: var(--danger-icon);
+        }
+        .list-ui-add {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: var(--text-sm);
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 0.5rem;
+            transition: color 0.2s;
+        }
+        .list-ui-add:hover {
+            color: var(--primary);
+        }
+
+        .content-rules-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            margin-bottom: 0.75rem;
+        }
+        .content-rules-header .badge {
+            font-size: 0.7rem;
+            font-weight: 500;
+            padding: 0.35rem 0.5rem;
+        }
+
+
+        .unsaved-warning {
+            color: #d97706; /* Amber 600 */
+            font-weight: 500;
+            font-size: 0.9rem;
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(8px);
+            padding: 0.6rem 1rem;
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-sm);
+            border: 1px solid var(--border-color);
+        }
+
+        @media (max-width: 992px) {
+            .brand-config-grid {
+                grid-template-columns: 1fr !important;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .bp-save-bar { left: 0; padding: 1rem; }
+            .bc-main { flex-direction: column; height: auto; display: block; }
+            .bc-sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border-color); padding: 1rem; gap: 1rem; }
+            .bc-nav { flex-direction: row; overflow-x: auto; padding-bottom: 0.5rem; }
+            .bc-nav-item { white-space: nowrap; width: auto; }
+            .bc-content { padding: 1.5rem 1rem 4rem; }
+        }
+    </style>
+</head>
+
+<body>
+    <header class="app-header">
+        <div class="header-brand">
+            <div class="brand-logo">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+            </svg>
+        </div>
+            <div class="brand-text">
+                <span class="brand-name">AVIR AI</span>
+                <span class="brand-tagline">My Brand Configuration</span>
+            </div>
+        </div>
+        <nav class="header-nav">
+            <a href="/dashboard" class="header-nav-item"><i data-feather="message-circle" class="me-2"></i>Studio Chat</a>
+            <a href="/brand-profile" class="header-nav-item active"><i data-feather="aperture" class="me-1"></i>My Brand
+                Configuration</a>
+        </nav>
+        <div class="header-actions">
+        {% include 'partials/user_menu.html' %}
+    </div>
+    </header>
+
+    <div class="bc-main">
+        <aside class="bc-sidebar">
+            <div class="bc-sidebar-header">
+                <i data-feather="aperture"></i>
+                <div>
+                    <div style="font-weight:700; font-size:1rem; color: var(--text-primary);">Brand Config</div>
+                    <div style="font-size:0.75rem; color: var(--text-secondary);">Extracted Intelligence</div>
+                </div>
+            </div>
+            <nav class="bc-nav">
+                <a href="#bpOverview" class="bc-nav-item"><i data-feather="home"></i> Brand Overview</a>
+                <a href="#bpVoice" class="bc-nav-item"><i data-feather="message-square"></i> Voice &amp; Themes</a>
+                <a href="#bpColors" class="bc-nav-item"><i data-feather="droplet"></i> Colors &amp; Fonts</a>
+                <a href="#bpProducts" class="bc-nav-item"><i data-feather="package"></i> Products &amp; Services</a>
+                <a href="#bpRules" class="bc-nav-item"><i data-feather="list"></i> Content Rules</a>
+                <a href="#bpSignals" class="bc-nav-item"><i data-feather="shield"></i> Website Signals</a>
+                <a href="#bpCompliance" class="bc-nav-item"><i data-feather="check-square"></i> Compliance</a>
+                <a href="#approvalSettingsCard" class="bc-nav-item"><i data-feather="user-check"></i> Approvals</a>
+            </nav>
+            <div class="promo-card mt-auto p-3 text-white rounded-3 position-relative overflow-hidden" style="background: linear-gradient(135deg, #f4f3fe, #e9d5ff); border: 1px solid #d8b4fe; margin-top: auto;">
+                <div style="position: relative; z-index: 1;">
+                    <h6 class="text-dark fw-bold mb-1 fs-6">Create AI content<br>that feels like you</h6>
+                    <p class="text-muted mb-0" style="font-size: 0.75rem; line-height: 1.4;">Set up your brand once,<br>use it everywhere.</p>
+                </div>
+                <div class="promo-wave" style="position:absolute; bottom:-10px; left:0; width:100%; height:40px; background: linear-gradient(to right, #a855f7, #6366f1); border-radius: 40% 40% 0 0; opacity: 0.8; transform: scaleX(1.5);"></div>
+            </div>
+        </aside>
+
+        <main class="bc-content">
+            <div class="bc-content-inner">
+                <!-- EMPTY STATE -->
+                <div id="bpEmptyState" class="brand-config-card bp-empty-state d-none mb-4">
+                    <div class="card-icon-circle bp-empty-icon"><i data-feather="globe"></i></div>
+                    <h5 id="bpEmptyTitle">No brand profile yet</h5>
+                    <p id="bpEmptyDesc">We couldn't analyze your website during signup, or it hasn't been analyzed yet. Enter your website below and we'll fetch your industry, voice, and brand colors automatically.</p>
+                    <div id="bpScanFailure" class="alert alert-warning text-start small d-none" role="alert"></div>
+                    <div class="bp-empty-form">
+                        <input type="text" id="bpEmptyWebsiteInput" class="form-control" placeholder="https://yourwebsite.com">
+                        <button type="button" class="btn-primary-save" id="bpEmptyAnalyzeBtn" onclick="rescanBrandProfile('empty')">
+                            <i data-feather="search" class="me-2"></i>Analyze Website
+                        </button>
+                    </div>
+                    <!-- Fallback when the site blocks automated access or has no readable text -->
+                    <div class="bp-manual-fallback text-start mt-4">
+                        <label for="bpManualText" class="form-label small fw-semibold mb-1">Or describe your business instead</label>
+                        <textarea id="bpManualText" class="form-control" rows="4"
+                            placeholder="What you sell or do, who your customers are, where you operate, and how you like to sound - a few sentences or your About page text."></textarea>
+                        <button type="button" class="btn-primary-save mt-2" id="bpManualAnalyzeBtn" onclick="rescanBrandProfile('manual')">
+                            <i data-feather="file-text" class="me-2"></i>Analyze Description
+                        </button>
+                    </div>
+                </div>
+
+                <div id="bpLoading" class="text-center text-muted py-5">
+                    <i data-feather="loader" class="fa-spin me-2"></i>Loading your brand profile...
+                </div>
+
+                <!-- FORM STATE -->
+                <div id="bpFormWrap" class="d-none">
+
+                    <!-- HERO HEADER -->
+                    <div class="brand-hero-card mb-4 position-relative overflow-hidden d-flex flex-column justify-content-center p-5 rounded-4" style="background: var(--bg-card); border: 1px solid var(--border-color); min-height: 240px; box-shadow: var(--shadow-sm);">
+                        <div class="position-relative z-1" style="max-width: 55%">
+                            <div class="text-secondary fw-bold mb-2" style="font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase;">Brand Configuration</div>
+                            <h2 class="fw-bold mb-2" style="font-size: 2.25rem; color: #172033; letter-spacing: -0.02em;">My Brand Configuration</h2>
+                            <p class="text-secondary mb-4" style="font-size: 0.95rem; line-height: 1.5; max-width: 480px;">Review and refine the brand intelligence extracted from your website before it is used to generate content.</p>
+                        </div>
+                        <!-- Abstract BG Right -->
+                        <div class="hero-bg-graphic position-absolute top-0 end-0 h-100" style="width: 50%; background: linear-gradient(135deg, #c4b5fd 0%, #818cf8 100%); clip-path: polygon(15% 0, 100% 0, 100% 100%, 0 100%); display:flex; align-items:center;">
+                            <div class="position-absolute text-dark fw-medium" style="left: 10%; background: transparent; padding: 0; font-size: 0.85rem; line-height: 1.3;">
+                                From your website<br>
+                                <span class="fw-bold text-primary position-relative" style="display:inline-block; padding-bottom:4px;">
+                                    to on-brand content
+                                    <div style="position:absolute; bottom:0; left:0; width:100%; height:2px; background:var(--primary);"></div>
+                                </span>
+                            </div>
+                            <!-- 3D Card Mockup -->
+                            <div class="position-absolute bg-white shadow-lg rounded-4" style="right: 15%; top: 50%; transform: translateY(-50%) rotate(-3deg); width: 260px; height: 180px; padding: 1.5rem; opacity: 0.95;">
+                                <div class="d-flex gap-3 mb-4 align-items-center">
+                                    <div style="width:36px;height:36px;background:var(--primary-gradient);border-radius:8px; display:flex;align-items:center;justify-content:center;">
+                                        <div style="width:16px;height:16px;border:2px solid #fff;border-radius:50%;opacity:0.8;"></div>
+                                    </div>
+                                    <div style="height:14px;width:80px;background:#e2e8f0;border-radius:4px;"></div>
+                                </div>
+                                <div style="height:10px;width:100%;background:#e2e8f0;border-radius:4px;margin-bottom:12px;"></div>
+                                <div style="height:10px;width:85%;background:#e2e8f0;border-radius:4px;margin-bottom:12px;"></div>
+                                <div style="height:10px;width:95%;background:#e2e8f0;border-radius:4px;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Source Card -->
+                    <div class="bp-website-bar mb-4">
+                        <img id="bpLogoPreview" class="bp-logo-preview d-none" alt="Logo">
+                        <i data-feather="globe" class="text-primary fs-5" id="bpWebsiteIcon"></i>
+                        <div class="flex-grow-1">
+                            <div class="d-flex align-items-center">
+                                <input type="text" id="bpWebsiteUrl" class="border-0 bg-transparent p-0 fw-medium m-0" style="color: var(--text-primary); font-size: 0.95rem; box-shadow: none; width: 100%; max-width: 320px; cursor: text; outline: none; line-height: 1.2;" placeholder="https://yourwebsite.com">
+                                <i data-feather="edit-2" class="text-muted ms-2" style="font-size: 0.8rem; opacity: 0.7; cursor: pointer; transition: opacity 0.2s;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.7'" onclick="document.getElementById('bpWebsiteUrl').focus(); document.getElementById('bpWebsiteUrl').select();" title="Edit Website URL"></i>
+                            </div>
+                            <div class="bp-analyzed-at mt-1" id="bpAnalyzedAt"></div>
+                        </div>
+                        <button type="button" class="btn-xs-outline-info bg-white" id="bpRescanBtn" onclick="rescanBrandProfile('form')">
+                            <i data-feather="refresh-cw" class="me-1"></i>Re-analyze
+                        </button>
+                    </div>
+
+                    <!-- PERFECTLY ALIGNED GRID -->
+                    <div class="brand-config-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem; align-items: stretch;">
+
+                        <!-- Card 1: Brand Overview -->
+                        <div class="brand-config-card" id="bpOverview">
+                            <h6><div class="card-icon-circle"><i data-feather="home"></i></div> Brand Overview</h6>
+                            <div class="brand-config-card-desc">Core identity and audience information used to guide generated content.</div>
+
+                            <div class="mt-auto">
+                                <div class="row">
+                                    <div class="col-md-6 bp-form-row">
+                                        <label class="guideline-field-label">Company Name</label>
+                                        <input type="text" id="bpCompanyName" class="form-control form-control-sm">
+                                    </div>
+                                    <div class="col-md-6 bp-form-row">
+                                        <label class="guideline-field-label">Industry</label>
+                                        <input type="text" id="bpIndustry" class="form-control form-control-sm">
+                                    </div>
+                                </div>
+                                <div class="row">
+                                    <div class="col-md-6 bp-form-row">
+                                        <label class="guideline-field-label">Tagline</label>
+                                        <input type="text" id="bpTagline" class="form-control form-control-sm" placeholder="No tagline detected">
+                                    </div>
+                                    <div class="col-md-6 bp-form-row">
+                                        <label class="guideline-field-label">Visual Style</label>
+                                        <input type="text" id="bpVisualStyle" class="form-control form-control-sm" placeholder="e.g. minimal, modern, high-contrast">
+                                    </div>
+                                </div>
+                                <div class="bp-form-row">
+                                    <label class="guideline-field-label">Target Audience</label>
+                                    <textarea id="bpTargetAudience" class="form-control form-control-sm" rows="2"></textarea>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 2: Voice & Themes -->
+                        <div class="brand-config-card" id="bpVoice">
+                            <h6><div class="card-icon-circle"><i data-feather="message-square"></i></div> Voice & Themes</h6>
+                            <div class="brand-config-card-desc">Defines how your brand sounds and the topics you frequently discuss.</div>
+
+                            <div class="mt-auto">
+                                <div class="bp-form-row">
+                                    <label class="guideline-field-label">Brand Voice Summary</label>
+                                    <textarea id="bpVoiceSummary" class="form-control form-control-sm" rows="5"></textarea>
+                                </div>
+                                <div class="bp-form-row">
+                                    <label class="guideline-field-label">Recurring Themes</label>
+                                    <textarea id="bpKeyThemes" class="form-control form-control-sm theme-textarea" rows="3" placeholder="One theme per line"></textarea>
+                                    <div class="guideline-field-hint">One theme per line.</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 3: Colors & Fonts -->
+                        <div class="brand-config-card" id="bpColors">
+                            <h6><div class="card-icon-circle"><i data-feather="droplet"></i></div> Colors & Fonts</h6>
+                            <div class="brand-config-card-desc">Visual assets extracted from your website's stylesheets.</div>
+
+                            <div class="mt-auto">
+                                <div class="row">
+                                    <div class="col-md-6 bp-form-row">
+                                        <label class="guideline-field-label">Primary Colors</label>
+                                        <textarea id="bpPrimaryColors" class="form-control form-control-sm theme-textarea d-none" rows="3" placeholder="#7366ff\n#111827" oninput="renderColorPreview()"></textarea>
+                                        <div class="bp-colors-preview mt-0" id="bpColorsPreview"></div>
+                                    </div>
+                                    <div class="col-md-6 bp-form-row">
+                                        <label class="guideline-field-label">Fonts Detected</label>
+                                        <textarea id="bpFonts" class="form-control form-control-sm theme-textarea" rows="1" placeholder="One font name per line" oninput="renderFontPreview()"></textarea>
+                                        <div class="guideline-field-hint" id="bpFontsHint">One font name per line.</div>
+                                        <div class="bp-fonts-preview" id="bpFontsPreview"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 4: Products & Services -->
+                        <div class="brand-config-card" id="bpProducts">
+                            <h6><div class="card-icon-circle"><i data-feather="package"></i></div> Products & Services</h6>
+                            <div class="brand-config-card-desc">Key offerings and product lines to highlight in content.</div>
+
+                            <div class="mt-auto">
+                                <div class="bp-form-row">
+                                    <label class="guideline-field-label">Core Products/Services</label>
+                                    <textarea id="bpCoreProducts" class="form-control form-control-sm theme-textarea" rows="4" placeholder="One product/service per line"></textarea>
+                                    <div class="guideline-field-hint">One product or service per line.</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 5: Content Rules (Full Width) -->
+                        <div class="brand-config-card" id="bpRules" style="grid-column: 1 / -1;">
+                            <h6><div class="card-icon-circle"><i data-feather="list"></i></div> Content Rules</h6>
+                            <div class="brand-config-card-desc">Specific instructions for AI generation behaviors.</div>
+
+                            <div class="mt-auto">
+                                <div class="row">
+                                    <div class="col-md-6 bp-form-row mb-0">
+                                        <div class="content-rules-header">
+                                            <i data-feather="check-circle" class="text-success" style="fill: var(--success-bg);"></i>
+                                            <span class="fw-bold fs-6">Do</span>
+                                            <span class="badge bg-success bg-opacity-10 text-success">Recommended</span>
+                                        </div>
+                                        <textarea id="bpContentDos" class="form-control form-control-sm semantic-card-do" rows="6" placeholder="One rule per line"></textarea>
+                                    </div>
+                                    <div class="col-md-6 bp-form-row mb-0">
+                                        <div class="content-rules-header">
+                                            <i data-feather="x-circle" class="text-danger" style="fill: var(--danger-bg);"></i>
+                                            <span class="fw-bold fs-6">Don't</span>
+                                            <span class="badge bg-danger bg-opacity-10 text-danger">Avoid</span>
+                                        </div>
+                                        <textarea id="bpContentDonts" class="form-control form-control-sm semantic-card-dont" rows="6" placeholder="One rule per line"></textarea>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 6: Website Signals (Full Width, read-only) - facts read
+                             straight off the site, used to keep content accurate and compliant -->
+                        <div class="brand-config-card" id="bpSignals" style="grid-column: 1 / -1;">
+                            <h6><div class="card-icon-circle"><i data-feather="shield"></i></div> Detected From Your Website</h6>
+                            <div class="brand-config-card-desc">Facts found on your site. Generated content cites only these credentials and reuses your own disclaimers. Re-analyze to refresh.</div>
+                            <div class="row g-3 mt-1">
+                                <div class="col-md-6">
+                                    <label class="guideline-field-label">Markets</label>
+                                    <div id="bpSignalRegions" class="bp-signal-value"></div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="guideline-field-label">Business type (declared by your site)</label>
+                                    <div id="bpSignalTypes" class="bp-signal-value"></div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="guideline-field-label">Credentials</label>
+                                    <div id="bpSignalCredentials" class="bp-signal-value"></div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="guideline-field-label">Social profiles</label>
+                                    <div id="bpSignalSocial" class="bp-signal-value"></div>
+                                </div>
+                                <div class="col-12">
+                                    <label class="guideline-field-label">Your disclaimers</label>
+                                    <ul id="bpSignalDisclaimers" class="bp-signal-list mb-0"></ul>
+                                </div>
+                                <div class="col-12">
+                                    <label class="guideline-field-label">Legal pages</label>
+                                    <div id="bpSignalLegal" class="bp-signal-value"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Card 7: Compliance (Full Width) - industry + markets select the
+                             advertising rules content must follow (services/compliance_rules.py).
+                             Saved separately via its own Confirm button. -->
+                        <div class="brand-config-card" id="bpCompliance" style="grid-column: 1 / -1;">
+                            <h6><div class="card-icon-circle"><i data-feather="check-square"></i></div> Compliance</h6>
+                            <div class="brand-config-card-desc">Your industry and markets decide which advertising regulations your content follows. We detected these from your website - review and confirm.</div>
+                            <div class="alert alert-warning small py-2 mt-2 mb-3" id="bpComplianceNotice" role="note"></div>
+
+                            <div class="row g-3 align-items-start">
+                                <div class="col-md-6">
+                                    <label class="guideline-field-label" for="bpComplianceIndustry">Industry</label>
+                                    <select id="bpComplianceIndustry" class="form-select form-select-sm"></select>
+                                    <div class="guideline-field-hint" id="bpComplianceIndustryHint"></div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="guideline-field-label">Markets you publish to</label>
+                                    <div id="bpComplianceRegions" class="d-flex flex-wrap gap-3 pt-1"></div>
+                                    <div class="guideline-field-hint" id="bpComplianceRegionsHint"></div>
+                                </div>
+                            </div>
+
+                            <div class="d-flex align-items-center justify-content-between mt-4 mb-2">
+                                <label class="guideline-field-label mb-0">Applicable rules <span class="text-muted fw-normal" id="bpComplianceRuleCount"></span></label>
+                                <span class="small" id="bpComplianceStatus"></span>
+                            </div>
+                            <div id="bpComplianceRules" class="bp-compliance-rules"></div>
+
+                            <div class="d-flex justify-content-end mt-3">
+                                <button type="button" class="btn-primary-save" id="bpComplianceSaveBtn" onclick="saveComplianceProfile()">
+                                    <i data-feather="check" class="me-2"></i>Confirm Compliance Settings
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Card 8: Approval Reviewer (Full Width) - filled by approval_settings.js -->
+                        <div class="brand-config-card" id="approvalSettingsCard" style="grid-column: 1 / -1;"></div>
+
+                    </div> <!-- end masonry grid -->
+
+                    <!-- Save Button Area -->
+                    <div class="d-flex justify-content-end align-items-center mt-3 mb-4 gap-3">
+                        <div class="unsaved-warning" id="bpUnsavedWarning" style="opacity: 0; transition: opacity 0.2s; background: rgba(255,255,255,0.9); padding: 0.4rem 0.8rem; border-radius: var(--radius-sm); box-shadow: var(--shadow-sm); border: 1px solid var(--border-color);">
+                            <i data-feather="alert-circle" style="width:16px;"></i> Unsaved changes
+                        </div>
+                        <button type="button" class="btn-primary-save shadow" id="bpSaveBtn" onclick="saveBrandProfile()">
+                            <i data-feather="check" class="me-2"></i>Save Changes
+                        </button>
+                    </div>
+                </div> <!-- end form wrap -->
+            </div> <!-- end bc-content-inner -->
+        </main>
+    </div>
+
+
+
+    <div class="toast-container position-fixed bottom-0 end-0 p-3">
+        <div id="toast" class="ent-toast" role="alert">
+            <div class="ent-toast-body" id="toastBody"></div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="{{ url_for('static', filename='js/brand_profile.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/approval_settings.js') }}"></script>
+<script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
+</body>
+
+</html>

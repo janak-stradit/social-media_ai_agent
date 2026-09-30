@@ -1,19 +1,6 @@
 /* global showToast, renderCarousel */
 $(document).ready(function () {
 
-    // Load current user info into the shared app header
-    $.ajax({
-        url: '/api/auth/me',
-        type: 'GET',
-        success: function (r) {
-            if (r.user) {
-                $('#headerUserLabel').text(r.user.name);
-                $('#headerUserEmail').text(r.user.email);
-                $('#headerUserAvatar').text(r.user.name.charAt(0).toUpperCase());
-            }
-        }
-    });
-
     $('input[name="mediaType"]').on('change', function () {
         if ($(this).val() === 'image') {
             $('#imageContextContainer').removeClass('d-none');
@@ -203,7 +190,8 @@ $(document).ready(function () {
     // Loads previously-scraped posts already saved in the DB (no external scan).
     // onComplete (optional) fires once the feed has been rendered, so callers
     // like useSuggestedCollection() can act on the resulting checkboxes.
-    window.loadStoredPosts = function (onComplete) {
+    // days (optional) overrides the server's default lookback window; 0 = no cutoff.
+    window.loadStoredPosts = function (onComplete, days) {
         const platform = $('#dashboardPlatformSelect').val();
         if (!platform) return;
         const competitor = $('#dashboardCompetitorSelect').val();
@@ -214,6 +202,9 @@ $(document).ready(function () {
         let url = '/api/competitor-posts-db?platform=' + encodeURIComponent(platform);
         if (competitor && competitor !== 'all') {
             url += '&competitor=' + encodeURIComponent(competitor);
+        }
+        if (days !== undefined) {
+            url += '&days=' + encodeURIComponent(days);
         }
 
         $.ajax({
@@ -314,7 +305,7 @@ $(document).ready(function () {
                     ${isNew ? '<span class="badge bg-success position-absolute" style="top: 0; left: 0; font-size: 0.7rem; padding: 0.35rem 0.8rem; box-shadow: 2px 2px 6px rgba(0,0,0,0.1); z-index: 10; border-bottom-right-radius: 12px;"><i class="fas fa-sparkles me-1"></i>New</span>' : ''}
                     <div class="d-flex justify-content-between align-items-start mb-3">
                         <div class="d-flex align-items-center gap-2">
-                            <div class="rounded-circle d-flex align-items-center justify-content-center shadow-sm" style="width: 36px; height: 36px; background: rgba(79, 70, 229, 0.1); color: var(--primary);">
+                            <div class="card-icon-circle">
                                 <i class="fas fa-building-columns"></i>
                             </div>
                             <div>
@@ -344,6 +335,7 @@ $(document).ready(function () {
         $('#postsContainer').html(html);
 
         $('.comp-master-checkbox').on('change', function () {
+            window.pendingUsedCollectionHash = null;
             updateSelection();
         });
     }
@@ -418,13 +410,7 @@ $(document).ready(function () {
     function renderSuggestedCollections() {
         const list = $('#suggestedCollectionsList');
         if (window.suggestedCollections.length === 0) {
-            // Distinguish "never run yet" from "everything found was already
-            // suggested before" - otherwise a fully-repeat-filtered result
-            // looks identical to a broken/empty response.
-            const msg = window.repeatedStorylinesFiltered
-                ? `No new storylines - ${window.repeatedStorylinesFiltered} related post group${window.repeatedStorylinesFiltered === 1 ? '' : 's'} found but already suggested in an earlier run.`
-                : 'No storylines suggested yet - click "Suggest Storylines" to scan for related posts.';
-            list.html(`<p class="text-muted small m-0">${msg}</p>`);
+            list.html('<p class="text-muted small m-0">No storylines suggested yet - click "Suggest Storylines" to scan for related posts.</p>');
             return;
         }
 
@@ -441,7 +427,7 @@ $(document).ready(function () {
         window.suggestedCollections.forEach((c, idx) => {
             const badgeClass = relevanceClass[c.relevance] || relevanceClass.medium;
             const isNew = window.newSuggestedCollectionHashes.has(c.post_urls_hash);
-            const isUsed = usedColls.includes(c.label);
+            const isUsed = usedColls.includes(c.post_urls_hash);
             const tags = [...(c.competitors || []), ...(c.platforms || []).map(p => p.toUpperCase())]
                 .map(t => `<span class="badge bg-light text-dark border" style="font-size: 0.65rem;">${escapeHtml(t)}</span>`)
                 .join(' ');
@@ -456,7 +442,7 @@ $(document).ready(function () {
             }
 
             html += `
-                <div class="border rounded-4 p-2 flex-shrink-0 d-flex flex-column gap-1 position-relative mt-2" style="min-width: 260px; max-width: 280px; background: #f8fafc;">
+                <div class="storyline-card flex-shrink-0 d-flex flex-column gap-1 position-relative mt-2" style="min-width: 260px; max-width: 280px;">
                     ${isNew ? '<span class="badge rounded-pill bg-success position-absolute" style="top: -8px; right: 10px; font-size: 0.6rem;">New</span>' : ''}
                     <div class="d-flex align-items-center justify-content-between badge-row">
                         <div>
@@ -533,7 +519,7 @@ $(document).ready(function () {
             const daysLabel = f.days_until === 0 ? 'Today' : (f.days_until === 1 ? 'Tomorrow' : `In ${f.days_until} days`);
 
             html += `
-                <div class="border rounded-4 p-3 flex-shrink-0 d-flex flex-column gap-2" style="min-width: 220px; max-width: 240px; background: #fffbeb;">
+                <div class="storyline-card storyline-card-festive flex-shrink-0 d-flex flex-column gap-2" style="min-width: 220px; max-width: 240px;">
                     <div class="d-flex align-items-center justify-content-between">
                         <span class="badge rounded-pill ${badgeClass}" style="font-size: 0.65rem;">${escapeHtml(f.region)}</span>
                         <span class="text-muted small">${daysLabel}</span>
@@ -579,22 +565,16 @@ $(document).ready(function () {
         const collection = window.suggestedCollections[idx];
         if (!collection) return;
 
-        // If the button was provided, add a professional "Used" tag to the card without disabling the button.
+        // Give visual feedback that the button was clicked without permanently marking it as used yet.
+        // It will be permanently marked 'Used' only if they actually generate a pipeline from it.
         if (btn) {
-            const $card = $(btn).closest('.position-relative');
-            const $badgeRow = $card.find('.badge-row > div').first();
-            // Prevent duplicate tags if clicked multiple times
-            if ($card.find('.used-tag').length === 0 && $badgeRow.length) {
-                $badgeRow.append('<span class="badge rounded-pill bg-secondary text-white used-tag ms-1" style="font-size: 0.65rem;"><i class="fas fa-check-double me-1"></i>Used</span>');
-            }
-
-            // Persist the state
-            let usedColls = [];
-            try { usedColls = JSON.parse(localStorage.getItem('usedSuggestedCollections') || '[]'); } catch (e) { usedColls = []; }
-            if (!usedColls.includes(collection.label)) {
-                usedColls.push(collection.label);
-                localStorage.setItem('usedSuggestedCollections', JSON.stringify(usedColls));
-            }
+            $(btn).html('<i class="fas fa-check-double me-1"></i>Using...').addClass('btn-secondary').removeClass('btn-primary');
+            setTimeout(() => {
+                $(btn).html('<i class="fas fa-check me-1"></i>Use Again').addClass('btn-outline-primary').removeClass('btn-secondary text-white');
+            }, 1000);
+            
+            // Queue this collection to be marked used only upon successful pipeline generation
+            window.pendingUsedCollectionHash = collection.post_urls_hash;
         }
 
         const targetUrls = new Set(collection.post_urls || []);
@@ -602,13 +582,22 @@ $(document).ready(function () {
         $('#dashboardPlatformSelect').val('all');
         $('#dashboardCompetitorSelect').val('all');
 
+        // Load without the default 15-day cutoff - a saved storyline can
+        // reference posts that have since aged out of the normal feed window.
         window.loadStoredPosts(function () {
+            let matched = 0;
             $('.comp-master-checkbox').each(function () {
-                $(this).prop('checked', targetUrls.has($(this).data('post-url')));
+                const hit = targetUrls.has($(this).attr('data-post-url'));
+                $(this).prop('checked', hit);
+                if (hit) matched++;
             });
             updateSelection();
-            showToast(`Selected ${collection.post_count} posts from "${collection.label}".`, 'success');
-        });
+            if (matched === 0) {
+                showToast(`None of the posts from "${collection.label}" are available any more.`, 'warning');
+                return;
+            }
+            showToast(`Selected ${matched} posts from "${collection.label}".`, 'success');
+        }, 0);
     };
 
     // #centerFeedPanel uses Bootstrap's auto-layout column (col-xl/col-lg with no
@@ -744,6 +733,7 @@ $(document).ready(function () {
 
     window.clearAllPostSelections = function () {
         $('.comp-master-checkbox').prop('checked', false);
+        window.pendingUsedCollectionHash = null;
         updateSelection();
     };
 
@@ -1030,6 +1020,17 @@ $(document).ready(function () {
                 if (r.success && r.storyline) {
                     const data = r.storyline;
                     window.lastStrategyData = data;
+                    
+                    if (window.pendingUsedCollectionHash) {
+                        let usedColls = [];
+                        try { usedColls = JSON.parse(localStorage.getItem('usedSuggestedCollections') || '[]'); } catch (e) { usedColls = []; }
+                        if (!usedColls.includes(window.pendingUsedCollectionHash)) {
+                            usedColls.push(window.pendingUsedCollectionHash);
+                            localStorage.setItem('usedSuggestedCollections', JSON.stringify(usedColls));
+                            renderSuggestedCollections(); // Update the UI to show the Used badge
+                        }
+                        window.pendingUsedCollectionHash = null; // Clear it so it doesn't mistakenly apply to future generations
+                    }
 
                     // Render facts pills
                     let factsHtml = '';
@@ -1260,10 +1261,10 @@ $(document).ready(function () {
     // stage: content is sent for external review instead of approved directly
     // in-app, and this stage shows the pending/accepted/rejected outcome.
     const PIPELINE_STAGES = [
-        { id: 'intel_selected', label: 'Post Pipeline', icon: 'fa-check' },
-        { id: 'strategy_generated', label: 'Counter Strategy Generated', icon: 'fa-brain' },
-        { id: 'asset_generated', label: 'Content Generated', icon: 'fa-magic' },
-        { id: 'approved', label: 'Approval', icon: 'fa-user-check' },
+        { id: 'intel_selected', label: 'Context', icon: 'fa-check' },
+        { id: 'strategy_generated', label: 'Strategy', icon: 'fa-brain' },
+        { id: 'asset_generated', label: 'Generator', icon: 'fa-magic' },
+        { id: 'approved', label: 'Review', icon: 'fa-user-check' },
         { id: 'published', label: 'Published', icon: 'fa-paper-plane' }
     ];
 
@@ -1299,6 +1300,33 @@ $(document).ready(function () {
         rail.html(html);
     }
 
+    function getPipelineTitle(pipeline) {
+        if (pipeline.strategy && pipeline.strategy.storyline_title) {
+            return pipeline.strategy.storyline_title;
+        }
+        if (!pipeline.context) return 'Pipeline #' + String(pipeline.id).slice(-4);
+        if (pipeline.context.includes('--- FESTIVE GREETING ---')) {
+            const match = pipeline.context.match(/Festival:\s*(.+)/);
+            if (match) return `Festive: ${match[1].trim()}`;
+            return 'Festive Greeting';
+        }
+        if (pipeline.context.includes('--- SELECTED COMPETITOR POSTS ---')) {
+            const splitCtx = pipeline.context.split('--- SELECTED COMPETITOR POSTS ---');
+            const customContext = splitCtx[0].trim();
+            if (customContext) {
+                 const firstLine = customContext.split('\n')[0].trim();
+                 return firstLine.substring(0, 40) + (firstLine.length > 40 ? '...' : '');
+            }
+            return 'Competitor Analysis Pipeline';
+        }
+        
+        const cleaned = pipeline.context.replace(/^---\s*.*?\s*---\n/, '').trim();
+        if (cleaned) {
+             return cleaned.substring(0, 30) + (cleaned.length > 30 ? '...' : '');
+        }
+        return 'Pipeline #' + String(pipeline.id).slice(-4);
+    }
+
     function renderPipelineHistory() {
         renderCollapsedHistoryRail();
 
@@ -1318,9 +1346,9 @@ $(document).ready(function () {
             const date = new Date(pipeline.timestamp).toLocaleString();
 
             let timelineHtml = `<div class="pipeline-timeline mt-3" onclick="openPipelineModal(${index})" title="Click to view stage details">`;
-            let reachedStatus = true;
+            const reachedIdx = getPipelineReachedIndex(pipeline);
             let pipelineStatus = pipeline.status || 'unknown';
-            let hasError = pipelineStatus.startsWith('stopped') || pipelineStatus === 'rejected';
+            let hasError = pipelineStatus.startsWith('stopped') || pipelineStatus === 'rejected' || pipelineStatus === 'content_rejected';
 
             PIPELINE_STAGES.forEach((step, stepIdx) => {
                 let badgeClass = 'bg-secondary';
@@ -1328,23 +1356,15 @@ $(document).ready(function () {
                 let stepIcon = step.icon;
                 const isLast = stepIdx === PIPELINE_STAGES.length - 1;
 
-                if (reachedStatus) {
+                if (stepIdx <= reachedIdx) {
                     badgeClass = 'bg-primary';
                     textClass = 'text-dark fw-bold';
-                }
-
-                if (pipelineStatus === step.id) {
-                    reachedStatus = false;
-                    if (hasError) {
+                    
+                    if (stepIdx === reachedIdx && hasError) {
                         badgeClass = 'bg-danger';
                         textClass = 'text-danger fw-bold';
                         stepIcon = 'fa-times';
                     }
-                }
-
-                if (hasError && !reachedStatus && pipelineStatus !== step.id) {
-                    // skip remaining
-                    badgeClass = 'bg-light border text-muted';
                 }
 
                 timelineHtml += `
@@ -1368,7 +1388,7 @@ $(document).ready(function () {
             html += `
                 <div class="list-group-item list-group-item-action p-3 border-bottom bg-light bg-opacity-50">
                     <div class="mb-2">
-                        <h6 class="mb-0 fw-bold text-dark text-truncate" style="font-size: 0.85rem;" title="Pipeline ID: ${pipeline.id}"><i class="fas fa-layer-group me-2 text-primary"></i>ID: ${pipeline.id}</h6>
+                        <h6 class="mb-0 fw-bold text-dark text-truncate" style="font-size: 0.85rem;" title="${escapeHtml(pipeline.context || 'Pipeline ID: ' + pipeline.id)}"><i class="fas fa-layer-group me-2 text-primary"></i>${escapeHtml(getPipelineTitle(pipeline))}</h6>
                         <small class="text-muted" style="font-size: 0.7rem;">${date}</small>
                     </div>
                     <p class="mb-1 text-muted small"><strong>Analysis:</strong> ${competitorsList}</p>
@@ -1744,7 +1764,7 @@ $(document).ready(function () {
             const footer = `
                 ${alreadySent
                     ? `<button class="btn btn-outline-secondary action-btn flex-grow-1" onclick="showPipelineStageDetail(${index}, 'approved')"><i class="fas fa-user-check me-1"></i>View Approval Status</button>`
-                    : `<button class="btn btn-primary action-btn flex-grow-1 shadow-sm" onclick="sendModalAssetForApproval(${pipeline.id})"><i class="fas fa-paper-plane me-2"></i>Send for Approval</button>`
+                    : `<button class="btn btn-primary action-btn flex-grow-1 shadow-sm" onclick="sendModalAssetForApproval(${pipeline.id}, this)"><i class="fas fa-paper-plane me-2"></i>Send for Approval</button>`
                 }
                 <button class="btn btn-outline-primary action-btn flex-grow-1" onclick="sendPipelineToStudioChat(${pipeline.id})">
                     <i class="fas fa-comments me-1"></i>Refine in Studio Chat
@@ -1898,8 +1918,7 @@ $(document).ready(function () {
                 dotContent = '<i class="fas fa-lock" style="font-size:0.6rem;"></i>';
             }
 
-            const stepLabels = ['Intel', 'Strategy', 'Content', 'Approved', 'Published'];
-            const label = stepLabels[stepIdx] || step.label;
+            const label = step.label;
 
             const clickHandler = isReached
                 ? `onclick="showPipelineStageDetail(${index}, '${step.id}')"`
@@ -2107,7 +2126,7 @@ $(document).ready(function () {
                         ${platformPreviewButtonsRow(`previewCarouselItem(${index}`)}
                     </div>
                     <div class="px-3 mt-2 mb-2">
-                        <button class="btn btn-primary w-100 rounded-pill shadow-sm fw-bold" onclick="sendCarouselItemForApproval(${index})"><i class="fas fa-paper-plane me-2"></i>Send for Approval</button>
+                        <button class="btn btn-primary w-100 rounded-pill shadow-sm fw-bold" onclick="sendCarouselItemForApproval(${index}, this)"><i class="fas fa-paper-plane me-2"></i>Send for Approval</button>
                     </div>
                 </div>
             `;
@@ -2217,10 +2236,14 @@ $(document).ready(function () {
     // updates the local pipeline record to reflect "sent for approval".
     // Shared by both the live workflow (one carousel variation) and the
     // pipeline modal (the whole generated set).
-    function submitApprovalRequest(pipeline, platform, assetType, caption, imageUrls, onDone) {
+    function submitApprovalRequest(pipeline, platform, assetType, caption, imageUrls, onDone, btnEl) {
         const competitors = pipeline.competitors
             ? [...new Set(pipeline.competitors.split(',').map(c => c.trim()).filter(Boolean))]
             : [];
+
+        const $btn = btnEl ? $(btnEl) : $();
+        const originalBtnHtml = $btn.html();
+        $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-2"></i>Sending for approval...');
 
         $.ajax({
             url: '/api/approval-requests',
@@ -2255,10 +2278,17 @@ $(document).ready(function () {
             error: function (xhr) {
                 showToast(xhr.responseJSON?.error || 'Network error sending for approval.', 'danger');
             }
+        }).always(function () {
+            // Only restore the button if the success handler didn't already
+            // replace it out of the DOM (sendCarouselItemForApproval swaps
+            // it for a "Sent for approval" confirmation on success).
+            if ($btn.length && $btn.closest('body').length) {
+                $btn.prop('disabled', false).html(originalBtnHtml);
+            }
         });
     }
 
-    window.sendCarouselItemForApproval = function (index) {
+    window.sendCarouselItemForApproval = function (index, btnEl) {
         const item = window.currentCarouselAssets[index];
         const pipeline = window.activePipeline;
         if (!item || !pipeline) return;
@@ -2279,10 +2309,10 @@ $(document).ready(function () {
                     '<div class="alert alert-info d-flex align-items-center gap-2 mx-3 mt-2 mb-2 py-2"><i class="fas fa-paper-plane"></i><span class="small">Sent for approval &mdash; awaiting reviewer decision.</span></div>'
                 );
             }
-        });
+        }, btnEl);
     };
 
-    window.sendModalAssetForApproval = function (pipelineId) {
+    window.sendModalAssetForApproval = function (pipelineId, btnEl) {
         const pipeline = window.pipelineHistory.find(p => p.id === pipelineId);
         if (!pipeline || !pipeline.assetContent) return;
 
@@ -2295,7 +2325,7 @@ $(document).ready(function () {
             if (r.success) {
                 showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'approved');
             }
-        });
+        }, btnEl);
     };
 
     window.approveCarouselItem = function (index) {
@@ -2372,6 +2402,18 @@ $(document).ready(function () {
                             renderPipelineHistory();
                         }
                     } else {
+                        // Selecting Image/Video and clicking "Generate Assets"
+                        // should produce the asset directly in one step, not stop
+                        // to show the caption and wait for a second confirm click.
+                        // The caption call above still has to happen first (its
+                        // result is passed as context to the media generation
+                        // call below), but that's an internal implementation
+                        // detail now - not a separate user-facing step.
+                        const mediaLabel = mediaType === 'video' ? 'Video' : 'Image';
+                        $('#pipelineLoader').removeClass('d-none');
+                        $('#pipelineOutputContent').html(mediaGenSkeletonHtml(`Generating ${mediaLabel.toLowerCase()}...`));
+
+                        function runPipelineMediaGeneration() {
                         // Generate Media (N variations, per the Number of Images field)
                         let generatedCount = 0;
                         const totalToGenerate = mediaType === 'image' ? (parseInt($('#pipelineImageCount').val(), 10) || 1) : 3;
@@ -2476,6 +2518,9 @@ $(document).ready(function () {
                         }
 
                         generateNextMedia();
+                        }
+
+                        runPipelineMediaGeneration();
                     }
                 } else {
                     showPipelineError('Caption generation failed.');
@@ -3031,10 +3076,17 @@ $(document).ready(function () {
 
                         showPipelineStageDetail(window.pipelineHistory.indexOf(pipeline), 'asset_generated');
                     } else {
+                        // Chain straight into media generation once the caption
+                        // comes back - see the matching change in
+                        // startPipelineGeneration() for the main workflow.
+                        const modalMediaLabel = mediaType === 'video' ? 'Video' : 'Image';
+                        $('#modalPipelineOutputContent').html(mediaGenSkeletonHtml(`Generating ${modalMediaLabel.toLowerCase()}...`));
+
+                        function runModalPipelineMediaGeneration() {
                         // For image/video, just simulate or trigger generation like in main workflow
                         let generatedCount = 0;
                         const totalToGenerate = mediaType === 'image' ? (parseInt($('#modalPipelineImageCount').val(), 10) || 1) : 3;
-                        $('#modalPipelineLoader').html(`<i class="fas fa-spinner fa-spin me-2"></i>Rendering media variation 1 of ${totalToGenerate}...`);
+                        $('#modalPipelineOutputContent').html(mediaGenSkeletonHtml(`Rendering media variation 1 of ${totalToGenerate}...`));
 
                         function generateNextMedia() {
                             if (generatedCount >= totalToGenerate) {
@@ -3123,6 +3175,9 @@ $(document).ready(function () {
                         }
 
                         generateNextMedia();
+                        }
+
+                        runModalPipelineMediaGeneration();
                     }
                 } else {
                     $('#startModalPipelineBtn').prop('disabled', false);

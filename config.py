@@ -5,6 +5,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _key_prefix(value: str) -> str:
+    """S3 key prefix with one trailing slash: 'uploads' -> 'uploads/', '' -> '' (bucket root)."""
+    value = (value or "").strip().strip("/")
+    return f"{value}/" if value else ""
+
+
 class Config:
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key")
     UPLOAD_FOLDER = "static/uploads"
@@ -14,6 +20,10 @@ class Config:
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     PERMANENT_SESSION_LIFETIME = 60 * 60 * 24 * 7  # 7 days
+
+    # Slider-puzzle check before signup (auth/captcha.py)
+    CAPTCHA_ENABLED = os.getenv("CAPTCHA_ENABLED", "true").lower() in ("1", "true", "yes")
+    CAPTCHA_TOLERANCE_PX = int(os.getenv("CAPTCHA_TOLERANCE_PX", "6"))
     # API Keys
     YOUTUBE_CLIENT_ID = os.getenv("YOUTUBE_CLIENT_ID")
     YOUTUBE_CLIENT_SECRET = os.getenv("YOUTUBE_CLIENT_SECRET")
@@ -24,6 +34,34 @@ class Config:
     Z_AI_BASE_URL = os.getenv("Z_AI_BASE_URL", "https://api.z.ai/api/paas/v4/")
     KIE_API_KEY = os.getenv("KIE_API_KEY")
 
+    # HeyRoute (https://heyroute.ai) - OpenAI-compatible gateway. A HeyRoute
+    # key can only call the models of the group it was created in, so each
+    # purpose has its own key: SMAI (reasoning, codex-plus group), SMAI-Image
+    # (gemini group) and SMAI-Video (grok group). Each is used only when set;
+    # otherwise the existing providers (kie.ai, OpenRouter, Gemini, Bedrock)
+    # are used exactly as before.
+    HEYROUTE_BASE_URL = os.getenv("HEYROUTE_BASE_URL", "https://heyroute.ai/v1").rstrip("/")
+    HEYROUTE_API_KEY = os.getenv("HEYROUTE_API_KEY")  # reasoning / text (SMAI)
+    HEYROUTE_IMAGE_API_KEY = os.getenv("HEYROUTE_IMAGE_API_KEY")  # SMAI-Image
+    HEYROUTE_VIDEO_API_KEY = os.getenv("HEYROUTE_VIDEO_API_KEY")  # SMAI-Video
+    HEYROUTE_LLM_MODEL = os.getenv("HEYROUTE_LLM_MODEL", "gpt-5.6-terra")
+    # Seconds one LLM request may take before it is abandoned (1 retry).
+    HEYROUTE_LLM_TIMEOUT = int(os.getenv("HEYROUTE_LLM_TIMEOUT", "120"))
+    # none / minimal / low / medium / high - "low" keeps agent calls fast; the
+    # model still reasons before answering.
+    HEYROUTE_REASONING_EFFORT = os.getenv("HEYROUTE_REASONING_EFFORT", "medium")
+    HEYROUTE_IMAGE_MODEL = os.getenv("HEYROUTE_IMAGE_MODEL", "gemini-3.1-flash-lite-preview")
+    #gemini-3.1-flash-lite-preview , gemini-3.1-flash-image
+    # Video is generated ONLY through HeyRoute (HEYROUTE_VIDEO_API_KEY) - no
+    # other video provider is tried. grok-video: text-to-video, 6/10/15 s only,
+    # no reference image. Optionally a second HeyRoute model to try if the
+    # first fails (e.g. grok-imagine-video-1.5); empty = none.
+    HEYROUTE_VIDEO_MODEL = os.getenv("HEYROUTE_VIDEO_MODEL", "gemini-3.1-flash-lite")
+    HEYROUTE_VIDEO_FALLBACK_MODEL = os.getenv("HEYROUTE_VIDEO_FALLBACK_MODEL", "")
+    HEYROUTE_VIDEO_RESOLUTION = os.getenv("HEYROUTE_VIDEO_RESOLUTION", "720p")
+    HEYROUTE_VIDEO_SECONDS = int(os.getenv("HEYROUTE_VIDEO_SECONDS", "8"))
+    HEYROUTE_VIDEO_TIMEOUT = int(os.getenv("HEYROUTE_VIDEO_TIMEOUT", "900"))
+
     # SMTP - approval-notification emails
     SMTP_HOST = os.getenv("SMTP_HOST")
     SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
@@ -31,6 +69,8 @@ class Config:
     SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
     SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL") or os.getenv("SMTP_USERNAME")
     APPROVAL_NOTIFY_EMAIL = os.getenv("APPROVAL_NOTIFY_EMAIL")
+    # Inbox that receives "Contact Sales" leads from the Enterprise onboarding step
+    SALES_EMAIL = os.getenv("SALES_EMAIL", "")
     # Optional override for absolute links in emails (e.g. approval request
     # links) when the app isn't reachable at the request's own host (behind a
     # reverse proxy, etc). Falls back to the incoming request's own host.
@@ -38,6 +78,9 @@ class Config:
 
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
     GEMINI_VIDEO_MODEL = os.getenv("GEMINI_VIDEO_MODEL", "veo-3.1-generate-preview")
+    # Veo 3.1 accepts only 4, 6 or 8 seconds (8 when a reference image is
+    # given); any other value is rejected, e.g. the 5 previously hard-coded.
+    GEMINI_VIDEO_DURATION = int(os.getenv("GEMINI_VIDEO_DURATION", "8"))
     GENERATE_NATIVE_AUDIO = os.getenv("GENERATE_NATIVE_AUDIO", "true").lower() == "true"
 
     # Mock LLM Mode toggle (true/false)
@@ -50,6 +93,13 @@ class Config:
     AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
     AWS_S3_BUCKET = os.getenv("AWS_S3_BUCKET")
     AWS_BUCKET_OWNER = os.getenv("AWS_BUCKET_OWNER")  # Optional 12-digit account ID
+
+    # S3 copy of generated content + user uploads (services/storage_service.py).
+    # Files stay under static/uploads/ locally and keep their /static/uploads/
+    # URLs; S3 is the durable copy and refills the disk when a file is missing.
+    # Empty = disabled.
+    S3_MEDIA_BUCKET = os.getenv("S3_MEDIA_BUCKET", "")
+    S3_MEDIA_PREFIX = _key_prefix(os.getenv("S3_MEDIA_PREFIX", "uploads"))
 
     # Media provider selection: 'bedrock', 'zai', 'openrouter', 'openai'
     MEDIA_PROVIDER = os.getenv("MEDIA_PROVIDER")
