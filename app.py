@@ -155,7 +155,20 @@ def create_app(config_name="development"):
         truth."""
         if get_current_user_id():
             return redirect(url_for("index"))
-        return render_template("signup.html", captcha_enabled=app.config.get("CAPTCHA_ENABLED", True))
+        # /signup?invite=<token> - from an admin's invitation email
+        invite_token = (request.args.get("invite") or "").strip()
+        invite = None
+        if invite_token:
+            from db import get_open_invitation_by_token
+
+            invite = get_open_invitation_by_token(invite_token)
+        return render_template(
+            "signup.html",
+            captcha_enabled=app.config.get("CAPTCHA_ENABLED", True),
+            invite=invite,
+            invite_token=invite_token if invite else None,
+            invite_invalid=bool(invite_token and not invite),
+        )
 
     @app.route("/forgot-password")
     def forgot_password_page():

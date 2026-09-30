@@ -428,6 +428,88 @@ def _build_password_reset_html(name: str, reset_url: str, ttl_minutes: int) -> s
 """
 
 
+def _build_invitation_html(
+    name: str | None, inviter_name: str | None, accept_url: str, message: str | None, expires_days: int
+) -> str:
+    """Admin -> Invitations. Same look as the password-reset email (brand
+    gradient header, white card, purple button)."""
+    first_name = (name or "").strip().split(" ")[0]
+    greeting = f"Hi {_escape(first_name)}," if first_name else "Hi there,"
+    inviter = _escape(inviter_name) if inviter_name else "The AVIR AI team"
+    message_block = (
+        f"""
+                    <tr>
+                        <td style="padding: 0 32px 8px 32px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                                   style="background-color: #f5f3ff; border-left: 3px solid #8a2be2; border-radius: 8px;">
+                                <tr>
+                                    <td style="padding: 14px 16px; color: #3b3355; font-size: 14px; line-height: 1.6;">
+                                        <div style="font-size: 12px; font-weight: 700; color: #8a2be2; margin-bottom: 4px;">A note from {inviter}</div>
+                                        {_escape(message)}
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
+        if message
+        else ""
+    )
+    return f"""<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 0; background-color: #f8f9fc; font-family: 'Segoe UI', Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fc; padding: 32px 0;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="560" cellpadding="0" cellspacing="0"
+                       style="background-color: #ffffff; border: 1px solid #e6e8ef; border-radius: 16px; overflow: hidden;">
+                    <tr>
+                        <td style="background-color: #8a2be2; background-image: linear-gradient(135deg, #8a2be2 0%, #4169e1 100%); padding: 32px; text-align: center;">
+                            <div style="color: #ffffff; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.85;">AVIR AI</div>
+                            <div style="color: #ffffff; font-size: 22px; font-weight: 700; margin-top: 6px;">You're invited to AVIR AI</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 32px 32px 16px 32px; color: #172033; font-size: 15px; line-height: 1.6;">
+                            {greeting}<br><br>
+                            <strong>{inviter}</strong> has invited you to join <strong>AVIR AI</strong> - the AI studio that turns
+                            one brief into on-brand posts, captions, hashtags and images for every social channel.
+                        </td>
+                    </tr>{message_block}
+                    <tr>
+                        <td style="padding: 8px 32px 0 32px; color: #475467; font-size: 14px; line-height: 1.7;">
+                            With your account you can:
+                            <ul style="margin: 8px 0 0 0; padding-left: 20px;">
+                                <li>Create posts for LinkedIn, Instagram and Facebook in minutes</li>
+                                <li>Keep every caption and image on-brand automatically</li>
+                                <li>Send content for approval before it goes live</li>
+                            </ul>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td align="center" style="padding: 28px 32px 32px 32px;">
+                            <a href="{_escape(accept_url)}"
+                               style="display: inline-block; background-color: #8a2be2; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 6px;">
+                                Accept invitation
+                            </a>
+                            <div style="color: #667085; font-size: 12px; margin-top: 12px;">This invitation expires in {expires_days} days and can only be used once.</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 16px 32px; background-color: #f8f9fc; border-top: 1px solid #e6e8ef; color: #667085; font-size: 12px; line-height: 1.6;">
+                            Button not working? Copy this link into your browser:<br>
+                            <a href="{_escape(accept_url)}" style="color: #8a2be2; word-break: break-all;">{_escape(accept_url)}</a><br><br>
+                            If you weren't expecting this invitation, you can safely ignore this email.
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+
+
 def _build_sales_lead_html(user_name: str, user_email: str, company_name: str, phone: str | None, message: str | None) -> str:
     phone_row = (
         f"""<tr><td style="padding: 4px 0; color: #6b7280; font-size: 13px;"><strong style="color: #374151;">Phone:</strong> {_escape(phone)}</td></tr>"""
@@ -614,6 +696,41 @@ class EmailService:
         msg["From"] = self.from_email
         msg["To"] = to_email
         msg.attach(MIMEText(_build_password_reset_html(name, reset_url, ttl_minutes), "html"))
+
+        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
+            server.starttls()
+            server.login(self.username, self.password)
+            server.sendmail(self.from_email, [to_email], msg.as_string())
+
+        return {"success": True, "recipient": to_email}
+
+    def send_invitation_email(
+        self,
+        to_email: str,
+        name: str | None,
+        inviter_name: str | None,
+        accept_url: str,
+        message: str | None = None,
+        expires_days: int = 7,
+    ) -> dict:
+        """Sent from Admin -> Invitations (api/routes.py /api/admin/invitations)."""
+        if not self.enabled:
+            raise RuntimeError(
+                "SMTP is not configured. Set SMTP_HOST, SMTP_USERNAME and SMTP_PASSWORD in .env."
+            )
+
+        from email.utils import formataddr, parseaddr
+
+        msg = MIMEMultipart("mixed")
+        inviter = inviter_name or "AVIR AI"
+        msg["Subject"] = f"{inviter} invited you to AVIR AI"
+        # Inbox shows "Janak via AVIR AI" as the sender (the address stays ours)
+        sender = f"{inviter_name} via AVIR AI" if inviter_name else "AVIR AI"
+        msg["From"] = formataddr((sender, parseaddr(self.from_email)[1] or self.from_email))
+        msg["To"] = to_email
+        msg.attach(
+            MIMEText(_build_invitation_html(name, inviter_name, accept_url, message, expires_days), "html")
+        )
 
         with smtplib.SMTP(self.host, self.port, timeout=30) as server:
             server.starttls()

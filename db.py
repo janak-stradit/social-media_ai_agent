@@ -189,6 +189,31 @@ class CreditRequest(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
 
 
+class UserInvitation(Base):
+    """An admin's email invitation to join (Admin -> Invitations). The emailed
+    link carries `token`; signing up through it verifies the email right away."""
+
+    __tablename__ = "user_invitations"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token: Mapped[str] = mapped_column(String(128), nullable=False, unique=True, index=True)
+    invited_by_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=True
+    )
+    # The name the email is signed with ("Janak has invited you") - typed by the
+    # admin; falls back to their account name.
+    inviter_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class RunHistory(Base):
     __tablename__ = "run_history"
     __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
@@ -478,6 +503,7 @@ def init_db():
 
         profile_tbl = f'"{SCHEMA}".user_brand_profiles' if not IS_SQLITE else "user_brand_profiles"
         approval_tbl = f'"{SCHEMA}".approval_requests' if not IS_SQLITE else "approval_requests"
+        invite_tbl = f'"{SCHEMA}".user_invitations' if not IS_SQLITE else "user_invitations"
         for alter_cmd in [
             f"ALTER TABLE {profile_tbl} ADD COLUMN company_name VARCHAR(255)",
             f"ALTER TABLE {profile_tbl} ADD COLUMN suggested_post_ideas TEXT",
@@ -500,6 +526,7 @@ def init_db():
             f"ALTER TABLE {profile_tbl} ADD COLUMN compliance_confirmed_at TIMESTAMP",
             f"ALTER TABLE {approval_tbl} ADD COLUMN compliance TEXT",
             f"ALTER TABLE {approval_tbl} ADD COLUMN reviewer_email VARCHAR(255)",
+            f"ALTER TABLE {invite_tbl} ADD COLUMN inviter_name VARCHAR(255)",
         ]:
             try:
                 with engine.begin() as sub_conn:
@@ -1078,6 +1105,134 @@ def append_run_media(run_id: int, platform: str, media_type: str, media: dict, u
     media_store = platform_data.setdefault("media", {})
     media_store[media_type] = media
     return update_run_content(run_id, content, user_id=user_id)
+
+
+def get_system_usage_totals() -> dict:
+    """All-time totals across every user's runs (Admin -> Global Cost History)."""
+    with Session(engine) as session:
+        row = session.query(
+            func.count(RunHistory.id),
+            func.coalesce(func.sum(RunHistory.cost_usd), 0.0),
+            func.coalesce(func.sum(RunHistory.tokens_used), 0),
+        ).first()
+    runs, cost, tokens = row if row else (0, 0.0, 0)
+    return {"total_runs": int(runs or 0), "total_system_cost_usd": round(float(cost or 0.0), 6), "total_tokens": int(tokens or 0)}
+
+
+INVITATION_TTL = timedelta(days=7)
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
+
+
+def _invitation_status(row: "UserInvitation") -> str:
+    if row.accepted_at:
+        return "accepted"
+    if row.revoked_at:
+        return "revoked"
+    if _as_utc(row.expires_at) <= datetime.now(timezone.utc):
+        return "expired"
+    return "pending"
+
+
+def _serialize_invitation(row: "UserInvitation", inviter_name: str | None = None) -> dict:
+    return {
+        "id": row.id,
+        "email": row.email,
+        "name": row.name,
+        "message": row.message,
+        "status": _invitation_status(row),
+        # The name typed for the email wins over the admin's account name
+        "invited_by": row.inviter_name or inviter_name,
+        "sent_at": _as_utc(row.sent_at).isoformat() if row.sent_at else None,
+        "expires_at": _as_utc(row.expires_at).isoformat() if row.expires_at else None,
+        "accepted_at": _as_utc(row.accepted_at).isoformat() if row.accepted_at else None,
+    }
+
+
+def upsert_invitation(
+    email: str,
+    name: str | None,
+    message: str | None,
+    invited_by_user_id: int,
+    token: str,
+    inviter_name: str | None = None,
+) -> dict:
+    """Creates an invitation, or refreshes the open one for this email (new
+    token + expiry - the previous link stops working). Returns it serialized."""
+    email = email.strip().lower()
+    now = _utcnow()
+    with Session(engine) as session:
+        row = (
+            session.query(UserInvitation)
+            .filter(UserInvitation.email == email, UserInvitation.accepted_at.is_(None))
+            .order_by(UserInvitation.created_at.desc())
+            .first()
+        )
+        if row is None:
+            row = UserInvitation(email=email)
+            session.add(row)
+        row.name = (name or "").strip() or row.name
+        row.message = (message or "").strip() or None
+        row.token = token
+        row.invited_by_user_id = invited_by_user_id
+        row.inviter_name = (inviter_name or "").strip()[:255] or row.inviter_name
+        row.sent_at = now
+        row.expires_at = now + INVITATION_TTL
+        row.revoked_at = None
+        session.commit()
+        session.refresh(row)
+        inviter = session.get(User, invited_by_user_id)
+        return _serialize_invitation(row, inviter.name if inviter else None)
+
+
+def list_invitations(limit: int = 100) -> list[dict]:
+    with Session(engine) as session:
+        rows = session.query(UserInvitation).order_by(UserInvitation.sent_at.desc()).limit(limit).all()
+        names = {u.id: u.name for u in session.query(User.id, User.name).all()}
+        return [_serialize_invitation(r, names.get(r.invited_by_user_id)) for r in rows]
+
+
+def get_invitation(invitation_id: int) -> dict | None:
+    with Session(engine) as session:
+        row = session.get(UserInvitation, invitation_id)
+        if not row:
+            return None
+        inviter = session.get(User, row.invited_by_user_id) if row.invited_by_user_id else None
+        return _serialize_invitation(row, inviter.name if inviter else None)
+
+
+def get_open_invitation_by_token(token: str) -> dict | None:
+    """The invitation behind a signup link - only while it's still pending."""
+    if not token:
+        return None
+    with Session(engine) as session:
+        row = session.query(UserInvitation).filter(UserInvitation.token == token).first()
+        if not row or _invitation_status(row) != "pending":
+            return None
+        inviter = session.get(User, row.invited_by_user_id) if row.invited_by_user_id else None
+        return _serialize_invitation(row, inviter.name if inviter else None)
+
+
+def mark_invitation_accepted(invitation_id: int) -> None:
+    with Session(engine) as session:
+        row = session.get(UserInvitation, invitation_id)
+        if row and not row.accepted_at:
+            row.accepted_at = _utcnow()
+            session.commit()
+
+
+def revoke_invitation(invitation_id: int) -> bool:
+    with Session(engine) as session:
+        row = session.get(UserInvitation, invitation_id)
+        if not row or row.accepted_at:
+            return False
+        row.revoked_at = _utcnow()
+        session.commit()
+        return True
 
 
 def add_run_cost(run_id: int, amount_usd: float, user_id: int) -> bool:

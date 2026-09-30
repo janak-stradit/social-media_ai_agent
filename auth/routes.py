@@ -22,7 +22,9 @@ from db import (
     get_user_by_email,
     get_user_by_id,
     get_user_by_password_reset_token_hash,
+    get_open_invitation_by_token,
     get_user_by_verification_token,
+    mark_invitation_accepted,
     mark_user_email_verified,
     reset_user_password,
     set_user_password_reset_token,
@@ -110,6 +112,27 @@ def register():
         return jsonify({"success": False, "error": "Password must be at least 6 characters"}), 400
     if get_user_by_email(email):
         return jsonify({"success": False, "error": "An account with this email already exists"}), 409
+
+    # Signing up through an admin's invitation link (Admin -> Invitations):
+    # the link was emailed to this address, which proves it's theirs - so no
+    # captcha and no verification email; they're signed in straight away.
+    invite_token = (data.get("invite_token") or "").strip()
+    if invite_token:
+        invitation = get_open_invitation_by_token(invite_token)
+        if not invitation:
+            return jsonify(
+                {"success": False, "error": "This invitation link has expired or was already used. Ask for a new one."}
+            ), 400
+        if invitation["email"] != email:
+            return jsonify({"success": False, "error": "Please sign up with the email address that was invited."}), 400
+        user = create_user(name, email, generate_password_hash(password))
+        mark_user_email_verified(user["id"])
+        mark_invitation_accepted(invitation["id"])
+        session.clear()
+        session["user_id"] = user["id"]
+        session.permanent = True
+        return jsonify({"success": True, "redirect": url_for("onboarding_page")})
+
     # Checked last so a typo'd form doesn't burn the one-use token.
     if Config.CAPTCHA_ENABLED and not consume_pass_token(data.get("captcha_token")):
         return jsonify({

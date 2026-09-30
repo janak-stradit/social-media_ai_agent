@@ -48,6 +48,7 @@ try:
         get_history,
         get_latest_approval_request_for_pipeline,
         get_run_by_id,
+        get_user_by_email,
         get_user_by_id,
         get_user_credit_requests,
         get_user_scheduled_posts,
@@ -2111,6 +2112,127 @@ def admin_get_all_users():
         return jsonify({"error": str(e), "success": False}), 500
 
 
+# ── Admin: email invitations ─────────────────────────────────────────────
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _send_invitation(invitation: dict, token: str) -> None:
+    """Emails an invitation (raises on SMTP failure). The link opens /signup
+    with the email pre-filled; signing up through it verifies the email."""
+    from services.email_service import EmailService
+
+    base = (Config.APP_BASE_URL or request.host_url).rstrip("/")
+    EmailService().send_invitation_email(
+        to_email=invitation["email"],
+        name=invitation.get("name"),
+        inviter_name=invitation.get("invited_by"),
+        accept_url=f"{base}/signup?invite={token}",
+        message=invitation.get("message"),
+        expires_days=7,
+    )
+
+
+@api_bp.route("/admin/invitations", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_list_invitations():
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import list_invitations
+
+    me = get_user_by_id(get_current_user_id())
+    # Pre-fills "Your name (shown in the email)" in the Invite panel
+    return jsonify({"success": True, "invitations": list_invitations(), "default_inviter_name": me.name if me else ""})
+
+
+@api_bp.route("/admin/invitations", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_create_invitation():
+    """Invite someone by email. Re-inviting a pending address refreshes its
+    link (the old one stops working) and sends the email again."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    data = request.get_json() or {}
+    email = (data.get("email") or "").strip().lower()
+    name = (data.get("name") or "").strip()[:255]
+    message = (data.get("message") or "").strip()[:1000]
+    inviter_name = (data.get("inviter_name") or "").strip()[:255]
+    if not _EMAIL_RE.match(email):
+        return jsonify({"success": False, "error": "Enter a valid email address."}), 400
+    if get_user_by_email(email):
+        return jsonify({"success": False, "error": "This email already has an AVIR AI account."}), 409
+
+    import secrets
+
+    from db import upsert_invitation
+
+    token = secrets.token_urlsafe(32)
+    invitation = upsert_invitation(email, name, message, get_current_user_id(), token, inviter_name=inviter_name)
+    try:
+        _send_invitation(invitation, token)
+    except Exception as e:
+        current_app.logger.warning(f"[Invite] Could not email {email}: {e}")
+        return jsonify(
+            {
+                "success": False,
+                "invitation": invitation,
+                "error": f"The invitation was saved but the email couldn't be sent: {e}",
+            }
+        ), 502
+    return jsonify({"success": True, "invitation": invitation})
+
+
+@api_bp.route("/admin/invitations/<int:invitation_id>/resend", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_resend_invitation(invitation_id):
+    """New link + 7 more days, emailed again (also revives an expired/revoked invite)."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import get_invitation
+
+    existing = get_invitation(invitation_id)
+    if not existing:
+        return jsonify({"success": False, "error": "Invitation not found."}), 404
+    if existing["status"] == "accepted" or get_user_by_email(existing["email"]):
+        return jsonify({"success": False, "error": "This person has already joined."}), 409
+
+    import secrets
+
+    from db import upsert_invitation
+
+    token = secrets.token_urlsafe(32)
+    # Keeps the name the original invitation was signed with
+    invitation = upsert_invitation(
+        existing["email"],
+        existing.get("name"),
+        existing.get("message"),
+        get_current_user_id(),
+        token,
+        inviter_name=existing.get("invited_by"),
+    )
+    try:
+        _send_invitation(invitation, token)
+    except Exception as e:
+        return jsonify({"success": False, "error": f"The email couldn't be sent: {e}"}), 502
+    return jsonify({"success": True, "invitation": invitation})
+
+
+@api_bp.route("/admin/invitations/<int:invitation_id>/revoke", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_revoke_invitation(invitation_id):
+    """The emailed link stops working immediately."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import revoke_invitation
+
+    if not revoke_invitation(invitation_id):
+        return jsonify({"success": False, "error": "Invitation not found or already accepted."}), 404
+    return jsonify({"success": True})
+
+
 @api_bp.route("/admin/users/<int:target_user_id>/active", methods=["POST"])
 @login_required_api
 @admin_required_api
@@ -2297,18 +2419,10 @@ def admin_get_global_cost_history():
         limit = min(int(request.args.get("limit", 100)), 500)
         history = get_global_cost_history(limit=limit)
 
-        # Calculate total aggregate cost across history
-        total_system_cost = sum(h.get("cost_usd", 0.0) for h in history)
-        total_tokens = sum(h.get("tokens_used", 0) for h in history)
+        # All-time totals from the database - not just the rows listed here
+        from db import get_system_usage_totals
 
-        return jsonify(
-            {
-                "success": True,
-                "history": history,
-                "count": len(history),
-                "summary": {"total_system_cost_usd": round(total_system_cost, 6), "total_tokens": total_tokens},
-            }
-        )
+        return jsonify({"success": True, "history": history, "count": len(history), "summary": get_system_usage_totals()})
     except Exception as e:
         return jsonify({"error": str(e), "success": False}), 500
 
