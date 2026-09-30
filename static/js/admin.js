@@ -133,9 +133,45 @@ $(document).ready(function () {
         `);
     }
 
+    // Brand configuration state per user (db._brand_status)
+    const BRAND_SCAN_ERRORS = {
+        // codes from services/website_scraper_service.py FAILURE_REASONS + brand_profile_service
+        invalid_url: 'invalid website address', unsafe_url: 'not a public website', unreachable: "couldn't reach the site",
+        timeout: 'site took too long', blocked: 'site blocked automated access', http_error: 'site returned an error',
+        not_html: 'not a web page', thin_content: 'too little text on the site', analysis_failed: 'AI analysis failed'
+    };
+    function brandSite(url) {
+        if (!url) return '';
+        const label = String(url).replace(/^https?:\/\//, '').replace(/\/$/, '');
+        const href = /^https?:\/\//.test(url) ? url : `https://${url}`;
+        return `<a href="${escapeAttr(href)}" target="_blank" rel="noopener" title="${escapeAttr(url)}">${escapeHtml(label)}</a>`;
+    }
+    function brandStatusCell(b) {
+        b = b || { status: 'not_onboarded' };
+        const cell = (badge, detail) => `<div class="admin-brand">${badge}${detail ? `<div class="admin-brand-detail">${detail}</div>` : ''}</div>`;
+        switch (b.status) {
+            case 'configured':
+                return cell('<span class="admin-brand-badge ok"><i class="fas fa-circle-check"></i>Configured</span>',
+                    [b.company_name ? `<strong class="text-dark">${escapeHtml(b.company_name)}</strong>` : '', brandSite(b.website)].filter(Boolean).join(' · ')
+                    + (b.analyzed_at ? `<div>Analyzed ${escapeHtml(b.analyzed_at)}${b.compliance_confirmed ? ' · <span title="Compliance rules confirmed by the user">compliance ✓</span>' : ''}</div>` : ''));
+            case 'analyzing':
+                return cell('<span class="admin-brand-badge busy"><i class="fas fa-spinner fa-spin"></i>Analyzing website</span>', brandSite(b.website));
+            case 'failed':
+                return cell('<span class="admin-brand-badge fail"><i class="fas fa-circle-exclamation"></i>Scan failed</span>',
+                    [escapeHtml(BRAND_SCAN_ERRORS[b.error] || (b.error || '').replace(/_/g, ' ')), brandSite(b.website)].filter(Boolean).join(' · '));
+            case 'not_set_up':
+                return cell('<span class="admin-brand-badge todo"><i class="fas fa-hourglass-half"></i>Not set up</span>',
+                    b.website ? brandSite(b.website) : 'Skipped the website at onboarding');
+            case 'company':
+                return cell('<span class="admin-brand-badge company"><i class="fas fa-building"></i>Company brand</span>', 'Uses the shared Brand Configuration');
+            default:
+                return cell('<span class="admin-brand-badge none">Not onboarded</span>', 'No account type chosen yet');
+        }
+    }
+
     function renderAdminUsersTable(users) {
         if (!users.length) {
-            $('#adminUsersTbody').html('<tr><td colspan="5" class="text-center py-5 text-muted">No users match these filters.</td></tr>');
+            $('#adminUsersTbody').html('<tr><td colspan="6" class="text-center py-5 text-muted">No users match these filters.</td></tr>');
             return;
         }
         $('#adminUsersTbody').html(users.map(u => {
@@ -161,6 +197,7 @@ $(document).ready(function () {
                         </div>
                     </td>
                     <td>${accountTypeBadge(u)}</td>
+                    <td>${brandStatusCell(u.brand)}</td>
                     <td>
                         <div class="admin-credit">
                             <div class="admin-credit-top"><span><strong>${money(used)}</strong> of ${money(limit)}</span><span>${Math.round(pct)}%</span></div>
@@ -175,7 +212,7 @@ $(document).ready(function () {
                             <button type="button" class="btn-xs btn-xs-credit-add" onclick="adminAddCredits(${u.id}, 50)" title="Add $50 to the credit limit">+$50</button>
                             <div class="dropdown">
                                 <button type="button" class="btn-xs btn-xs-outline-neutral admin-kebab" id="${menuId}" data-bs-toggle="dropdown"
-                                        data-bs-popper-config='{"strategy":"fixed"}' aria-expanded="false" aria-label="More actions for ${escapeAttr(u.name)}">
+                                        data-bs-display="static" aria-expanded="false" aria-label="More actions for ${escapeAttr(u.name)}">
                                     <i class="fas fa-ellipsis"></i>
                                 </button>
                                 <ul class="dropdown-menu dropdown-menu-end admin-menu" aria-labelledby="${menuId}">
@@ -529,15 +566,18 @@ $(document).ready(function () {
 
                 let html = '';
                 if (!history.length) {
-                    html = '<tr><td colspan="7" class="text-center py-4 text-muted">No generation history recorded.</td></tr>';
+                    html = '<tr><td colspan="8" class="text-center py-4 text-muted">No generation history recorded.</td></tr>';
                 } else {
                     history.forEach(h => {
+                        // Image/video charged outside a saved run (e.g. Analysis Dashboard): no run details
+                        const isCharge = h.kind === 'media_charge';
                         html += `
-                            <tr>
-                                <td>#${h.id}</td>
+                            <tr class="${isCharge ? '' : 'run-row'}" ${isCharge ? 'title="Image generated outside a Studio Chat post (e.g. Analysis Dashboard)"' : `onclick="openRunDetails(${h.id})" title="View everything this run generated"`}>
+                                <td>${isCharge ? '<span class="run-video-badge" style="height:auto;padding:2px 8px">Image charge</span>' : `#${h.id}`}</td>
                                 <td>${escapeHtml(h.user_email)}</td>
                                 <td>${h.timestamp}</td>
-                                <td style="max-width: 280px;" class="text-truncate" title="${escapeAttr(h.story)}">${escapeHtml(h.story)}</td>
+                                <td><div class="run-excerpt">${escapeHtml(h.story)}</div></td>
+                                <td>${runThumbsHtml(h.media)}</td>
                                 <td><span class="badge bg-secondary me-1">${h.tone || 'Auto'}</span> <small class="text-muted">${(h.platforms || []).join(', ')}</small></td>
                                 <td><span class="font-monospace">${Number(h.tokens_used).toLocaleString()}</span></td>
                                 <td><strong class="text-warning font-monospace">$${Number(h.cost_usd).toFixed(6)}</strong></td>
@@ -551,6 +591,99 @@ $(document).ready(function () {
     }
 
     // ── Init ──────────────────────────────────────────────────────────────
+
+    // ── Global Cost History: thumbnails + run details panel ──────────────
+    function runThumbsHtml(media) {
+        const images = (media && media.images) || [];
+        const videos = (media && media.videos) || [];
+        if (!images.length && !videos.length) return '<span class="run-no-media">Text only</span>';
+        const shown = images.slice(0, 3).map(u => `<img class="run-thumb" src="${escapeAttr(u)}" alt="" loading="lazy">`).join('');
+        const more = images.length > 3 ? `<span class="run-thumb-more">+${images.length - 3}</span>` : '';
+        const video = videos.length ? `<span class="run-video-badge" title="${videos.length} video(s)"><i class="fas fa-video"></i></span>` : '';
+        return `<div class="run-thumbs">${shown}${more}${video}</div>`;
+    }
+
+    const PLATFORM_LABELS = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube' };
+    const PLATFORM_ICONS = { linkedin: 'fab fa-linkedin', facebook: 'fab fa-facebook', instagram: 'fab fa-instagram', youtube: 'fab fa-youtube' };
+
+    window.openRunDetails = function (runId) {
+        $('#runDetailsTitle').html(`<i class="fas fa-layer-group text-primary me-2"></i>Run #${runId}`);
+        $('#runDetailsBody').html('<div class="text-center text-muted py-5"><i class="fas fa-spinner fa-spin me-2"></i>Loading run...</div>');
+        $('#runDetailsBackdrop, #runDetailsPanel').addClass('open');
+        $.getJSON(`/api/admin/runs/${runId}`).done(function (r) {
+            const run = r.run || {};
+            $('#runDetailsTitle').html(`<i class="fas fa-layer-group text-primary me-2"></i>Run #${Number(run.id || runId)}`);
+            const outputs = (run.outputs || []).map(o => {
+                const q = o.quality || {};
+                const checks = q.checks_total ? `<span class="run-chip${q.checks_passed < q.checks_total ? ' warn' : ''}">${q.checks_passed}/${q.checks_total} checks</span>` : '';
+                const rewritten = q.rewritten ? '<span class="run-chip warn">caption rewritten</span>' : '';
+                const flags = o.compliance_flags ? `<span class="run-chip warn">${o.compliance_flags} compliance flag${o.compliance_flags === 1 ? '' : 's'}</span>` : '';
+                const image = o.image ? `<img class="run-output-image" src="${escapeAttr(o.image.url)}" alt="Generated image" onclick="adminPreviewImage('${escapeAttr(o.image.url)}')">` : '';
+                const video = o.video ? `<video class="run-output-image" src="${escapeAttr(o.video.url)}" controls preload="metadata"></video>` : '';
+                const prompt = (o.image && o.image.prompt) || o.media_prompt;
+                return `
+                    <div class="run-output">
+                        <div class="run-output-head">
+                            <span class="run-platform"><i class="${PLATFORM_ICONS[o.platform] || 'fas fa-share-nodes'}"></i>${escapeHtml(PLATFORM_LABELS[o.platform] || o.platform)}</span>
+                            <span class="d-flex gap-1 flex-wrap justify-content-end">${checks}${rewritten}${flags}</span>
+                        </div>
+                        ${image}${video}
+                        ${o.caption ? `<div class="run-caption">${escapeHtml(o.caption)}</div>` : '<div class="run-caption text-muted">No caption saved.</div>'}
+                        ${o.hashtags.length ? `<div class="run-tags">${o.hashtags.map(t => `<span>${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+                        ${prompt ? `<details class="run-prompt"><summary>${o.image ? 'Image prompt' : 'Media prompt'}</summary><div class="mt-1">${escapeHtml(prompt)}</div></details>` : ''}
+                    </div>`;
+            }).join('');
+            const agents = (run.agents || []).map(a => `<li><strong>${escapeHtml(a.name || '')}</strong> - ${escapeHtml(a.role || '')}</li>`).join('');
+            $('#runDetailsBody').html(`
+                <div class="run-meta">
+                    <div><span>User</span><strong title="${escapeAttr(run.user_email)}">${escapeHtml(run.user_name)}</strong></div>
+                    <div><span>When</span><strong>${escapeHtml(run.timestamp || '')}</strong></div>
+                    <div><span>Tone</span><strong>${escapeHtml(run.tone || 'Auto')}</strong></div>
+                    <div><span>Platforms</span><strong>${escapeHtml((run.platforms || []).map(p => PLATFORM_LABELS[p] || p).join(', ') || '—')}</strong></div>
+                    <div><span>Tokens</span><strong>${Number(run.tokens_used || 0).toLocaleString()}</strong></div>
+                    <div><span>Cost</span><strong>$${Number(run.cost_usd || 0).toFixed(4)}</strong></div>
+                </div>
+                <div class="run-section-title">Brief / prompt</div>
+                <div class="run-brief">${escapeHtml(run.story || '')}</div>
+                <div class="run-section-title">Generated content</div>
+                ${outputs || '<div class="text-muted small">Nothing was saved for this run.</div>'}
+                ${agents ? `<div class="run-section-title">Pipeline</div><ul class="run-agents">${agents}</ul>` : ''}
+            `);
+        }).fail(function (xhr) {
+            $('#runDetailsBody').html(`<div class="alert-inline alert-inline-danger">${escapeHtml((xhr.responseJSON || {}).error || 'Could not load this run.')}</div>`);
+        });
+    };
+
+    window.closeRunDetails = function () {
+        $('#runDetailsBackdrop, #runDetailsPanel').removeClass('open');
+    };
+
+    // Full-size image view (same look as Studio Chat's preview)
+    window.adminPreviewImage = function (src) {
+        let $box = $('#imageLightbox');
+        if (!$box.length) {
+            $('body').append(`
+                <div class="image-lightbox" id="imageLightbox" role="dialog" aria-modal="true" aria-label="Image preview">
+                    <div class="image-lightbox-toolbar">
+                        <a class="image-lightbox-btn" id="imageLightboxOpen" target="_blank" rel="noopener" title="Open full size in a new tab"><i class="fas fa-up-right-from-square"></i></a>
+                        <button type="button" class="image-lightbox-btn" id="imageLightboxClose" title="Close (Esc)"><i class="fas fa-xmark"></i></button>
+                    </div>
+                    <img class="image-lightbox-img" alt="Generated image preview">
+                </div>`);
+            $box = $('#imageLightbox');
+            $box.on('click', function (e) { if (e.target === this) $box.removeClass('show'); });
+            $('#imageLightboxClose').on('click', () => $box.removeClass('show'));
+        }
+        $box.find('.image-lightbox-img').attr('src', src);
+        $('#imageLightboxOpen').attr('href', src);
+        $box.addClass('show');
+    };
+
+    $(document).on('keydown', function (e) {
+        if (e.key !== 'Escape') return;
+        if ($('#imageLightbox').hasClass('show')) { $('#imageLightbox').removeClass('show'); return; }
+        if ($('#runDetailsPanel').hasClass('open')) closeRunDetails();
+    });
 
     // ── Invitations ────────────────────────────────────────────────────
     // Admin emails someone an invitation link (/signup?invite=...). Statuses:

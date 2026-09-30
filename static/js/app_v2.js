@@ -1456,7 +1456,7 @@ $(document).ready(function () {
             ? `<button class="btn-agent-pipeline-toggle me-1" id="${msgId}_pipeline_btn" title="View executed agents"><i class="fas fa-network-wired me-1"></i>${agentsCount} Agents Active</button>`
             : '';
         const costBadgeHtml = hasUsage
-            ? `<span class="badge-cost-tag me-1" title="Tokens & USD Cost"><i class="fas fa-bolt text-warning me-1"></i>${totalTokens} tok | ${costUsd}</span>`
+            ? `<span class="badge-cost-tag me-1" id="${msgId}_cost_badge" title="Tokens & USD cost - text generation plus any images">${costBadgeInner(usage)}</span>`
             : '';
         const memBadgeHtml = memCount > 0 ? `<span class="badge-memory-tag me-1" title="ChromaDB RAG Memory Context"><i class="fas fa-brain me-1"></i>${memCount} Memories</span>` : '';
 
@@ -1552,14 +1552,8 @@ $(document).ready(function () {
                     <div id="${msgId}_media_${p}" class="media-container-slot">
                         ${pData.media?.image?.url ? buildGeneratedMediaHtml('image', pData.media.image)
                             : (selectedOutputs || []).includes('image') ? `
-                        <div class="media-output-card mb-2" id="${msgId}_media_image_${p}">
-                            <div class="media-output-header">
-                                <span><i class="fas fa-spinner fa-spin me-2 text-primary"></i>Generating AI IMAGE...</span>
-                            </div>
-                            <div class="media-output-body text-center p-4">
-                                <div class="spinner-border text-primary mb-2" role="status"></div>
-                                <p class="text-muted small mb-0">Multi-agent media pipeline is processing image generation</p>
-                            </div>
+                        <div id="${msgId}_media_image_${p}">
+                            ${imageCreatingHtml(platforms.length > 1 || p === 'instagram')}
                         </div>
                         ` : ''}
                         ${pData.media?.video?.url ? buildGeneratedMediaHtml('video', pData.media.video)
@@ -1791,6 +1785,29 @@ $(document).ready(function () {
             });
     };
 
+    // ChatGPT-style "creating image" placeholder: the shape of the coming image
+    // (square or 16:9) with slowly moving colour blobs, a shimmering label and
+    // an elapsed-time counter. Replaced by the image when it arrives.
+    function imageCreatingHtml(square, label) {
+        return `
+            <div class="img-creating${square ? '' : ' is-wide'}" data-started="${Date.now()}" role="status" aria-live="polite">
+                <div class="img-creating-blobs" aria-hidden="true"><span></span><span></span><span></span><span></span></div>
+                <div class="img-creating-grain" aria-hidden="true"></div>
+                <div class="img-creating-caption">
+                    <span class="img-creating-label">${escapeHtml(label || 'Creating image')}</span>
+                    <span class="img-creating-time">0s</span>
+                </div>
+                <div class="img-creating-hint">Usually takes about a minute</div>
+            </div>`;
+    }
+    setInterval(function () {
+        $('.img-creating').each(function () {
+            const secs = Math.floor((Date.now() - Number(this.dataset.started || Date.now())) / 1000);
+            $(this).find('.img-creating-time').text(secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`);
+            if (secs >= 75) $(this).find('.img-creating-hint').text('Almost there - larger images take a little longer');
+        });
+    }, 1000);
+
     const PLATFORM_NAMES = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube' };
     const platformName = p => PLATFORM_NAMES[p] || (p.charAt(0).toUpperCase() + p.slice(1));
 
@@ -1801,16 +1818,39 @@ $(document).ready(function () {
         const r = h.responses[h.currentIndex];
         const pData = (r.content || {})[platform] || {};
         const caption = pData.caption?.primary_caption || h.requestBody.story;
-        $(`#${msgId}_media_image_${platform}`).html(`
-            <div class="media-loading-inline"><i class="fas fa-spinner fa-spin me-2"></i>Creating a separate image for ${escapeHtml(platformName(platform))}...</div>`);
+        $(`#${msgId}_media_image_${platform}`).html(
+            imageCreatingHtml(platform === 'instagram', `Creating a ${platformName(platform)} image`));
         triggerMediaGenInChat(platform, caption, 'image', h.requestBody.tone, r.runId, h.activeImgPath,
             `${msgId}_media_image_${platform}`, pData.media_prompt || caption, msgId, []);
     };
 
+    // Cost badge text: text generation + images (images arrive after the text,
+    // so the badge is updated again when each one is done - see addMediaCost)
+    function costBadgeInner(usage) {
+        const media = Number(usage.media_cost_usd || 0);
+        return `<i class="fas fa-bolt text-warning me-1"></i>${Number(usage.total_tokens || 0).toLocaleString()} tok | $${Number(usage.cost_usd || 0).toFixed(4)}`
+            + (media > 0 ? `<span class="cost-media-note"> · incl. ${usage.media_count > 1 ? usage.media_count + ' images' : 'image'} $${media.toFixed(2)}</span>` : '');
+    }
+
+    // The server already adds the image's cost to the saved run (credits);
+    // this keeps the message's badge and the credit meter in step with it.
+    function addMediaCost(msgId, cost) {
+        cost = Number(cost || 0);
+        const h = msgId && window.chatHistory[msgId];
+        if (!h || cost <= 0) return;
+        const r = h.responses[h.currentIndex];
+        r.usage = r.usage || {};
+        r.usage.cost_usd = Number(r.usage.cost_usd || 0) + cost;
+        r.usage.media_cost_usd = Number(r.usage.media_cost_usd || 0) + cost;
+        r.usage.media_count = Number(r.usage.media_count || 0) + 1;
+        $(`#${msgId}_cost_badge`).html(costBadgeInner(r.usage));
+        loadUserUsageMetrics();
+    }
+
     function triggerMediaGenInChat(platform, caption, mediaType, tone, runId, imagePath, targetSlotId, mediaPrompt, msgId, sharePlatforms) {
         const shareWith = mediaType === 'image' ? (sharePlatforms || []) : [];
-        shareWith.forEach(p => $(`#${msgId}_media_image_${p}`).html(`
-            <div class="media-loading-inline"><i class="fas fa-spinner fa-spin me-2"></i>Creating one image for all platforms...</div>`));
+        shareWith.forEach(p => $(`#${msgId}_media_image_${p}`).html(
+            imageCreatingHtml(true, 'Creating one image for all platforms')));
         $.ajax({
             url: '/api/generate-media',
             type: 'POST',
@@ -1834,6 +1874,7 @@ $(document).ready(function () {
                     // and paging between versions doesn't re-trigger generation.
                     const h = msgId && window.chatHistory[msgId];
                     const sharedTargets = res.shared_platforms || [];
+                    addMediaCost(msgId, res.cost);  // one charge, even when shared by several platforms
                     [platform, ...sharedTargets].forEach(target => {
                         const pContent = h && h.responses[h.currentIndex].content[target];
                         if (pContent) {
@@ -1862,7 +1903,7 @@ $(document).ready(function () {
                                 </div>
                             </div>
                             <div class="media-output-body">
-                                <img src="${res.url}" class="media-output-img" alt="Generated media">
+                                <img src="${res.url}" class="media-output-img img-reveal" alt="Generated media">
                             </div>
                         </div>
                     `;

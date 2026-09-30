@@ -189,6 +189,26 @@ class CreditRequest(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
 
 
+class MediaCharge(Base):
+    """Cost of an image/video generated outside a saved run (e.g. the Analysis
+    Dashboard) - counted in the user's used credits and admin totals alongside
+    RunHistory.cost_usd. Images made inside a run are added to that run instead."""
+
+    __tablename__ = "media_charges"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True
+    )
+    kind: Mapped[str] = mapped_column(String(16), default="image", nullable=False)
+    platform: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    media_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
 class UserInvitation(Base):
     """An admin's email invitation to join (Admin -> Invitations). The emailed
     link carries `token`; signing up through it verifies the email right away."""
@@ -597,6 +617,7 @@ def _serialize_run(row: RunHistory, truncate_story: bool = False) -> dict:
         story = story[:120] + "..."
     return {
         "id": row.id,
+        "user_id": row.user_id,
         "timestamp": row.created_at.strftime("%Y-%m-%d %H:%M" if truncate_story else "%Y-%m-%d %H:%M:%S"),
         "story": story,
         "tone": row.tone,
@@ -757,6 +778,7 @@ _USER_OWNED_TABLES = (
     ApprovedAsset,
     ApprovalRequest,
     ScheduledPost,
+    MediaCharge,
 )
 
 
@@ -1115,8 +1137,38 @@ def get_system_usage_totals() -> dict:
             func.coalesce(func.sum(RunHistory.cost_usd), 0.0),
             func.coalesce(func.sum(RunHistory.tokens_used), 0),
         ).first()
+        media_cost = _media_charges_total(session)
     runs, cost, tokens = row if row else (0, 0.0, 0)
-    return {"total_runs": int(runs or 0), "total_system_cost_usd": round(float(cost or 0.0), 6), "total_tokens": int(tokens or 0)}
+    return {
+        "total_runs": int(runs or 0),
+        "total_system_cost_usd": round(float(cost or 0.0) + media_cost, 6),
+        "total_tokens": int(tokens or 0),
+        "media_charges_usd": round(media_cost, 6),
+    }
+
+
+def _media_charges_total(session, user_id: int | None = None) -> float:
+    query = session.query(func.coalesce(func.sum(MediaCharge.cost_usd), 0.0))
+    if user_id is not None:
+        query = query.filter(MediaCharge.user_id == user_id)
+    return float(query.scalar() or 0.0)
+
+
+def record_media_charge(
+    user_id: int, cost_usd: float, kind: str = "image", platform: str | None = None,
+    description: str | None = None, media_url: str | None = None,
+) -> None:
+    """Charges a generation that isn't part of a saved run (see MediaCharge)."""
+    if not cost_usd or cost_usd <= 0:
+        return
+    with Session(engine) as session:
+        session.add(
+            MediaCharge(
+                user_id=user_id, kind=kind, platform=platform, description=(description or "")[:500] or None,
+                media_url=media_url, cost_usd=round(float(cost_usd), 6),
+            )
+        )
+        session.commit()
 
 
 INVITATION_TTL = timedelta(days=7)
@@ -1292,6 +1344,7 @@ def get_user_usage_stats(user_id: int) -> dict:
         total_runs = result.total_runs if result else 0
         total_tokens = int(result.total_tokens) if result else 0
         used_cost = float(result.total_cost) if result else 0.0
+        used_cost += _media_charges_total(session, user_id)
 
         remaining = max(0.0, credit_limit - used_cost)
 
@@ -1487,10 +1540,42 @@ def update_user_credit_limit(
         }
 
 
+_SELF_SERVE_TYPES = ("individual", "small", "medium")
+
+
+def _brand_status(user: "User", profile: "UserBrandProfile | None") -> dict:
+    """Where a user is with their brand configuration (Admin -> Users).
+    status: configured | analyzing | failed | not_set_up | not_onboarded | company"""
+    if user.account_type == "enterprise" or (user.is_admin and not user.account_type):
+        # Enterprise accounts (and staff admins) use the company-wide Brand Configuration (AppSetting)
+        return {"status": "company"}
+    if profile is not None:
+        return {
+            "status": "configured",
+            "company_name": profile.company_name,
+            "website": profile.website,
+            "analyzed_at": profile.analyzed_at.strftime("%Y-%m-%d") if profile.analyzed_at else None,
+            "compliance_confirmed": profile.compliance_confirmed_at is not None,
+        }
+    if user.brand_scan_status == "running":
+        return {"status": "analyzing", "website": user.company_website}
+    if user.brand_scan_status == "failed":
+        return {"status": "failed", "website": user.company_website, "error": user.brand_scan_error}
+    if user.account_type in _SELF_SERVE_TYPES and user.onboarding_completed:
+        return {"status": "not_set_up", "website": user.company_website}
+    return {"status": "not_onboarded"}
+
+
 def get_all_users_credit_summary() -> list[dict]:
     """Return credit summaries for all registered users (for admin management)."""
     with Session(engine) as session:
         users = session.query(User).order_by(User.created_at.asc()).all()
+        profiles = {p.user_id: p for p in session.query(UserBrandProfile).all()}
+        media_costs = dict(
+            session.query(MediaCharge.user_id, func.coalesce(func.sum(MediaCharge.cost_usd), 0.0))
+            .group_by(MediaCharge.user_id)
+            .all()
+        )
         summaries = []
         for u in users:
             # Query usage cost for this user
@@ -1504,6 +1589,7 @@ def get_all_users_credit_summary() -> list[dict]:
             )
 
             used_cost = float(cost_res.used_cost) if cost_res else 0.0
+            used_cost += float(media_costs.get(u.id, 0.0))
             total_runs = cost_res.total_runs if cost_res else 0
             limit = u.credit_limit if u.credit_limit is not None else 10.0
             remaining = max(0.0, limit - used_cost)
@@ -1533,9 +1619,26 @@ def get_all_users_credit_summary() -> list[dict]:
                     "total_runs": total_runs,
                     "has_pending_request": has_pending,
                     "created_at": u.created_at.strftime("%Y-%m-%d"),
+                    "brand": _brand_status(u, profiles.get(u.id)),
                 }
             )
         return summaries
+
+
+def run_media_summary(content: dict | None) -> dict:
+    """Image/video URLs generated in a run (one per platform, shared images once)."""
+    images, videos = [], []
+    for key, pdata in (content or {}).items():
+        if str(key).startswith("_") or not isinstance(pdata, dict):
+            continue
+        media = pdata.get("media") or {}
+        img = (media.get("image") or {}).get("url") if isinstance(media.get("image"), dict) else None
+        vid = (media.get("video") or {}).get("url") if isinstance(media.get("video"), dict) else None
+        if img and img not in images:
+            images.append(img)
+        if vid and vid not in videos:
+            videos.append(vid)
+    return {"images": images, "videos": videos}
 
 
 def get_global_cost_history(limit: int = 100) -> list[dict]:
@@ -1551,7 +1654,12 @@ def get_global_cost_history(limit: int = 100) -> list[dict]:
 
         history = []
         for run, user in rows:
-            story_snippet = run.story[:100] + "..." if len(run.story) > 100 else run.story
+            story = run.story or ""
+            story_snippet = story[:160] + "..." if len(story) > 160 else story
+            try:
+                content = json.loads(run.content) if run.content else {}
+            except (TypeError, ValueError):
+                content = {}
             history.append(
                 {
                     "id": run.id,
@@ -1564,9 +1672,39 @@ def get_global_cost_history(limit: int = 100) -> list[dict]:
                     "platforms": json.loads(run.platforms) if run.platforms else [],
                     "tokens_used": run.tokens_used or 0,
                     "cost_usd": round(run.cost_usd or 0.0, 6),
+                    "media": run_media_summary(content),
                 }
             )
-        return history
+
+        # Image/video charges made outside a run (e.g. Analysis Dashboard)
+        charges = (
+            session.query(MediaCharge, User)
+            .outerjoin(User, MediaCharge.user_id == User.id)
+            .order_by(MediaCharge.created_at.desc())
+            .limit(limit)
+            .all()
+        )
+        for charge, user in charges:
+            history.append(
+                {
+                    "id": None,
+                    "charge_id": charge.id,
+                    "kind": "media_charge",
+                    "user_id": charge.user_id,
+                    "user_name": user.name if user else "Unknown",
+                    "user_email": user.email if user else "N/A",
+                    "timestamp": charge.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+                    "story": charge.description or f"{charge.kind.capitalize()} generation",
+                    "tone": None,
+                    "platforms": [charge.platform] if charge.platform else [],
+                    "tokens_used": 0,
+                    "cost_usd": round(charge.cost_usd or 0.0, 6),
+                    "media": {"images": [charge.media_url] if charge.media_url and charge.kind == "image" else [],
+                              "videos": [charge.media_url] if charge.media_url and charge.kind == "video" else []},
+                }
+            )
+        history.sort(key=lambda h: h["timestamp"], reverse=True)
+        return history[:limit]
 
 
 # ── SOCIAL ACCOUNTS & POST SCHEDULING HELPERS ─────────────────────────

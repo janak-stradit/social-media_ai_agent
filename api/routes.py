@@ -1634,6 +1634,21 @@ def generate_media():
                         add_run_cost(run_id, float(result.get("cost") or 0), user_id)
                     except Exception as cost_err:
                         current_app.logger.warning(f"[Credits] Could not record media cost: {cost_err}")
+        elif user_id is not None and result.get("success") and DB_AVAILABLE:
+            # Not part of a saved run (e.g. Analysis Dashboard): still charge it
+            try:
+                from db import record_media_charge
+
+                record_media_charge(
+                    user_id,
+                    float(result.get("cost") or 0),
+                    kind=media_type,
+                    platform=platform,
+                    description=(image_prompt or video_prompt or caption)[:300],
+                    media_url=result.get("url"),
+                )
+            except Exception as cost_err:
+                current_app.logger.warning(f"[Credits] Could not record media charge: {cost_err}")
 
         return jsonify(result)
 
@@ -2406,6 +2421,79 @@ def admin_reject_request(req_id):
         return jsonify({"success": True, "result": res, "message": "Credit extension request rejected."})
     except Exception as e:
         return jsonify({"error": str(e), "success": False}), 500
+
+
+@api_bp.route("/admin/runs/<int:run_id>", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_get_run_details(run_id):
+    """Everything one run produced (Admin -> Global Cost History -> row): the
+    full brief, and per platform the caption, hashtags, image/video with the
+    prompt used, quality checks and compliance flags."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    run = get_run_by_id(run_id)
+    if not run:
+        return jsonify({"success": False, "error": "Run not found"}), 404
+    owner = get_user_by_id(run["user_id"]) if run.get("user_id") else None
+    content = run.get("content") or {}
+
+    def _caption(value):
+        if isinstance(value, dict):
+            return value.get("primary_caption") or value.get("caption") or ""
+        return value or ""
+
+    def _hashtags(value):
+        if isinstance(value, dict):
+            value = value.get("hashtags") or value.get("primary_hashtags") or []
+        return [str(t) for t in value] if isinstance(value, list) else []
+
+    platforms = [p for p in (run.get("platforms") or []) if isinstance(content.get(p), dict)]
+    platforms += [k for k, v in content.items() if not str(k).startswith("_") and isinstance(v, dict) and k not in platforms]
+    outputs = []
+    for p in platforms:
+        d = content.get(p) or {}
+        media = d.get("media") or {}
+        image = media.get("image") if isinstance(media.get("image"), dict) else None
+        video = media.get("video") if isinstance(media.get("video"), dict) else None
+        quality = d.get("quality") if isinstance(d.get("quality"), dict) else {}
+        compliance = d.get("compliance") if isinstance(d.get("compliance"), dict) else {}
+        outputs.append(
+            {
+                "platform": p,
+                "caption": _caption(d.get("caption")),
+                "hashtags": _hashtags(d.get("hashtags")),
+                "image": {"url": image.get("url"), "prompt": image.get("prompt")} if image and image.get("url") else None,
+                "video": {"url": video.get("url")} if video and video.get("url") else None,
+                "media_prompt": d.get("media_prompt"),
+                "quality": {
+                    "checks_passed": quality.get("checks_passed"),
+                    "checks_total": quality.get("checks_total"),
+                    "issues": quality.get("fixed_issues") or quality.get("issues") or [],
+                    "rewritten": bool(quality.get("self_corrected")),
+                },
+                "compliance_flags": len(compliance.get("flags") or []),
+            }
+        )
+    agents = [a for a in (content.get("_agents") or []) if isinstance(a, dict)]
+    return jsonify(
+        {
+            "success": True,
+            "run": {
+                "id": run["id"],
+                "timestamp": run.get("timestamp"),
+                "story": run.get("story") or "",
+                "tone": run.get("tone"),
+                "platforms": run.get("platforms") or [],
+                "tokens_used": run.get("tokens_used", 0),
+                "cost_usd": run.get("cost_usd", 0.0),
+                "user_name": owner.name if owner else "Unknown",
+                "user_email": owner.email if owner else "N/A",
+                "outputs": outputs,
+                "agents": [{"name": a.get("name"), "role": a.get("role")} for a in agents],
+            },
+        }
+    )
 
 
 @api_bp.route("/admin/cost-history", methods=["GET"])

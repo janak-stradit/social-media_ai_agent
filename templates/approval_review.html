@@ -13,7 +13,7 @@
         /* Layout mirrors /brand-profile; card, hero and approval styles live
            in style.css (see APPROVALS / STANDALONE PAGES). */
         body { overflow: hidden; }
-        .ap-main { margin-top: var(--header-h); height: calc(100vh - var(--header-h)); overflow-y: auto; }
+        .ap-main { margin-top: var(--header-h); height: calc(var(--vh100, 100vh) - var(--header-h)); overflow-y: auto; }
         .approval-shell { max-width: 1180px; margin: 0 auto; padding: 2.5rem 2rem 4rem; }
         .ap-back { display: inline-flex; margin-bottom: 1.25rem; }
     </style>
