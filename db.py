@@ -1080,6 +1080,20 @@ def append_run_media(run_id: int, platform: str, media_type: str, media: dict, u
     return update_run_content(run_id, content, user_id=user_id)
 
 
+def add_run_cost(run_id: int, amount_usd: float, user_id: int) -> bool:
+    """Adds a media generation's cost (e.g. an image) to its run, so it counts
+    towards the user's used credits (get_user_usage_stats sums run costs)."""
+    if not amount_usd or amount_usd <= 0:
+        return False
+    with Session(engine) as session:
+        row = session.get(RunHistory, run_id)
+        if not row or row.user_id != user_id:
+            return False
+        row.cost_usd = round(float(row.cost_usd or 0.0) + float(amount_usd), 6)
+        session.commit()
+        return True
+
+
 def get_history(limit: int = 20, user_id: int | None = None, include_archived: bool = False) -> list[dict]:
     with Session(engine) as session:
         query = session.query(RunHistory).order_by(RunHistory.created_at.desc())

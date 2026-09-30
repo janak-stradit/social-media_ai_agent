@@ -484,6 +484,28 @@ class MediaGenerationService:
             "cost": (status_data.get("usage") or {}).get("cost"),
         }
 
+    # HeyRoute returns 2048px PNGs (~4 MB) whatever size is requested; social
+    # posts don't need more than this, so images are stored downscaled as JPEG.
+    _STORED_MAX_SIDE = {"square": 1080, "landscape": 1600}
+
+    def _save_compact_image(self, img_data: bytes, platform: str, max_side: int) -> str:
+        """Saves the image downscaled to max_side as a high-quality JPEG (a
+        few hundred KB instead of ~4 MB). Falls back to the original bytes."""
+        import io
+
+        from PIL import Image
+
+        try:
+            with Image.open(io.BytesIO(img_data)) as img:
+                img = img.convert("RGB")
+                img.thumbnail((max_side, max_side), Image.LANCZOS)
+                local_filename = f"gen_{platform}_{uuid.uuid4().hex[:8]}.jpg"
+                img.save(os.path.join(self.upload_folder, local_filename), format="JPEG", quality=90, optimize=True)
+                return local_filename
+        except Exception as err:  # never lose the image over compression
+            print(f"[Media Service] Could not compress image, keeping original: {err}")
+            return self._save_image_bytes(img_data, platform)[0]
+
     def _save_image_bytes(self, img_data: bytes, platform: str) -> tuple[str, str]:
         local_filename = f"gen_{platform}_{uuid.uuid4().hex[:8]}.png"
         local_path = os.path.join(self.upload_folder, local_filename)
@@ -628,7 +650,7 @@ class MediaGenerationService:
         raise RuntimeError("HeyRoute image stream ended without a completed event.")
 
     def _generate_image_heyroute(
-        self, prompt: str, platform: str, size: str, image_path: str | list[str] | None = None
+        self, prompt: str, platform: str, size: str, image_path: str | list[str] | None = None, square: bool = False
     ) -> dict:
         """Same return shape as _generate_image_kie: {url (local), original_url,
         prompt, model, cost}."""
@@ -638,7 +660,8 @@ class MediaGenerationService:
         if not key:
             raise RuntimeError("HEYROUTE_IMAGE_API_KEY is not configured.")
         model = Config.HEYROUTE_IMAGE_MODEL
-        hint = self._HEYROUTE_ASPECT_HINTS.get(platform)
+        # square=True: one image shared by every platform of a post (1:1 works on all)
+        hint = self._HEYROUTE_ASPECT_HINTS["instagram"] if square else self._HEYROUTE_ASPECT_HINTS.get(platform)
         full_prompt = f"{prompt}\n\n{hint}" if hint and hint not in prompt else prompt
         references = self._resolve_image_paths(image_path)[: self._HEYROUTE_MAX_REFERENCES]
         base = Config.HEYROUTE_BASE_URL
@@ -678,16 +701,20 @@ class MediaGenerationService:
         else:
             raise RuntimeError("HeyRoute image response had no image data.")
 
-        local_filename, _ = self._save_image_bytes(img_data, platform)
+        is_square = square or platform == "instagram"
+        local_filename = self._save_compact_image(
+            img_data, platform, self._STORED_MAX_SIDE["square" if is_square else "landscape"]
+        )
         return {
             "url": f"/static/uploads/{local_filename}",
             "original_url": original_url,
             "prompt": full_prompt,
             "model": f"heyroute/{model}",
+            "cost": Config.HEYROUTE_IMAGE_COST_USD,
         }
 
     def _generate_image_primary(
-        self, prompt: str, platform: str, size: str, image_path: str | list[str] | None = None
+        self, prompt: str, platform: str, size: str, image_path: str | list[str] | None = None, square: bool = False
     ) -> dict:
         """The default image provider: HeyRoute only (HEYROUTE_IMAGE_API_KEY),
         like video and text. No kie.ai fallback - a fallback failure used to
@@ -696,7 +723,7 @@ class MediaGenerationService:
         generate_image(ai_model=...)."""
         if not Config.HEYROUTE_IMAGE_API_KEY:
             raise RuntimeError("HEYROUTE_IMAGE_API_KEY is not configured - image generation runs on HeyRoute.")
-        return self._generate_image_heyroute(prompt, platform, size, image_path)
+        return self._generate_image_heyroute(prompt, platform, size, image_path, square=square)
 
     def _file_to_data_uri(self, path: str) -> str:
         mime = mimetypes.guess_type(path)[0] or "image/jpeg"
@@ -1223,6 +1250,7 @@ class MediaGenerationService:
         image_path: str | list[str] | None = None,
         ai_model: str = "kie",
         logo_path: str | None = None,
+        square: bool = False,
     ) -> dict:
         """
         Generate a social media image. The model is told never to draw a
@@ -1242,7 +1270,8 @@ class MediaGenerationService:
             print("[Media Service] USE_MOCK_LLM is enabled. Generating mock image asset...")
             return self._generate_mock_media(platform, "image", caption)
 
-        size = self.IMAGE_SIZES.get(platform, "1024x1024")
+        # square: one 1:1 image reused by all of a post's platforms
+        size = "1024x1024" if square else self.IMAGE_SIZES.get(platform, "1024x1024")
 
         resolved_references = self._resolve_image_paths(image_path)
         has_reference = bool(resolved_references)
@@ -1297,7 +1326,7 @@ class MediaGenerationService:
                 result = self._generate_image_openrouter(prompt, platform, size, single_reference)
             elif ai_model == "kie":
                 # The default ("kie" is the frontend's historical name for it): HeyRoute
-                result = self._generate_image_primary(prompt, platform, size, resolved_references)
+                result = self._generate_image_primary(prompt, platform, size, resolved_references, square=square)
             else:
                 # Default to pollinations
                 result = self._generate_pollinations_image(prompt, platform, size)
