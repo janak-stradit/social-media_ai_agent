@@ -333,7 +333,76 @@ Changing the type is a stop → *Change instance type* → start, with a few min
 | Disk usage | `df -h /` and `sudo docker system df` |
 | Connect to RDS from EC2 | `sudo apt-get install -y postgresql-client && psql "<DATABASE_URL without +psycopg2>"` |
 
-**Run the production image locally** (Docker Desktop running):
+### Checking logs on the server
+
+Connect first: `ssh -i socialmedia-deploy.pem ubuntu@<elastic-ip>`
+
+**Containers and logs**
+```bash
+# Are all 3 containers up? (web, scheduler, redis) - look at STATUS
+sudo docker ps
+
+# Last 100 lines, then follow live (Ctrl+C to stop)
+sudo docker logs -f --tail 100 socialmedia-web-1
+sudo docker logs -f --tail 100 socialmedia-scheduler-1
+sudo docker logs -f --tail 50  socialmedia-redis-1
+
+# All containers together, prefixed with their name
+cd /opt/socialmedia/deploy
+sudo env APP_IMAGE="$(cat /opt/socialmedia/CURRENT_IMAGE)" docker compose -f docker-compose.prod.yml logs -f --tail 100
+```
+
+**Useful filters**
+```bash
+# Only errors / tracebacks from the web app
+sudo docker logs --tail 2000 socialmedia-web-1 2>&1 | grep -iE "error|exception|traceback|warning" | tail -50
+
+# The last 30 minutes only
+sudo docker logs --since 30m socialmedia-web-1
+
+# Scheduler activity (scheduled posts being published)
+sudo docker logs --tail 500 socialmedia-scheduler-1 2>&1 | grep "\[Scheduler\]"
+
+# Requests hitting the app (gunicorn access log lines)
+sudo docker logs --tail 200 socialmedia-web-1 2>&1 | grep '"GET\|"POST'
+```
+
+**Other places to look**
+```bash
+cat /opt/socialmedia/CURRENT_IMAGE        # image running now
+tail /opt/socialmedia/DEPLOY_HISTORY      # past deploys: image, commit, branch, time
+
+sudo tail -f /var/log/nginx/access.log    # every request from browsers
+sudo tail -f /var/log/nginx/error.log     # 502 / timeout errors between nginx and the app
+
+sudo docker stats --no-stream             # CPU / memory per container
+free -m                                   # memory + swap on the server
+df -h / && sudo docker system df          # disk space
+```
+
+**What healthy logs look like**
+- **`web`:**
+  - `Listening at: http://0.0.0.0:5000`
+  - a `Booting worker` line for each gunicorn worker
+  - `[DB] Schema 'social_media_agent' initialised.`
+- **`scheduler`:** `[Scheduler] Background scheduling thread started...`
+
+**Warning signs**
+| Log / state | Meaning |
+|---|---|
+| `Restarting` in `docker ps` | The container crashes on start; its logs say why |
+| `[DB] Warning – could not initialise DB` (web) | Wrong `DATABASE_URL`, missing database, or RDS security group (see Troubleshooting) |
+| `Unable to locate credentials` | S3/Bedrock from the container can't read the EC2 role; set the metadata hop limit to 2 (Step 4) |
+| `WORKER TIMEOUT` (gunicorn) | A request ran longer than 900 s |
+| `502 Bad Gateway` in nginx `error.log` | The web container is down or restarting |
+
+Logs rotate automatically (5 × 20 MB per container), so they can't fill the disk. They're
+deleted when a container is recreated, which happens on every deploy. After a failed deploy,
+the job output in GitHub Actions keeps the last 80 lines.
+
+### Run the production image locally
+
+With Docker Desktop running:
 
 ```bash
 docker build -t avir-ai .
@@ -367,6 +436,20 @@ docker run --rm -p 5000:5000 -e SCHEDULER_ENABLED=false -v "$PWD/.env:/app/.env:
     GitHub actually sent.
   - *`denied` / `AccessDenied` when pushing to ECR*: `ECR_REPOSITORY`, `AWS_REGION` or the
     ARN in `github-deploy-policy.json` doesn't match the repository.
+  - *`FATAL: database "socialmedia" does not exist`*: RDS was created without an *Initial
+    database name*. Network and login already work. Create the database with the app's own
+    settings (no password typed), then re-run the workflow:
+    ```bash
+    sudo docker exec socialmedia-web-1 python -c "
+    import os, config, psycopg2
+    from sqlalchemy.engine import make_url
+    u = make_url(os.environ['DATABASE_URL'])
+    c = psycopg2.connect(host=u.host, port=u.port or 5432, user=u.username, password=u.password, dbname='postgres', sslmode='require')
+    c.autocommit = True
+    c.cursor().execute('CREATE DATABASE \"%s\"' % u.database)
+    print('Created database', u.database)
+    "
+    ```
   - *`Permission denied (publickey)`*: `EC2_SSH_KEY` or `EC2_USER` is wrong.
   - *`Host key verification failed`*: the instance was replaced; update `EC2_KNOWN_HOSTS`.
   - *`no space left on device`*: `sudo docker system prune -af` (images stay in ECR), or grow

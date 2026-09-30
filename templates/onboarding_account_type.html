@@ -59,6 +59,7 @@
         .step-label { font-size: 0.9rem; font-weight: 500; color: #9CA3AF; padding-top: 2px; transition: color 0.2s ease; }
         .progress-step.active .step-label, .progress-step.done .step-label { color: var(--bp-text); }
         .progress-step.final .step-label { font-weight: 700; }
+        .scan-failure-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 
         @media (max-width: 860px) {
             .onboard-shell { flex-direction: column; align-items: stretch; }
@@ -321,12 +322,44 @@
                 $(`.progress-step[data-step="${currentStep}"] .step-icon`).html('<i class="fas fa-exclamation-triangle text-warning"></i>');
             }
             $('#progressCardSub').text('Your account is ready, but we couldn\'t analyze your website.');
+            $('#scanFailure').remove();
             $('#onboardProgressCard').append(
-                $('<div class="alert-inline alert-inline-danger mt-3" role="alert"></div>')
-                    .text((message || 'Website analysis failed.') + ' You can add your brand details in Brand Configuration.')
-                    .show(),
-                $('<button type="button" class="btn-primary-blue mt-3">Continue to dashboard</button>').on('click', onDone)
+                $('<div id="scanFailure"></div>').append(
+                    $('<div class="alert-inline alert-inline-danger mt-3" role="alert"></div>')
+                        .text((message || 'Website analysis failed.') + ' You can add your brand details in Brand Configuration.')
+                        .show(),
+                    $('<div class="scan-failure-actions mt-3"></div>').append(
+                        $('<button type="button" class="btn-cancel-light"><i class="fas fa-redo me-2"></i>Try again</button>')
+                            .on('click', function () { retryBrandScan(onDone); }),
+                        $('<button type="button" class="btn-primary-blue">Continue to dashboard</button>').on('click', onDone)
+                    )
+                )
             );
+        }
+
+        // Re-runs the website scan (same background scan + progress as the
+        // first attempt) - the account itself is already saved, so only the
+        // analysis is repeated. Uses the website stored at onboarding.
+        function retryBrandScan(onDone) {
+            $('#scanFailure').remove();
+            clearInterval(stepTimer);
+            $('.progress-step').removeClass('active done');
+            $('.step-icon').empty();
+            $('#progressCardSub').text('Trying again - this usually takes a few seconds.');
+            currentStep = -1;
+            advanceStep();
+            stepTimer = setInterval(advanceStep, STEP_INTERVAL_MS);
+
+            $.ajax({
+                url: '/api/brand-profile/rescan',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ background: true })
+            }).done(function () {
+                waitForBrandScan(onDone);
+            }).fail(function (xhr) {
+                showScanFailure((xhr.responseJSON && xhr.responseJSON.error) || 'Could not start the analysis again.', onDone);
+            });
         }
 
         $('#continueBtn').on('click', function () {
