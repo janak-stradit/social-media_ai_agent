@@ -234,11 +234,13 @@ class LLMService:
     # answer. Billing is per token actually used, so headroom costs nothing.
     _REASONING_MIN_COMPLETION_TOKENS = 4096
 
-    def _chat_kwargs(self, provider, system_prompt, user_prompt, temperature, max_tokens):
+    def _chat_kwargs(self, provider, system_prompt, user_prompt, temperature, max_tokens, reasoning_effort=None):
         """Chat-completions arguments for an OpenAI-compatible provider. A
         reasoning model (HeyRoute gpt-5.6-terra) takes max_completion_tokens and
         reasoning_effort, and only its default temperature -- the gpt-5 family
-        rejects any other value -- so temperature is left out for it."""
+        rejects any other value -- so temperature is left out for it.
+        reasoning_effort: per-call override (e.g. "minimal" for hashtags) of
+        HEYROUTE_REASONING_EFFORT; ignored by non-reasoning providers."""
         kwargs = {
             "model": provider["model"],
             "messages": [
@@ -248,7 +250,7 @@ class LLMService:
         }
         if provider.get("reasoning"):
             kwargs["max_completion_tokens"] = max(int(max_tokens or 0) * 4, self._REASONING_MIN_COMPLETION_TOKENS)
-            effort = getattr(Config, "HEYROUTE_REASONING_EFFORT", None)
+            effort = reasoning_effort or getattr(Config, "HEYROUTE_REASONING_EFFORT", None)
             if effort:
                 kwargs["reasoning_effort"] = effort
         else:
@@ -311,6 +313,7 @@ class LLMService:
         max_tokens=1000,
         return_usage=False,
         max_retries_per_provider=2,
+        reasoning_effort=None,
     ):
         """Generate text using available LLM providers in sequence with optimal token budgeting.
 
@@ -349,7 +352,9 @@ class LLMService:
                         usage_metrics = self._calculate_cost("bedrock", provider["model"], in_t, out_t)
                     else:
                         response = provider["client"].chat.completions.create(
-                            **self._chat_kwargs(provider, system_prompt, user_prompt, temperature, max_tokens)
+                            **self._chat_kwargs(
+                                provider, system_prompt, user_prompt, temperature, max_tokens, reasoning_effort
+                            )
                         )
                         text_out = self._first_choice_text(response, provider["name"])
 
@@ -435,6 +440,7 @@ class LLMService:
         max_tokens=1200,
         return_usage=False,
         max_retries_per_provider=2,
+        reasoning_effort=None,
     ):
         """Generate structured JSON response with optimal token budgeting.
 
@@ -477,7 +483,9 @@ class LLMService:
                         content = self._generate_mock_response(system_prompt, user_prompt)
                         usage_metrics = self._calculate_cost("mock", "mock-llm-v1", 0, 0)
                     else:
-                        kwargs = self._chat_kwargs(provider, system_prompt, user_prompt, temperature, max_tokens)
+                        kwargs = self._chat_kwargs(
+                            provider, system_prompt, user_prompt, temperature, max_tokens, reasoning_effort
+                        )
                         kwargs["response_format"] = {"type": "json_object"}
                         response = provider["client"].chat.completions.create(**kwargs)
                         content = self._first_choice_text(response, provider["name"])
