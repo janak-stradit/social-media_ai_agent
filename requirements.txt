@@ -1,6 +1,5 @@
 flask
 flask-cors
-agentscope==0.1.0
 huggingface-hub==0.24.0
 transformers==4.42.0
 torch==2.3.1
@@ -8,17 +7,14 @@ pillow==10.3.0
 # 1.45+ is required for max_completion_tokens / reasoning_effort (HeyRoute reasoning models,
 # services/llm_service.py); 2.52.0 is the version the app is developed and tested with.
 openai==2.52.0
-posthog>=2.4.0,<6.0.0
 python-dotenv==1.0.1
 gunicorn==22.0.0
-celery==5.4.0
 redis==5.0.0
 requests==2.32.0
 httpx<0.28
 sqlalchemy>=2.0
 psycopg2-binary
 boto3
-duckduckgo-search
 json_repair
 demjson3
 gtts

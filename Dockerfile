@@ -3,32 +3,49 @@
 # Pinned to Debian 12 (bookworm): the plain "3.11-slim" tag moved to Debian 13 (trixie),
 # which Playwright 1.47's "install --with-deps" doesn't support (it falls back to the
 # Ubuntu 20.04 package list, whose names don't exist on trixie, e.g. libasound2).
-FROM python:3.11-slim-bookworm
+#
+# Two stages to keep the image small: packages are installed into a virtualenv in
+# a "builder" stage that has a compiler, and only that virtualenv is copied into the
+# final image - no gcc, headers or pip caches ship to production.
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
-    HF_HOME=/opt/hf-cache \
-    WEB_CONCURRENCY=2
+# ---------- builder: install Python dependencies ----------
+FROM python:3.11-slim-bookworm AS builder
 
-WORKDIR /app
+ENV PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# gcc/libpq-dev: building psycopg2 and friends; ffmpeg: video post-processing
+# Only needed if a dependency has to be compiled from source; never reaches the final image
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends gcc libpq-dev ffmpeg \
+    && apt-get install -y --no-install-recommends gcc libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Dependencies first so code-only changes reuse these (large) cached layers.
+RUN python -m venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
+
 # CPU-only torch: the default wheel bundles ~2.5 GB of CUDA libraries an EC2
 # CPU instance can't use.
 COPY requirements.txt .
 RUN pip install "$(grep -E '^torch==' requirements.txt)" --index-url https://download.pytorch.org/whl/cpu \
     && pip install -r requirements.txt
 
-# Chromium + its system libraries for the onboarding scraper's headless-browser tier
-RUN playwright install --with-deps chromium
+# ---------- runtime ----------
+FROM python:3.11-slim-bookworm
+
+ENV PATH=/opt/venv/bin:$PATH \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright \
+    HF_HOME=/opt/hf-cache \
+    WEB_CONCURRENCY=2
+
+WORKDIR /app
+
+COPY --from=builder /opt/venv /opt/venv
+
+# Chromium + its system libraries for the onboarding scraper's headless-browser tier.
+# No system ffmpeg: moviepy uses the ffmpeg binary bundled in the imageio-ffmpeg wheel.
+RUN playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*.deb /tmp/*
 
 # Bake the embedding model into the image so containers don't download it on every start
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
