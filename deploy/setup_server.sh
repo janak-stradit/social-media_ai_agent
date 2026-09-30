@@ -1,29 +1,22 @@
 #!/usr/bin/env bash
-# One-time (and idempotent) EC2 preparation - Ubuntu 24.04 / 22.04.
-# Run as root:  sudo bash deploy/setup_server.sh <app-user>
-# <app-user> must have passwordless sudo (the default EC2 "ubuntu" user does).
+# One-time (and idempotent) EC2 preparation for the Docker deployment - Ubuntu 24.04.
+# Run as root:  sudo bash /opt/socialmedia/deploy/setup_server.sh
 # remote_deploy.sh calls it automatically on the first deploy and again
-# whenever this file, the systemd units or the nginx config change.
+# whenever this file or the nginx config change.
 set -euo pipefail
 
-APP_USER="${1:-ubuntu}"
 BASE=/opt/socialmedia
+DATA="$BASE/data"
+APP_UID=1000   # the "app" user inside the image (see Dockerfile)
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export DEBIAN_FRONTEND=noninteractive
 
 [ "$(id -u)" -eq 0 ] || { echo "Run as root (sudo)." >&2; exit 1; }
-id "$APP_USER" >/dev/null 2>&1 || { echo "User $APP_USER does not exist." >&2; exit 1; }
 
-echo "==> System packages"
+echo "==> System packages (Docker, Compose, nginx)"
 apt-get update -y
-apt-get install -y software-properties-common curl git rsync nginx \
-    build-essential libpq-dev ffmpeg ca-certificates
-# The app is pinned to Python 3.11 (same as the Dockerfile and CI).
-if ! command -v python3.11 >/dev/null 2>&1; then
-    add-apt-repository -y ppa:deadsnakes/ppa
-    apt-get update -y
-fi
-apt-get install -y python3.11 python3.11-venv python3.11-dev
+apt-get install -y ca-certificates curl rsync nginx docker.io docker-compose-v2
+systemctl enable --now docker
 
 echo "==> Swap (torch + sentence-transformers need headroom on small instances)"
 if ! swapon --show | grep -q '/swapfile'; then
@@ -36,18 +29,20 @@ if ! swapon --show | grep -q '/swapfile'; then
     grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
 fi
 
-echo "==> Directories"
-mkdir -p "$BASE/app/static/uploads" "$BASE/ms-playwright" "$BASE/hf-cache"
-chown -R "$APP_USER:$APP_USER" "$BASE"
-# nginx (www-data) serves /static directly, so it must be able to traverse these
-chmod 755 "$BASE" "$BASE/app"
+echo "==> Data directories (mounted into the containers)"
+mkdir -p "$DATA/static/uploads" "$DATA/brand" "$DATA/chroma_db"
+chown -R "$APP_UID:$APP_UID" "$DATA"
+# nginx (www-data) serves /static/uploads straight from here
+chmod 755 "$BASE" "$DATA" "$DATA/static" "$DATA/static/uploads"
 
-echo "==> systemd services"
+# Earlier non-Docker deployments ran the app as systemd services on the same port
 for unit in socialmedia-web socialmedia-scheduler; do
-    sed "s/__APP_USER__/$APP_USER/g" "$HERE/systemd/$unit.service" > "/etc/systemd/system/$unit.service"
+    if [ -f "/etc/systemd/system/$unit.service" ]; then
+        systemctl disable --now "$unit" || true
+        rm -f "/etc/systemd/system/$unit.service"
+        systemctl daemon-reload
+    fi
 done
-systemctl daemon-reload
-systemctl enable socialmedia-web socialmedia-scheduler
 
 echo "==> nginx"
 SITE=/etc/nginx/sites-available/socialmedia.conf

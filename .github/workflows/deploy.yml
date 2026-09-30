@@ -1,12 +1,16 @@
 name: Deploy to EC2
 
-# Deploys a branch to the EC2 instance of a GitHub Environment.
-#  - Manual: Actions -> "Deploy to EC2" -> Run workflow -> pick the branch in
-#    the "Use workflow from" dropdown and the environment (production/staging).
+# Builds the Docker image, pushes it to Amazon ECR and runs it on the EC2 instance
+# of a GitHub Environment (web + scheduler containers, deploy/docker-compose.prod.yml).
+#  - Manual: Actions -> "Deploy to EC2" -> Run workflow -> pick the branch in the
+#    "Use workflow from" dropdown and the environment (production/staging).
 #    The branch comes from that dropdown on purpose: GitHub checks it against the
 #    Environment's "Deployment branches" rule, so e.g. only main can reach production.
+#  - Rollback: Run workflow with "image_tag" = an earlier tag (e.g. sha-1a2b3c4...);
+#    nothing is built, that image is pulled from ECR and started.
 #  - Automatic: every push to main deploys main to production.
 # All configuration lives in the Environment's secrets (see DEPLOYMENT.md):
+#   AWS_REGION, AWS_DEPLOY_ROLE_ARN, ECR_REPOSITORY,
 #   EC2_HOST, EC2_USER, EC2_SSH_KEY, ENV_FILE, and optionally EC2_KNOWN_HOSTS.
 
 on:
@@ -22,9 +26,15 @@ on:
         options:
           - production
           - staging
+      image_tag:
+        description: "Rollback: deploy this existing ECR tag instead of building (e.g. sha-<commit>). Leave empty to build."
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
+  id-token: write # lets the job assume the AWS role via OIDC - no AWS keys stored in GitHub
 
 jobs:
   deploy:
@@ -40,18 +50,22 @@ jobs:
     env:
       DEPLOY_BRANCH: ${{ github.ref_name }}
       DEPLOY_ENV: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || 'production' }}
+      ROLLBACK_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.image_tag || '' }}
       EC2_HOST: ${{ secrets.EC2_HOST }}
       EC2_USER: ${{ secrets.EC2_USER }}
-      APP_DIR: /opt/socialmedia/app
+      ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+      REMOTE_DEPLOY_DIR: /opt/socialmedia/deploy
 
     steps:
-      - name: Validate branch name
+      - name: Validate inputs
         run: |
           if ! printf '%s' "$DEPLOY_BRANCH" | grep -Eq '^[A-Za-z0-9._/-]+$'; then
-            echo "::error::Invalid branch name: $DEPLOY_BRANCH"
-            exit 1
+            echo "::error::Invalid branch name: $DEPLOY_BRANCH"; exit 1
           fi
-          echo "Deploying branch: $DEPLOY_BRANCH"
+          if [ -n "$ROLLBACK_TAG" ] && ! printf '%s' "$ROLLBACK_TAG" | grep -Eq '^sha-[0-9a-f]{7,40}$'; then
+            echo "::error::image_tag must look like sha-<commit>, got: $ROLLBACK_TAG"; exit 1
+          fi
+          echo "Branch: $DEPLOY_BRANCH  Environment: $DEPLOY_ENV  Rollback tag: ${ROLLBACK_TAG:-none}"
 
       # Checks out the exact commit that triggered this run (github.sha).
       - name: Check out ${{ env.DEPLOY_BRANCH }}
@@ -61,9 +75,11 @@ jobs:
         env:
           EC2_SSH_KEY: ${{ secrets.EC2_SSH_KEY }}
           ENV_FILE: ${{ secrets.ENV_FILE }}
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_DEPLOY_ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
         run: |
           missing=""
-          for name in EC2_HOST EC2_USER EC2_SSH_KEY ENV_FILE; do
+          for name in AWS_REGION AWS_DEPLOY_ROLE_ARN ECR_REPOSITORY EC2_HOST EC2_USER EC2_SSH_KEY ENV_FILE; do
             [ -n "${!name}" ] || missing="$missing $name"
           done
           if [ -n "$missing" ]; then
@@ -73,13 +89,60 @@ jobs:
           grep -Eq '^[[:space:]]*(export[[:space:]]+)?DATABASE_URL=' <<< "$ENV_FILE" || { echo "::error::ENV_FILE has no DATABASE_URL line"; exit 1; }
           grep -Eq '^[[:space:]]*(export[[:space:]]+)?SECRET_KEY=' <<< "$ENV_FILE" || { echo "::error::ENV_FILE has no SECRET_KEY line"; exit 1; }
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          python-version: "3.11"
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Resolve image
+        id: image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          tag="${ROLLBACK_TAG:-sha-$GITHUB_SHA}"
+          if aws ecr describe-images --repository-name "$ECR_REPOSITORY" --image-ids imageTag="$tag" >/dev/null 2>&1; then
+            exists=true
+          else
+            exists=false
+          fi
+          if [ -n "$ROLLBACK_TAG" ] && [ "$exists" != true ]; then
+            echo "::error::Image tag $tag not found in ECR repository $ECR_REPOSITORY"; exit 1
+          fi
+          # A re-run of the same commit reuses the image already in ECR
+          echo "build=$([ "$exists" = true ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "image=$REGISTRY/$ECR_REPOSITORY:$tag" >> "$GITHUB_OUTPUT"
+          echo "Image: $REGISTRY/$ECR_REPOSITORY:$tag (build: $([ "$exists" = true ] && echo no || echo yes))"
 
       - name: Syntax check
-        run: python -m compileall -q -x '(^|/)(soical-media-ai|venv|\.venv|scratch)/' .
+        if: steps.image.outputs.build == 'true'
+        run: python3 -m compileall -q -x '(^|/)(soical-media-ai|venv|\.venv|scratch)/' .
+
+      - name: Set up Docker Buildx
+        if: steps.image.outputs.build == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push image
+        if: steps.image.outputs.build == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.image.outputs.image }}
+          # Single-manifest image: attestation manifests show up in ECR as untagged
+          # images, which the lifecycle policy would expire and break the tag.
+          provenance: false
+          sbom: false
+          # Layer cache in ECR itself: dependency layers (torch, Playwright) are only
+          # rebuilt when requirements.txt changes.
+          cache-from: type=registry,ref=${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:buildcache
+          cache-to: type=registry,ref=${{ steps.ecr.outputs.registry }}/${{ env.ECR_REPOSITORY }}:buildcache,mode=max,image-manifest=true,oci-mediatypes=true
 
       - name: Configure SSH
         env:
@@ -108,33 +171,31 @@ jobs:
           EOF
           ssh ec2 'echo "Connected to $(hostname) as $(id -un)"'
 
-      - name: Prepare app directory
+      - name: Upload deploy scripts
         run: |
           ssh ec2 "command -v rsync >/dev/null || { sudo apt-get update -y && sudo apt-get install -y rsync; }"
-          ssh ec2 "sudo mkdir -p '$APP_DIR' && sudo chown \"\$(id -un):\$(id -gn)\" /opt/socialmedia '$APP_DIR'"
+          ssh ec2 "sudo mkdir -p '$REMOTE_DEPLOY_DIR' && sudo chown \"\$(id -un):\$(id -gn)\" '$REMOTE_DEPLOY_DIR'"
+          rsync -az --delete deploy/ "ec2:$REMOTE_DEPLOY_DIR/"
 
-      - name: Upload code
-        run: |
-          rsync -az --delete --exclude-from=deploy/rsync-exclude.txt \
-            ./ "ec2:$APP_DIR/"
-          # Brand assets are uploaded/replaced from the app into static/img/brand/
-          # (excluded above, so never deleted). Only copy the repo's default
-          # assets when they're missing - never overwrite a user's replacement.
-          rsync -az --ignore-existing static/img/brand/ "ec2:$APP_DIR/static/img/brand/"
-
-      - name: Install, configure and restart
+      - name: Pull and start on EC2
         env:
           ENV_FILE: ${{ secrets.ENV_FILE }}
+          IMAGE: ${{ steps.image.outputs.image }}
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
         run: |
-          printf '%s\n' "$ENV_FILE" | ssh ec2 \
-            "bash '$APP_DIR/deploy/remote_deploy.sh' '$GITHUB_SHA' '$DEPLOY_BRANCH'"
+          # stdin: line 1 = short-lived ECR password for the server's docker pull,
+          # then the .env content. The server needs no AWS credentials for ECR.
+          { aws ecr get-login-password; printf '%s\n' "$ENV_FILE"; } | ssh ec2 \
+            "bash '$REMOTE_DEPLOY_DIR/remote_deploy.sh' '$IMAGE' '$REGISTRY' '$GITHUB_SHA' '$DEPLOY_BRANCH'"
 
       - name: Summary
         if: success()
+        env:
+          TAG: ${{ steps.image.outputs.tag }}
         run: |
           {
-            echo "### Deployed \`$DEPLOY_BRANCH\` (\`${GITHUB_SHA::7}\`)"
-            echo "Environment: **$DEPLOY_ENV**"
+            echo "### Deployed \`$DEPLOY_BRANCH\` → **$DEPLOY_ENV**"
+            echo "Image tag: \`$TAG\` (roll back later by running this workflow with this tag)"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Remove SSH key

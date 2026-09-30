@@ -14,10 +14,10 @@ sys.path.insert(0, APP_ROOT)
 os.chdir(APP_ROOT)
 
 # Load .env before db.py reads DATABASE_URL at import time.
-import config  # noqa: E402,F401  pylint: disable=unused-import
+import config  # noqa: E402,F401  pylint: disable=unused-import,wrong-import-position
 
-from db import init_db  # noqa: E402
-from scheduler_thread import run_scheduler  # noqa: E402
+from db import init_db  # noqa: E402  pylint: disable=wrong-import-position
+from scheduler_thread import run_scheduler  # noqa: E402  pylint: disable=wrong-import-position
 
 if __name__ == "__main__":
     for _stream in (sys.stdout, sys.stderr):

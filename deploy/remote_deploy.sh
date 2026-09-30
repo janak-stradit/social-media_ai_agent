@@ -1,83 +1,107 @@
 #!/usr/bin/env bash
-# Runs ON THE EC2 INSTANCE (as the deploy user) after GitHub Actions has
-# rsynced the code into /opt/socialmedia/app. The .env content arrives on
-# stdin (from the ENV_FILE GitHub secret) so it is never written to the
-# runner's disk, the command line or the logs.
-#   usage: remote_deploy.sh <git-sha> <branch> < env-file
+# Runs ON THE EC2 INSTANCE (as the deploy user, e.g. ubuntu) from GitHub Actions.
+#   usage: remote_deploy.sh <image> <registry> <git-sha> <branch>
+#   stdin: line 1 = ECR login password (valid 12 h), rest = the .env content
+#          (ENV_FILE secret). Neither touches the command line or the logs.
+# Pulls <image> from ECR, (re)starts the web + scheduler containers and checks
+# the app answers. If the new version fails the check, the previous image is
+# started again and the deploy is reported as failed.
 set -euo pipefail
 
 BASE=/opt/socialmedia
-APP="$BASE/app"
-VENV="$BASE/venv"
-SHA="${1:-unknown}"
-BRANCH="${2:-unknown}"
-cd "$APP"
+DEPLOY="$BASE/deploy"
+DATA="$BASE/data"
+APP_UID=1000
+IMAGE="${1:?image required}"
+REGISTRY="${2:?registry required}"
+SHA="${3:-unknown}"
+BRANCH="${4:-unknown}"
+COMPOSE=(docker compose -f "$DEPLOY/docker-compose.prod.yml")
 
-echo "==> Writing .env from GitHub secret"
+IFS= read -r ECR_PASSWORD || true
+[ -n "${ECR_PASSWORD:-}" ] || { echo "No ECR login password received on stdin." >&2; exit 1; }
+
+echo "==> Reading .env from GitHub secret"
 umask 077
-ENV_TMP="$(mktemp "$APP/.env.XXXXXX")"
+ENV_TMP="$(mktemp)"
+trap 'rm -f "$ENV_TMP"' EXIT
 cat > "$ENV_TMP"
 if [ ! -s "$ENV_TMP" ]; then
-    rm -f "$ENV_TMP"
     echo "ENV_FILE secret is empty - refusing to deploy without configuration." >&2
     exit 1
 fi
-# Normalise Windows line endings pasted into the secret
 sed -i 's/\r$//' "$ENV_TMP"
-mv "$ENV_TMP" "$APP/.env"
-chmod 600 "$APP/.env"
 umask 022
 
-echo "==> Server setup (only when deploy/ server files changed)"
-SETUP_HASH="$(cat deploy/setup_server.sh deploy/systemd/*.service deploy/nginx/*.conf | sha256sum | cut -d' ' -f1)"
+echo "==> Server setup (only when setup_server.sh / nginx config changed)"
+SETUP_HASH="$(cat "$DEPLOY/setup_server.sh" "$DEPLOY"/nginx/*.conf | sha256sum | cut -d' ' -f1)"
 if [ "$(cat "$BASE/.setup-hash" 2>/dev/null || true)" != "$SETUP_HASH" ]; then
-    sudo bash deploy/setup_server.sh "$(id -un)"
-    echo "$SETUP_HASH" > "$BASE/.setup-hash"
+    sudo bash "$DEPLOY/setup_server.sh"
+    echo "$SETUP_HASH" | sudo tee "$BASE/.setup-hash" >/dev/null
 fi
 
-echo "==> Python dependencies"
-[ -x "$VENV/bin/python" ] || python3.11 -m venv "$VENV"
-REQ_HASH="$(sha256sum requirements.txt | cut -d' ' -f1)"
-if [ "$(cat "$BASE/.requirements-hash" 2>/dev/null || true)" != "$REQ_HASH" ]; then
-    "$VENV/bin/pip" install --upgrade pip wheel
-    # CPU-only torch: the default PyPI wheel bundles ~2.5 GB of CUDA libraries
-    # that an EC2 CPU instance can't use.
-    TORCH_PIN="$(grep -E '^torch==' requirements.txt || true)"
-    if [ -n "$TORCH_PIN" ]; then
-        "$VENV/bin/pip" install "$TORCH_PIN" --index-url https://download.pytorch.org/whl/cpu
-    fi
-    "$VENV/bin/pip" install -r requirements.txt
-    # Chromium + its system libraries for the onboarding scraper
-    sudo "$VENV/bin/playwright" install-deps chromium
-    PLAYWRIGHT_BROWSERS_PATH="$BASE/ms-playwright" "$VENV/bin/playwright" install chromium
-    echo "$REQ_HASH" > "$BASE/.requirements-hash"
-else
-    echo "requirements.txt unchanged - skipping pip install"
-fi
+# Readable only by the container's app user
+sudo install -m 600 -o "$APP_UID" -g "$APP_UID" "$ENV_TMP" "$BASE/.env"
 
-mkdir -p "$APP/static/uploads"
-echo "$SHA $BRANCH $(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$BASE/DEPLOYED_VERSION"
+echo "==> Pulling $IMAGE"
+printf '%s' "$ECR_PASSWORD" | sudo docker login --username AWS --password-stdin "$REGISTRY" >/dev/null
+unset ECR_PASSWORD
+sudo docker pull --quiet "$IMAGE"
+sudo docker logout "$REGISTRY" >/dev/null
 
-echo "==> Restarting services"
-sudo systemctl restart socialmedia-web
-sudo systemctl restart socialmedia-scheduler
+echo "==> Seeding default brand assets (existing files are never overwritten)"
+sudo docker run --rm --user "$APP_UID:$APP_UID" -v "$DATA/brand:/seed" --entrypoint sh "$IMAGE" \
+    -c 'cp -rn /app/static/img/brand/. /seed/ 2>/dev/null || true'
+
+PREVIOUS_IMAGE="$(cat "$BASE/CURRENT_IMAGE" 2>/dev/null || true)"
+
+start() {
+    # --force-recreate: also picks up a changed .env when the image is unchanged
+    sudo env APP_IMAGE="$1" "${COMPOSE[@]}" up -d --force-recreate --remove-orphans
+}
+
+healthy() {
+    # First start loads torch + the embedding model and runs init_db against RDS
+    local code=""
+    for _ in $(seq 1 36); do
+        code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/login || true)"
+        if [ "$code" = "200" ]; then
+            sleep 5
+            if sudo env APP_IMAGE="$1" "${COMPOSE[@]}" ps --status running --services | grep -qx scheduler; then
+                return 0
+            fi
+            echo "Scheduler container is not running." >&2
+            return 1
+        fi
+        sleep 5
+    done
+    echo "App did not answer HTTP 200 on /login (last code: ${code:-none})." >&2
+    return 1
+}
+
+echo "==> Starting containers"
+start "$IMAGE"
 
 echo "==> Health check"
-# First start loads torch + the embedding model and runs init_db against RDS.
-for i in $(seq 1 36); do
-    code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/login || true)"
-    if [ "$code" = "200" ]; then
-        echo "App is up (HTTP 200 on /login) - deployed $SHA ($BRANCH)"
-        systemctl is-active --quiet socialmedia-scheduler || {
-            echo "Scheduler service is not running:" >&2
-            sudo systemctl status socialmedia-scheduler --no-pager -l | tail -n 30 >&2
-            exit 1
-        }
-        exit 0
-    fi
-    sleep 5
-done
+if healthy "$IMAGE"; then
+    echo "$IMAGE" | sudo tee "$BASE/CURRENT_IMAGE" >/dev/null
+    echo "$IMAGE $SHA $BRANCH $(date -u +%Y-%m-%dT%H:%M:%SZ)" | sudo tee -a "$BASE/DEPLOY_HISTORY" >/dev/null
+    # Free disk: drop unused images older than 3 days (older versions stay in ECR)
+    sudo docker image prune -af --filter "until=72h" >/dev/null || true
+    echo "Deployed $IMAGE ($BRANCH)"
+    exit 0
+fi
 
-echo "Health check failed (last HTTP code: ${code:-none}). Recent web logs:" >&2
-journalctl -u socialmedia-web -n 80 --no-pager >&2 || sudo systemctl status socialmedia-web --no-pager -l >&2
+echo "==> Deploy FAILED - recent logs:" >&2
+sudo env APP_IMAGE="$IMAGE" "${COMPOSE[@]}" logs --tail 80 web scheduler >&2 || true
+
+if [ -n "$PREVIOUS_IMAGE" ] && [ "$PREVIOUS_IMAGE" != "$IMAGE" ]; then
+    echo "==> Rolling back to $PREVIOUS_IMAGE" >&2
+    if sudo docker image inspect "$PREVIOUS_IMAGE" >/dev/null 2>&1; then
+        start "$PREVIOUS_IMAGE"
+        healthy "$PREVIOUS_IMAGE" && echo "Rollback OK - $PREVIOUS_IMAGE is running." >&2
+    else
+        echo "Previous image is no longer on this server; redeploy it with the image_tag input." >&2
+    fi
+fi
 exit 1
