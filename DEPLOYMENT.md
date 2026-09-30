@@ -100,8 +100,10 @@ EC2 → Launch instance:
 - **Key pair:** create `socialmedia-deploy` (ED25519, .pem) and download it
 - **Network:** same VPC as RDS, a **public subnet in the same AZ as RDS**, auto-assign public IP,
   security group `socialmedia-ec2-sg`
-- **Storage:** **30 GB** gp3. Docker images are ~3–4 GB each, and the current and previous
-  versions are kept.
+- **Storage:** **30 GB** gp3 minimum, 40 GB comfortable. While a deploy pulls a new image, the
+  running image and the new one are both on disk (each takes several GB, compressed plus
+  unpacked), next to the OS and the 4 GB swap file. After a successful deploy only the new
+  image is kept.
 
 Then **Elastic IPs → Allocate → Associate** with the instance so the address never changes.
 Point your domain's A record at the Elastic IP.
@@ -452,5 +454,20 @@ docker run --rm -p 5000:5000 -e SCHEDULER_ENABLED=false -v "$PWD/.env:/app/.env:
     ```
   - *`Permission denied (publickey)`*: `EC2_SSH_KEY` or `EC2_USER` is wrong.
   - *`Host key verification failed`*: the instance was replaced; update `EC2_KNOWN_HOSTS`.
-  - *`no space left on device`*: `sudo docker system prune -af` (images stay in ECR), or grow
-    the EBS volume.
+  - *`no space left on device`* (usually during "Pull and start on EC2"): each deploy now
+    removes old images before pulling and keeps only the new one afterwards. If the disk is
+    already full, free it once by hand, then re-run the workflow:
+    ```bash
+    sudo docker container prune -f && sudo docker image prune -af && sudo docker builder prune -af
+    df -h /                                             # how much is free now
+    sudo du -sh /var/lib/docker /var/lib/containerd     # what Docker is using
+    ```
+    A deploy needs about 8 GB free while it pulls. If `df -h /` still shows less, grow the
+    disk (no downtime, +$0.08/GB-month): EC2 → Volumes → the instance's volume → *Modify* →
+    e.g. 40 GB, then on the server:
+    ```bash
+    lsblk                                  # find the root disk, e.g. nvme0n1 with partition 1
+    sudo growpart /dev/nvme0n1 1
+    sudo resize2fs /dev/nvme0n1p1          # Ubuntu's root filesystem is ext4
+    df -h /
+    ```
