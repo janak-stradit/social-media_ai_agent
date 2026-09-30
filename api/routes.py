@@ -716,6 +716,17 @@ def generate_content():
                 caption_futures = {p: pool.submit(_caption_for, p) for p in platforms}
                 hashtag_futures = {p: pool.submit(_hashtags_for, p) for p in platforms}
                 _mark_done_when_finished(list(caption_futures.values()), lambda: _progress("caption", "done"))
+
+                # Show each caption on the page the moment it's written, while the
+                # rest of the pipeline (hashtags, checks) is still running.
+                def _preview_caption(platform, future):
+                    if future.exception() is None:
+                        text = (future.result() or {}).get("primary_caption") or ""
+                        if text:
+                            _progress(f"preview:{platform}", text[:600])
+
+                for _p, _future in caption_futures.items():
+                    _future.add_done_callback(lambda f, platform=_p: _preview_caption(platform, f))
                 _mark_done_when_finished(list(hashtag_futures.values()), lambda: _progress("hashtag", "done"))
 
                 for platform, future in caption_futures.items():
@@ -3183,7 +3194,19 @@ def brand_profile_quick_prompts():
 
     profile = get_user_brand_profile(user_id)
     ideas = (profile or {}).get("suggested_post_ideas") or []
-    return jsonify({"success": True, "post_ideas": ideas, "company_name": (profile or {}).get("company_name")})
+    user = get_user_by_id(user_id)
+    return jsonify(
+        {
+            "success": True,
+            "post_ideas": ideas,
+            "company_name": (profile or {}).get("company_name"),
+            # Studio Chat nudges self-serve users without a brand profile (e.g.
+            # they skipped the website at onboarding) to add one
+            "needs_brand_profile": bool(
+                profile is None and user and user.account_type in VALID_SELF_SERVE_ACCOUNT_TYPES
+            ),
+        }
+    )
 
 
 @api_bp.route("/brand-profile/quick-prompts/generate", methods=["POST"])
