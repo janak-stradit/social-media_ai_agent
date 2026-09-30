@@ -13,8 +13,8 @@ APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, APP_ROOT)
 os.chdir(APP_ROOT)
 
-from config import Config  # noqa: E402
-from services import storage_service  # noqa: E402
+from config import Config  # noqa: E402  pylint: disable=wrong-import-position
+from services import storage_service  # noqa: E402  pylint: disable=wrong-import-position
 
 if __name__ == "__main__":
     if not storage_service.enabled():

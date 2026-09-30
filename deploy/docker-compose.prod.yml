@@ -1,0 +1,39 @@
+# Production containers on EC2. Run by deploy/remote_deploy.sh:
+#   APP_IMAGE=<ecr-registry>/<repo>:sha-<commit> docker compose -f docker-compose.prod.yml up -d
+# Both containers use the same image; state lives on the host under /opt/socialmedia.
+name: socialmedia
+
+x-app: &app
+  image: ${APP_IMAGE:?APP_IMAGE is required}
+  restart: unless-stopped
+  volumes:
+    # .env written from the ENV_FILE GitHub secret; the app loads it with python-dotenv
+    - /opt/socialmedia/.env:/app/.env:ro
+    # Generated content + uploads (also mirrored to S3 when S3_MEDIA_BUCKET is set);
+    # nginx serves existing files straight from this host directory
+    - /opt/socialmedia/data/static/uploads:/app/static/uploads
+    # Brand assets uploaded in the app; seeded with the image's defaults on deploy
+    - /opt/socialmedia/data/brand:/app/static/img/brand
+    - /opt/socialmedia/data/chroma_db:/app/chroma_db
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "5"
+
+services:
+  web:
+    <<: *app
+    ports:
+      - "127.0.0.1:8000:5000"
+    environment:
+      # Only the scheduler container publishes scheduled posts
+      SCHEDULER_ENABLED: "false"
+      # gunicorn workers: ~0.6-0.7 GB each. 2 on t3.medium; use "1" on t3.small.
+      WEB_CONCURRENCY: "2"
+    stop_grace_period: 90s
+
+  scheduler:
+    <<: *app
+    command: ["python", "scripts/run_scheduler.py"]
+    stop_grace_period: 30s
