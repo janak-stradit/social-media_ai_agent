@@ -28,6 +28,7 @@ from services import storage_service
 
 try:
     from db import (
+        add_run_cost,
         append_run_media,
         approve_credit_request,
         archive_run,
@@ -1231,6 +1232,7 @@ def refine_post():
             prompt = _build_image_edit_prompt(plan, p, entry["media_prompt"], bool(base_image))
             result = media_service.edit_image(prompt, p, references or None, logo_path=logo_path)
             if result.get("success"):
+                extra_cost += float(result.get("cost") or 0)
                 entry["media"]["image"] = {
                     "url": result["url"],
                     "clean_url": result.get("clean_url"),
@@ -1583,6 +1585,13 @@ def generate_media():
     # that direction.
     image_prompt = (data.get("image_prompt") or "").strip()
     video_prompt = (data.get("video_prompt") or "").strip()
+    # Other platforms of the same post that reuse this image (one square image
+    # instead of one per platform - see app_v2.js triggerMediaGenInChat)
+    shared_platforms = [
+        p
+        for p in (data.get("share_with_platforms") or [])
+        if p in ("facebook", "instagram", "linkedin") and p != platform
+    ]
 
     try:
         caption_to_use = extract_prompt_for_type(caption, media_type)
@@ -1600,15 +1609,30 @@ def generate_media():
             if image_prompt:
                 caption_to_use = image_prompt
             result = media_service.generate_image(
-                caption_to_use, platform, tone, image_path=image_path_for_gen, ai_model=ai_model, logo_path=logo_path
+                caption_to_use,
+                platform,
+                tone,
+                image_path=image_path_for_gen,
+                ai_model=ai_model,
+                logo_path=logo_path,
+                square=bool(shared_platforms),
             )
+            if shared_platforms and result.get("success"):
+                result["shared_platforms"] = shared_platforms
 
         if image_path:
             result["source_image_url"] = _public_upload_url(image_path)
         if run_id:
             result["run_id"] = run_id
             if user_id is not None:
-                _persist_generated_media(run_id, platform, media_type, result, user_id)
+                # One image, saved for every platform of the post that uses it
+                for target in [platform] + list(result.get("shared_platforms") or []):
+                    _persist_generated_media(run_id, target, media_type, result, user_id)
+                if result.get("success") and DB_AVAILABLE:
+                    try:
+                        add_run_cost(run_id, float(result.get("cost") or 0), user_id)
+                    except Exception as cost_err:
+                        current_app.logger.warning(f"[Credits] Could not record media cost: {cost_err}")
 
         return jsonify(result)
 

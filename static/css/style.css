@@ -3985,3 +3985,11 @@ body.lightbox-open { overflow: hidden; }
   .brand-nudge-cta { width: 100%; justify-content: center; }
   .brand-nudge-close { position: absolute; top: 8px; right: 8px; }
 }
+
+/* One shared image per post: loading line + "same image as ..." note */
+.media-loading-inline { padding: 14px; font-size: 13px; color: #64748b; }
+.shared-image-note {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px;
+  margin-top: 8px; padding: 8px 10px; border-radius: 8px; background: #f8fafc; border: 1px dashed #cbd5e1;
+  font-size: 12px; color: #64748b;
+}

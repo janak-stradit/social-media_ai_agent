@@ -44,6 +44,10 @@ class Config:
     HEYROUTE_API_KEY = os.getenv("HEYROUTE_API_KEY")  # reasoning / text (SMAI)
     HEYROUTE_IMAGE_API_KEY = os.getenv("HEYROUTE_IMAGE_API_KEY")  # SMAI-Image
     HEYROUTE_VIDEO_API_KEY = os.getenv("HEYROUTE_VIDEO_API_KEY")  # SMAI-Video
+    # What HeyRoute charges per generated/edited image (its API doesn't report
+    # cost). Added to the post's cost, so it counts against the user's credits.
+    # Set it to your image model's price from the HeyRoute dashboard.
+    HEYROUTE_IMAGE_COST_USD = float(os.getenv("HEYROUTE_IMAGE_COST_USD", "0.55"))
     HEYROUTE_LLM_MODEL = os.getenv("HEYROUTE_LLM_MODEL", "gpt-5.6-terra")
     # Seconds one LLM request may take before it is abandoned (1 retry).
     HEYROUTE_LLM_TIMEOUT = int(os.getenv("HEYROUTE_LLM_TIMEOUT", "120"))

@@ -1720,6 +1720,20 @@ $(document).ready(function () {
         // would immediately kick off a brand new, wasteful (and credit-
         // consuming) generation for content that already exists.
         if (selectedOutputs && selectedOutputs.length > 0) {
+            // Images: ONE square image for the whole post, shown on every
+            // platform (a 1:1 image works on Instagram, Facebook and LinkedIn),
+            // instead of a separately paid image per platform. Each platform
+            // can still ask for its own ("Separate image for ...").
+            const needImage = selectedOutputs.includes('image')
+                ? platforms.filter(p => !(content[p] || {}).media?.image?.url)
+                : [];
+            if (needImage.length) {
+                const first = needImage[0];
+                const fData = content[first] || {};
+                const fCaption = fData.caption?.primary_caption || requestBody.story;
+                triggerMediaGenInChat(first, fCaption, 'image', requestBody.tone, runId, historyObj.activeImgPath,
+                    `${msgId}_media_image_${first}`, fData.media_prompt || fCaption, msgId, needImage.slice(1));
+            }
             platforms.forEach(p => {
                 const pData = content[p] || {};
                 const pCaption = pData.caption?.primary_caption || requestBody.story;
@@ -1728,9 +1742,6 @@ $(document).ready(function () {
                 // so image/video generation actually reflects the research shown
                 // to the user - not just the short social caption text.
                 const pMediaPrompt = pData.media_prompt || pCaption;
-                if (selectedOutputs.includes('image') && !pData.media?.image?.url) {
-                    triggerMediaGenInChat(p, pCaption, 'image', requestBody.tone, runId, historyObj.activeImgPath, `${msgId}_media_image_${p}`, pMediaPrompt, msgId);
-                }
                 if (selectedOutputs.includes('video') && !pData.media?.video?.url) {
                     triggerMediaGenInChat(p, pCaption, 'video', requestBody.tone, runId, historyObj.activeImgPath, `${msgId}_media_video_${p}`, pMediaPrompt, msgId);
                 }
@@ -1780,7 +1791,26 @@ $(document).ready(function () {
             });
     };
 
-    function triggerMediaGenInChat(platform, caption, mediaType, tone, runId, imagePath, targetSlotId, mediaPrompt, msgId) {
+    const PLATFORM_NAMES = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube' };
+    const platformName = p => PLATFORM_NAMES[p] || (p.charAt(0).toUpperCase() + p.slice(1));
+
+    // A platform that was showing the shared image asks for its own (paid) one
+    window.generateSeparateImage = function (msgId, platform) {
+        const h = window.chatHistory[msgId];
+        if (!h) return;
+        const r = h.responses[h.currentIndex];
+        const pData = (r.content || {})[platform] || {};
+        const caption = pData.caption?.primary_caption || h.requestBody.story;
+        $(`#${msgId}_media_image_${platform}`).html(`
+            <div class="media-loading-inline"><i class="fas fa-spinner fa-spin me-2"></i>Creating a separate image for ${escapeHtml(platformName(platform))}...</div>`);
+        triggerMediaGenInChat(platform, caption, 'image', h.requestBody.tone, r.runId, h.activeImgPath,
+            `${msgId}_media_image_${platform}`, pData.media_prompt || caption, msgId, []);
+    };
+
+    function triggerMediaGenInChat(platform, caption, mediaType, tone, runId, imagePath, targetSlotId, mediaPrompt, msgId, sharePlatforms) {
+        const shareWith = mediaType === 'image' ? (sharePlatforms || []) : [];
+        shareWith.forEach(p => $(`#${msgId}_media_image_${p}`).html(`
+            <div class="media-loading-inline"><i class="fas fa-spinner fa-spin me-2"></i>Creating one image for all platforms...</div>`));
         $.ajax({
             url: '/api/generate-media',
             type: 'POST',
@@ -1793,7 +1823,8 @@ $(document).ready(function () {
                 run_id: runId,
                 image_path: imagePath,
                 image_prompt: mediaType === 'image' ? mediaPrompt : undefined,
-                video_prompt: mediaType === 'video' ? mediaPrompt : undefined
+                video_prompt: mediaType === 'video' ? mediaPrompt : undefined,
+                share_with_platforms: shareWith.length ? shareWith : undefined
             }),
             success: function (res) {
                 const slot = $('#' + targetSlotId);
@@ -1802,12 +1833,15 @@ $(document).ready(function () {
                     // follow-up edits this image instead of regenerating it,
                     // and paging between versions doesn't re-trigger generation.
                     const h = msgId && window.chatHistory[msgId];
-                    const pContent = h && h.responses[h.currentIndex].content[platform];
-                    if (pContent) {
-                        pContent.media = pContent.media || {};
-                        pContent.media[mediaType] = { url: res.url, clean_url: res.clean_url || null, prompt: res.prompt, resolution: res.resolution || res.size };
-                        if (refineBaseMsgId === msgId) adoptAsRefineBase(msgId);
-                    }
+                    const sharedTargets = res.shared_platforms || [];
+                    [platform, ...sharedTargets].forEach(target => {
+                        const pContent = h && h.responses[h.currentIndex].content[target];
+                        if (pContent) {
+                            pContent.media = pContent.media || {};
+                            pContent.media[mediaType] = { url: res.url, clean_url: res.clean_url || null, prompt: res.prompt, resolution: res.resolution || res.size };
+                        }
+                    });
+                    if (h && refineBaseMsgId === msgId) adoptAsRefineBase(msgId);
                     const mediaHtml = mediaType === 'video' ? `
                         <div class="media-output-card">
                             <div class="media-output-header">
@@ -1833,20 +1867,34 @@ $(document).ready(function () {
                         </div>
                     `;
                     slot.html(mediaHtml);
+                    // The same image in the other platforms' slots, each able to get its own
+                    sharedTargets.forEach(target => {
+                        $(`#${msgId}_media_image_${target}`).html(mediaHtml + `
+                            <div class="shared-image-note">
+                                <span><i class="fas fa-link me-1"></i>Same image as ${escapeHtml(platformName(platform))} - one image for the whole post</span>
+                                <button type="button" class="btn-copy-sm" onclick="generateSeparateImage('${msgId}', '${target}')">
+                                    <i class="fas fa-wand-magic-sparkles me-1"></i>Separate image for ${escapeHtml(platformName(target))}
+                                </button>
+                            </div>`);
+                    });
                 } else {
-                    slot.html(`
+                    const failHtml = `
                         <div class="alert alert-warning py-2 px-3 small mt-2">
-                            <i class="fas fa-exclamation-circle me-1"></i>Media generation info: ${res.error || 'Complete'}
+                            <i class="fas fa-exclamation-circle me-1"></i>Media generation info: ${escapeHtml(res.error || 'Complete')}
                         </div>
-                    `);
+                    `;
+                    slot.html(failHtml);
+                    shareWith.forEach(p => $(`#${msgId}_media_image_${p}`).html(failHtml));
                 }
             },
             error: function () {
-                $('#' + targetSlotId).html(`
+                const errHtml = `
                     <div class="alert alert-danger py-2 px-3 small mt-2">
                         <i class="fas fa-exclamation-circle me-1"></i>Could not render media preview.
                     </div>
-                `);
+                `;
+                $('#' + targetSlotId).html(errHtml);
+                shareWith.forEach(p => $(`#${msgId}_media_image_${p}`).html(errHtml));
             }
         });
     }
