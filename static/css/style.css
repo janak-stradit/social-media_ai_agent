@@ -999,6 +999,10 @@ body {
   box-shadow: var(--shadow-lg); font-weight: 500; font-size: 13px;
 }
 .ent-toast-body { display: flex; align-items: center; gap: 8px; }
+/* Hidden until bootstrap.Toast shows it - Bootstrap's own hide rule only targets
+   .toast, so without this the empty dark box sat in the corner of every page. */
+.ent-toast:not(.show):not(.showing) { display: none; }
+.toast-container { max-width: min(420px, calc(100vw - 16px)); }
 
 /* ── Responsiveness ─────────────────────────────────────────────────── */
 @media (max-width: 992px) {
@@ -3876,3 +3880,90 @@ body.captcha-open { overflow: hidden; }
     .captcha-modal { padding: 1.25rem 1rem 1rem; border-radius: 16px; }
     .captcha-header h2 { font-size: 1.05rem; }
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   PHONES - logged-in app pages (feature/ux-enhancements)
+   ══════════════════════════════════════════════════════════════════════ */
+.btn-dock-options, .sidebar-backdrop { display: none; }
+
+@media (max-width: 768px) {
+  /* Shared header: logo + name + menu only. Page links live in the user menu. */
+  .app-header { padding: 0 12px; gap: 8px; }
+  .app-header .brand-tagline, .app-header .header-nav { display: none; }
+  .app-header .header-brand { gap: 8px; min-width: 0; }
+  .app-header .brand-name { white-space: nowrap; }
+  .app-header .header-actions { gap: 8px; }
+
+  /* Studio Chat: history becomes a slide-in drawer (hamburger button) */
+  .sidebar, .sidebar.hidden {
+    display: flex; width: min(320px, 86vw); z-index: 1040;
+    transform: translateX(-100%); box-shadow: none;
+  }
+  .sidebar.mobile-open { transform: none; box-shadow: 0 12px 40px rgba(15, 23, 42, 0.25); }
+  .sidebar-backdrop {
+    display: block; position: fixed; top: var(--header-h); left: 0; right: 0; bottom: 0; z-index: 1035;
+    background: rgba(15, 23, 42, 0.35); opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+  }
+  .sidebar-backdrop.show { opacity: 1; pointer-events: auto; }
+  body.drawer-open { overflow: hidden; }
+
+  /* Studio Chat: compact title row */
+  .chat-header-subtitle, .chat-header-bar .badge-version, .chat-header-bar .btn-label { display: none; }
+  .chat-header-bar .btn-xs-outline-info i { margin-right: 0 !important; }
+
+  /* Composer: options fold behind the sliders button, so the text box stays visible */
+  .btn-dock-options { display: flex; }
+  .btn-dock-options.active { background: var(--bp-primary-light, #f3f0ff); color: #8A2BE2; border-color: #d8b4fe; }
+  .chat-input-dock:not(.options-open) .chat-config-bar { display: none; }
+  .chat-dock-footer .dock-tip { display: none; }
+  .chat-workspace { padding-bottom: 180px; }
+
+  /* My Brand Configuration: smaller hero, no decorative panel or promo card */
+  .brand-hero-card { padding: 1.5rem !important; min-height: 0 !important; }
+  .brand-hero-card > .z-1 { max-width: 100% !important; }
+  .brand-hero-card h2 { font-size: 1.6rem !important; }
+  .brand-hero-card p { margin-bottom: 0 !important; }
+  .brand-hero-card .hero-bg-graphic, .bc-sidebar .promo-card { display: none !important; }
+
+  /* Analysis Dashboard: KPI cards stack icon over text in the 2-column grid */
+  .kpi-stat-card { flex-direction: column; align-items: flex-start; gap: 0.6rem; padding: 1rem !important; }
+  .kpi-stat-card h4 { font-size: 1.05rem; overflow-wrap: anywhere; }
+  .kpi-label { font-size: 0.68rem; }
+}
+
+/* Studio Chat: caption preview while the rest of the pipeline runs */
+.caption-preview-list { display: flex; flex-direction: column; gap: 8px; margin: 2px 0 10px 36px; }
+.caption-preview { background: #fff; border: 1px solid #e9d5ff; border-left: 3px solid #8A2BE2; border-radius: 8px; padding: 10px 12px; animation: previewIn 0.3s ease; }
+.caption-preview-label { font-size: 11px; font-weight: 600; color: #8A2BE2; margin-bottom: 4px; }
+.caption-preview-text { font-size: 13px; line-height: 1.5; color: #334155; white-space: pre-line; max-height: 9.5em; overflow: hidden; }
+@keyframes previewIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+/* Studio Chat: failed generation - plain message, retry, technical details */
+.gen-error-card { border: 1px solid #fecaca; background: #fef2f2; border-radius: 12px; padding: 16px 18px; }
+.gen-error-title { font-weight: 700; color: #b91c1c; margin-bottom: 6px; }
+.gen-error-text { color: #7f1d1d; font-size: 14px; margin-bottom: 12px; }
+.gen-error-actions { display: flex; gap: 8px; margin-bottom: 8px; }
+.gen-error-details summary { cursor: pointer; font-size: 12px; color: #991b1b; }
+.gen-error-details code { display: block; margin-top: 6px; font-size: 11.5px; color: #7f1d1d; white-space: pre-wrap; word-break: break-word; }
+@media (max-width: 768px) { .caption-preview-list { margin-left: 0; } }
+@media (prefers-reduced-motion: reduce) { .caption-preview { animation: none; } }
+
+/* Generated image: Preview + Download, and the full-screen preview */
+.media-output-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.media-output-img { cursor: zoom-in; }
+.image-lightbox {
+  position: fixed; inset: 0; z-index: 2000; display: none; align-items: center; justify-content: center;
+  padding: 56px 16px 16px; background: rgba(15, 23, 42, 0.88); backdrop-filter: blur(4px);
+}
+.image-lightbox.show { display: flex; animation: previewIn 0.2s ease; }
+.image-lightbox-img {
+  max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 10px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45); background: #fff; cursor: default;
+}
+.image-lightbox-toolbar { position: absolute; top: 12px; right: 12px; display: flex; gap: 8px; }
+.image-lightbox-btn {
+  width: 40px; height: 40px; border-radius: 50%; border: none; display: flex; align-items: center; justify-content: center;
+  background: rgba(255, 255, 255, 0.14); color: #fff; font-size: 16px; cursor: pointer; text-decoration: none; transition: background 0.15s ease;
+}
+.image-lightbox-btn:hover, .image-lightbox-btn:focus-visible { background: rgba(255, 255, 255, 0.28); color: #fff; outline: none; }
+body.lightbox-open { overflow: hidden; }

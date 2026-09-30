@@ -41,6 +41,9 @@
 <!-- ═══════════════════════ APP SHELL ═══════════════════════ -->
 <div class="app-shell">
 
+    <!-- Phones: dims the page while the history drawer is open; tap to close -->
+    <div class="sidebar-backdrop" id="sidebarBackdrop" aria-hidden="true"></div>
+
     <!-- ── SIDEBAR ── -->
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-top-action d-flex align-items-center gap-2">
@@ -93,7 +96,7 @@
             </div>
             <div class="d-flex gap-2 align-items-center">
                 <a href="/competitor-dashboard" class="btn-xs-outline-info text-decoration-none" title="Open Analysis Dashboard">
-                    <i class="fas fa-chart-line me-2"></i>Analysis Dashboard
+                    <i class="fas fa-chart-line me-2"></i><span class="btn-label">Analysis Dashboard</span>
                 </a>
                 <span class="badge-version">v2.5 Critic</span>
             </div>
@@ -280,6 +283,11 @@
                 <!-- Textarea & Action Buttons Bar -->
                 <div class="chat-input-row">
                     
+                    <!-- Phones: platforms/voice/tone/output fold away behind this button -->
+                    <button type="button" class="btn-chat-attach btn-dock-options" id="dockOptionsBtn" title="Platforms, voice, tone &amp; output" aria-expanded="false" aria-controls="dropZone">
+                        <i class="fas fa-sliders"></i>
+                    </button>
+
                     <!-- Upload Asset Button -->
                     <button type="button" class="btn-chat-attach" id="attachBtn" onclick="document.getElementById('imageInput').click()" title="Attach visual asset (Image)">
                         <i class="fas fa-paperclip"></i>

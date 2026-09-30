@@ -131,8 +131,33 @@ $(document).ready(function () {
         }
     }
 
+    // Phones: the sidebar is a slide-in drawer over the chat instead of a
+    // column, so the desktop show/hide preference isn't touched there.
+    const isPhone = () => window.matchMedia('(max-width: 768px)').matches;
+    function setMobileDrawer(open) {
+        $('#sidebar').toggleClass('mobile-open', open);
+        $('#sidebarBackdrop').toggleClass('show', open);
+        $('body').toggleClass('drawer-open', open);
+    }
+    window.closeMobileDrawer = function () { if (isPhone()) setMobileDrawer(false); };
+
     $('#sidebarToggleBtn, #sidebarHideBtn').on('click', function () {
+        if (isPhone()) {
+            setMobileDrawer(!$('#sidebar').hasClass('mobile-open'));
+            return;
+        }
         toggleSidebar();
+    });
+    $('#sidebarBackdrop').on('click', function () { setMobileDrawer(false); });
+    // Picking a conversation or starting a new one closes the drawer
+    $('#sidebar').on('click', '.history-card, #newChatBtn', function () { window.closeMobileDrawer(); });
+    $(window).on('resize', function () { if (!isPhone()) setMobileDrawer(false); });
+
+    // Phones: composer options (platforms, voice, tone, output) fold away
+    $('#dockOptionsBtn').on('click', function () {
+        const open = !$('#dropZone').hasClass('options-open');
+        $('#dropZone').toggleClass('options-open', open);
+        $(this).toggleClass('active', open).attr('aria-expanded', String(open));
     });
 
     // Restore saved sidebar preference
@@ -631,6 +656,35 @@ $(document).ready(function () {
         }
     }
 
+    // A finished caption, shown under the Caption step while hashtags and
+    // quality checks are still running - so the wait doesn't feel empty.
+    function renderCaptionPreview(msgId, platform, text) {
+        const $list = $(`#${msgId}_captionPreviews`);
+        if (!$list.length || !text) return;
+        const key = String(platform).replace(/[^a-z0-9_-]/gi, '');
+        if ($list.find(`[data-platform="${key}"]`).length) return;
+        const label = key.charAt(0).toUpperCase() + key.slice(1);
+        $list.removeClass('d-none').append(`
+            <div class="caption-preview" data-platform="${key}">
+                <div class="caption-preview-label"><i class="fas fa-eye me-1"></i>${escapeHtml(label)} caption - finishing touches in progress</div>
+                <div class="caption-preview-text">${escapeHtml(text)}</div>
+            </div>
+        `);
+    }
+
+    // Plain-language message for a failed generation (the raw error stays
+    // available under "Technical details").
+    function friendlyGenerationError(xhr, errText) {
+        if (xhr.status === 0) return "We couldn't reach the server. Check your internet connection and try again.";
+        if ([502, 503, 504].includes(xhr.status) || /time(d)? ?out/i.test(errText)) {
+            return 'The AI service took too long to answer. Please try again - it usually works on the next attempt.';
+        }
+        if (/all providers|LLM|HeyRoute|rate limit|429|overloaded|unavailable/i.test(errText)) {
+            return 'The AI service is busy or unavailable right now. Please try again in a moment.';
+        }
+        return 'Something went wrong while creating your post. Please try again.';
+    }
+
     // Polls the server's step states every second until stop() is called.
     function pollGenerationProgress(msgId, progressId) {
         let stopped = false;
@@ -639,7 +693,10 @@ $(document).ready(function () {
             if (stopped) return;
             $.getJSON(`/api/generate/progress/${encodeURIComponent(progressId)}`)
                 .done(function (res) {
-                    Object.entries((res && res.steps) || {}).forEach(([step, state]) => setAgentStep(msgId, step, state));
+                    Object.entries((res && res.steps) || {}).forEach(([step, value]) => {
+                        if (step.startsWith('preview:')) renderCaptionPreview(msgId, step.slice(8), value);
+                        else setAgentStep(msgId, step, value);
+                    });
                 })
                 .always(function () {
                     if (!stopped) timer = setTimeout(poll, 1000);
@@ -720,11 +777,20 @@ $(document).ready(function () {
                     openCreditRequestModal();
                 } else {
                     assistantElem.find('.assistant-card').html(`
-                        <div class="alert alert-danger mb-0">
-                            <i class="fas fa-exclamation-triangle me-2"></i><strong>Error:</strong> ${escapeHtml(errText)}
+                        <div class="gen-error-card" role="alert">
+                            <div class="gen-error-title"><i class="fas fa-circle-exclamation me-2"></i>Your post couldn't be created</div>
+                            <p class="gen-error-text">${escapeHtml(friendlyGenerationError(xhr, errText))}</p>
+                            <div class="gen-error-actions">
+                                <button type="button" class="btn-chat-send gen-retry-btn"><i class="fas fa-rotate-right me-2"></i>Try again</button>
+                            </div>
+                            <details class="gen-error-details"><summary>Technical details</summary><code>${escapeHtml(errText)}</code></details>
                         </div>
                     `);
-                    showToast('Generation error: ' + errText, 'error');
+                    assistantElem.find('.gen-retry-btn').on('click', function () {
+                        // Same request again, in the same chat bubble
+                        assistantElem.find('.assistant-card').html(buildPipelineCardHtml(msgId, !!activeImgPath));
+                        executeGeneration(msgId, requestBody, assistantElem, platforms, activeImgPath, mediaType, selectedOutputs);
+                    });
                 }
             }
         });
@@ -925,7 +991,10 @@ $(document).ready(function () {
             <div class="media-output-card">
                 <div class="media-output-header">
                     <span><i class="fas fa-image text-primary me-2"></i>Generated Image (${media.resolution || '1024x1024'})</span>
-                    <button type="button" class="btn-copy-sm" onclick="downloadAsZip('${media.url}', this)"><i class="fas fa-file-zipper me-1"></i>Download</button>
+                    <div class="media-output-actions">
+                        <button type="button" class="btn-copy-sm" onclick="openImagePreview('${media.url}')" title="View the image larger"><i class="fas fa-expand me-1"></i>Preview</button>
+                        <button type="button" class="btn-copy-sm" onclick="downloadAsZip('${media.url}', this)"><i class="fas fa-file-zipper me-1"></i>Download</button>
+                    </div>
                 </div>
                 <div class="media-output-body">
                     <img src="${media.url}" class="media-output-img" alt="Generated media">
@@ -933,6 +1002,44 @@ $(document).ready(function () {
             </div>
         `;
     }
+
+    // ── Image preview (lightbox) ────────────────────────────────────────
+    // Full-screen view of a generated image: fits the screen, Esc / click
+    // outside / X closes it, and "open full size" shows the original in a tab.
+    window.openImagePreview = function (src) {
+        if (!src) return;
+        let $box = $('#imageLightbox');
+        if (!$box.length) {
+            $('body').append(`
+                <div class="image-lightbox" id="imageLightbox" role="dialog" aria-modal="true" aria-label="Image preview">
+                    <div class="image-lightbox-toolbar">
+                        <a class="image-lightbox-btn" id="imageLightboxOpen" target="_blank" rel="noopener" title="Open full size in a new tab"><i class="fas fa-up-right-from-square"></i></a>
+                        <button type="button" class="image-lightbox-btn" id="imageLightboxClose" title="Close (Esc)"><i class="fas fa-xmark"></i></button>
+                    </div>
+                    <img class="image-lightbox-img" alt="Generated image preview">
+                </div>
+            `);
+            $box = $('#imageLightbox');
+            $box.on('click', function (e) { if (e.target === this) closeImagePreview(); });
+            $('#imageLightboxClose').on('click', closeImagePreview);
+            $(document).on('keydown', function (e) {
+                if (e.key === 'Escape' && $('#imageLightbox').hasClass('show')) closeImagePreview();
+            });
+        }
+        $box.find('.image-lightbox-img').attr('src', src);
+        $('#imageLightboxOpen').attr('href', src);
+        $box.addClass('show');
+        $('body').addClass('lightbox-open');
+        $('#imageLightboxClose').trigger('focus');
+    };
+
+    function closeImagePreview() {
+        $('#imageLightbox').removeClass('show');
+        $('body').removeClass('lightbox-open');
+    }
+
+    // Clicking a generated image opens the preview too
+    $(document).on('click', '.media-output-img', function () { window.openImagePreview($(this).attr('src')); });
 
     function assistantAvatarSvg() {
         return `
@@ -988,6 +1095,7 @@ $(document).ready(function () {
                     <span class="agent-step-name"><i class="fas fa-pen-nib me-1 text-primary"></i>Caption Agent</span>
                     <span class="agent-step-desc">Writing the caption for each platform</span>
                 </div>
+                <div class="caption-preview-list d-none" id="${msgId}_captionPreviews"></div>
 
                 <div class="agent-step-item" id="${msgId}_step_hashtag">
                     <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
@@ -1689,7 +1797,10 @@ $(document).ready(function () {
                         <div class="media-output-card">
                             <div class="media-output-header">
                                 <span><i class="fas fa-image text-primary me-2"></i>Generated Image (${res.resolution || '1024x1024'})</span>
-                                <button type="button" class="btn-copy-sm" onclick="downloadAsZip('${res.url}', this)"><i class="fas fa-file-zipper me-1"></i>Download</button>
+                                <div class="media-output-actions">
+                                    <button type="button" class="btn-copy-sm" onclick="openImagePreview('${res.url}')" title="View the image larger"><i class="fas fa-expand me-1"></i>Preview</button>
+                                    <button type="button" class="btn-copy-sm" onclick="downloadAsZip('${res.url}', this)"><i class="fas fa-file-zipper me-1"></i>Download</button>
+                                </div>
                             </div>
                             <div class="media-output-body">
                                 <img src="${res.url}" class="media-output-img" alt="Generated media">
