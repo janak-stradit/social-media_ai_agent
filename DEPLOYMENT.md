@@ -17,7 +17,7 @@ EC2 (Ubuntu 24.04, Docker)                                   RDS PostgreSQL 16 (
 |---|---|
 | Workflow | `.github/workflows/deploy.yml` |
 | Image definition | `Dockerfile`, `.dockerignore` |
-| Containers on the server | `deploy/docker-compose.prod.yml` (web + scheduler, same image) |
+| Containers on the server | `deploy/docker-compose.prod.yml` (web + scheduler from the same image, plus a small Redis for signup captcha) |
 | Server bootstrap (Docker, nginx, swap, data folders) | `deploy/setup_server.sh`, runs automatically on the first deploy |
 | Per-deploy script on the server | `deploy/remote_deploy.sh` |
 | nginx site | `deploy/nginx/socialmedia.conf` |
@@ -128,8 +128,13 @@ private. Implementation: `services/storage_service.py`.
 1. **S3 → Create bucket**, e.g. `avir-content-<account-id>`, in the same region as EC2.
    Keep **Block all public access** on and default encryption (SSE-S3). Versioning is optional.
 2. **IAM → Roles → Create role** → trusted entity *AWS service / EC2*, name `avir-ec2`.
-   Add an inline policy from `deploy/aws/ec2-s3-media-policy.json`, replacing `S3_MEDIA_BUCKET`.
+   Add an inline policy from `deploy/aws/ec2-app-policy.json`, replacing `S3_MEDIA_BUCKET` and
+   `AWS_REGION`. It covers S3 storage and Bedrock image analysis (`VISION_PROVIDER=bedrock`).
 3. **EC2 → the instance → Actions → Security → Modify IAM role** → `avir-ec2`.
+   Then **Actions → Instance settings → Modify instance metadata options** → set
+   **Metadata response hop limit = 2**. Containers are one network hop away from the instance;
+   with the default hop limit of 1 they can't read the role's credentials, and S3/Bedrock calls
+   fail with "Unable to locate credentials".
 4. In the `ENV_FILE` secret, set `S3_MEDIA_BUCKET=<bucket>` and `AWS_REGION=<region>`. Leave
    `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` empty so the role is used.
 5. After the first deploy, once, to copy content that existed before S3 was switched on:
@@ -157,10 +162,14 @@ are used.
    - Audience: `sts.amazonaws.com`
 2. **IAM → Roles → Create role → Web identity** → that provider, audience `sts.amazonaws.com`.
    Name it `avir-github-deploy`.
-3. Open the role → **Trust relationships → Edit** → paste
+3. Open the role → **Trust relationships → Edit** → **replace everything** with
    `deploy/aws/github-oidc-trust-policy.json`, replacing `ACCOUNT_ID`, `GITHUB_OWNER` and
-   `GITHUB_REPO`. Only workflow jobs of this repository that run in a GitHub Environment can
-   use the role.
+   `GITHUB_REPO` (exact spelling, e.g. `repo:janak-stradit/social-media_ai_agent:environment:*`).
+   Only workflow jobs of this repository that run in a GitHub Environment can use the role.
+   > The console wizard asks for a GitHub *branch* and writes a `...:ref:refs/heads/<branch>`
+   > condition. That never matches here, because the deploy job runs in an Environment, where
+   > GitHub sends `repo:<owner>/<repo>:environment:<name>`. Keeping the wizard's condition fails
+   > with *"Not authorized to perform sts:AssumeRoleWithWebIdentity"*.
 4. **Permissions → Add permissions → Create inline policy → JSON** → paste
    `deploy/aws/github-deploy-policy.json`, replacing `AWS_REGION`, `ACCOUNT_ID` and
    `ECR_REPOSITORY`. It grants push/pull to this one repository only.
@@ -194,7 +203,10 @@ To change a setting, edit the secret and re-run the workflow. Unchanged images a
 the containers just restart with the new `.env`. Important for production:
 - Generate a new `SECRET_KEY` (don't reuse the local one).
 - Do **not** include `AWS_PROFILE` (no AWS profiles exist on the server).
-- `SCHEDULER_ENABLED` is not needed; the compose file sets it correctly.
+- `SCHEDULER_ENABLED`, `WEB_CONCURRENCY` and `REDIS_URL` are not needed; the compose file sets
+  them, and its values win over `ENV_FILE`.
+- Line by line, what to put in `ENV_FILE` (required vs optional) is in
+  `deploy/env.production.example`.
 
 ## Step 7 — First deploy
 
@@ -347,8 +359,12 @@ docker run --rm -p 5000:5000 -e SCHEDULER_ENABLED=false -v "$PWD/.env:/app/.env:
 - **Troubleshooting:**
   - *Health check failed*: read the log lines printed in the job. The usual causes are a wrong
     `DATABASE_URL` or an RDS security group that doesn't allow the EC2 security group.
-  - *`Not authorized to perform sts:AssumeRoleWithWebIdentity`*: the trust policy's
-    `repo:OWNER/REPO` doesn't match the repository exactly, or the OIDC provider is missing.
+  - *`Not authorized to perform sts:AssumeRoleWithWebIdentity`*: the role's trust policy doesn't
+    match what GitHub sends. The usual cause is the wizard's branch condition (`:ref:refs/heads/...`)
+    instead of `:environment:*` (see Step 5b.3). Also check the repo spelling, the account ID in
+    `Federated`, the OIDC provider (audience `sts.amazonaws.com`), and the
+    `AWS_DEPLOY_ROLE_ARN` secret. CloudTrail → *AssumeRoleWithWebIdentity* shows the `sub`
+    GitHub actually sent.
   - *`denied` / `AccessDenied` when pushing to ECR*: `ECR_REPOSITORY`, `AWS_REGION` or the
     ARN in `github-deploy-policy.json` doesn't match the repository.
   - *`Permission denied (publickey)`*: `EC2_SSH_KEY` or `EC2_USER` is wrong.
