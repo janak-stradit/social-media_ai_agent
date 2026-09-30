@@ -3273,6 +3273,10 @@ body {
 .mock-bar { height: 9px; background: #e2e8f0; border-radius: 4px; margin-bottom: 10px; }
 
 .welcome-section-label { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--bp-text-sub); margin-bottom: 0.9rem; }
+/* "Start from an idea" + its regenerate-ideas button on one line */
+.welcome-section-row { display: flex; align-items: center; gap: 10px; margin-bottom: 0.9rem; }
+.welcome-section-row .welcome-section-label { margin-bottom: 0; }
+.welcome-section-row .btn-regenerate-greeting { margin: 0; width: 28px; height: 28px; font-size: 12px; }
 
 /* ── Prompt cards (static + app_v2.js renderQuickPromptCards) ────────── */
 .quick-prompts-grid { gap: 1.5rem; }

@@ -32,7 +32,6 @@
     </div>
     <nav class="header-nav">
         <a href="/dashboard" class="header-nav-item active"><i class="fas fa-comments me-2"></i>Studio Chat</a>
-        <a href="/dashboard" class="header-nav-item" id="headerNewChatBtn"><i class="fas fa-plus me-2"></i>New Chat</a>
     </nav>
     <div class="header-actions">
         {% include 'partials/user_menu.html' %}
@@ -44,14 +43,6 @@
 
     <!-- ── SIDEBAR ── -->
     <aside class="sidebar" id="sidebar">
-        <div class="bc-sidebar-header sidebar-panel-header">
-            <i class="fas fa-comments"></i>
-            <div>
-                <div class="sidebar-panel-title">Studio Chat</div>
-                <div class="sidebar-panel-sub">Campaign conversations</div>
-            </div>
-        </div>
-
         <div class="sidebar-top-action d-flex align-items-center gap-2">
             <button class="btn-new-chat flex-grow-1" id="newChatBtn">
                 <i class="fas fa-plus me-2"></i>New Conversation
@@ -118,9 +109,6 @@
                         <div class="welcome-eyebrow">Campaign Studio</div>
                         <div class="welcome-title-row">
                             <h2 class="welcome-title">How can I assist your social media strategy?</h2>
-                            <button type="button" class="btn-regenerate-greeting d-none" id="regenerateGreetingBtn" onclick="regenerateGreeting()" title="Regenerate prompt ideas">
-                                <i class="fas fa-arrows-rotate"></i>
-                            </button>
                         </div>
                         <p class="welcome-desc">Select a prompt template below or type your brief, upload image context, and pick your target channels.</p>
                     </div>
@@ -141,7 +129,12 @@
                     </div>
                 </div>
 
-                <div class="welcome-section-label">Start from an idea</div>
+                <div class="welcome-section-row">
+                    <div class="welcome-section-label">Start from an idea</div>
+                    <button type="button" class="btn-regenerate-greeting d-none" id="regenerateGreetingBtn" onclick="regenerateGreeting()" title="Regenerate prompt ideas">
+                        <i class="fas fa-arrows-rotate"></i>
+                    </button>
+                </div>
                 
                 <!-- Quick Prompt Cards -->
                 <div class="quick-prompts-grid">
@@ -314,61 +307,13 @@
                 <!-- Dock Footer info -->
                 <div class="chat-dock-footer">
                     <span id="charCount" class="char-count">0 chars</span>
-                    <span class="dock-tip"><i class="fas fa-sparkles me-1"></i>Autonomous Multi-Agent System (Story, Vision, Caption, Hashtag, Strategy, Reviewer Critic)</span>
+                    <span class="dock-tip"><i class="fas fa-sparkles me-1"></i>Autonomous Multi-Agent System (Story, Vision, Caption, Hashtag, Quality Checks)</span>
                 </div>
 
             </div>
         </div>
 
     </main>
-</div>
-
-<!-- ═══════════════════════ HISTORY MODAL ═══════════════════════ -->
-<div class="modal fade" id="historyModal" tabindex="-1" aria-labelledby="historyModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-xl modal-dialog-scrollable">
-        <div class="modal-content ent-modal">
-            <div class="modal-header ent-modal-header">
-                <div class="d-flex align-items-center gap-3">
-                    <div class="card-icon card-icon-blue"><i class="fas fa-clock-rotate-left"></i></div>
-                    <div>
-                        <h5 class="modal-title mb-0" id="historyModalLabel">Run Details</h5>
-                        <small class="text-muted" id="modalTimestamp">—</small>
-                    </div>
-                </div>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body ent-modal-body">
-                <div class="modal-meta-row">
-                    <div class="modal-meta-item">
-                        <div class="modal-meta-label"><i class="fas fa-sliders me-1"></i>Tone</div>
-                        <div class="modal-meta-value" id="modalTone">—</div>
-                    </div>
-                    <div class="modal-meta-item">
-                        <div class="modal-meta-label"><i class="fas fa-bullseye me-1"></i>Platforms</div>
-                        <div class="modal-meta-value" id="modalPlatforms">—</div>
-                    </div>
-                    <div class="modal-meta-item">
-                        <div class="modal-meta-label"><i class="fas fa-bolt me-1"></i>Tokens &amp; Cost</div>
-                        <div class="modal-meta-value" id="modalUsage">—</div>
-                    </div>
-                    <div class="modal-meta-item modal-meta-story">
-                        <div class="modal-meta-label"><i class="fas fa-pen me-1"></i>Story</div>
-                        <div class="modal-meta-value" id="modalStory">—</div>
-                    </div>
-                </div>
-                <hr class="ent-divider">
-                <div id="modalDetails"></div>
-            </div>
-            <div class="modal-footer ent-modal-footer">
-                <button type="button" class="btn-secondary-ent" data-bs-dismiss="modal">Close</button>
-                <span class="coming-soon ms-2" title="Coming soon">
-                    <button type="button" class="btn-submit-emerald" id="modalScheduleBtn" disabled>
-                        <i class="fas fa-calendar-plus me-1"></i>Schedule Campaign Post<span class="soon-tag">Soon</span>
-                    </button>
-                </span>
-            </div>
-        </div>
-    </div>
 </div>
 
 <!-- ═══════════════════════ CREDIT EXTENSION REQUEST MODAL ═══════════════════════ -->

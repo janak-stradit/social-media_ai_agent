@@ -36,6 +36,12 @@
         .website-row { display: flex; gap: 0.75rem; align-items: flex-end; }
         .website-row .auth-form-group { flex: 1; margin-bottom: 0; }
         .website-row .btn-primary-blue { height: 48px; margin: 0; white-space: nowrap; }
+        .website-actions { display: flex; gap: 0.5rem; }
+        .website-actions .btn-cancel-light { height: 48px; white-space: nowrap; }
+        .website-hint { margin: 0.6rem 0 0; font-size: 0.8rem; color: #6B7280; }
+        .skip-scan-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--bp-border); }
+        .skip-scan-row .btn-cancel-light { display: inline-flex; align-items: center; gap: 8px; }
+        .skip-scan-note { font-size: 0.78rem; color: #6B7280; }
         #onboardError { margin-top: 1rem; display: none; }
         .d-none { display: none !important; }
 
@@ -68,6 +74,7 @@
         @media (max-width: 560px) {
             .account-type-grid { grid-template-columns: 1fr; }
             .website-row { flex-direction: column; align-items: stretch; }
+            .website-actions > button { flex: 1; }
         }
     </style>
 </head>
@@ -162,10 +169,16 @@
                                 <label class="auth-form-label" for="websiteInput">Your website</label>
                                 <input id="websiteInput" type="url" class="auth-form-input" placeholder="https://yourcompany.com" autocomplete="url">
                             </div>
-                            <button id="continueBtn" type="button" class="btn-primary-blue">
-                                <span id="continueBtnText">Continue to dashboard</span>
-                            </button>
+                            <div class="website-actions">
+                                <button id="skipWebsiteBtn" type="button" class="btn-cancel-light" title="Add your website later in My Brand Configuration">
+                                    Skip for now
+                                </button>
+                                <button id="continueBtn" type="button" class="btn-primary-blue">
+                                    <span id="continueBtnText">Proceed</span><i class="fas fa-arrow-right ms-2" aria-hidden="true"></i>
+                                </button>
+                            </div>
                         </div>
+                        <p class="website-hint">No website yet? Skip for now - you can add it later in My Brand Configuration.</p>
                     </div>
 
                     <div id="onboardError" class="alert-inline alert-inline-danger" role="alert"></div>
@@ -182,6 +195,13 @@
                         <li class="progress-step" data-step="4"><span class="step-icon"></span><span class="step-label">Generating content ideas</span></li>
                         <li class="progress-step final" data-step="5"><span class="step-icon"></span><span class="step-label">Complete!</span></li>
                     </ul>
+                    <!-- Shown while the analysis runs - it keeps going in the background -->
+                    <div id="skipScanRow" class="skip-scan-row d-none">
+                        <button id="skipScanBtn" type="button" class="btn-cancel-light">
+                            Skip &amp; go to dashboard<i class="fas fa-arrow-right" aria-hidden="true"></i>
+                        </button>
+                        <span class="skip-scan-note">We'll finish analyzing in the background.</span>
+                    </div>
                 </div>
             </div>
 
@@ -297,8 +317,15 @@
 
         function waitForBrandScan(onDone) {
             const startedAt = Date.now();
+            // The scan keeps running server-side, so leaving now loses nothing
+            $('#skipScanRow').removeClass('d-none');
+            $('#skipScanBtn').off('click').on('click', function () {
+                $(this).prop('disabled', true);
+                onDone();
+            });
             (function poll() {
                 $.getJSON('/api/brand-profile/status').done(function (s) {
+                    if (s.status === 'ready' || s.status === 'failed') $('#skipScanRow').addClass('d-none');
                     if (s.status === 'ready') {
                         finishProgressCard(onDone);
                     } else if (s.status === 'failed') {
@@ -362,6 +389,33 @@
             });
         }
 
+        // "Skip for now": finish onboarding without a website (added later in
+        // My Brand Configuration) - no brand analysis, straight to the dashboard.
+        $('#skipWebsiteBtn').on('click', function () {
+            if (!selectedType) return;
+            const $skip = $(this);
+            $skip.prop('disabled', true);
+            $('#continueBtn').prop('disabled', true);
+            $.ajax({
+                url: '/api/onboarding/account-type',
+                type: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({ account_type: selectedType, website: '', skip_website: true })
+            }).done(function (res) {
+                if (res.success) {
+                    window.location.href = res.redirect || '/dashboard';
+                    return;
+                }
+                $('#onboardError').text(res.error || 'Something went wrong.').show();
+                $skip.prop('disabled', false);
+                $('#continueBtn').prop('disabled', false);
+            }).fail(function (xhr) {
+                $('#onboardError').text((xhr.responseJSON && xhr.responseJSON.error) || 'Something went wrong.').show();
+                $skip.prop('disabled', false);
+                $('#continueBtn').prop('disabled', false);
+            });
+        });
+
         $('#continueBtn').on('click', function () {
             if (!selectedType) return;
             const website = $('#websiteInput').val().trim();
@@ -371,6 +425,7 @@
             }
             const $btn = $(this);
             $btn.prop('disabled', true);
+            $('#skipWebsiteBtn').prop('disabled', true);
             startProgressCard();
 
             submitAccountType(selectedType, website).done(function (res) {
@@ -384,11 +439,13 @@
                 } else {
                     resetProgressCard();
                     $btn.prop('disabled', false);
+                    $('#skipWebsiteBtn').prop('disabled', false);
                     $('#onboardError').text(res.error || 'Something went wrong.').show();
                 }
             }).fail(function () {
                 resetProgressCard();
                 $btn.prop('disabled', false);
+                $('#skipWebsiteBtn').prop('disabled', false);
             });
         });
     </script>
