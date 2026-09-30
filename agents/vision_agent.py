@@ -21,6 +21,9 @@ class VisionAgent:
 
     def analyze_image(self, image_path):
         """Full image analysis pipeline"""
+        if self.hf.vision_provider == "heyroute":
+            return self._analyze_image_heyroute(image_path)
+
         # Step 1: Get HF caption
         caption = self.hf.get_image_caption(image_path)
 
@@ -36,6 +39,30 @@ class VisionAgent:
         analysis = self.llm.generate_json(self.SYSTEM_PROMPT, user_prompt)
         analysis["raw_caption"] = caption
         return analysis
+
+    def _analyze_image_heyroute(self, image_path):
+        """The model sees the image itself, so one call replaces the caption +
+        features + enrichment calls. A failure returns an empty analysis - the
+        upload/post still works, just without image insights."""
+        instruction = (
+            self.SYSTEM_PROMPT
+            + "\n\nAlso include raw_caption: one sentence describing exactly what is in the image. "
+            "Return ONLY the JSON object."
+        )
+        try:
+            text = self.hf.describe_image_heyroute(image_path, instruction, json_output=True)
+            analysis = self.llm._robust_parse_json(text)  # pylint: disable=protected-access
+            if not isinstance(analysis, dict):
+                raise ValueError("vision model did not return a JSON object")
+            analysis.setdefault("raw_caption", analysis.get("rich_description", ""))
+            return analysis
+        except Exception as err:
+            print(f"[VisionAgent] HeyRoute image analysis failed: {err}")
+            return {
+                "rich_description": "",
+                "raw_caption": "",
+                "error": "Image analysis is unavailable right now - the post is written without it.",
+            }
 
     def get_alt_text(self, image_path):
         """Generate accessibility-friendly alt text"""

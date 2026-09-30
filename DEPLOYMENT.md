@@ -130,12 +130,13 @@ private. Implementation: `services/storage_service.py`.
 1. **S3 → Create bucket**, e.g. `avir-content-<account-id>`, in the same region as EC2.
    Keep **Block all public access** on and default encryption (SSE-S3). Versioning is optional.
 2. **IAM → Roles → Create role** → trusted entity *AWS service / EC2*, name `avir-ec2`.
-   Add an inline policy from `deploy/aws/ec2-app-policy.json`, replacing `S3_MEDIA_BUCKET` and
-   `AWS_REGION`. It covers S3 storage and Bedrock image analysis (`VISION_PROVIDER=bedrock`).
+   Add an inline policy from `deploy/aws/ec2-app-policy.json`, replacing `S3_MEDIA_BUCKET` (the
+   bucket name, e.g. `avir-content-...`). Image analysis runs on HeyRoute
+   (`VISION_PROVIDER=heyroute`), so no Bedrock permission is needed.
 3. **EC2 → the instance → Actions → Security → Modify IAM role** → `avir-ec2`.
    Then **Actions → Instance settings → Modify instance metadata options** → set
    **Metadata response hop limit = 2**. Containers are one network hop away from the instance;
-   with the default hop limit of 1 they can't read the role's credentials, and S3/Bedrock calls
+   with the default hop limit of 1 they can't read the role's credentials, and S3 calls
    fail with "Unable to locate credentials".
 4. In the `ENV_FILE` secret, set `S3_MEDIA_BUCKET=<bucket>` and `AWS_REGION=<region>`. Leave
    `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` empty so the role is used.
@@ -394,7 +395,8 @@ df -h / && sudo docker system df          # disk space
 |---|---|
 | `Restarting` in `docker ps` | The container crashes on start; its logs say why |
 | `[DB] Warning – could not initialise DB` (web) | Wrong `DATABASE_URL`, missing database, or RDS security group (see Troubleshooting) |
-| `Unable to locate credentials` | S3/Bedrock from the container can't read the EC2 role; set the metadata hop limit to 2 (Step 4) |
+| `Unable to locate credentials` | S3 from the container can't read the EC2 role; set the metadata hop limit to 2 (Step 4) |
+| `AccessDenied ... s3:PutObject` / `no identity-based policy allows` | The EC2 role has no (or the wrong) permission policy - attach `deploy/aws/ec2-app-policy.json` with your bucket name (Step 4) |
 | `WORKER TIMEOUT` (gunicorn) | A request ran longer than 900 s |
 | `502 Bad Gateway` in nginx `error.log` | The web container is down or restarting |
 

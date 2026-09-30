@@ -54,6 +54,58 @@ class HuggingFaceService:
             except Exception as e:
                 print(f"[HuggingFaceService] Bedrock client initialization failed: {e}. Falling back to local.")
 
+    # Longest side sent to the vision model - enough detail for a description,
+    # far fewer tokens (and seconds) than a full-resolution photo.
+    VISION_MAX_SIDE = 1024
+
+    def _image_data_uri(self, image_path):
+        """JPEG data URI of the image, downscaled to VISION_MAX_SIDE."""
+        import io
+
+        from PIL import Image
+
+        with Image.open(image_path) as img:
+            img = img.convert("RGB")
+            img.thumbnail((self.VISION_MAX_SIDE, self.VISION_MAX_SIDE))
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=85)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("utf-8")
+
+    def describe_image_heyroute(self, image_path, instruction, json_output=False, max_tokens=1200):
+        """One multimodal call to HeyRoute (HEYROUTE_VISION_MODEL, HEYROUTE_API_KEY):
+        returns the model's text answer for `instruction` about the image."""
+        import openai
+
+        if not Config.HEYROUTE_API_KEY:
+            raise RuntimeError("HEYROUTE_API_KEY is not configured.")
+        client = openai.OpenAI(
+            api_key=Config.HEYROUTE_API_KEY,
+            base_url=Config.HEYROUTE_BASE_URL,
+            timeout=float(Config.HEYROUTE_LLM_TIMEOUT),
+            max_retries=1,
+        )
+        kwargs = {
+            "model": Config.HEYROUTE_VISION_MODEL,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": instruction},
+                        {"type": "image_url", "image_url": {"url": self._image_data_uri(image_path)}},
+                    ],
+                }
+            ],
+            # Reasoning model: token budget includes its thinking; "minimal" keeps it fast
+            "max_completion_tokens": max(max_tokens * 4, 4096),
+            "reasoning_effort": "minimal",
+        }
+        if json_output:
+            kwargs["response_format"] = {"type": "json_object"}
+        response = client.chat.completions.create(**kwargs)
+        if not getattr(response, "choices", None):
+            raise RuntimeError(f"HeyRoute vision returned no choices: {getattr(response, 'error', None)}")
+        return (response.choices[0].message.content or "").strip()
+
     def encode_image(self, image_path):
         """Convert image to base64 for API"""
         with open(image_path, "rb") as f:
@@ -61,6 +113,11 @@ class HuggingFaceService:
 
     def get_image_caption(self, image_path, model="blip"):
         """Get caption using local transformers library to bypass Inference API deprecation, or optionally via AWS Bedrock"""
+        if self.vision_provider == "heyroute":
+            # No local-model fallback here: on a server it would download ~1 GB
+            return self.describe_image_heyroute(
+                image_path, "Describe what is happening in this image in one clear, detailed sentence.", max_tokens=200
+            )
         if self.vision_provider == "bedrock" and self.bedrock_client:
             try:
                 with open(image_path, "rb") as f:
@@ -125,6 +182,17 @@ class HuggingFaceService:
 
     def get_image_features(self, image_path):
         """Extract visual features for content analysis"""
+        if self.vision_provider == "heyroute":
+            try:
+                return self.describe_image_heyroute(
+                    image_path,
+                    "List the main visual features, objects, colors, composition, and mood of this image "
+                    "as a comma-separated list.",
+                    max_tokens=300,
+                )
+            except Exception as err:
+                print(f"[HeyRoute Vision] Failed to extract features: {err}")
+                return None
         if self.vision_provider == "bedrock" and self.bedrock_client:
             try:
                 with open(image_path, "rb") as f:

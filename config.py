@@ -47,6 +47,8 @@ class Config:
     HEYROUTE_LLM_MODEL = os.getenv("HEYROUTE_LLM_MODEL", "gpt-5.6-terra")
     # Seconds one LLM request may take before it is abandoned (1 retry).
     HEYROUTE_LLM_TIMEOUT = int(os.getenv("HEYROUTE_LLM_TIMEOUT", "120"))
+    # Model for image analysis (must accept image input). Uses HEYROUTE_API_KEY.
+    HEYROUTE_VISION_MODEL = os.getenv("HEYROUTE_VISION_MODEL", "") or os.getenv("HEYROUTE_LLM_MODEL", "gpt-5.6-terra")
     # none / minimal / low / medium / high - "low" keeps agent calls fast; the
     # model still reasons before answering.
     HEYROUTE_REASONING_EFFORT = os.getenv("HEYROUTE_REASONING_EFFORT", "medium")
@@ -123,7 +125,15 @@ class Config:
     BEDROCK_VIDEO_MODEL = os.getenv("BEDROCK_VIDEO_MODEL", "amazon.nova-reel-v1:0")
     BEDROCK_VISION_MODEL = os.getenv("BEDROCK_VISION_MODEL", "amazon.nova-lite-v1:0")
     BEDROCK_TEXT_MODEL = os.getenv("BEDROCK_TEXT_MODEL", "amazon.nova-lite-v1:0")
-    VISION_PROVIDER = os.getenv("VISION_PROVIDER", "bedrock" if os.getenv("MEDIA_PROVIDER") == "bedrock" else "local")
+    # Image analysis (agents/vision_agent.py): "heyroute" (default when a HeyRoute
+    # key is set - one multimodal call on HEYROUTE_VISION_MODEL), "bedrock", or
+    # "local" (downloads a ~1 GB captioning model; not for the server).
+    VISION_PROVIDER = os.getenv(
+        "VISION_PROVIDER",
+        "heyroute"
+        if os.getenv("HEYROUTE_API_KEY")
+        else ("bedrock" if os.getenv("MEDIA_PROVIDER") == "bedrock" else "local"),
+    ).lower()
 
     # Image generation (OpenRouter model slug or OpenAI dall-e-3)
     IMAGE_MODEL = os.getenv("IMAGE_MODEL", "openai/gpt-image-1")
