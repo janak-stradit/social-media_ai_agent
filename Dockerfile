@@ -1,6 +1,9 @@
 # Production image - built and pushed to Amazon ECR by .github/workflows/deploy.yml
 # and run on EC2 as two containers (web + scheduler, deploy/docker-compose.prod.yml).
-FROM python:3.11-slim
+# Pinned to Debian 12 (bookworm): the plain "3.11-slim" tag moved to Debian 13 (trixie),
+# which Playwright 1.47's "install --with-deps" doesn't support (it falls back to the
+# Ubuntu 20.04 package list, whose names don't exist on trixie, e.g. libasound2).
+FROM python:3.11-slim-bookworm
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \

@@ -31,7 +31,23 @@ services:
       SCHEDULER_ENABLED: "false"
       # gunicorn workers: ~0.6-0.7 GB each. 2 on t3.medium; use "1" on t3.small.
       WEB_CONCURRENCY: "2"
+      # Signup captcha state shared by all gunicorn workers (auth/captcha.py);
+      # without it a challenge issued by one worker fails in another.
+      REDIS_URL: "redis://redis:6379/0"
+    depends_on:
+      - redis
     stop_grace_period: 90s
+
+  redis:
+    # Short-lived captcha data only - no persistence, capped memory
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "32mb", "--maxmemory-policy", "allkeys-lru"]
+    logging:
+      driver: json-file
+      options:
+        max-size: "5m"
+        max-file: "2"
 
   scheduler:
     <<: *app
