@@ -471,3 +471,12 @@ docker run --rm -p 5000:5000 -e SCHEDULER_ENABLED=false -v "$PWD/.env:/app/.env:
     sudo resize2fs /dev/nvme0n1p1          # Ubuntu's root filesystem is ext4
     df -h /
     ```
+    A pull that failed on a full disk can leave half-downloaded data behind that
+    `docker system df` doesn't show. If
+    `sudo du -sh /var/lib/containerd/io.containerd.content.v1.content/ingest` is large, clear it.
+    This stops the app for about a minute; the containers restart by themselves:
+    ```bash
+    sudo systemctl stop docker docker.socket containerd
+    sudo rm -rf /var/lib/containerd/io.containerd.content.v1.content/ingest/*
+    sudo systemctl start containerd docker
+    ```
