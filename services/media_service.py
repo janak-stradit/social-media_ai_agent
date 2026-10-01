@@ -708,6 +708,17 @@ class MediaGenerationService:
                 timeout=300,
             )
         if not resp.ok:
+            # The user's model can't be used right now - not enabled on the image
+            # key (404 model_not_found) or its provider is down (502/503/504).
+            # Nothing was generated, so make the image with the default model
+            # instead of failing the user.
+            unusable = (resp.status_code == 404 and "model_not_found" in resp.text) or resp.status_code in (502, 503, 504)
+            if unusable and model != Config.HEYROUTE_IMAGE_MODEL:
+                print(f"[Media Service] HeyRoute image model {model!r} unavailable ({resp.status_code}); "
+                      f"using {Config.HEYROUTE_IMAGE_MODEL!r} instead")
+                return self._generate_image_heyroute(
+                    prompt, platform, size, image_path, square=square, model=Config.HEYROUTE_IMAGE_MODEL
+                )
             raise RuntimeError(f"HeyRoute image request failed: {resp.status_code} - {resp.text[:300]}")
 
         item = ((self._heyroute_image_payload(resp) or {}).get("data") or [{}])[0]

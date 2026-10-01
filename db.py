@@ -1261,7 +1261,7 @@ def get_image_quota(user_id: int) -> dict:
         if raw_limit is None:
             raw_limit = IMAGE_UNLIMITED if user.is_admin else settings["default_limit"]
         unlimited = raw_limit == IMAGE_UNLIMITED
-        model = user.image_model or settings["default_model"]
+        model = _user_image_model(user, settings)
         resets_at = day_start + timedelta(days=1)
         return {
             "used": int(used),
@@ -1274,6 +1274,13 @@ def get_image_quota(user_id: int) -> dict:
             "resets_at": resets_at.isoformat(),
             "resets_in_seconds": int((resets_at - now).total_seconds()),
         }
+
+
+def _user_image_model(user: "User", settings: dict) -> str:
+    """The user's own model while it's still offered in Image Settings, else the default."""
+    if user.image_model and any(m["id"] == user.image_model for m in settings["models"]):
+        return user.image_model
+    return settings["default_model"]
 
 
 def set_user_image_access(user_id: int, limit: int | None, model: str | None) -> bool:
@@ -1692,7 +1699,7 @@ def _image_access_summary(user: "User", used_today: int, settings: dict) -> dict
         "limit": None if limit == IMAGE_UNLIMITED else limit,
         "unlimited": limit == IMAGE_UNLIMITED,
         "custom_limit": user.image_limit,  # None = default
-        "model": user.image_model or settings["default_model"],
+        "model": _user_image_model(user, settings),
         "custom_model": user.image_model,  # None = default
     }
 

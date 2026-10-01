@@ -1272,7 +1272,8 @@ def refine_post():
                 extra_cost += float(result.get("cost") or 0)
                 image_logs.append(
                     {"cost": float(result.get("cost") or 0), "platform": p, "url": result.get("url"),
-                     "model": edit_quota["model"] if edit_quota else None, "description": prompt}
+                     "model": result.get("model_id") or (edit_quota["model"] if edit_quota else None),
+                     "description": prompt}
                 )
                 entry["media"]["image"] = {
                     "url": result["url"],
@@ -1707,7 +1708,7 @@ def generate_media():
                     run_id=run_id or None,
                     kind="video" if media_type == "video" else "image",
                     platform=platform,
-                    model=quota["model"] if quota else None,
+                    model=result.get("model_id") or (quota["model"] if quota else None),
                     description=(image_prompt or video_prompt or caption)[:300],
                     media_url=result.get("url"),
                 )
@@ -2318,20 +2319,31 @@ def admin_revoke_invitation(invitation_id):
 _heyroute_image_models_cache = {"at": 0.0, "ids": []}
 
 
-def _heyroute_image_models() -> list[str]:
-    """Models the HeyRoute image key may use (cached 10 min) - suggestions for
-    Admin -> Image Settings."""
+def _heyroute_image_models(fresh: bool = False) -> list[str]:
+    """Models the HeyRoute image key can make images with (cached 10 min) -
+    suggestions and validation for Admin -> Image Settings. /models lists every
+    model on the key, text models included; only those whose
+    supported_endpoint_types include "image-generation" work for images (the
+    others fail with 404 model_not_found). Empty when HeyRoute can't be reached.
+    fresh=True skips the cache (models enabled on HeyRoute a moment ago)."""
     import time
 
-    if time.time() - _heyroute_image_models_cache["at"] < 600:
+    if not fresh and time.time() - _heyroute_image_models_cache["at"] < 600:
         return _heyroute_image_models_cache["ids"]
     ids: list[str] = []
     if Config.HEYROUTE_IMAGE_API_KEY:
         try:
-            import openai
-
-            client = openai.OpenAI(api_key=Config.HEYROUTE_IMAGE_API_KEY, base_url=Config.HEYROUTE_BASE_URL, timeout=15, max_retries=0)
-            ids = sorted(m.id for m in client.models.list().data)
+            resp = requests.get(
+                f"{Config.HEYROUTE_BASE_URL.rstrip('/')}/models",
+                headers={"Authorization": f"Bearer {Config.HEYROUTE_IMAGE_API_KEY}"},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            ids = sorted(
+                m["id"]
+                for m in (resp.json() or {}).get("data") or []
+                if m.get("id") and "image-generation" in (m.get("supported_endpoint_types") or [])
+            )
         except Exception as e:  # noqa: BLE001
             current_app.logger.warning(f"[Images] Could not list HeyRoute image models: {e}")
     _heyroute_image_models_cache.update(at=time.time(), ids=ids)
@@ -2355,7 +2367,7 @@ def my_image_quota():
 def admin_get_image_settings():
     from db import get_image_settings
 
-    return jsonify({"success": True, "settings": get_image_settings(), "available_models": _heyroute_image_models()})
+    return jsonify({"success": True, "settings": get_image_settings(), "available_models": _heyroute_image_models(fresh=True)})
 
 
 @api_bp.route("/admin/image-settings", methods=["PUT"])
@@ -2382,6 +2394,17 @@ def admin_save_image_settings():
             models.append({"id": model_id, "price": price})
     if not models:
         return jsonify({"success": False, "error": "Add at least one image model."}), 400
+    image_models = _heyroute_image_models()
+    if any(m["id"] not in image_models for m in models):
+        image_models = _heyroute_image_models(fresh=True)  # may have just been enabled on HeyRoute
+    not_image = [m["id"] for m in models if image_models and m["id"] not in image_models]
+    if not_image:
+        return jsonify({
+            "success": False,
+            "error": f"{', '.join(not_image)} can't make images on your HeyRoute image key. "
+                     f"Image models available: {', '.join(image_models)}.",
+            "invalid_models": not_image,
+        }), 400
     default_model = str(data.get("default_model") or "").strip()
     if default_model not in [m["id"] for m in models]:
         return jsonify({"success": False, "error": "The default model must be one of the listed models."}), 400
