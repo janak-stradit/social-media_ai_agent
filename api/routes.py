@@ -514,6 +514,15 @@ def _image_quota_or_block(user_id):
     return quota, None
 
 
+def _quota_after_refine(user_id, targets) -> dict | None:
+    """Today's image quota after a refine that touched images (for Studio Chat)."""
+    if "image" not in targets or not DB_AVAILABLE or user_id is None:
+        return None
+    from db import get_image_quota
+
+    return get_image_quota(user_id)
+
+
 def _mark_done_when_finished(futures, on_done):
     """Calls on_done() once, when the last of `futures` finishes (progress
     display for steps that run in parallel)."""
@@ -1262,7 +1271,16 @@ def refine_post():
             # An image edit is a full image generation: same daily limit + model
             edit_quota, blocked = _image_quota_or_block(user_id)
             if blocked:
-                media_errors.append(f"{p} image: {_image_limit_message(edit_quota)}")
+                # Daily limit used up: don't show the old image as if it were the
+                # edit - the reply shows "Daily image limit reached" instead. The
+                # old image is kept as previous_* so a later refine can edit it.
+                prev = entry["media"].get("image") or {}
+                entry["media"]["image"] = {
+                    "limit_reached": True,
+                    "previous_url": prev.get("url"),
+                    "previous_clean_url": prev.get("clean_url"),
+                    "previous_prompt": prev.get("prompt"),
+                }
                 result = None
             else:
                 result = media_service.edit_image(
@@ -1360,6 +1378,8 @@ def refine_post():
             "usage": {"total_tokens": usage.get("total_tokens", 0), "cost_usd": usage.get("cost_usd", 0.0)},
             "agents_executed": agents_executed,
             "media_errors": media_errors,
+            # Studio Chat updates "Images today" and the Generate button from this
+            "image_quota": _quota_after_refine(user_id, targets),
         }
     )
 

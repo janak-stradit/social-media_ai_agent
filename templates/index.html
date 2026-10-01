@@ -280,6 +280,9 @@
                     </div>
                 </div>
 
+                <!-- Shown while Generate is off because today's images are used up -->
+                <div class="image-limit-dock-note d-none" id="imageLimitDockNote" role="status"></div>
+
                 <!-- Textarea & Action Buttons Bar -->
                 <div class="chat-input-row">
                     
@@ -293,6 +296,7 @@
                         <i class="fas fa-paperclip"></i>
                     </button>
                     <input type="file" id="imageInput" accept="image/*" class="d-none">
+
 
                     <!-- Text Area -->
                     <textarea id="storyInput" class="chat-textarea" rows="1"

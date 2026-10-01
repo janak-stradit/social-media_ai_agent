@@ -61,13 +61,17 @@ $(document).ready(function () {
         lastThreadPlatforms = h.platforms.slice();
         lastAssistantContext = buildThreadContext(h.requestBody.story, h.platforms, content);
         // Unbranded copy first - the real logo is stamped on again after generation
-        const image = h.platforms.map(p => content[p]?.media?.image?.clean_url || content[p]?.media?.image?.url).find(Boolean);
+        const image = h.platforms.map(p => {
+            const img = content[p]?.media?.image || {};
+            return img.clean_url || img.url || img.previous_clean_url || img.previous_url;
+        }).find(Boolean);
         if (image) threadActiveImagePath = image;
 
         $('.btn-refine-base').each(function () {
             const isBase = $(this).attr('data-msg') === msgId;
             $(this).html(`<i class="fas fa-wand-magic-sparkles me-1"></i>${isBase ? 'Refining this version' : 'Refine this version'}`);
         });
+        updateGenerateGate();
     }
 
     // Frozen copy of the base post at send time, so a later Regenerate of the
@@ -93,9 +97,9 @@ $(document).ready(function () {
                 caption: d.caption?.primary_caption || '',
                 hashtags: getTagList(d.hashtags),
                 media_prompt: d.media_prompt || '',
-                image_url: d.media?.image?.url || null,
-                image_clean_url: d.media?.image?.clean_url || null,
-                image_prompt: d.media?.image?.prompt || null,
+                image_url: d.media?.image?.url || d.media?.image?.previous_url || null,
+                image_clean_url: d.media?.image?.clean_url || d.media?.image?.previous_clean_url || null,
+                image_prompt: d.media?.image?.prompt || d.media?.image?.previous_prompt || null,
                 video_url: d.media?.video?.url || null
             };
         });
@@ -509,6 +513,7 @@ $(document).ready(function () {
         threadRootBrief = null;
         lastThreadPlatforms = [];
         refineBaseMsgId = null;
+        updateGenerateGate();
         showToast('Started a new conversation', 'info');
     }
 
@@ -659,6 +664,7 @@ $(document).ready(function () {
     function setChatDockDisabled(disabled) {
         $('#dropZone').toggleClass('dock-disabled', disabled);
         $('#storyInput, #generateBtn, #analyzeBtn, #attachBtn').prop('disabled', disabled);
+        if (!disabled) updateGenerateGate();
     }
 
     // crypto.randomUUID only exists on HTTPS/localhost; the site may run on plain HTTP
@@ -831,6 +837,10 @@ $(document).ready(function () {
 
     // ── Generate Content (Main Chat Flow) ──────────────────────────────
     window.generateContent = function () {
+        if (imageGateBlocked()) {
+            showToast(imageLimitText(window.__imageQuota), 'warning');
+            return;
+        }
         const story = storyInput.val().trim();
         const targetCompany = $('#targetCompanySelect').val() || 'None';
 
@@ -1238,6 +1248,7 @@ $(document).ready(function () {
             }),
             success: function (r) {
                 window.currentGenerationRequest = null;
+                if (r.image_quota) window.applyImageQuota(r.image_quota);
                 setChatDockDisabled(false);
 
                 if (r.intent === 'new_content') {
@@ -1291,7 +1302,6 @@ $(document).ready(function () {
                 renderAssistantResponse(msgId);
                 adoptAsRefineBase(msgId);
                 (r.media_errors || []).forEach(e => showToast('Media refinement failed - ' + e, 'error'));
-                window.loadImageQuota();
                 renderHistory();
                 loadUserUsageMetrics();
                 scrollToBottom();
@@ -1554,7 +1564,8 @@ $(document).ready(function () {
                          kick off a real generation) when there's genuinely
                          no saved media yet for a type that was requested. -->
                     <div id="${msgId}_media_${p}" class="media-container-slot">
-                        ${pData.media?.image?.url ? buildGeneratedMediaHtml('image', pData.media.image)
+                        ${pData.media?.image?.limit_reached ? `<div id="${msgId}_media_image_${p}">${imageLimitCardHtml()}</div>`
+                            : pData.media?.image?.url ? buildGeneratedMediaHtml('image', pData.media.image)
                             : (selectedOutputs || []).includes('image') ? `
                         <div id="${msgId}_media_image_${p}">
                             ${imageCreatingHtml(platforms.length > 1 || p === 'instagram')}
@@ -1723,7 +1734,7 @@ $(document).ready(function () {
             // instead of a separately paid image per platform. Each platform
             // can still ask for its own ("Separate image for ...").
             const needImage = selectedOutputs.includes('image')
-                ? platforms.filter(p => !(content[p] || {}).media?.image?.url)
+                ? platforms.filter(p => !((content[p] || {}).media?.image?.url || (content[p] || {}).media?.image?.limit_reached))
                 : [];
             if (needImage.length) {
                 const first = needImage[0];
@@ -1851,7 +1862,40 @@ $(document).ready(function () {
                 $label.removeClass('quota-blocked').removeAttr('title');
             }
         });
+        $('.image-limit-card .image-limit-text').text(imageLimitCardText(q));
+        updateGenerateGate();
     };
+
+    // Generate is off while today's images are used up and the request needs
+    // one: the Image option is ticked, or the follow-up refines a post that has
+    // an image. Text-only posts (e.g. after "New Conversation") still work.
+    function imageGateBlocked() {
+        const q = window.__imageQuota;
+        if (!q || q.unlimited || q.remaining > 0) return false;
+        if ($('input[name="outputOptions"][value="image"]:checked').length) return true;
+        const h = refineBaseMsgId ? window.chatHistory && window.chatHistory[refineBaseMsgId] : null;
+        if (!h) return false;
+        const content = (h.responses[h.currentIndex] || {}).content || {};
+        return h.platforms.some(p => content[p]?.media?.image);
+    }
+
+    function updateGenerateGate() {
+        const gated = imageGateBlocked();
+        const busy = $('#dropZone').hasClass('dock-disabled');
+        const q = window.__imageQuota;
+        $('#generateBtn').prop('disabled', busy || gated).toggleClass('quota-gated', gated)
+            .attr('title', gated ? imageLimitText(q) : 'Send & Generate Content');
+        $('#imageLimitDockNote').toggleClass('d-none', !gated).html(gated ? `
+            <i class="fas fa-hourglass-half"></i>
+            <span><strong>Daily image limit reached.</strong> This post has an image, so refining it resumes in
+            ${resetsInText(q.resets_in_seconds)} (midnight UTC). For a text-only post,
+            <a href="#" id="imageLimitNewChat">start a new conversation</a>.</span>` : '');
+    }
+
+    $(document).on('click', '#imageLimitNewChat', function (e) {
+        e.preventDefault();
+        startNewChat();
+    });
 
     function loadImageQuota() {
         $.getJSON('/api/me/image-quota').done(r => window.applyImageQuota(r && r.quota));
@@ -1859,13 +1903,20 @@ $(document).ready(function () {
     window.loadImageQuota = loadImageQuota;
 
     // The image slot when the server refused because today's limit is used up
+    function imageLimitCardText(q) {
+        q = q || window.__imageQuota;
+        return q && !q.unlimited && q.remaining <= 0 ? imageLimitText(q)
+            : "This image wasn't changed because the daily image limit had been reached. You have images again - ask for the change again to create it.";
+    }
+
     function imageLimitCardHtml(q) {
+        const text = imageLimitCardText(q);
         return `
             <div class="image-limit-card" role="status">
                 <div class="image-limit-icon"><i class="fas fa-hourglass-half"></i></div>
                 <div>
                     <div class="image-limit-title">Daily image limit reached</div>
-                    <div class="image-limit-text">${escapeHtml(imageLimitText(q))}</div>
+                    <div class="image-limit-text">${escapeHtml(text)}</div>
                 </div>
             </div>`;
     }

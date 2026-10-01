@@ -684,29 +684,36 @@ class MediaGenerationService:
         references = self._resolve_image_paths(image_path)[: self._HEYROUTE_MAX_REFERENCES]
         base = Config.HEYROUTE_BASE_URL
 
-        if references:
-            files = []
-            try:
-                for ref in references:
-                    mime = mimetypes.guess_type(ref)[0] or "image/png"
-                    files.append(("image", (os.path.basename(ref), open(ref, "rb"), mime)))
-                resp = requests.post(
-                    f"{base}/images/edits",
-                    headers=self._heyroute_headers(key),
-                    data={"model": model, "prompt": full_prompt, "n": "1", "stream": "false"},
-                    files=files,
-                    timeout=300,
-                )
-            finally:
-                for _, (_, handle, _) in files:
-                    handle.close()
-        else:
-            resp = requests.post(
+        def send(plain: bool = False):
+            # plain=True: just model + prompt. Some models (e.g. gpt-image-2.5)
+            # reject the extra n/stream fields with 400 invalid_request.
+            extra = {} if plain else {"n": 1, "stream": False}
+            if references:
+                files = []
+                try:
+                    for ref in references:
+                        mime = mimetypes.guess_type(ref)[0] or "image/png"
+                        files.append(("image", (os.path.basename(ref), open(ref, "rb"), mime)))
+                    return requests.post(
+                        f"{base}/images/edits",
+                        headers=self._heyroute_headers(key),
+                        data={"model": model, "prompt": full_prompt, **{k: str(v).lower() for k, v in extra.items()}},
+                        files=files,
+                        timeout=300,
+                    )
+                finally:
+                    for _, (_, handle, _) in files:
+                        handle.close()
+            return requests.post(
                 f"{base}/images/generations",
                 headers={**self._heyroute_headers(key), "Content-Type": "application/json"},
-                json={"model": model, "prompt": full_prompt, "n": 1, "stream": False},
+                json={"model": model, "prompt": full_prompt, **extra},
                 timeout=300,
             )
+
+        resp = send()
+        if resp.status_code == 400 and "invalid_request" in resp.text:
+            resp = send(plain=True)  # rejected requests make no image, so this costs nothing extra
         if not resp.ok:
             # The user's model can't be used right now - not enabled on the image
             # key (404 model_not_found) or its provider is down (502/503/504).
