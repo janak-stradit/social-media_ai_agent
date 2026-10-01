@@ -1,4 +1,7 @@
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 # Structured Content Guidelines default - matches what was previously hardcoded
 # directly in agents/story_agent.py's prompts (the "Strad" orange / "IT" white
@@ -122,7 +125,7 @@ class StradITService:
                     with open(filepath, encoding="utf-8") as f:
                         context.append(f"--- Document: {filename} ---\n{f.read()}")
                 except Exception as e:
-                    print(f"Error reading {filename}: {e}")
+                    logger.warning(f"Error reading {filename}: {e}")
 
         return "\n\n".join(context)
 

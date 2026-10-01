@@ -452,6 +452,40 @@
             .img-models td:first-child { grid-column: 1 / -1; }
         }
 
+        /* Global Cost History: filters + pagination */
+        .cost-filters {
+            display: grid; grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(130px, 1fr));
+            gap: 0.6rem; background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 0.85rem; margin-bottom: 0.75rem;
+        }
+        .cost-filters label { display: block; font-size: 0.68rem; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.25rem; }
+        .cost-filters .cost-filter-dates { display: flex; gap: 0.35rem; align-items: center; }
+        .cost-filters .cost-filter-dates span { font-size: 0.75rem; color: #9ca3af; }
+        .cost-filters .cost-filter-actions { display: flex; align-items: flex-end; gap: 0.4rem; }
+        .cost-results-bar { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; margin: 0 0 0.6rem; font-size: 0.8rem; color: #4b5563; }
+        .cost-results-bar strong { color: #172033; }
+        .cost-active-filters { display: flex; flex-wrap: wrap; gap: 0.35rem; }
+        .cost-chip { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.72rem; font-weight: 600; color: #6d28d9; background: #f5f3ff; border: 1px solid #ddd6fe; border-radius: 999px; padding: 2px 4px 2px 10px; }
+        .cost-chip button { border: none; background: none; color: #8b5cf6; padding: 0 4px; line-height: 1; font-size: 0.9rem; }
+        .cost-pagination { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; padding: 0.75rem 0.25rem 0; font-size: 0.8rem; color: #4b5563; }
+        .cost-pages { display: flex; gap: 0.25rem; flex-wrap: wrap; }
+        .cost-page-btn {
+            min-width: 32px; height: 32px; padding: 0 0.55rem; border-radius: 8px; border: 1px solid #e5e7eb; background: #fff;
+            font-size: 0.8rem; font-weight: 600; color: #374151;
+        }
+        .cost-page-btn:hover:not(:disabled) { border-color: #c4b5fd; color: #6d28d9; }
+        .cost-page-btn.active { background: #8A2BE2; border-color: #8A2BE2; color: #fff; }
+        .cost-page-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+        .cost-page-gap { padding: 0 0.25rem; align-self: center; color: #9ca3af; }
+        .cost-page-size { display: flex; align-items: center; gap: 0.4rem; }
+        .cost-page-size select { width: auto; }
+        #adminCostHistoryTbody.loading { opacity: 0.55; transition: opacity 0.15s; }
+        @media (max-width: 992px) { .cost-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+        @media (max-width: 640px) {
+            .cost-filters { grid-template-columns: 1fr; }
+            .cost-pagination { flex-direction: column; align-items: stretch; }
+            .cost-pages { justify-content: center; }
+        }
+
         /* Request decisions side by side */
         #adminReqTbody .btn-xs + .btn-xs { margin-top: 0; }
         #adminReqTbody td:last-child { white-space: nowrap; }
@@ -646,6 +680,64 @@
                     </div>
                 </div>
 
+                <div class="cost-filters" id="costFilters">
+                    <div>
+                        <label for="costFilterQ">Search</label>
+                        <input type="search" id="costFilterQ" class="form-control form-control-sm" placeholder="User, email, prompt or #run id">
+                    </div>
+                    <div>
+                        <label for="costFilterUser">User</label>
+                        <select id="costFilterUser" class="form-select form-select-sm"><option value="">All users</option></select>
+                    </div>
+                    <div>
+                        <label for="costFilterType">Activity</label>
+                        <select id="costFilterType" class="form-select form-select-sm">
+                            <option value="all">All activity</option>
+                            <option value="runs">Runs (posts)</option>
+                            <option value="runs_with_images">Runs with images</option>
+                            <option value="charges">Image charges outside posts</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="costFilterPlatform">Channel</label>
+                        <select id="costFilterPlatform" class="form-select form-select-sm">
+                            <option value="">All channels</option>
+                            <option value="linkedin">LinkedIn</option>
+                            <option value="facebook">Facebook</option>
+                            <option value="instagram">Instagram</option>
+                            <option value="youtube">YouTube</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="costFilterFrom">Date (UTC)</label>
+                        <div class="cost-filter-dates">
+                            <input type="date" id="costFilterFrom" class="form-control form-control-sm" aria-label="From date">
+                            <span>to</span>
+                            <input type="date" id="costFilterTo" class="form-control form-control-sm" aria-label="To date">
+                        </div>
+                    </div>
+                    <div>
+                        <label for="costFilterMinCost">Min. cost ($)</label>
+                        <input type="number" id="costFilterMinCost" class="form-control form-control-sm" min="0" step="0.01" placeholder="e.g. 0.50">
+                    </div>
+                    <div>
+                        <label for="costFilterSort">Sort</label>
+                        <select id="costFilterSort" class="form-select form-select-sm">
+                            <option value="newest">Newest first</option>
+                            <option value="oldest">Oldest first</option>
+                            <option value="cost">Highest cost</option>
+                        </select>
+                    </div>
+                    <div class="cost-filter-actions">
+                        <button type="button" class="btn-xs btn-xs-outline-neutral w-100" id="costFilterReset"><i class="fas fa-rotate-left me-1"></i>Reset filters</button>
+                    </div>
+                </div>
+
+                <div class="cost-results-bar">
+                    <div id="costResultsSummary" aria-live="polite">Loading...</div>
+                    <div class="cost-active-filters" id="costActiveFilters"></div>
+                </div>
+
                 <div class="admin-table-wrap">
                     <div class="admin-table-scroll">
                         <table class="admin-table-light" id="adminCostHistoryTable">
@@ -667,6 +759,18 @@
                                 </tr>
                             </tbody>
                         </table>
+                    </div>
+                </div>
+                <div class="cost-pagination" id="costPagination">
+                    <div id="costPageInfo"></div>
+                    <div class="cost-pages" id="costPages"></div>
+                    <div class="cost-page-size">
+                        <label for="costPageSize" class="mb-0">Rows</label>
+                        <select id="costPageSize" class="form-select form-select-sm">
+                            <option value="25">25</option>
+                            <option value="50">50</option>
+                            <option value="100">100</option>
+                        </select>
                     </div>
                 </div>
             </div>

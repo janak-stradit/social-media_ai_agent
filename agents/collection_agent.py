@@ -1,4 +1,8 @@
+import logging
+
 from services.llm_service import LLMService
+
+logger = logging.getLogger(__name__)
 
 
 class CollectionAgent:
@@ -71,7 +75,7 @@ One entry per group, in the same order given, using the exact cluster_index show
                 except (ValueError, TypeError):
                     continue
         except Exception as e:
-            print(f"[CollectionAgent] Error labeling clusters: {e}")
+            logger.warning(f"Error labeling clusters: {e}")
             labels_by_index = {}
 
         annotated = []

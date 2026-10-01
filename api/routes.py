@@ -1,13 +1,14 @@
+import io
 import json
+import logging
 import os
 import re
-import urllib.parse
 import time
-import uuid
 import typing
-from typing import Optional
-import io
+import urllib.parse
+import uuid
 import zipfile
+from typing import Optional
 
 import requests
 from flask import Blueprint, current_app, jsonify, request, send_file
@@ -21,13 +22,19 @@ from agents.strategy_agent import StrategyAgent
 from agents.vision_agent import VisionAgent
 from auth.utils import admin_required_api, get_current_user_id, login_required_api
 from config import Config
-from services.observability import estimate_tokens, log_event
-from services.prompt_builder import IMAGE_TEXT_RULE, build_image_edit_prompt, build_image_versions_block
+from services import storage_service
 from services.compliance_service import active_rules_for_user, check_caption
 from services.llm_service import LLMService
 from services.memory_service import MemoryService
+from services.observability import estimate_tokens, log_event
+from services.prompt_builder import (
+    IMAGE_TEXT_RULE,
+    build_image_edit_prompt,
+    build_image_versions_block,
+)
 from services.scraper_service import ScraperService
-from services import storage_service
+
+logger = logging.getLogger(__name__)
 
 try:
     from db import (
@@ -51,11 +58,11 @@ try:
         get_history,
         get_latest_approval_request_for_pipeline,
         get_run_by_id,
+        get_setting,
         get_user_by_email,
         get_user_by_id,
         get_user_credit_requests,
         get_user_scheduled_posts,
-        get_setting,
         get_user_social_accounts,
         get_user_usage_stats,
         hard_delete_user,
@@ -77,7 +84,7 @@ try:
     DB_AVAILABLE = True
 except Exception as _db_err:
     DB_AVAILABLE = False
-    print(f"[routes] DB not available: {_db_err}")
+    logger.warning(f"DB not available: {_db_err}")
 
 try:
     from services.media_service import MediaGenerationService
@@ -86,7 +93,7 @@ try:
     MEDIA_AVAILABLE = True
 except Exception as _media_err:
     MEDIA_AVAILABLE = False
-    print(f"[routes] Media service not available: {_media_err}")
+    logger.warning(f"Media service not available: {_media_err}")
 
 try:
     from services.social_publisher_service import SocialPublisherService
@@ -94,7 +101,7 @@ try:
     publisher_service: Optional[SocialPublisherService] = SocialPublisherService()
 except Exception as _pub_err:
     publisher_service = None
-    print(f"[routes] Social publisher service not available: {_pub_err}")
+    logger.warning(f"Social publisher service not available: {_pub_err}")
 
 api_bp = Blueprint("api", __name__)
 memory_service = MemoryService()
@@ -356,7 +363,7 @@ def get_memory_graph():
     try:
         data = memory_service.get_memory_graph_data(user_id=user_id)
         return jsonify(data)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
 
 
@@ -370,7 +377,7 @@ def usage_metrics():
     try:
         stats = get_user_usage_stats(user_id)
         return jsonify({"success": True, **stats})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 
 
@@ -397,7 +404,7 @@ def upload_image():
         try:
             analysis = vision_agent.analyze_image(filepath)
             return jsonify({"success": True, "image_id": unique_name, "filepath": filepath, "analysis": analysis})
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return jsonify({"error": str(e)}), 500
 
     return jsonify({"error": "Invalid file type"}), 400
@@ -456,7 +463,7 @@ def analyze_story():
                 "suggested_brief": suggested_brief,
             }
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 
 
@@ -768,7 +775,7 @@ def generate_content():
                         brand_profile_block=brand_profile_block,
                     )
                 except Exception as tag_err:  # a post without hashtags beats no post at all
-                    print(f"[Hashtags] {platform} failed: {tag_err}")
+                    logger.warning(f"{platform} failed: {tag_err}")
                     return {"hashtags": [], "_usage": {}}
 
             _progress("caption", "active")
@@ -878,7 +885,7 @@ def generate_content():
                             brand_profile_block=brand_profile_block,
                         )
                     except Exception as ref_err:  # keep the original caption
-                        print(f"[Quality] Rewrite for {platform} failed: {ref_err}")
+                        logger.warning(f"Rewrite for {platform} failed: {ref_err}")
                         return platform, None
 
                 with ThreadPoolExecutor(max_workers=min(4, len(to_fix)), thread_name_prefix="fix") as pool:
@@ -1092,7 +1099,7 @@ def generate_content():
 
         return jsonify(response)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 
 
@@ -1218,7 +1225,7 @@ def refine_post():
         plan, usage = refine_llm.generate_json(
             REFINE_SYSTEM_PROMPT, user_prompt, temperature=0.3, max_tokens=1500, return_usage=True
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": f"Refinement failed: {e}"}), 500
 
     if plan.get("intent") == "new_content":
@@ -1548,7 +1555,7 @@ def list_history():
         include_archived = request.args.get("archived", "false").lower() == "true"
         rows = get_history(limit=limit, user_id=get_current_user_id(), include_archived=include_archived)
         return jsonify({"success": True, "history": rows, "count": len(rows)})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 
 
@@ -1563,7 +1570,7 @@ def archive_history_run(run_id):
         if not success:
             return jsonify({"error": "Run not found or access denied"}), 404
         return jsonify({"success": True, "run_id": run_id, "is_archived": True})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 
 
@@ -1578,7 +1585,7 @@ def unarchive_history_run(run_id):
         if not success:
             return jsonify({"error": "Run not found or access denied"}), 404
         return jsonify({"success": True, "run_id": run_id, "is_archived": False})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 
 
@@ -1593,7 +1600,7 @@ def get_history_run(run_id):
         if not row:
             return jsonify({"error": "Run not found"}), 404
         return jsonify({"success": True, "run": row})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 
 
@@ -1622,7 +1629,7 @@ def generate_for_platform(platform):
             {"success": True, "platform": platform, "caption": caption, "hashtags": hashtags, "strategy": strategy}
         )
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 
 
@@ -1650,7 +1657,7 @@ def approve_asset():
         )
 
         return jsonify({"success": True, "asset_id": asset_id})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 
 
@@ -1697,7 +1704,7 @@ def publish_pipeline_asset():
         )
         plat_result = results.get(platform, {"success": False, "error": "No result returned"})
         return jsonify({"success": bool(plat_result.get("success")), "result": plat_result})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 
 
@@ -1717,7 +1724,7 @@ def schedule_campaign():
 
         return jsonify({"success": True, "schedule": schedule})
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 
 
@@ -1905,7 +1912,7 @@ def generate_media():
 
         return jsonify(result)
 
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
 
 
@@ -1937,7 +1944,7 @@ def send_approval_email():
             slide_titles=data.get("slide_titles"),
         )
         return jsonify(result)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -2088,7 +2095,7 @@ def create_approval_request_route():
             email_result = {"success": False, "error": str(email_err)}
 
         return jsonify({"success": True, "request": req, "approval_url": approval_url, "email": email_result})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -2140,7 +2147,7 @@ def decide_approval_request_route(request_id):
         if not req:
             return jsonify({"error": "Approval request not found"}), 404
         return jsonify({"success": True, "request": req})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -2193,7 +2200,7 @@ def save_app_setting_route(key):
     try:
         result = save_setting(key, value)
         return jsonify({"success": True, "setting": result})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -2341,7 +2348,7 @@ def request_credit_extension():
                 "message": "Credit extension request submitted to admin for approval.",
             }
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
 
 
@@ -2359,7 +2366,7 @@ def get_my_credit_requests():
     try:
         requests_list = get_user_credit_requests(user_id)
         return jsonify({"success": True, "requests": requests_list})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
 
 
@@ -2376,7 +2383,7 @@ def admin_get_all_users():
     try:
         users = get_all_users_credit_summary()
         return jsonify({"success": True, "users": users})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
 
 
@@ -2439,7 +2446,7 @@ def admin_create_invitation():
     invitation = upsert_invitation(email, name, message, get_current_user_id(), token, inviter_name=inviter_name)
     try:
         _send_invitation(invitation, token)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         current_app.logger.warning(f"[Invite] Could not email {email}: {e}")
         return jsonify(
             {
@@ -2482,7 +2489,7 @@ def admin_resend_invitation(invitation_id):
     )
     try:
         _send_invitation(invitation, token)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"success": False, "error": f"The email couldn't be sent: {e}"}), 502
     return jsonify({"success": True, "invitation": invitation})
 
@@ -2603,7 +2610,12 @@ def admin_save_image_settings():
 def admin_set_image_access(target_user_id):
     """limit: null = default, -1 = unlimited, n >= 0 = custom daily limit;
     model: null = default, else one of the Image Settings models."""
-    from db import IMAGE_UNLIMITED, get_image_quota, get_image_settings, set_user_image_access
+    from db import (
+        IMAGE_UNLIMITED,
+        get_image_quota,
+        get_image_settings,
+        set_user_image_access,
+    )
 
     data = request.get_json() or {}
     limit = data.get("limit")
@@ -2680,7 +2692,7 @@ def admin_hard_delete_user(target_user_id):
         if not res:
             return jsonify({"error": "User not found"}), 404
         return jsonify({"success": True, "deleted": res})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
 
 
@@ -2715,7 +2727,7 @@ def admin_update_user_profile(target_user_id):
         return jsonify({"success": True, "user": res, "message": "User profile updated successfully."})
     except ValueError as e:
         return jsonify({"error": str(e), "success": False}), 400
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
 
 
@@ -2744,7 +2756,7 @@ def admin_update_user_credits(target_user_id):
             return jsonify({"error": "User not found"}), 404
 
         return jsonify({"success": True, "user": res, "message": "User credit limit updated successfully."})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
 
 
@@ -2759,7 +2771,7 @@ def admin_get_credit_requests():
         status_filter = request.args.get("status")
         requests_list = get_all_credit_requests(status_filter=status_filter)
         return jsonify({"success": True, "requests": requests_list})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
 
 
@@ -2776,7 +2788,7 @@ def admin_approve_request(req_id):
             return jsonify({"error": "Pending request not found"}), 404
 
         return jsonify({"success": True, "result": res, "message": "Credit extension approved and limit increased."})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
 
 
@@ -2793,7 +2805,7 @@ def admin_reject_request(req_id):
             return jsonify({"error": "Pending request not found"}), 404
 
         return jsonify({"success": True, "result": res, "message": "Credit extension request rejected."})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
 
 
@@ -2877,15 +2889,46 @@ def admin_get_global_cost_history():
     """List global cost history across all users."""
     if not DB_AVAILABLE:
         return jsonify({"error": "Database not available"}), 503
+    from datetime import datetime, timedelta
+
+    from db import get_system_usage_totals
+
+    args = request.args
+
+    def _int(name, default=None):
+        try:
+            return int(args.get(name)) if args.get(name) not in (None, "") else default
+        except ValueError:
+            return default
+
+    def _day(name):
+        try:
+            return datetime.strptime(args.get(name, ""), "%Y-%m-%d") if args.get(name) else None
+        except ValueError:
+            return None
+
     try:
-        limit = min(int(request.args.get("limit", 100)), 500)
-        history = get_global_cost_history(limit=limit)
-
+        min_cost = float(args["min_cost"]) if args.get("min_cost") not in (None, "") else None
+    except ValueError:
+        min_cost = None
+    date_to = _day("date_to")
+    page_size = _int("page_size") or _int("limit") or 25  # "limit": older clients
+    try:
+        result = get_global_cost_history(
+            page=_int("page", 1),
+            page_size=page_size,
+            q=(args.get("q") or "").strip()[:200] or None,
+            user_id=_int("user_id"),
+            kind=args.get("type", "all"),
+            platform=args.get("platform") or None,
+            date_from=_day("date_from"),
+            date_to=date_to + timedelta(days=1) if date_to else None,  # the whole last day
+            min_cost=min_cost,
+            sort=args.get("sort", "newest"),
+        )
         # All-time totals from the database - not just the rows listed here
-        from db import get_system_usage_totals
-
-        return jsonify({"success": True, "history": history, "count": len(history), "summary": get_system_usage_totals()})
-    except Exception as e:
+        return jsonify({"success": True, **result, "count": len(result["history"]), "summary": get_system_usage_totals()})
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
 
 
@@ -3035,7 +3078,7 @@ def youtube_auth_callback():
     except requests.exceptions.HTTPError as e:
         error_details = e.response.text if hasattr(e, "response") else str(e)
         return f"Error exchanging token (HTTP Error): {error_details}", 500
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return f"Error exchanging token: {str(e)}", 500
 
 
@@ -3068,7 +3111,7 @@ def test_mcp_connection_endpoint():
                 "message": f"MCP Server connected successfully (HTTP {resp.status_code}). Tool [{mcp_tool_name}] ready.",
             }
         )
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify(
             {
                 "success": True,
@@ -3326,7 +3369,7 @@ def verify_social_account_endpoint(platform):
                     "message": "YouTube Channel successfully connected and verified!",
                 }
             )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return jsonify(
                 {"success": False, "verified": False, "platform": "youtube", "error": f"Verification failed: {str(e)}"}
             )
@@ -3353,8 +3396,8 @@ def competitor_posts():
         scraper = ScraperService()
         posts = scraper.get_company_store(target)
         # --- NEW FILTERING LOGIC ---
-        from services.stradit_service import StradITService
         from agents.story_agent import StoryAgent
+        from services.stradit_service import StradITService
 
         stradit = StradITService()
         project_context = stradit.get_all_projects_context()
@@ -3363,7 +3406,7 @@ def competitor_posts():
         # ---------------------------
 
         return jsonify({"success": True, "posts": posts})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 
 
@@ -3381,8 +3424,8 @@ def platform_posts():
         posts = scraper.get_platform_posts(platform, competitor)
 
         # --- NEW FILTERING LOGIC ---
-        from services.stradit_service import StradITService
         from agents.story_agent import StoryAgent
+        from services.stradit_service import StradITService
 
         stradit = StradITService()
         project_context = stradit.get_all_projects_context()
@@ -3396,10 +3439,10 @@ def platform_posts():
 
             db_stats = save_competitor_posts(posts)
         except Exception as db_err:
-            print(f"[platform-posts] Warning - could not persist posts: {db_err}")
+            logger.warning(f"Warning - could not persist posts: {db_err}")
 
         return jsonify({"success": True, "posts": posts, "db": db_stats})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 
 
@@ -3418,7 +3461,7 @@ def competitor_posts_db():
 
         posts = get_competitor_posts(platform=platform, competitor=competitor, days=days)
         return jsonify({"success": True, "posts": posts})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 
 
@@ -3435,7 +3478,7 @@ def suggested_collections():
 
         collections = get_content_collections(limit=SUGGESTED_COLLECTIONS_DISPLAY_LIMIT)
         return jsonify({"success": True, "collections": collections})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 
 
@@ -3557,10 +3600,10 @@ def generate_suggested_collections():
         stored = get_content_collections(limit=SUGGESTED_COLLECTIONS_DISPLAY_LIMIT)
         db_stats["repeated_filtered"] = repeated_count
         return jsonify({"success": True, "collections": stored, "db": db_stats})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         import traceback
 
-        print(traceback.format_exc())
+        logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
 
@@ -3577,7 +3620,7 @@ def festive_storylines():
         days_ahead = int(request.args.get("days_ahead", 60))
         festivals = get_upcoming_festivals(days_ahead=days_ahead)
         return jsonify({"success": True, "festivals": festivals})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 
 
@@ -3589,7 +3632,7 @@ def get_stradit_projects():
         svc = StradITService()
         projects = svc.get_projects()
         return jsonify({"success": True, "projects": projects})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 
 
@@ -3617,10 +3660,10 @@ def generate_channel_storyline():
         result = story_agent_local.generate_channel_storyline(story, project_context, character_config=character_config)
 
         return jsonify({"success": True, "storyline": result})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         import traceback
 
-        print(traceback.format_exc())
+        logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
 
@@ -3631,7 +3674,7 @@ def opportunity_suggestions():
         from db import get_opportunity_suggestions
 
         return jsonify({"success": True, "suggestions": get_opportunity_suggestions()})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 
 
@@ -3664,10 +3707,10 @@ def generate_opportunity_suggestions():
         )
 
         return jsonify({"success": True, "suggestions": result, "db": db_stats})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         import traceback
 
-        print(traceback.format_exc())
+        logger.error(traceback.format_exc())
         return jsonify({"error": str(e)}), 500
 
 
@@ -3832,7 +3875,7 @@ def generate_brand_quick_prompts():
     data = request.get_json(silent=True) or {}
     try:
         ideas, greeting, _usage = generate_post_ideas(user_id, exclude_titles=data.get("exclude_titles") or [])
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": f"Could not generate new ideas: {e}"}), 500
     if not ideas:
         return jsonify({"error": "No brand profile to generate ideas from - analyze your website first."}), 404
@@ -3884,7 +3927,7 @@ def update_brand_profile():
         if not res:
             return jsonify({"error": "No brand profile found - run a website analysis first"}), 404
         return jsonify({"success": True})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
 
 
@@ -3922,7 +3965,7 @@ def rescan_brand_profile():
             from services.brand_profile_service import start_brand_analysis_async
 
             return jsonify({"success": True, "scan_started": start_brand_analysis_async(user_id, website)})
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             return jsonify({"error": str(e), "success": False}), 500
 
     try:
@@ -3937,7 +3980,7 @@ def rescan_brand_profile():
         from db import get_user_brand_profile
 
         return jsonify({"success": True, "profile": get_user_brand_profile(user_id)})
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
 
 
@@ -3965,7 +4008,12 @@ def get_compliance_profile():
         return jsonify({"error": "Database not available"}), 503
 
     from db import get_user_brand_profile
-    from services.compliance_rules import INDUSTRIES, REGIONS, normalize_industry, normalize_regions
+    from services.compliance_rules import (
+        INDUSTRIES,
+        REGIONS,
+        normalize_industry,
+        normalize_regions,
+    )
 
     profile = get_user_brand_profile(user_id)
     if not profile:

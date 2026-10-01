@@ -5,6 +5,7 @@ Media generation service.
 """
 
 import base64
+import logging
 import mimetypes
 import os
 import time
@@ -19,6 +20,8 @@ from services import storage_service
 from services.brand_logo_service import NO_AI_LOGO_RULE, overlay_logo
 from services.llm_service import LLMService
 from services.storage_service import mirror_to_s3
+
+logger = logging.getLogger(__name__)
 
 _PROMPT_LIMIT = 2000  # kie.ai's prompt cap (see _generate_image_kie)
 
@@ -112,7 +115,7 @@ class MediaGenerationService:
                 self.bedrock_client = session.client("bedrock-runtime", config=boto_config)
                 self.s3_client = session.client("s3")
             except Exception as e:
-                print(f"[MediaGenerationService] Bedrock client initialization failed: {e}")
+                logger.warning(f"Bedrock client initialization failed: {e}")
 
         self.upload_folder = Config.UPLOAD_FOLDER
         os.makedirs(self.upload_folder, exist_ok=True)
@@ -514,7 +517,7 @@ class MediaGenerationService:
                 img.save(os.path.join(self.upload_folder, local_filename), format="JPEG", quality=90, optimize=True)
                 return local_filename
         except Exception as err:  # never lose the image over compression
-            print(f"[Media Service] Could not compress image, keeping original: {err}")
+            logger.warning(f"Could not compress image, keeping original: {err}")
             return self._save_image_bytes(img_data, platform)[0]
 
     def _save_image_bytes(self, img_data: bytes, platform: str) -> tuple[str, str]:
@@ -611,13 +614,13 @@ class MediaGenerationService:
                     timeout=30,
                 )
             if not upload_resp.ok:
-                print(
-                    f"[Media Service] kie.ai file upload failed: {upload_resp.status_code} - {upload_resp.text[:200]}"
+                logger.warning(
+                    f"kie.ai file upload failed: {upload_resp.status_code} - {upload_resp.text[:200]}"
                 )
                 return None
             return ((upload_resp.json() or {}).get("data") or {}).get("downloadUrl")
         except Exception as e:
-            print(f"[Media Service] kie.ai file upload error: {e}")
+            logger.warning(f"kie.ai file upload error: {e}")
             return None
 
     # ── HeyRoute (https://heyroute.ai/v1, OpenAI-compatible) ─────────────────
@@ -721,7 +724,7 @@ class MediaGenerationService:
             # instead of failing the user.
             unusable = (resp.status_code == 404 and "model_not_found" in resp.text) or resp.status_code in (502, 503, 504)
             if unusable and model != Config.HEYROUTE_IMAGE_MODEL:
-                print(f"[Media Service] HeyRoute image model {model!r} unavailable ({resp.status_code}); "
+                logger.warning(f"HeyRoute image model {model!r} unavailable ({resp.status_code}); "
                       f"using {Config.HEYROUTE_IMAGE_MODEL!r} instead")
                 return self._generate_image_heyroute(
                     prompt, platform, size, image_path, square=square, model=Config.HEYROUTE_IMAGE_MODEL
@@ -846,7 +849,7 @@ class MediaGenerationService:
         last_error = None
         for body, native_audio in attempts:
             try:
-                print(f"[Media Service] Generating video via HeyRoute {body['model']}...")
+                logger.info(f"Generating video via HeyRoute {body['model']}...")
                 content = self._heyroute_video_task(key, body)
                 filename = f"heyroute_video_{uuid.uuid4().hex[:8]}.mp4"
                 with open(os.path.join(self.upload_folder, filename), "wb") as f:
@@ -863,7 +866,7 @@ class MediaGenerationService:
                 }
             except Exception as err:
                 last_error = err
-                print(f"[Media Service] HeyRoute {body['model']} failed: {err}")
+                logger.warning(f"HeyRoute {body['model']} failed: {err}")
         raise RuntimeError(f"HeyRoute video generation failed: {last_error}")
 
     def _generate_image_kie(
@@ -953,7 +956,7 @@ class MediaGenerationService:
         # rather than surfacing "variation N failed" to the user immediately.
         result_url = _create_and_poll()
         if not result_url:
-            print("[Media Service] kie.ai task timed out - retrying once with a new task...")
+            logger.warning("kie.ai task timed out - retrying once with a new task...")
             result_url = _create_and_poll()
 
         if not result_url:
@@ -1049,8 +1052,8 @@ class MediaGenerationService:
                     contentType="application/json",
                 )
             except Exception as variation_err:
-                print(
-                    f"[Media Service] Bedrock IMAGE_VARIATION payload notice: {variation_err}. Falling back to TEXT_IMAGE taskType..."
+                logger.warning(
+                    f"Bedrock IMAGE_VARIATION payload notice: {variation_err}. Falling back to TEXT_IMAGE taskType..."
                 )
                 payload = {
                     "taskType": "TEXT_IMAGE",
@@ -1311,7 +1314,7 @@ class MediaGenerationService:
             }
 
         if getattr(Config, "USE_MOCK_LLM", False):
-            print("[Media Service] USE_MOCK_LLM is enabled. Generating mock image asset...")
+            logger.info("USE_MOCK_LLM is enabled. Generating mock image asset...")
             return self._generate_mock_media(platform, "image", caption)
 
         # square: one 1:1 image reused by all of a post's platforms
@@ -1511,7 +1514,7 @@ class MediaGenerationService:
                 result["slide_number"] = slide_num
                 result["slide_title"] = slide_title
             except Exception as e:
-                print(f"[Media Service] Carousel slide {slide_num} ({slide_title}) generation failed: {e}")
+                logger.warning(f"Carousel slide {slide_num} ({slide_title}) generation failed: {e}")
                 result = {"success": False, "slide_number": slide_num, "slide_title": slide_title, "error": str(e)}
             results.append(result)
 
@@ -1522,6 +1525,7 @@ class MediaGenerationService:
     ) -> dict:
         """Generate an image using Google Gemini (Imagen 3) API via google-genai SDK."""
         import os
+
         from config import Config
 
         google_key = getattr(Config, "GOOGLE_API_KEY", None) or os.getenv("GOOGLE_API_KEY")
@@ -1542,7 +1546,7 @@ class MediaGenerationService:
         elif platform == "instagram":
             aspect_ratio = "1:1"
 
-        print(f"[Media Service] Generating image via Google Gemini (imagen-3.0-generate-001) for {platform}...")
+        logger.info(f"Generating image via Google Gemini (imagen-3.0-generate-001) for {platform}...")
 
         # Gemini does not natively support an image_path for image generation in this SDK endpoint currently,
         # so we rely purely on the text prompt
@@ -1581,7 +1585,7 @@ class MediaGenerationService:
             raise RuntimeError("The 'google-genai' package is required. Run 'pip install google-genai'.") from exc
 
         model_name = getattr(Config, "GEMINI_VIDEO_MODEL", "veo-3.1-generate-preview")
-        print(f"[Media Service] Initiating Google Gemini Video generation with model: {model_name}...")
+        logger.info(f"Initiating Google Gemini Video generation with model: {model_name}...")
 
         client = genai.Client(api_key=google_key)
         aspect_ratio = "9:16" if platform == "instagram" else "16:9"
@@ -1606,7 +1610,7 @@ class MediaGenerationService:
                     img_bytes = f.read()
                 gen_kwargs["image"] = types.Image(image_bytes=img_bytes, mime_type="image/jpeg")
             except Exception as img_err:
-                print(f"[Media Service] Warning loading image for Gemini Video: {img_err}")
+                logger.warning(f"Warning loading image for Gemini Video: {img_err}")
 
         native_audio_requested = gen_kwargs["config"].generate_audio
         try:
@@ -1617,7 +1621,7 @@ class MediaGenerationService:
             # so retry once without requesting native audio instead of failing
             # the whole video generation over an audio feature we can't use.
             if native_audio_requested and "generate_audio" in str(gen_err):
-                print("[Media Service] generate_audio not supported on this Gemini API tier - retrying without it...")
+                logger.warning("generate_audio not supported on this Gemini API tier - retrying without it...")
                 native_audio_requested = False
                 gen_kwargs["config"] = types.GenerateVideosConfig(  # pylint: disable=no-member
                     aspect_ratio=aspect_ratio,
@@ -1628,7 +1632,7 @@ class MediaGenerationService:
             else:
                 raise
 
-        print("[Media Service] Polling Google Gemini Video operation (Native Single-Pass Video + Audio)...")
+        logger.info("Polling Google Gemini Video operation (Native Single-Pass Video + Audio)...")
         deadline = time.time() + 300
         while not operation.done and time.time() < deadline:
             time.sleep(8)
@@ -1662,11 +1666,13 @@ class MediaGenerationService:
         }
 
     def _generate_pollinations_image(self, prompt: str, platform: str, size: str) -> dict:
-        import urllib.parse
-        import requests
-        import time
         import os
         import secrets
+        import time
+        import urllib.parse
+
+        import requests
+
         from config import Config
 
         encoded_prompt = urllib.parse.quote(prompt)
@@ -1674,13 +1680,13 @@ class MediaGenerationService:
         seed = secrets.SystemRandom().randint(1, 1000000)
         url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width={w}&height={h}&nologo=true&seed={seed}"
 
-        print(f"[Media Service] Fetching Pollinations image from {url[:80]}...")
+        logger.info(f"Fetching Pollinations image from {url[:80]}...")
 
         try:
             response = requests.get(url, stream=True, timeout=60)
             response.raise_for_status()
         except requests.exceptions.RequestException as req_err:
-            print(f"[Media Service] Request to Pollinations failed: {req_err}")
+            logger.warning(f"Request to Pollinations failed: {req_err}")
             return {"success": False, "error": str(req_err)}
 
         if response.status_code == 200:
@@ -1722,7 +1728,7 @@ class MediaGenerationService:
             }
 
         if getattr(Config, "USE_MOCK_LLM", False):
-            print("[Media Service] USE_MOCK_LLM is enabled. Generating mock video asset...")
+            logger.info("USE_MOCK_LLM is enabled. Generating mock video asset...")
             return self._generate_mock_media(platform, "video", caption)
 
         # Video is generated ONLY through HeyRoute (HEYROUTE_VIDEO_API_KEY,
@@ -1744,7 +1750,7 @@ class MediaGenerationService:
         takes_reference = any(self._heyroute_takes_reference(m) for m in video_models)
         resolved_image = self._resolve_image_path(image_path) if takes_reference else None
         if takes_reference and not resolved_image:
-            print("[Media Service] No user image uploaded for video. Auto-generating keyframe image...")
+            logger.info("No user image uploaded for video. Auto-generating keyframe image...")
             keyframe_res = self.generate_image(caption, platform, tone)
             if keyframe_res.get("success") and keyframe_res.get("url"):
                 resolved_image = self._resolve_image_path(keyframe_res["url"])
@@ -1755,13 +1761,13 @@ class MediaGenerationService:
             try:
                 result = self._generate_video_heyroute(prompt, platform, image_path=resolved_image)
             except Exception as heyroute_err:
-                print(f"[Media Service] {heyroute_err}")
+                logger.warning(f"{heyroute_err}")
                 return {"success": False, "type": "video", "platform": platform, "error": str(heyroute_err)}
 
             # --- Single-Pass Native Video + Audio Optimization ---
             if result.get("url") and result.get("has_native_audio"):
-                print(
-                    "[Media Service] Single-pass native video+audio generated successfully. Skipping separate TTS audio merging."
+                logger.warning(
+                    "Single-pass native video+audio generated successfully. Skipping separate TTS audio merging."
                 )
                 local_name = result["url"].split("/")[-1]
                 local_path = os.path.join(self.upload_folder, local_name)
@@ -1906,15 +1912,15 @@ class MediaGenerationService:
                         # Replace the silent video file with the processed one
                         if os.path.exists(processed_video_path):
                             os.replace(processed_video_path, silent_video_path)
-                            print(
-                                f"[Media Service] Video successfully cropped/resized to 1080x1420 px at {silent_video_path}"
+                            logger.info(
+                                f"Video successfully cropped/resized to 1080x1420 px at {silent_video_path}"
                             )
                     # Apply watermark after processing/saving
                     if silent_video_path is not None:
                         self._apply_video_watermark(silent_video_path, logo_path)
 
                 except Exception as merge_err:
-                    print(f"[Media Service] Video post-processing failed: {merge_err}")
+                    logger.warning(f"Video post-processing failed: {merge_err}")
 
             return {
                 "success": True,
@@ -1989,17 +1995,19 @@ Return JSON with keys:
         another company's (this used to always use StradIT's Logo.png)."""
         try:
             if not logo_path or not os.path.exists(logo_path):
-                print("[Media Service] No brand logo for this user, skipping video watermark.")
+                logger.warning("No brand logo for this user, skipping video watermark.")
                 return
 
             try:
                 # MoviePy v1.x imports
-                from moviepy.editor import VideoFileClip, ImageClip, CompositeVideoClip
+                from moviepy.editor import CompositeVideoClip, ImageClip, VideoFileClip
             except ImportError:
                 # MoviePy v2.x fallback
+                from moviepy.video.compositing.CompositeVideoClip import (
+                    CompositeVideoClip,
+                )
                 from moviepy.video.io.VideoFileClip import VideoFileClip
                 from moviepy.video.VideoClip import ImageClip
-                from moviepy.video.compositing.CompositeVideoClip import CompositeVideoClip
 
             with VideoFileClip(video_path) as video:
                 duration = video.duration
@@ -2051,9 +2059,9 @@ Return JSON with keys:
                 final_video.write_videofile(temp_path, codec="libx264", audio_codec="aac", logger=None)
 
             os.replace(temp_path, video_path)
-            print(f"[Media Service] Successfully watermarked video: {video_path}")
+            logger.info(f"Successfully watermarked video: {video_path}")
         except Exception as e:
-            print(f"[Media Service] Failed to watermark video: {e}")
+            logger.warning(f"Failed to watermark video: {e}")
 
     def _clean_text_for_tts(self, text: str) -> str:
         if not text:
@@ -2089,7 +2097,7 @@ Return JSON with keys:
             )
             return headline.strip().strip('"').strip("'")[:80]
         except Exception as e:
-            print(f"[Media Service] Headline extraction failed: {e}. Using fallback.")
+            logger.warning(f"Headline extraction failed: {e}. Using fallback.")
             trimmed = caption.split(".")[0].split("\n")[0].strip()[:60]
             return trimmed.rsplit(" ", 1)[0] if " " in trimmed else trimmed
 
@@ -2134,7 +2142,7 @@ Return JSON with keys:
             )
             return enhanced.strip()[:600]
         except Exception as e:
-            print(f"[Media Service] Image prompt enhancement failed: {e}. Using fallback.")
+            logger.warning(f"Image prompt enhancement failed: {e}. Using fallback.")
             # No further LLM call here - the one above just failed. Trim to the
             # last full word within the limit instead of a blind character cut,
             # which can chop a phrase off mid-word (e.g. "AI-driven" -> "AI-dri").
@@ -2169,7 +2177,7 @@ Return JSON with keys:
             compressed_str = compressed.strip()
             return compressed_str[:400]
         except Exception as e:
-            print(f"[Media Service] Prompt compression failed: {e}. Using fallback truncation.")
+            logger.warning(f"Prompt compression failed: {e}. Using fallback truncation.")
             return user_caption[:400]
 
     def _extract_speech_dialogue(self, caption: str) -> str:
@@ -2203,5 +2211,5 @@ Return JSON with keys:
             clean_dialogue = dialogue.strip().replace('"', "").lstrip("—").strip()
             return clean_dialogue or self._clean_text_for_tts(caption)
         except Exception as e:
-            print(f"[Media Service] Dialogue extraction failed: {e}")
+            logger.warning(f"Dialogue extraction failed: {e}")
             return self._clean_text_for_tts(caption)

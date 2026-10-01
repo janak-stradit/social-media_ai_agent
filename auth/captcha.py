@@ -13,6 +13,7 @@ scripted signups; email verification remains the real gate.
 import base64
 import io
 import json
+import logging
 import random
 import secrets
 import statistics
@@ -23,6 +24,8 @@ from flask import Blueprint, jsonify, request
 from PIL import Image, ImageDraw, ImageFilter
 
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 captcha_bp = Blueprint("captcha", __name__)
 
@@ -116,7 +119,7 @@ def get_store():
                     client.ping()
                     _store = _RedisStore(client)
                 except Exception:  # noqa: BLE001
-                    print("[captcha] Redis unavailable - using in-memory store (single process only)")
+                    logger.warning("Redis unavailable - using in-memory store (single process only)")
                     _store = _MemoryStore()
     return _store
 

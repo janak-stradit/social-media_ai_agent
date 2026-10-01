@@ -1,9 +1,13 @@
-import uuid
 import json
+import logging
+import uuid
+
 import numpy as np
 
 from config import Config
-from db import engine, Session, MemoryEmbedding
+from db import MemoryEmbedding, Session, engine
+
+logger = logging.getLogger(__name__)
 
 
 def cosine_similarity(v1, v2):
@@ -30,7 +34,7 @@ class MemoryService:
             return
         try:
             if not self.embedding_service:
-                print("[MemoryService] No embedding service available.")
+                logger.info("No embedding service available.")
                 return
             
             embedding_vector = self.embedding_service.get_embedding(text)
@@ -47,7 +51,7 @@ class MemoryService:
                 session.merge(emb)
                 session.commit()
         except Exception as e:
-            print(f"[MemoryService] Error storing content: {e}")
+            logger.warning(f"Error storing content: {e}")
 
     def store_campaign_run(self, run_id, story, content, user_id=None, tone=None, platforms=None):
         """Vectorize and store a completed campaign run into memory"""
@@ -91,9 +95,9 @@ class MemoryService:
                 )
                 session.merge(emb)
                 session.commit()
-            print(f"[MemoryService] Successfully indexed campaign run {doc_id} into PostgreSQL memory.")
+            logger.info(f"Successfully indexed campaign run {doc_id} into PostgreSQL memory.")
         except Exception as e:
-            print(f"[MemoryService] Failed to index campaign run: {e}")
+            logger.warning(f"Failed to index campaign run: {e}")
 
     def retrieve_context(self, query_text, user_id=None, n_results=3):
         """Retrieve relevant past campaign context for prompt injection (RAG)"""
@@ -130,7 +134,7 @@ class MemoryService:
                     
                 return retrieved
         except Exception as e:
-            print(f"[MemoryService] Context retrieval failed: {e}")
+            logger.warning(f"Context retrieval failed: {e}")
             return []
 
     def get_trending_hashtags(self, category=None):
@@ -164,7 +168,7 @@ class MemoryService:
                 if docs:
                     return docs
         except Exception as e:
-            print(f"[MemoryService] get_trending_hashtags notice: {e}")
+            logger.warning(f"get_trending_hashtags notice: {e}")
         return ["#AVIRAI", "#AIStrategy", "#GrowthMarketing", "#DigitalGrowth"]
 
     def get_stats(self):
@@ -176,7 +180,7 @@ class MemoryService:
                 count = session.query(MemoryEmbedding).count()
                 return {"total_memories": count}
         except Exception as e:
-            print(f"[MemoryService] get_stats warning: {e}")
+            logger.warning(f"get_stats warning: {e}")
             return {"total_memories": 0}
 
     def format_memory_prompt(self, retrieved_items):
@@ -304,7 +308,7 @@ class MemoryService:
                                 )
 
             except Exception as err:
-                print(f"[MemoryService] get_memory_graph_data warning: {err}")
+                logger.warning(f"get_memory_graph_data warning: {err}")
 
         # Summary statistics
         summary = {

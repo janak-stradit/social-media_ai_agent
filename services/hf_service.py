@@ -1,9 +1,12 @@
 import base64
+import logging
 
 import requests
 from transformers import pipeline
 
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 
 class HuggingFaceService:
@@ -48,11 +51,11 @@ class HuggingFaceService:
                 boto_config = BotoConfig(read_timeout=300, connect_timeout=60, retries={"max_attempts": 3})
 
                 self.bedrock_client = session.client("bedrock-runtime", config=boto_config)
-                print(
-                    f"[HuggingFaceService] Bedrock client initialized with model: {getattr(Config, 'BEDROCK_VISION_MODEL', 'amazon.nova-lite-v1:0')}"
+                logger.info(
+                    f"Bedrock client initialized with model: {getattr(Config, 'BEDROCK_VISION_MODEL', 'amazon.nova-lite-v1:0')}"
                 )
             except Exception as e:
-                print(f"[HuggingFaceService] Bedrock client initialization failed: {e}. Falling back to local.")
+                logger.warning(f"Bedrock client initialization failed: {e}. Falling back to local.")
 
     # Longest side sent to the vision model - enough detail for a description,
     # far fewer tokens (and seconds) than a full-resolution photo.
@@ -146,8 +149,8 @@ class HuggingFaceService:
                 caption = "".join([block["text"] for block in output_content if "text" in block])
                 return caption.strip()
             except Exception as bedrock_err:
-                print(
-                    f"[Bedrock Vision] Failed to generate caption via Bedrock: {bedrock_err}. Falling back to local/HF."
+                logger.warning(
+                    f"Failed to generate caption via Bedrock: {bedrock_err}. Falling back to local/HF."
                 )
 
         try:
@@ -191,7 +194,7 @@ class HuggingFaceService:
                     max_tokens=300,
                 )
             except Exception as err:
-                print(f"[HeyRoute Vision] Failed to extract features: {err}")
+                logger.warning(f"Failed to extract features: {err}")
                 return None
         if self.vision_provider == "bedrock" and self.bedrock_client:
             try:
@@ -221,7 +224,7 @@ class HuggingFaceService:
                 features = "".join([block["text"] for block in output_content if "text" in block])
                 return features.strip()
             except Exception as bedrock_err:
-                print(f"[Bedrock Vision] Failed to extract features via Bedrock: {bedrock_err}. Falling back to None.")
+                logger.warning(f"Failed to extract features via Bedrock: {bedrock_err}. Falling back to None.")
 
         # Since API fails, return None (handled gracefully by vision_agent.py)
         return None

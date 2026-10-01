@@ -15,11 +15,14 @@ Which logo (resolve_logo_path):
 
 import hashlib
 import io
+import logging
 import os
 
 import requests
 
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 NO_AI_LOGO_RULE = (
     "Do not draw, write or imitate any logo, wordmark, watermark or company name anywhere in the image "
@@ -80,7 +83,7 @@ def _cached_logo(logo_url: str) -> str | None:
     try:
         png = _render_svg(data) if _looks_like_svg(logo_url, data) else _normalize_raster(data)
     except Exception as e:
-        print(f"[brand_logo_service] Could not process logo {logo_url}: {e}")
+        logger.warning(f"Could not process logo {logo_url}: {e}")
         return None
     if not png:
         return None
@@ -102,7 +105,7 @@ def _fetch_logo_bytes(url: str) -> bytes | None:
         try:
             resp = requests.get(url, timeout=10, allow_redirects=False, stream=True, headers=_REQUEST_HEADERS)
         except Exception as e:
-            print(f"[brand_logo_service] Failed to fetch logo {url}: {e}")
+            logger.warning(f"Failed to fetch logo {url}: {e}")
             return None
         if resp.status_code in (301, 302, 303, 307, 308) and resp.headers.get("Location"):
             url = requests.compat.urljoin(url, resp.headers["Location"])
@@ -185,7 +188,7 @@ def overlay_logo(image_path: str, logo_path: str) -> bool:
         base = Image.open(image_path).convert("RGBA")
         logo = Image.open(logo_path).convert("RGBA")
     except Exception as e:
-        print(f"[brand_logo_service] Could not open image/logo: {e}")
+        logger.warning(f"Could not open image/logo: {e}")
         return False
 
     bbox = logo.getchannel("A").getbbox()
@@ -245,6 +248,6 @@ def overlay_logo(image_path: str, logo_path: str) -> bool:
         fmt = "PNG" if image_path.lower().endswith(".png") else "JPEG"
         (base if fmt == "PNG" else base.convert("RGB")).save(image_path, format=fmt)
     except Exception as e:
-        print(f"[brand_logo_service] Could not save branded image: {e}")
+        logger.warning(f"Could not save branded image: {e}")
         return False
     return True

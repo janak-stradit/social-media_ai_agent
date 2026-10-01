@@ -1,5 +1,9 @@
+import logging
+
 from services.hf_service import HuggingFaceService
 from services.llm_service import LLMService
+
+logger = logging.getLogger(__name__)
 
 
 class VisionAgent:
@@ -57,7 +61,7 @@ class VisionAgent:
             analysis.setdefault("raw_caption", analysis.get("rich_description", ""))
             return analysis
         except Exception as err:
-            print(f"[VisionAgent] HeyRoute image analysis failed: {err}")
+            logger.warning(f"HeyRoute image analysis failed: {err}")
             return {
                 "rich_description": "",
                 "raw_caption": "",

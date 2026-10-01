@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import time
 from datetime import datetime
@@ -8,6 +9,8 @@ from sqlalchemy.orm import Session
 
 from db import ScheduledPost, engine
 from services.social_publisher_service import SocialPublisherService
+
+logger = logging.getLogger(__name__)
 
 
 def process_due_posts(app_root_path):
@@ -26,7 +29,7 @@ def process_due_posts(app_root_path):
         publisher = SocialPublisherService()
 
         for post in due_posts:
-            print(f"[Scheduler] Processing Scheduled Post #{post.id} for user {post.user_id}...")
+            logger.info(f"Processing Scheduled Post #{post.id} for user {post.user_id}...")
 
             try:
                 platforms = json.loads(post.platforms)
@@ -62,7 +65,7 @@ def process_due_posts(app_root_path):
             any_success = any(res.get("success") for res in results.values())
 
             new_status = "published" if any_success else "failed"
-            print(f"[Scheduler] Post #{post.id} completed with status: {new_status}. Results: {results}")
+            logger.info(f"Post #{post.id} completed with status: {new_status}. Results: {results}")
 
             # Update DB
             post.status = new_status
@@ -93,7 +96,7 @@ def refresh_youtube_tokens():
         publisher = SocialPublisherService()
         for acc in yt_accounts:
             try:
-                print(f"[Scheduler] Refreshing YouTube access token for account ID {acc.id}...")
+                logger.info(f"Refreshing YouTube access token for account ID {acc.id}...")
                 # KNOWN BUG (pre-existing): SocialPublisherService has no refresh_youtube_token
                 # method, so this always raises and is swallowed by the except below -- YouTube
                 # tokens are never actually refreshed. Needs a real OAuth2 refresh-token-grant
@@ -101,20 +104,20 @@ def refresh_youtube_tokens():
                 new_token = publisher.refresh_youtube_token(acc.refresh_token)  # pylint: disable=no-member
                 acc.access_token = new_token
                 session.commit()
-                print(f"[Scheduler] Successfully refreshed YouTube token for account ID {acc.id}")
+                logger.info(f"Successfully refreshed YouTube token for account ID {acc.id}")
             except Exception as e:
-                print(f"[Scheduler] Failed to refresh YouTube token for account ID {acc.id}: {e}")
+                logger.warning(f"Failed to refresh YouTube token for account ID {acc.id}: {e}")
 
 
 def run_scheduler(app_root_path):
-    print("[Scheduler] Background scheduling thread started...")
+    logger.info("Background scheduling thread started...")
     last_refresh_time = 0
 
     while True:
         try:
             process_due_posts(app_root_path)
         except Exception as e:
-            print(f"[Scheduler] Error processing posts: {e}")
+            logger.warning(f"Error processing posts: {e}")
 
         # Refresh tokens every 45 minutes (2700 seconds)
         current_time = time.time()
@@ -123,7 +126,7 @@ def run_scheduler(app_root_path):
                 refresh_youtube_tokens()
                 last_refresh_time = current_time
             except Exception as e:
-                print(f"[Scheduler] Error running token refresh: {e}")
+                logger.warning(f"Error running token refresh: {e}")
 
         # Check every 20 seconds
         time.sleep(20)

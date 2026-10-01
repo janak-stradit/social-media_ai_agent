@@ -1,6 +1,9 @@
+import logging
 import re
 
 from services.llm_service import LLMService
+
+logger = logging.getLogger(__name__)
 
 
 class CaptionAgent:
@@ -350,7 +353,7 @@ primary_caption
             primary = parsed.get("primary_caption", "")
 
         except Exception as e:
-            print(f"[CaptionAgent] JSON generation fallback: {e}")
+            logger.warning(f"JSON generation fallback: {e}")
 
             primary, usage = self.llm.generate(
                 system_prompt,

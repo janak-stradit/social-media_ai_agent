@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 
@@ -19,10 +20,10 @@ from auth.utils import get_current_user_id
 from config import Config
 from db import (
     create_user,
+    get_open_invitation_by_token,
     get_user_by_email,
     get_user_by_id,
     get_user_by_password_reset_token_hash,
-    get_open_invitation_by_token,
     get_user_by_verification_token,
     mark_invitation_accepted,
     mark_user_email_verified,
@@ -30,6 +31,9 @@ from db import (
     set_user_password_reset_token,
     set_user_verification_token,
 )
+from logging_setup import mask_email
+
+logger = logging.getLogger(__name__)
 
 auth_bp = Blueprint("auth", __name__)
 
@@ -76,7 +80,7 @@ def _send_verification_email(user_id: int, email: str, name: str) -> None:
         verify_url = f"{(Config.APP_BASE_URL or request.host_url).rstrip('/')}/api/auth/verify/{token}"
         EmailService().send_welcome_verification_email(email, name, verify_url)
     except Exception as e:  # noqa: BLE001
-        print(f"[auth] Failed to send verification email to {email}: {e}")
+        logger.warning(f"Failed to send verification email to {mask_email(email)}: {e}")
 
 
 def _user_payload(user) -> dict:
@@ -245,12 +249,12 @@ def forgot_password():
                     user.email, user.name, reset_url, int(PASSWORD_RESET_TTL.total_seconds() // 60)
                 )
             except Exception as e:  # noqa: BLE001
-                print(f"[auth] Failed to send password reset email to {user.email}: {e}")
+                logger.warning(f"Failed to send password reset email to {mask_email(user.email)}: {e}")
                 # Local development without SMTP: surface the link in the
                 # server console so the flow can still be tested. Never in
                 # production, where the link must only go to the inbox.
                 if current_app.debug:
-                    print(f"[auth] DEV ONLY - password reset link for {user.email}: {reset_url}")
+                    logger.info(f"DEV ONLY - password reset link for {mask_email(user.email)}: {reset_url}")
 
     return jsonify(
         {"success": True, "message": "If an account exists for that email, a reset link is on its way."}

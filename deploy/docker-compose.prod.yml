@@ -29,6 +29,8 @@ services:
     environment:
       # Only the scheduler container publishes scheduled posts
       SCHEDULER_ENABLED: "false"
+      # Names the source of each log line (LOG_FORMAT / LOG_LEVEL come from .env)
+      SERVICE_NAME: "avir-web"
       # gunicorn workers: ~0.6-0.7 GB each. 2 on t3.medium; use "1" on t3.small.
       WEB_CONCURRENCY: "2"
       # Signup captcha state shared by all gunicorn workers (auth/captcha.py);
@@ -52,4 +54,6 @@ services:
   scheduler:
     <<: *app
     command: ["python", "scripts/run_scheduler.py"]
+    environment:
+      SERVICE_NAME: "avir-scheduler"
     stop_grace_period: 30s

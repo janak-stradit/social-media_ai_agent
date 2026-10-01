@@ -1,9 +1,12 @@
 import json
+import logging
 import os
 
 import openai
 
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 
 class LLMService:
@@ -97,9 +100,9 @@ class LLMService:
                 session = boto3.Session(**session_kwargs)
                 boto_config = BotoConfig(read_timeout=120, connect_timeout=30, retries={"max_attempts": 3})
                 self.bedrock_client = session.client("bedrock-runtime", config=boto_config)
-                print(f"[LLM Service] AWS Bedrock client initialized successfully using model {self.bedrock_model}.")
+                logger.info(f"AWS Bedrock client initialized successfully using model {self.bedrock_model}.")
             except Exception as e:
-                print(f"[LLM Service] Bedrock initialization failed: {e}")
+                logger.warning(f"Bedrock initialization failed: {e}")
 
         self.providers = []
 
@@ -125,7 +128,7 @@ class LLMService:
 
         google_key = getattr(Config, "GOOGLE_API_KEY", None) or os.getenv("GOOGLE_API_KEY")
         if google_key:
-            print("[LLM Service] Initialized Gemini Provider via OpenAI compat.")
+            logger.info("Initialized Gemini Provider via OpenAI compat.")
             self.providers.append(
                 {
                     "name": "gemini",
@@ -138,7 +141,7 @@ class LLMService:
 
         use_mock = getattr(Config, "USE_MOCK_LLM", False)
         if use_mock or not self.providers:
-            print("[LLM Service] Initialized Mock LLM Provider (Offline / Zero-Cost Mode).")
+            logger.info("Initialized Mock LLM Provider (Offline / Zero-Cost Mode).")
             mock_entry = {"name": "mock", "client": None, "model": "mock-llm-v1"}
             if use_mock:
                 self.providers.insert(0, mock_entry)
@@ -374,8 +377,8 @@ class LLMService:
                     if not text_out or not text_out.strip() or self._looks_like_reasoning_leakage(text_out):
                         reason = "empty response" if not text_out or not text_out.strip() else "reasoning leakage"
                         last_error = Exception(f"{provider['name']} returned a {reason}")
-                        print(
-                            f"[LLM Service] Provider {provider['name']} returned {reason} "
+                        logger.warning(
+                            f"Provider {provider['name']} returned {reason} "
                             f"(attempt {attempt + 1}/{max_retries_per_provider}). Retrying..."
                         )
                         continue
@@ -385,11 +388,11 @@ class LLMService:
                     return text_out
                 except Exception as e:
                     last_error = e
-                    print(
-                        f"[LLM Service] Provider {provider['name']} failed "
+                    logger.warning(
+                        f"Provider {provider['name']} failed "
                         f"(attempt {attempt + 1}/{max_retries_per_provider}): {e}."
                     )
-            print(f"[LLM Service] Provider {provider['name']} exhausted retries. Trying fallback...")
+            logger.warning(f"Provider {provider['name']} exhausted retries. Trying fallback...")
         raise Exception(f"LLM Generation failed for all providers. Last error: {str(last_error)}")
 
     def _robust_parse_json(self, content_str: str) -> dict:
@@ -508,8 +511,8 @@ class LLMService:
 
                     if not parsed_json:
                         last_error = Exception(f"{provider['name']} returned an empty JSON object")
-                        print(
-                            f"[LLM Service] Provider {provider['name']} returned empty JSON "
+                        logger.warning(
+                            f"Provider {provider['name']} returned empty JSON "
                             f"(attempt {attempt + 1}/{max_retries_per_provider}). Retrying..."
                         )
                         continue
@@ -519,9 +522,9 @@ class LLMService:
                     return parsed_json
                 except Exception as e:
                     last_error = e
-                    print(
-                        f"[LLM Service] Provider {provider['name']} failed JSON generation "
+                    logger.warning(
+                        f"Provider {provider['name']} failed JSON generation "
                         f"(attempt {attempt + 1}/{max_retries_per_provider}): {e}."
                     )
-            print(f"[LLM Service] Provider {provider['name']} exhausted retries. Trying fallback...")
+            logger.warning(f"Provider {provider['name']} exhausted retries. Trying fallback...")
         raise Exception(f"LLM JSON Generation failed for all providers. Last error: {str(last_error)}")

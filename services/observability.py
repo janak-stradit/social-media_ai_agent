@@ -1,28 +1,22 @@
-"""Structured event logs for generation flows - one JSON line per event, so
-context and image-lineage problems can be traced by conversation, run and
-image ids (e.g. `docker logs web | grep '"event": "image.edit"'`)."""
+"""Structured events for generation flows (generate, image.generate,
+image.edit, image.select, refine), written through the app's logging
+(logging_setup.py) as the "events" source with key=value fields, so context
+and image-lineage problems can be traced by conversation, run and image ids:
 
-import json
+    ... INFO    events         image.edit  conversation_id=14 asset_id=88 parent_asset_id=87 status=completed  req=3f2a... user=7
+
+    docker logs socialmedia-web-1 2>&1 | grep 'image.edit'
+"""
+
 import logging
-import sys
-import time
 
 logger = logging.getLogger("avir.events")
-if not logger.handlers:
-    _handler = logging.StreamHandler(sys.stdout)
-    _handler.setFormatter(logging.Formatter("%(message)s"))
-    logger.addHandler(_handler)
-    logger.setLevel(logging.INFO)
-    logger.propagate = False
 
 
 def log_event(event: str, **fields) -> None:
-    """event: e.g. "generate", "image.generate", "image.edit", "refine".
-    Fields with None values are dropped. Never raises."""
+    """Fields with None values are dropped. Never raises."""
     try:
-        payload = {"event": event, "ts": round(time.time(), 3)}
-        payload.update({k: v for k, v in fields.items() if v is not None})
-        logger.info(json.dumps(payload, default=str))
+        logger.info(event, extra={"fields": {k: v for k, v in fields.items() if v is not None}})
     except Exception:  # noqa: BLE001, S110 - logging must never break a request
         pass
 

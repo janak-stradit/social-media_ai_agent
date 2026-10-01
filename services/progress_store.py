@@ -8,11 +8,14 @@ which is fine for the single-process dev server. Best-effort throughout -
 progress must never break or slow down a generation.
 """
 
+import logging
 import re
 import threading
 import time
 
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 TTL_SECONDS = 3600
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
@@ -62,7 +65,7 @@ def get(user_id, progress_id) -> dict:
             if entry and entry[0] > time.time():
                 return dict(entry[1])
     except Exception as e:  # noqa: BLE001
-        print(f"[progress] read failed: {e}")
+        logger.warning(f"read failed: {e}")
     return {}
 
 
@@ -89,4 +92,4 @@ def set_step(user_id, progress_id, step: str, state: str) -> None:
             steps[step] = state
             _memory[key] = (now + TTL_SECONDS, steps)
     except Exception as e:  # noqa: BLE001
-        print(f"[progress] write failed: {e}")
+        logger.warning(f"write failed: {e}")

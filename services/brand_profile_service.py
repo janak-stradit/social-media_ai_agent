@@ -6,7 +6,10 @@ _build_guidelines_block(). Only wired into the Studio Chat path
 competitor-dashboard flow."""
 
 
+import logging
 import threading
+
+logger = logging.getLogger(__name__)
 
 # User-facing explanation for each scan failure code (see
 # website_scraper_service.FAILURE_REASONS) - shown on onboarding and on the
@@ -56,8 +59,8 @@ def start_brand_analysis_async(user_id: int, website: str) -> bool:
     def _worker():
         try:
             run_brand_analysis(user_id, website, _already_claimed=True)
-        except Exception as e:  # noqa: BLE001 - never let a background thread die silently
-            print(f"[brand_profile_service] Background brand analysis crashed for user {user_id}: {e}")
+        except Exception:  # never let a background thread die silently (traceback is logged)
+            logger.exception(f"Background brand analysis crashed for user {user_id}")
             set_brand_scan_status(user_id, "failed", "analysis_failed")
         finally:
             with _running_scans_lock:
@@ -103,7 +106,7 @@ def run_brand_analysis(
         try:
             profile = WebsiteAnalysisAgent().analyze(scraped)
         except Exception as e:  # noqa: BLE001
-            print(f"[brand_profile_service] Brand analysis failed for {website}: {e}")
+            logger.warning(f"Brand analysis failed for {website}: {e}")
             set_brand_scan_status(user_id, "failed", "analysis_failed")
             return False, "analysis_failed"
 
