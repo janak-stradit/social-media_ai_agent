@@ -2319,15 +2319,16 @@ def admin_revoke_invitation(invitation_id):
 _heyroute_image_models_cache = {"at": 0.0, "ids": []}
 
 
-def _heyroute_image_models() -> list[str]:
+def _heyroute_image_models(fresh: bool = False) -> list[str]:
     """Models the HeyRoute image key can make images with (cached 10 min) -
     suggestions and validation for Admin -> Image Settings. /models lists every
     model on the key, text models included; only those whose
     supported_endpoint_types include "image-generation" work for images (the
-    others fail with 404 model_not_found). Empty when HeyRoute can't be reached."""
+    others fail with 404 model_not_found). Empty when HeyRoute can't be reached.
+    fresh=True skips the cache (models enabled on HeyRoute a moment ago)."""
     import time
 
-    if time.time() - _heyroute_image_models_cache["at"] < 600:
+    if not fresh and time.time() - _heyroute_image_models_cache["at"] < 600:
         return _heyroute_image_models_cache["ids"]
     ids: list[str] = []
     if Config.HEYROUTE_IMAGE_API_KEY:
@@ -2366,7 +2367,7 @@ def my_image_quota():
 def admin_get_image_settings():
     from db import get_image_settings
 
-    return jsonify({"success": True, "settings": get_image_settings(), "available_models": _heyroute_image_models()})
+    return jsonify({"success": True, "settings": get_image_settings(), "available_models": _heyroute_image_models(fresh=True)})
 
 
 @api_bp.route("/admin/image-settings", methods=["PUT"])
@@ -2394,6 +2395,8 @@ def admin_save_image_settings():
     if not models:
         return jsonify({"success": False, "error": "Add at least one image model."}), 400
     image_models = _heyroute_image_models()
+    if any(m["id"] not in image_models for m in models):
+        image_models = _heyroute_image_models(fresh=True)  # may have just been enabled on HeyRoute
     not_image = [m["id"] for m in models if image_models and m["id"] not in image_models]
     if not_image:
         return jsonify({
