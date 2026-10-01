@@ -14,6 +14,25 @@ $(document).ready(function () {
     // output by default, or whichever version "Refine this version" picked).
     let refineBaseMsgId = null;
     let messageCounter = 0;
+    // The conversation every message is saved into, until "New Conversation"
+    // (the server creates it on the first message and returns its id)
+    let currentConversationId = null;
+    const CONVERSATION_KEY = 'avir_active_conversation';
+
+    function setConversation(id) {
+        currentConversationId = id ? Number(id) : null;
+        try {
+            if (currentConversationId) sessionStorage.setItem(CONVERSATION_KEY, String(currentConversationId));
+            else sessionStorage.removeItem(CONVERSATION_KEY);
+        } catch (e) { /* storage blocked - the thread still works until a refresh */ }
+        $('.history-card').each(function () {
+            $(this).toggleClass('active', Number($(this).data('id')) === currentConversationId);
+        });
+    }
+
+    function clearConversation() {
+        setConversation(null);
+    }
     window.chatHistory = {}; // Store generations per msgId
 
     // Builds the multi-turn context sent as previous_context: the original
@@ -100,6 +119,7 @@ $(document).ready(function () {
                 image_url: d.media?.image?.url || d.media?.image?.previous_url || null,
                 image_clean_url: d.media?.image?.clean_url || d.media?.image?.previous_clean_url || null,
                 image_prompt: d.media?.image?.prompt || d.media?.image?.previous_prompt || null,
+                image_asset_id: d.media?.image?.asset_id || d.media?.image?.previous_asset_id || null,
                 video_url: d.media?.video?.url || null
             };
         });
@@ -283,6 +303,7 @@ $(document).ready(function () {
         loadBrandProfileQuickPrompts();
         loadImageQuota();
         openModalFromHash();
+        restoreConversation();
     });
 
     function openModalFromHash() {
@@ -503,7 +524,7 @@ $(document).ready(function () {
         startNewChat();
     });
 
-    function startNewChat() {
+    function startNewChat(silent) {
         $('#chatThread').empty();
         $('#welcomeHero').removeClass('d-none');
         storyInput.val('').trigger('input');
@@ -513,8 +534,9 @@ $(document).ready(function () {
         threadRootBrief = null;
         lastThreadPlatforms = [];
         refineBaseMsgId = null;
+        clearConversation();
         updateGenerateGate();
-        showToast('Started a new conversation', 'info');
+        if (!silent) showToast('Started a new conversation', 'info');
     }
 
     // ── Incoming handoff from the Analysis Dashboard's "Refine in Studio
@@ -746,7 +768,12 @@ $(document).ready(function () {
         // so the stepper shows what is really running - captions and hashtags
         // run at the same time, so both can be active together.
         const progressId = newProgressId();
-        requestBody = Object.assign({}, requestBody, { progress_id: progressId });
+        const prior = window.chatHistory[msgId];
+        requestBody = Object.assign({}, requestBody, {
+            progress_id: progressId,
+            conversation_id: currentConversationId,
+            version_of_run_id: prior && prior.responses.length ? prior.responses[0].runId : undefined
+        });
         const stopProgress = pollGenerationProgress(msgId, progressId);
 
         window.currentGenerationRequest = $.ajax({
@@ -759,6 +786,7 @@ $(document).ready(function () {
                 setChatDockDisabled(false);
                 stopProgress();
                 lastRunId = r.run_id || null;
+                if (r.conversation_id) setConversation(r.conversation_id);
 
                 if (!window.chatHistory[msgId]) {
                     window.chatHistory[msgId] = { responses: [], currentIndex: 0, requestBody, platforms, activeImgPath, mediaType, selectedOutputs };
@@ -1243,12 +1271,15 @@ $(document).ready(function () {
                 previous_context: base.context,
                 selected_outputs: opts.selectedOutputs,
                 base_run_id: base.runId,
+                conversation_id: currentConversationId,
+                version_of_run_id: (window.chatHistory[msgId]?.responses || [])[0]?.runId,
                 reference_image_path: opts.attachedImage,
                 base: toRefinePayload(base.content, opts.platforms)
             }),
             success: function (r) {
                 window.currentGenerationRequest = null;
                 if (r.image_quota) window.applyImageQuota(r.image_quota);
+                if (r.conversation_id) setConversation(r.conversation_id);
                 setChatDockDisabled(false);
 
                 if (r.intent === 'new_content') {
@@ -1673,7 +1704,19 @@ $(document).ready(function () {
         // Pick which version the next follow-up message edits (e.g. go back
         // to an earlier image if the latest refinement made it worse).
         elem.find('.btn-refine-base').on('click', function () {
-            adoptAsRefineBase($(this).attr('data-msg'));
+            const pickedMsg = $(this).attr('data-msg');
+            adoptAsRefineBase(pickedMsg);
+            const ph = window.chatHistory[pickedMsg];
+            const pContent = ph ? ph.responses[ph.currentIndex].content || {} : {};
+            const imageId = ph && ph.platforms.map(p => pContent[p]?.media?.image?.asset_id).find(Boolean);
+            if (currentConversationId && imageId) {
+                $.ajax({
+                    url: `/api/conversations/${currentConversationId}/active-image`,
+                    type: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify({ image_id: imageId })
+                });
+            }
             storyInput.focus();
             showToast('Your next message will refine this version.', 'info');
         });
@@ -1993,7 +2036,7 @@ $(document).ready(function () {
                         const pContent = h && h.responses[h.currentIndex].content[target];
                         if (pContent) {
                             pContent.media = pContent.media || {};
-                            pContent.media[mediaType] = { url: res.url, clean_url: res.clean_url || null, prompt: res.prompt, resolution: res.resolution || res.size };
+                            pContent.media[mediaType] = { url: res.url, clean_url: res.clean_url || null, prompt: res.prompt, resolution: res.resolution || res.size, asset_id: res.asset_id || null };
                         }
                     });
                     if (h && refineBaseMsgId === msgId) adoptAsRefineBase(msgId);
@@ -2087,10 +2130,10 @@ $(document).ready(function () {
     function renderHistory() {
         const isArchived = currentHistoryTab === 'archived';
         $.ajax({
-            url: `/api/history?limit=30&archived=${isArchived}`,
+            url: `/api/conversations?limit=30&archived=${isArchived}`,
             type: 'GET',
             success: function (r) {
-                const history = r.history || [];
+                const history = r.conversations || [];
                 window._allHistoryItems = history;
                 $('#historyCount').text(history.length);
 
@@ -2155,6 +2198,8 @@ $(document).ready(function () {
             }).join(' ');
 
             const toneTag = item.tone && item.tone !== 'Auto' ? `<span class="history-tone-tag"><i class="fas fa-sliders me-1"></i>${escapeHtml(item.tone)}</span>` : '';
+            const countTag = item.message_count > 1
+                ? `<span class="history-tone-tag" title="${item.message_count} messages in this conversation"><i class="fas fa-comments me-1"></i>${item.message_count}</span>` : '';
             const dateStr = item.timestamp || 'Recent';
 
             const actionBtn = isArchived
@@ -2162,7 +2207,7 @@ $(document).ready(function () {
                 : `<button class="btn-history-icon btn-archive-item" data-id="${item.id}" title="Archive conversation"><i class="fas fa-box-archive"></i></button>`;
 
             html += `
-                <div class="history-card" data-id="${item.id}">
+                <div class="history-card${Number(item.id) === currentConversationId ? ' active' : ''}" data-id="${item.id}">
                     <div class="history-card-header">
                         <div class="history-card-title">${escapeHtml(item.story)}</div>
                         <div class="history-card-actions">
@@ -2173,6 +2218,7 @@ $(document).ready(function () {
                         <div class="history-tags-row">
                             ${platformBadges}
                             ${toneTag}
+                            ${countTag}
                         </div>
                         <span class="history-date">${dateStr}</span>
                     </div>
@@ -2187,7 +2233,7 @@ $(document).ready(function () {
             $('.history-card').removeClass('active');
             $(this).addClass('active');
             const id = $(this).data('id');
-            loadHistoryIntoChat(id);
+            loadConversation(id);
         });
 
         $('.btn-archive-item').on('click', function (e) {
@@ -2205,7 +2251,7 @@ $(document).ready(function () {
 
     function archiveRun(runId) {
         $.ajax({
-            url: `/api/history/${runId}/archive`,
+            url: `/api/conversations/${runId}/archive`,
             type: 'POST',
             success: function () {
                 showToast('Conversation archived', 'info');
@@ -2219,7 +2265,7 @@ $(document).ready(function () {
 
     function unarchiveRun(runId) {
         $.ajax({
-            url: `/api/history/${runId}/unarchive`,
+            url: `/api/conversations/${runId}/unarchive`,
             type: 'POST',
             success: function () {
                 showToast('Conversation restored to Active', 'success');
@@ -2231,66 +2277,117 @@ $(document).ready(function () {
         });
     }
 
-    // Loads a past run into the live chat workspace as a resumable
-    // conversation (instead of the read-only Run Details modal), so the user
-    // can send a follow-up message to fine-tune it with more information.
-    function loadHistoryIntoChat(runId) {
+    // Opens a saved conversation: every message and reply is replayed in order
+    // (regenerated replies become versions of their message), the reply with
+    // the conversation's active image becomes what the next message refines,
+    // and new messages keep going into this same conversation.
+    function loadConversation(convId, opts) {
+        opts = opts || {};
         $.ajax({
-            url: `/api/history/${runId}`,
+            url: `/api/conversations/${convId}`,
             type: 'GET',
             success: function (r) {
-                const run = r.run;
-                if (!run) return;
+                const runs = r.runs || [];
+                if (!runs.length) return;
+                const conv = r.conversation || {};
 
-                const platforms = Array.isArray(run.platforms) ? run.platforms : (run.platforms ? [run.platforms] : ['linkedin']);
-                const content = run.content || {};
-
-                startNewChat();
+                startNewChat(true);
                 $('#welcomeHero').addClass('d-none');
+                threadRootBrief = runs[0].story;
 
-                messageCounter++;
-                const msgId = 'msg_' + Date.now() + '_' + messageCounter;
+                const msgByRun = {};
+                const order = [];
+                runs.forEach(run => {
+                    const content = run.content || {};
+                    const meta = content._meta || {};
+                    const platforms = Array.isArray(run.platforms) ? run.platforms : (run.platforms ? [run.platforms] : ['linkedin']);
+                    const rData = {
+                        content: content, runId: run.id,
+                        usage: { total_tokens: run.tokens_used, cost_usd: run.cost_usd },
+                        agentsExecuted: content._agents || null, qualitySummary: content._quality || null
+                    };
 
-                appendUserMessage(run.story, null, platforms, run.tone, 'Text (Caption)', 'Standard Enterprise');
-                appendAssistantThinking(msgId, false);
+                    // A regenerated reply: another version of that message
+                    const ownerMsg = meta.version_of && msgByRun[meta.version_of];
+                    if (ownerMsg) {
+                        const owner = window.chatHistory[ownerMsg];
+                        owner.responses.push(rData);
+                        owner.currentIndex = owner.responses.length - 1;
+                        msgByRun[run.id] = ownerMsg;
+                        return;
+                    }
 
-                // Reflect what was actually generated for this run (see
-                // db.append_run_media / content[platform].media.{image,video})
-                // - this used to always be [], which meant a run that DID
-                // include a generated image never showed it when reloaded
-                // from history (the media card only ever renders when its
-                // type is listed here).
-                const savedOutputs = [];
-                platforms.forEach(p => {
-                    const media = content[p]?.media || {};
-                    if (media.image?.url && !savedOutputs.includes('image')) savedOutputs.push('image');
-                    if (media.video?.url && !savedOutputs.includes('video')) savedOutputs.push('video');
+                    messageCounter++;
+                    const msgId = 'msg_' + Date.now() + '_' + messageCounter;
+                    appendUserMessage(run.story, meta.image_url || null, platforms, run.tone, 'Text (Caption)', 'Standard Enterprise');
+                    appendAssistantThinking(msgId, false);
+
+                    // Show the media this reply already has (no new generation)
+                    const savedOutputs = [];
+                    platforms.forEach(p => {
+                        const media = content[p]?.media || {};
+                        if ((media.image?.url || media.image?.limit_reached) && !savedOutputs.includes('image')) savedOutputs.push('image');
+                        if (media.video?.url && !savedOutputs.includes('video')) savedOutputs.push('video');
+                    });
+                    const h = {
+                        responses: [rData],
+                        currentIndex: 0,
+                        requestBody: { story: run.story, platforms: platforms, tone: run.tone, brand_voice: 'Standard Enterprise' },
+                        platforms: platforms,
+                        activeImgPath: null,
+                        mediaType: 'none',
+                        selectedOutputs: savedOutputs
+                    };
+                    // A refinement: Regenerate re-applies it to the version it refined
+                    const baseMsg = meta.refined_from_run_id && msgByRun[meta.refined_from_run_id];
+                    if (baseMsg) {
+                        const bh = window.chatHistory[baseMsg];
+                        const bResp = bh.responses.find(x => x.runId === meta.refined_from_run_id) || bh.responses[bh.currentIndex];
+                        h.refine = {
+                            instruction: run.story, platforms: platforms, tone: run.tone, brandVoice: 'Standard Enterprise',
+                            selectedOutputs: [], attachedImage: null, targetCompany: 'None',
+                            base: {
+                                msgId: baseMsg, runId: meta.refined_from_run_id, platforms: bh.platforms.slice(),
+                                content: JSON.parse(JSON.stringify(bResp.content || {})), qualitySummary: bResp.qualitySummary, context: null
+                            }
+                        };
+                    }
+                    window.chatHistory[msgId] = h;
+                    msgByRun[run.id] = msgId;
+                    order.push(msgId);
                 });
 
-                window.chatHistory[msgId] = {
-                    responses: [{ content: content, runId: run.id, usage: null, agentsExecuted: null, qualitySummary: null }],
-                    currentIndex: 0,
-                    requestBody: { story: run.story, platforms: platforms, tone: run.tone, brand_voice: 'Standard Enterprise' },
-                    platforms: platforms,
-                    activeImgPath: null,
-                    mediaType: 'none',
-                    selectedOutputs: savedOutputs
-                };
-                renderAssistantResponse(msgId);
+                // The reply showing the active image is what "it" refers to
+                let baseMsgId = order[order.length - 1];
+                if (conv.active_image_id) {
+                    order.forEach(id => {
+                        const h = window.chatHistory[id];
+                        h.responses.forEach((resp, idx) => {
+                            const hit = h.platforms.some(p => resp.content?.[p]?.media?.image?.asset_id === conv.active_image_id);
+                            if (hit) { baseMsgId = id; h.currentIndex = idx; }
+                        });
+                    });
+                }
 
-                // Seed multi-turn context the same way a live generation does,
-                // so the next message the user sends continues refining this
-                // run instead of starting from scratch.
-                lastRunId = run.id;
-                adoptAsRefineBase(msgId);
-
+                order.forEach(id => renderAssistantResponse(id));
+                setConversation(convId);
+                lastRunId = runs[runs.length - 1].id;
+                adoptAsRefineBase(baseMsgId);
                 scrollToBottom();
-                showToast('Loaded past conversation - send a message to keep refining it.', 'info');
+                if (!opts.quiet) showToast('Conversation loaded - send a message to continue it.', 'info');
             },
-            error: function () {
-                showToast('Could not load that conversation.', 'error');
+            error: function (xhr) {
+                if (xhr.status === 404) clearConversation();
+                if (!opts.quiet) showToast('Could not load that conversation.', 'error');
             }
         });
+    }
+
+    // The tab's open conversation survives a page refresh
+    function restoreConversation() {
+        let saved = null;
+        try { saved = sessionStorage.getItem(CONVERSATION_KEY); } catch (e) { /* storage blocked */ }
+        if (saved && !$('#chatThread').children().length && !storyInput.val()) loadConversation(saved, { quiet: true });
     }
 
     // ── Utilities ──────────────────────────────────────────────────────

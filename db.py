@@ -215,6 +215,17 @@ class ImageGeneration(Base):
     media_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
+    # Image versions (see image_lineage): parent = the image this one was edited
+    # from, root = the original of the lineage, version = 1 for an original.
+    conversation_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    root_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    version: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
+    edit_instruction: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    clean_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    width: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class UserInvitation(Base):
@@ -242,6 +253,26 @@ class UserInvitation(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class Conversation(Base):
+    """A Studio Chat thread: the runs (one per message) sent between two
+    clicks of "New Conversation". See ensure_conversation."""
+
+    __tablename__ = "conversations"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(300), nullable=False, default="New conversation")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
+    is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # The image "it" / "this" refers to (an ImageGeneration id) - the newest
+    # image, or the version the user picked with "Refine this version"
+    active_image_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+
+
 class RunHistory(Base):
     __tablename__ = "run_history"
     __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
@@ -258,6 +289,8 @@ class RunHistory(Base):
     tokens_used: Mapped[int | None] = mapped_column(Integer, default=0, nullable=True)
     cost_usd: Mapped[float | None] = mapped_column(Float, default=0.0, nullable=True)
     is_archived: Mapped[bool | None] = mapped_column(Boolean, default=False, nullable=True)
+    # The Studio Chat conversation this message belongs to (see Conversation)
+    conversation_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
 
 
 class SocialAccount(Base):
@@ -500,6 +533,7 @@ def init_db():
 
     with engine.connect() as conn:
         run_tbl = f'"{SCHEMA}".run_history' if not IS_SQLITE else "run_history"
+        img_tbl = f'"{SCHEMA}".image_generations' if not IS_SQLITE else "image_generations"
         usr_tbl = f'"{SCHEMA}".users' if not IS_SQLITE else "users"
 
         for alter_cmd in [
@@ -507,6 +541,20 @@ def init_db():
             f"ALTER TABLE {run_tbl} ADD COLUMN tokens_used INTEGER DEFAULT 0",
             f"ALTER TABLE {run_tbl} ADD COLUMN cost_usd DOUBLE PRECISION DEFAULT 0.0",
             f"ALTER TABLE {run_tbl} ADD COLUMN is_archived BOOLEAN DEFAULT FALSE",
+            f"ALTER TABLE {run_tbl} ADD COLUMN conversation_id INTEGER",
+            f"CREATE INDEX IF NOT EXISTS ix_run_history_conversation_id ON {run_tbl} (conversation_id)",
+            f"ALTER TABLE {img_tbl} ADD COLUMN conversation_id INTEGER",
+            f"ALTER TABLE {img_tbl} ADD COLUMN parent_id INTEGER",
+            f"ALTER TABLE {img_tbl} ADD COLUMN root_id INTEGER",
+            f"ALTER TABLE {img_tbl} ADD COLUMN version INTEGER",
+            f"ALTER TABLE {img_tbl} ADD COLUMN prompt TEXT",
+            f"ALTER TABLE {img_tbl} ADD COLUMN edit_instruction VARCHAR(1000)",
+            f"ALTER TABLE {img_tbl} ADD COLUMN clean_url VARCHAR(1000)",
+            f"ALTER TABLE {img_tbl} ADD COLUMN width INTEGER",
+            f"ALTER TABLE {img_tbl} ADD COLUMN height INTEGER",
+            f"CREATE INDEX IF NOT EXISTS ix_image_generations_conversation_id ON {img_tbl} (conversation_id)",
+            f"CREATE INDEX IF NOT EXISTS ix_image_generations_parent_id ON {img_tbl} (parent_id)",
+            f"CREATE INDEX IF NOT EXISTS ix_image_generations_root_id ON {img_tbl} (root_id)",
             f"ALTER TABLE {usr_tbl} ADD COLUMN credit_limit DOUBLE PRECISION DEFAULT 10.0",
             f"ALTER TABLE {usr_tbl} ADD COLUMN is_admin BOOLEAN DEFAULT FALSE",
             f"ALTER TABLE {usr_tbl} ADD COLUMN email_verified BOOLEAN DEFAULT FALSE",
@@ -620,6 +668,13 @@ def init_db():
     except Exception as seed_err:
         print(f"[DB] Warning seeding admin user: {seed_err}")
 
+    try:
+        made = _backfill_conversations()
+        if made:
+            print(f"[DB] Grouped {made} earlier run(s) into conversations.")
+    except Exception as conv_err:  # noqa: BLE001 - start-up must not fail on it
+        print(f"[DB] Warning backfilling conversations: {conv_err}")
+
 
 def _serialize_run(row: RunHistory, truncate_story: bool = False) -> dict:
     story = row.story if row.story else ""
@@ -636,6 +691,7 @@ def _serialize_run(row: RunHistory, truncate_story: bool = False) -> dict:
         "tokens_used": row.tokens_used or 0,
         "cost_usd": round(float(row.cost_usd or 0.0), 6),  # type: ignore
         "is_archived": bool(getattr(row, "is_archived", False)),
+        "conversation_id": getattr(row, "conversation_id", None),
     }
 
 
@@ -784,6 +840,7 @@ _USER_OWNED_TABLES = (
     UserBrandProfile,
     CreditRequest,
     RunHistory,
+    Conversation,
     SocialAccount,
     ApprovedAsset,
     ApprovalRequest,
@@ -1063,11 +1120,19 @@ def get_user_brand_profile(user_id: int) -> dict | None:
 
 
 def save_run(
-    story: str, tone: str, platforms: list, content: dict, user_id: int, tokens_used: int = 0, cost_usd: float = 0.0
+    story: str,
+    tone: str,
+    platforms: list,
+    content: dict,
+    user_id: int,
+    tokens_used: int = 0,
+    cost_usd: float = 0.0,
+    conversation_id: int | None = None,
 ) -> int:
     with Session(engine) as session:
         row = RunHistory(
             user_id=user_id,
+            conversation_id=conversation_id,
             story=story,
             tone=tone or "Auto",
             platforms=json.dumps(platforms),
@@ -1101,6 +1166,259 @@ def update_run_content(run_id: int, content: dict, user_id: int | None = None) -
         row.content = json.dumps(content)  # type: ignore
         session.commit()
         return True
+
+
+# ── Conversations (Studio Chat threads) ───────────────────────────────────
+# Every message of a thread is saved as its own run (cost, media and admin
+# history stay per run); the conversation groups them. Only "New
+# Conversation" starts a new one - the client sends conversation_id with each
+# message, and a regenerated reply records content._meta.version_of.
+
+
+def ensure_conversation(user_id: int, conversation_id: int | None, title: str) -> int:
+    """The user's conversation to save the next message into: the given one
+    when it is theirs (bumped to the top, restored if archived), else a new one.
+    Another user's id is never reused - that starts a new conversation."""
+    now = _utcnow()
+    with Session(engine) as session:
+        conv = None
+        if conversation_id:
+            try:
+                conv = session.get(Conversation, int(conversation_id))
+            except (TypeError, ValueError):
+                conv = None
+        if conv is None or conv.user_id != user_id:
+            conv = Conversation(user_id=user_id, title=(title or "New conversation").strip()[:300], created_at=now)
+            session.add(conv)
+        conv.updated_at = now
+        conv.is_archived = False
+        session.commit()
+        return int(conv.id)
+
+
+def _conversation_summary(conv: "Conversation", runs: list) -> dict:
+    platforms: list[str] = []
+    for r in runs:
+        for p in json.loads(r.platforms) if r.platforms else []:
+            if p not in platforms:
+                platforms.append(p)
+    latest = runs[-1] if runs else None
+    title = conv.title or ""
+    short = title[:120] + ("..." if len(title) > 120 else "")
+    return {
+        "id": conv.id,
+        "title": short,
+        "story": short,  # the sidebar list and its search read "story"
+        "platforms": platforms,
+        "tone": latest.tone if latest else None,
+        "message_count": len(runs),
+        "timestamp": (conv.updated_at or conv.created_at).strftime("%Y-%m-%d %H:%M"),
+        "is_archived": bool(conv.is_archived),
+        "active_image_id": conv.active_image_id,
+    }
+
+
+def list_conversations(user_id: int, limit: int = 30, archived: bool = False) -> list[dict]:
+    with Session(engine) as session:
+        convs = (
+            session.query(Conversation)
+            .filter(Conversation.user_id == user_id, Conversation.is_archived.is_(bool(archived)))
+            .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
+            .limit(limit)
+            .all()
+        )
+        if not convs:
+            return []
+        runs_by_conv: dict[int, list] = {c.id: [] for c in convs}
+        for r in (
+            session.query(RunHistory)
+            .filter(RunHistory.conversation_id.in_(list(runs_by_conv)), RunHistory.user_id == user_id)
+            .order_by(RunHistory.created_at.asc(), RunHistory.id.asc())
+            .all()
+        ):
+            runs_by_conv[r.conversation_id].append(r)
+        return [_conversation_summary(c, runs_by_conv[c.id]) for c in convs if runs_by_conv[c.id]]
+
+
+def get_conversation(conversation_id: int, user_id: int) -> dict | None:
+    """The conversation and all its runs, oldest first (to replay the thread)."""
+    with Session(engine) as session:
+        conv = session.get(Conversation, conversation_id)
+        if not conv or conv.user_id != user_id:
+            return None
+        runs = (
+            session.query(RunHistory)
+            .filter(RunHistory.conversation_id == conversation_id, RunHistory.user_id == user_id)
+            .order_by(RunHistory.created_at.asc(), RunHistory.id.asc())
+            .all()
+        )
+        return {"conversation": _conversation_summary(conv, runs), "runs": [_serialize_run(r) for r in runs]}
+
+
+def set_conversation_archived(conversation_id: int, user_id: int, archived: bool) -> bool:
+    with Session(engine) as session:
+        conv = session.get(Conversation, conversation_id)
+        if not conv or conv.user_id != user_id:
+            return False
+        conv.is_archived = bool(archived)
+        session.commit()
+        return True
+
+
+# ── Image versions (lineage) ──────────────────────────────────────────────
+# Each generated/edited image is an ImageGeneration row: parent_id = the image
+# it was edited from, root_id = the original of that lineage, version = depth
+# (1 = original). Editing an older version branches (a second child of it);
+# nothing is overwritten. The conversation's active_image_id is the image
+# "it" / "this" refers to.
+
+
+def _asset_dict(r: "ImageGeneration") -> dict:
+    return {
+        "id": r.id,
+        "conversation_id": r.conversation_id,
+        "run_id": r.run_id,
+        "parent_id": r.parent_id,
+        "root_id": r.root_id,
+        "version": r.version or 1,
+        "kind": r.kind,
+        "platform": r.platform,
+        "model": r.model,
+        "prompt": r.prompt or r.description,
+        "edit_instruction": r.edit_instruction,
+        "url": r.media_url,
+        "clean_url": r.clean_url,
+        "width": r.width,
+        "height": r.height,
+        "created_at": r.created_at.isoformat() if r.created_at else None,
+    }
+
+
+def get_image_asset(asset_id: int | None, user_id: int) -> dict | None:
+    if not asset_id:
+        return None
+    with Session(engine) as session:
+        try:
+            row = session.get(ImageGeneration, int(asset_id))
+        except (TypeError, ValueError):
+            return None
+        if not row or row.user_id != user_id or row.kind not in ("image", "edit"):
+            return None
+        return _asset_dict(row)
+
+
+def image_lineage(asset_id: int, user_id: int, max_depth: int = 25) -> list[dict]:
+    """The image and its ancestors, original first."""
+    chain: list[dict] = []
+    with Session(engine) as session:
+        row = session.get(ImageGeneration, asset_id)
+        while row is not None and row.user_id == user_id and len(chain) < max_depth:
+            chain.append(_asset_dict(row))
+            row = session.get(ImageGeneration, row.parent_id) if row.parent_id else None
+    return list(reversed(chain))
+
+
+def conversation_images(conversation_id: int | None, user_id: int) -> list[dict]:
+    """Every image version in the user's conversation, oldest first."""
+    if not conversation_id:
+        return []
+    with Session(engine) as session:
+        conv = session.get(Conversation, conversation_id)
+        if not conv or conv.user_id != user_id:
+            return []
+        rows = (
+            session.query(ImageGeneration)
+            .filter(
+                ImageGeneration.conversation_id == conversation_id,
+                ImageGeneration.user_id == user_id,
+                ImageGeneration.kind.in_(("image", "edit")),
+            )
+            .order_by(ImageGeneration.id.asc())
+            .all()
+        )
+        return [_asset_dict(r) for r in rows]
+
+
+def get_active_image_id(conversation_id: int | None, user_id: int) -> int | None:
+    if not conversation_id:
+        return None
+    with Session(engine) as session:
+        conv = session.get(Conversation, conversation_id)
+        return conv.active_image_id if conv and conv.user_id == user_id else None
+
+
+def set_active_image(conversation_id: int, user_id: int, asset_id: int) -> bool:
+    """The user picked a version ("Refine this version"): "it" now means that image."""
+    with Session(engine) as session:
+        conv = session.get(Conversation, conversation_id)
+        asset = session.get(ImageGeneration, asset_id)
+        if not conv or conv.user_id != user_id or not asset or asset.user_id != user_id:
+            return False
+        if asset.conversation_id not in (None, conversation_id):
+            return False
+        conv.active_image_id = asset.id
+        session.commit()
+        return True
+
+
+def attach_images_to_run(asset_ids: list[int], run_id: int, user_id: int) -> None:
+    """Edits are logged before their run is saved (so the run's content can
+    reference them); link them to the run once it exists. Until then a row has
+    no run and counts as its own charge - so if saving the run fails, the image
+    the user received is still charged once."""
+    if not asset_ids or not run_id:
+        return
+    with Session(engine) as session:
+        run = session.get(RunHistory, run_id)
+        if not run or run.user_id != user_id:
+            return
+        session.query(ImageGeneration).filter(
+            ImageGeneration.id.in_(list(asset_ids)), ImageGeneration.user_id == user_id
+        ).update({ImageGeneration.run_id: run_id}, synchronize_session=False)
+        session.commit()
+
+
+def _backfill_conversations() -> int:
+    """Runs saved before conversations existed: each becomes its own
+    one-message conversation (which runs belonged together wasn't recorded).
+    Their images join that conversation as originals of their own lineage."""
+    made = 0
+    with Session(engine) as session:
+        while True:
+            rows = (
+                session.query(RunHistory)
+                .filter(RunHistory.conversation_id.is_(None), RunHistory.user_id.isnot(None))
+                .order_by(RunHistory.id.asc())
+                .limit(500)
+                .all()
+            )
+            if not rows:
+                break
+            for r in rows:
+                conv = Conversation(
+                    user_id=r.user_id,
+                    title=(r.story or "Conversation")[:300],
+                    created_at=r.created_at,
+                    updated_at=r.created_at,
+                    is_archived=bool(r.is_archived),
+                )
+                session.add(conv)
+                session.flush()
+                r.conversation_id = conv.id
+                made += 1
+            session.commit()
+        for img, conv_id in (
+            session.query(ImageGeneration, RunHistory.conversation_id)
+            .join(RunHistory, RunHistory.id == ImageGeneration.run_id)
+            .filter(ImageGeneration.conversation_id.is_(None), RunHistory.conversation_id.isnot(None))
+            .all()
+        ):
+            img.conversation_id = conv_id
+        session.query(ImageGeneration).filter(ImageGeneration.root_id.is_(None)).update(
+            {ImageGeneration.root_id: ImageGeneration.id, ImageGeneration.version: 1}, synchronize_session=False
+        )
+        session.commit()
+    return made
 
 
 def archive_run(run_id: int, user_id: int | None = None) -> bool:
@@ -1174,18 +1492,48 @@ def log_image_generation(
     model: str | None = None,
     description: str | None = None,
     media_url: str | None = None,
-) -> None:
-    """Records a generated/edited image: counts toward the daily limit and, when
-    run_id is None, is the charge for it (see ImageGeneration)."""
+    *,
+    conversation_id: int | None = None,
+    parent_id: int | None = None,
+    prompt: str | None = None,
+    edit_instruction: str | None = None,
+    clean_url: str | None = None,
+    width: int | None = None,
+    height: int | None = None,
+) -> int:
+    """Records a generated/edited image and returns its id (the image's asset
+    id): counts toward the daily limit and, when run_id is None, is the charge
+    for it (see ImageGeneration). parent_id = the image it was edited from;
+    root and version follow from it. A new image or edit becomes the
+    conversation's active image."""
     with Session(engine) as session:
-        session.add(
-            ImageGeneration(
-                user_id=user_id, run_id=run_id, kind=kind, platform=platform, model=model,
-                description=(description or "")[:500] or None, media_url=media_url,
-                cost_usd=round(float(cost_usd or 0.0), 6),
-            )
+        if conversation_id is None and run_id:
+            run = session.get(RunHistory, run_id)
+            if run is not None and run.user_id == user_id:
+                conversation_id = run.conversation_id
+        parent = session.get(ImageGeneration, parent_id) if parent_id else None
+        if parent is not None and parent.user_id != user_id:
+            parent = None
+        row = ImageGeneration(
+            user_id=user_id, run_id=run_id, kind=kind, platform=platform, model=model,
+            description=(description or "")[:500] or None, media_url=media_url,
+            cost_usd=round(float(cost_usd or 0.0), 6),
+            conversation_id=conversation_id,
+            parent_id=parent.id if parent else None,
+            version=(parent.version or 1) + 1 if parent else 1,
+            prompt=prompt or description,
+            edit_instruction=(edit_instruction or "")[:1000] or None,
+            clean_url=clean_url, width=width, height=height,
         )
+        session.add(row)
+        session.flush()
+        row.root_id = (parent.root_id or parent.id) if parent else row.id
+        if conversation_id and kind in ("image", "edit"):
+            conv = session.get(Conversation, conversation_id)
+            if conv is not None and conv.user_id == user_id:
+                conv.active_image_id = row.id
         session.commit()
+        return int(row.id)
 
 
 # ── Image limits & model access ───────────────────────────────────────────
