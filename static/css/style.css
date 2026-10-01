@@ -4089,3 +4089,20 @@ label.quota-blocked * { cursor: not-allowed; }
 .image-limit-dock-note i { margin-top: 3px; color: #d97706; }
 .image-limit-dock-note a { color: #8A2BE2; font-weight: 600; }
 #generateBtn.quota-gated { filter: grayscale(0.6); }
+
+/* StradIT logo (real file, unchanged): crop its transparent padding with CSS.
+   Mark = x 46-424, y 17-95 of the 640x160 PNG; --h sets the mark's height. */
+.stradit-badge { display: inline-flex; align-items: center; background: #0f172a; border-radius: 7px; padding: 5px 9px; line-height: 0; vertical-align: middle; transition: background 0.15s ease; }
+a:hover > .stradit-badge, .stradit-badge:hover { background: #1e293b; }
+.stradit-mark { --h: 14px; display: inline-block; width: calc(var(--h) * 378 / 78); height: var(--h); overflow: hidden; }
+.stradit-mark img { display: block; height: calc(var(--h) * 160 / 78); width: auto; max-width: none; margin: calc(var(--h) * -17 / 78) 0 0 calc(var(--h) * -46 / 78); }
+
+/* Sign-in pages: "A product of StradIT" under the card's links */
+.auth-made-by { display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 18px; padding-top: 16px; border-top: 1px solid #eef0f4; font-size: 12px; color: #6B7280; text-decoration: none; }
+.auth-made-by:hover { color: #374151; }
+
+/* User menu: maker line at the bottom of the panel */
+.um-made-by { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0.35rem 0.25rem 0.1rem; padding: 0.55rem 0.6rem; border-radius: 10px; font-size: 11.5px; color: #6B7280; text-decoration: none; }
+.um-made-by:hover { background: #F8F7FF; color: #374151; }
+.um-made-by .stradit-badge { padding: 4px 7px; }
+.um-made-by .stradit-mark { --h: 13px; }

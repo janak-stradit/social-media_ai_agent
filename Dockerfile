@@ -59,14 +59,19 @@ RUN mkdir -p static/uploads chroma_db \
     && chown app:app /app \
     && chown -R app:app static/uploads chroma_db /opt/hf-cache
 
+# Version on every log line (logging_setup.py); the deploy workflow passes the commit
+ARG GIT_SHA=dev
+ENV APP_VERSION=$GIT_SHA
+
 USER app
 EXPOSE 5000
 
-# Web server. --timeout 900: a generation (LLM + image/video) can run for minutes;
+# Web server (logging and other settings that belong with the code: gunicorn.conf.py).
+# --timeout 900: a generation (LLM + image/video) can run for minutes;
 # gunicorn's default 30 s would kill it. Workers come from WEB_CONCURRENCY (default 2).
 # The scheduler runs in its own container (command: python scripts/run_scheduler.py),
 # so the web container must run with SCHEDULER_ENABLED=false (set in the compose file).
 CMD ["gunicorn", "--worker-class", "gthread", "--threads", "4", \
      "--timeout", "900", "--graceful-timeout", "60", \
-     "--bind", "0.0.0.0:5000", "--access-logfile", "-", "--error-logfile", "-", \
+     "--bind", "0.0.0.0:5000", "--config", "gunicorn.conf.py", \
      "app:create_app(\"production\")"]

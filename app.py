@@ -1,7 +1,28 @@
+import logging
 import os
-import sys
+import re
+import time
+import uuid
 
-from flask import Flask, abort, jsonify, redirect, render_template, request, send_from_directory, session, url_for
+from logging_setup import configure_logging, redact_query
+
+# Before the app's own imports, so what they log while loading (provider
+# clients, models) already uses the same format. Also forces UTF-8 stdout:
+# LLM text can contain characters the Windows console can't encode.
+configure_logging()
+
+from flask import (
+    Flask,
+    abort,
+    g,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+    session,
+    url_for,
+)
 from flask_cors import CORS
 
 from api.routes import api_bp
@@ -16,15 +37,82 @@ from auth.utils import (
 )
 from config import config_map
 
-# LLM responses (captions, image/video prompts, error messages) can contain
-# Unicode punctuation the Windows console's default cp1252 stdout can't encode
-# (e.g. non-breaking hyphens) - print() would then raise UnicodeEncodeError and
-# abort whatever was mid-execution, including provider fallback loops meant to
-# recover from exactly this kind of failure. Force UTF-8 stdout/stderr so
-# logging output never crashes the process it's trying to report on.
-for _stream in (sys.stdout, sys.stderr):
-    if hasattr(_stream, "reconfigure"):
-        _stream.reconfigure(encoding="utf-8", errors="replace")
+logger = logging.getLogger(__name__)
+http_logger = logging.getLogger("avir.http")
+
+_REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{6,64}$")
+# Pages search engines may index (see sitemap.xml); every other page gets
+# X-Robots-Tag: noindex - they're behind login or one-off (reset links etc.)
+_INDEXABLE_PATHS = ("/", "/signup", "/login")
+
+
+def _site_url() -> str:
+    """Public base URL for canonical links and the sitemap: APP_BASE_URL, else
+    this request's host with the scheme nginx saw (https in production)."""
+    from config import Config
+
+    if Config.APP_BASE_URL:
+        return Config.APP_BASE_URL.rstrip("/")
+    scheme = request.headers.get("X-Forwarded-Proto", request.scheme)
+    return f"{scheme}://{request.host}"
+
+# Logged at DEBUG (hidden at the default INFO): assets, health checks and the
+# once-a-second generation progress polling - they drown out real traffic
+_QUIET_PREFIXES = ("/static/", "/favicon.ico", "/api/generate/progress/", "/api/health")
+_PROBE_AGENTS = ("curl/", "wget/", "elb-healthchecker", "kube-probe", "uptimerobot", "healthcheck")
+
+
+def _client_ip() -> str | None:
+    """The visitor's address (nginx passes it on), not the Docker gateway's."""
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    return request.headers.get("X-Real-IP") or (forwarded.split(",")[0].strip() if forwarded else request.remote_addr)
+
+
+def _install_request_logging(app: Flask) -> None:
+    """One access-log line per request, replacing gunicorn's: method, path
+    (secrets in the query redacted), status, duration, request id and user.
+    The request id (nginx's X-Request-ID, or a new one) is on every line logged
+    during the request and returned in the X-Request-ID response header."""
+
+    @app.before_request
+    def _start_request():
+        incoming = request.headers.get("X-Request-ID", "")
+        g.request_id = incoming if _REQUEST_ID.match(incoming) else uuid.uuid4().hex[:12]
+        g.request_started = time.perf_counter()
+
+    @app.after_request
+    def _log_request(response):
+        request_id = getattr(g, "request_id", None)
+        if request_id:
+            response.headers["X-Request-ID"] = request_id
+        if response.mimetype == "text/html" and request.path not in _INDEXABLE_PATHS:
+            response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
+        started = getattr(g, "request_started", None)
+        duration_ms = int((time.perf_counter() - started) * 1000) if started else -1
+        path, status = request.path, response.status_code
+        agent = (request.user_agent.string or "").lower()
+        quiet = path.startswith(_QUIET_PREFIXES) or (
+            request.method in ("GET", "HEAD") and path in ("/", "/login") and agent.startswith(_PROBE_AGENTS)
+        )
+        if status >= 500:
+            level = logging.ERROR
+        elif quiet:
+            level = logging.DEBUG
+        elif status >= 400 and status not in (401, 404):
+            level = logging.WARNING
+        else:
+            level = logging.INFO
+        if http_logger.isEnabledFor(level):
+            query = redact_query(request.query_string.decode("utf-8", "replace"))
+            fields = {"ip": _client_ip(), "bytes": response.calculate_content_length()}
+            if status >= 400:
+                fields["ua"] = (request.user_agent.string or "")[:120] or None
+            http_logger.log(
+                level,
+                f"{request.method} {path}{'?' + query if query else ''} {status} {duration_ms}ms",
+                extra={"fields": fields},
+            )
+        return response
 
 
 def create_app(config_name="development"):
@@ -44,7 +132,7 @@ def create_app(config_name="development"):
         from db import init_db
 
         init_db()
-        print("[DB] Schema 'social_media_agent' initialised.")
+        logger.info("Database schema initialised.")
 
         # Start background scheduler thread (skip the reloader's monitor process,
         # otherwise app.py runs twice under debug=True and posts get published twice).
@@ -57,12 +145,13 @@ def create_app(config_name="development"):
 
             start_background_scheduler(app.root_path)
     except Exception as e:
-        print(f"[DB] Warning – could not initialise DB: {e}")
+        logger.error(f"Could not initialise the database: {e}")
 
     # Register blueprints
     app.register_blueprint(api_bp, url_prefix="/api")
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(captcha_bp, url_prefix="/api/auth/captcha")
+    _install_request_logging(app)
 
     @app.route("/dashboard")
     @login_required_page
@@ -229,7 +318,7 @@ def create_app(config_name="development"):
     def landing_page():
         if get_current_user_id():
             return redirect(url_for("index"))
-        return render_template("landing.html")
+        return render_template("landing.html", site_url=_site_url())
 
     @app.route("/logout")
     def logout_route():
@@ -251,7 +340,38 @@ def create_app(config_name="development"):
 
     @app.route("/favicon.ico")
     def favicon():
-        return "", 204
+        return send_from_directory(app.static_folder, "favicon.ico", mimetype="image/vnd.microsoft.icon", max_age=86400)
+
+    @app.route("/robots.txt")
+    def robots_txt():
+        site = _site_url()
+        body = "\n".join([
+            "User-agent: *",
+            "Allow: /",
+            # API responses and user-generated media are not content to index
+            "Disallow: /api/",
+            "Disallow: /static/uploads/",
+            "",
+            f"Sitemap: {site}/sitemap.xml",
+            "",
+        ])
+        return app.response_class(body, mimetype="text/plain", headers={"Cache-Control": "public, max-age=3600"})
+
+    @app.route("/sitemap.xml")
+    def sitemap_xml():
+        site = _site_url()
+        # lastmod = when the landing page itself last changed (its file in this build)
+        stamp = os.path.getmtime(os.path.join(app.root_path, "templates", "landing.html"))
+        lastmod = time.strftime("%Y-%m-%d", time.gmtime(stamp))
+        pages = [("/", "weekly", "1.0"), ("/signup", "monthly", "0.8"), ("/login", "monthly", "0.5")]
+        urls = "".join(
+            f"<url><loc>{site}{path}</loc><lastmod>{lastmod}</lastmod>"
+            f"<changefreq>{freq}</changefreq><priority>{prio}</priority></url>"
+            for path, freq, prio in pages
+        )
+        body = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+                f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>\n')
+        return app.response_class(body, mimetype="application/xml", headers={"Cache-Control": "public, max-age=3600"})
 
     @app.errorhandler(413)
     def too_large(e):
@@ -259,7 +379,9 @@ def create_app(config_name="development"):
 
     @app.errorhandler(500)
     def server_error(e):
-        return jsonify({"error": "Internal server error"}), 500
+        # Flask has already logged the exception with its traceback; the
+        # request id lets a user's report be matched to that log entry
+        return jsonify({"error": "Internal server error", "request_id": getattr(g, "request_id", None)}), 500
 
     return app
 

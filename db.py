@@ -11,6 +11,7 @@ Tables: users, run_history
 
 import hashlib
 import json
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -29,6 +30,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql import func
+
+logger = logging.getLogger(__name__)
 
 
 def _utcnow():
@@ -664,16 +667,16 @@ def init_db():
                     )
                     session.add(new_admin)
                 session.commit()
-                print("[DB] Default Admin user (admin@vortexsocial.ai / admin123) initialized.")
+                logger.warning("Default admin user created with the built-in password - change it now.")
     except Exception as seed_err:
-        print(f"[DB] Warning seeding admin user: {seed_err}")
+        logger.warning(f"Warning seeding admin user: {seed_err}")
 
     try:
         made = _backfill_conversations()
         if made:
-            print(f"[DB] Grouped {made} earlier run(s) into conversations.")
+            logger.info(f"Grouped {made} earlier run(s) into conversations.")
     except Exception as conv_err:  # noqa: BLE001 - start-up must not fail on it
-        print(f"[DB] Warning backfilling conversations: {conv_err}")
+        logger.warning(f"Warning backfilling conversations: {conv_err}")
 
 
 def _serialize_run(row: RunHistory, truncate_story: bool = False) -> dict:
@@ -2140,71 +2143,171 @@ def run_media_summary(content: dict | None) -> dict:
     return {"images": images, "videos": videos}
 
 
-def get_global_cost_history(limit: int = 100) -> list[dict]:
-    """Return all cost history runs across all users with user info (for admin)."""
+COST_HISTORY_KINDS = ("all", "runs", "runs_with_images", "charges")
+COST_HISTORY_SORTS = ("newest", "oldest", "cost")
+
+
+def _run_history_row(run: "RunHistory", user: "User | None") -> dict:
+    story = run.story or ""
+    try:
+        content = json.loads(run.content) if run.content else {}
+    except (TypeError, ValueError):
+        content = {}
+    return {
+        "id": run.id,
+        "user_id": run.user_id,
+        "user_name": user.name if user else "Unknown",
+        "user_email": user.email if user else "N/A",
+        "timestamp": run.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "story": story[:160] + "..." if len(story) > 160 else story,
+        "tone": run.tone,
+        "platforms": json.loads(run.platforms) if run.platforms else [],
+        "tokens_used": run.tokens_used or 0,
+        "cost_usd": round(run.cost_usd or 0.0, 6),
+        "media": run_media_summary(content),
+        "_sort": (run.created_at, run.id),
+    }
+
+
+def _charge_history_row(charge: "ImageGeneration", user: "User | None") -> dict:
+    return {
+        "id": None,
+        "charge_id": charge.id,
+        "kind": "media_charge",
+        "user_id": charge.user_id,
+        "user_name": user.name if user else "Unknown",
+        "user_email": user.email if user else "N/A",
+        "timestamp": charge.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "story": charge.description or f"{charge.kind.capitalize()} generation",
+        "tone": None,
+        "platforms": [charge.platform] if charge.platform else [],
+        "tokens_used": 0,
+        "cost_usd": round(charge.cost_usd or 0.0, 6),
+        "media": {"images": [charge.media_url] if charge.media_url and charge.kind in ("image", "edit") else [],
+                  "videos": [charge.media_url] if charge.media_url and charge.kind == "video" else []},
+        "_sort": (charge.created_at, -charge.id),
+    }
+
+
+def get_global_cost_history(
+    page: int = 1,
+    page_size: int = 25,
+    q: str | None = None,
+    user_id: int | None = None,
+    kind: str = "all",
+    platform: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    min_cost: float | None = None,
+    sort: str = "newest",
+) -> dict:
+    """Admin -> Global Cost History: runs plus image/video charges made outside
+    a run (e.g. Analysis Dashboard), filtered and paged in the database.
+
+    q matches the user's name or email, the prompt, or "#<run id>".
+    kind: all | runs | runs_with_images | charges. date_to is exclusive (the
+    caller passes the day after the last day wanted). Returns the page's rows,
+    the total number of matching rows, and their summed cost and tokens."""
+    from sqlalchemy import and_, exists
+
+    kind = kind if kind in COST_HISTORY_KINDS else "all"
+    sort = sort if sort in COST_HISTORY_SORTS else "newest"
+    page = max(1, int(page))
+    page_size = max(1, min(int(page_size), 100))
+    like = f"%{q.strip()}%" if q and q.strip() else None
+    run_number = int(q.strip().lstrip("#")) if q and q.strip().lstrip("#").isdigit() else None
+
+    def run_filters(query):
+        if user_id:
+            query = query.filter(RunHistory.user_id == user_id)
+        if like:
+            conds = [User.email.ilike(like), User.name.ilike(like), RunHistory.story.ilike(like)]
+            if run_number is not None:
+                conds.append(RunHistory.id == run_number)
+            query = query.filter(or_(*conds))
+        if date_from:
+            query = query.filter(RunHistory.created_at >= date_from)
+        if date_to:
+            query = query.filter(RunHistory.created_at < date_to)
+        if min_cost is not None:
+            query = query.filter(RunHistory.cost_usd >= min_cost)
+        if platform:
+            query = query.filter(RunHistory.platforms.like(f'%"{platform}"%'))
+        if kind == "runs_with_images":
+            # Images logged against the run (image limits), or saved in its
+            # content (runs from before images were logged)
+            query = query.filter(or_(
+                exists().where(and_(ImageGeneration.run_id == RunHistory.id, ImageGeneration.kind.in_(("image", "edit")))),
+                RunHistory.content.like('%"image": {"url"%'),
+            ))
+        return query
+
+    def charge_filters(query):
+        query = query.filter(ImageGeneration.run_id.is_(None))
+        if user_id:
+            query = query.filter(ImageGeneration.user_id == user_id)
+        if like:
+            query = query.filter(or_(User.email.ilike(like), User.name.ilike(like), ImageGeneration.description.ilike(like)))
+        if date_from:
+            query = query.filter(ImageGeneration.created_at >= date_from)
+        if date_to:
+            query = query.filter(ImageGeneration.created_at < date_to)
+        if min_cost is not None:
+            query = query.filter(ImageGeneration.cost_usd >= min_cost)
+        if platform:
+            query = query.filter(ImageGeneration.platform == platform)
+        return query
+
+    include_runs = kind in ("all", "runs", "runs_with_images")
+    include_charges = kind in ("all", "charges")
+    # Enough rows from each source to cut this page out of their merge
+    need = page * page_size
+    run_order = {"newest": (RunHistory.created_at.desc(), RunHistory.id.desc()),
+                 "oldest": (RunHistory.created_at.asc(), RunHistory.id.asc()),
+                 "cost": (RunHistory.cost_usd.desc(), RunHistory.id.desc())}[sort]
+    charge_order = {"newest": (ImageGeneration.created_at.desc(), ImageGeneration.id.desc()),
+                    "oldest": (ImageGeneration.created_at.asc(), ImageGeneration.id.asc()),
+                    "cost": (ImageGeneration.cost_usd.desc(), ImageGeneration.id.desc())}[sort]
+
+    rows: list[dict] = []
+    total, total_cost, total_tokens = 0, 0.0, 0
     with Session(engine) as session:
-        rows = (
-            session.query(RunHistory, User)
-            .outerjoin(User, RunHistory.user_id == User.id)
-            .order_by(RunHistory.created_at.desc())
-            .limit(limit)
-            .all()
-        )
+        if include_runs:
+            base = run_filters(session.query(RunHistory, User).outerjoin(User, RunHistory.user_id == User.id))
+            rows += [_run_history_row(r, u) for r, u in base.order_by(*run_order).limit(need).all()]
+            count, cost, tokens = run_filters(
+                session.query(
+                    func.count(RunHistory.id),
+                    func.coalesce(func.sum(RunHistory.cost_usd), 0.0),
+                    func.coalesce(func.sum(RunHistory.tokens_used), 0),
+                ).select_from(RunHistory).outerjoin(User, RunHistory.user_id == User.id)
+            ).one()
+            total, total_cost, total_tokens = total + int(count), total_cost + float(cost), total_tokens + int(tokens)
+        if include_charges:
+            base = charge_filters(session.query(ImageGeneration, User).outerjoin(User, ImageGeneration.user_id == User.id))
+            rows += [_charge_history_row(c, u) for c, u in base.order_by(*charge_order).limit(need).all()]
+            count, cost = charge_filters(
+                session.query(func.count(ImageGeneration.id), func.coalesce(func.sum(ImageGeneration.cost_usd), 0.0))
+                .select_from(ImageGeneration).outerjoin(User, ImageGeneration.user_id == User.id)
+            ).one()
+            total, total_cost = total + int(count), total_cost + float(cost)
 
-        history = []
-        for run, user in rows:
-            story = run.story or ""
-            story_snippet = story[:160] + "..." if len(story) > 160 else story
-            try:
-                content = json.loads(run.content) if run.content else {}
-            except (TypeError, ValueError):
-                content = {}
-            history.append(
-                {
-                    "id": run.id,
-                    "user_id": run.user_id,
-                    "user_name": user.name if user else "Unknown",
-                    "user_email": user.email if user else "N/A",
-                    "timestamp": run.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                    "story": story_snippet,
-                    "tone": run.tone,
-                    "platforms": json.loads(run.platforms) if run.platforms else [],
-                    "tokens_used": run.tokens_used or 0,
-                    "cost_usd": round(run.cost_usd or 0.0, 6),
-                    "media": run_media_summary(content),
-                }
-            )
-
-        # Image/video charges made outside a run (e.g. Analysis Dashboard)
-        charges = (
-            session.query(ImageGeneration, User)
-            .outerjoin(User, ImageGeneration.user_id == User.id)
-            .filter(ImageGeneration.run_id.is_(None))
-            .order_by(ImageGeneration.created_at.desc())
-            .limit(limit)
-            .all()
-        )
-        for charge, user in charges:
-            history.append(
-                {
-                    "id": None,
-                    "charge_id": charge.id,
-                    "kind": "media_charge",
-                    "user_id": charge.user_id,
-                    "user_name": user.name if user else "Unknown",
-                    "user_email": user.email if user else "N/A",
-                    "timestamp": charge.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                    "story": charge.description or f"{charge.kind.capitalize()} generation",
-                    "tone": None,
-                    "platforms": [charge.platform] if charge.platform else [],
-                    "tokens_used": 0,
-                    "cost_usd": round(charge.cost_usd or 0.0, 6),
-                    "media": {"images": [charge.media_url] if charge.media_url and charge.kind in ("image", "edit") else [],
-                              "videos": [charge.media_url] if charge.media_url and charge.kind == "video" else []},
-                }
-            )
-        history.sort(key=lambda h: h["timestamp"], reverse=True)
-        return history[:limit]
+    if sort == "cost":
+        rows.sort(key=lambda h: (h["cost_usd"], h["_sort"][0]), reverse=True)
+    else:
+        rows.sort(key=lambda h: h["_sort"][0], reverse=(sort == "newest"))
+    start = (page - 1) * page_size
+    page_rows = rows[start:start + page_size]
+    for h in page_rows:
+        h.pop("_sort", None)
+    return {
+        "history": page_rows,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": max(1, -(-total // page_size)),
+        "filtered": {"count": total, "cost_usd": round(total_cost, 6), "tokens": total_tokens},
+    }
 
 
 # ── SOCIAL ACCOUNTS & POST SCHEDULING HELPERS ─────────────────────────
@@ -2475,7 +2578,7 @@ def save_competitor_posts(posts: list[dict]) -> dict:
 
                 EmbeddingService().index_posts(newly_inserted_posts)
             except Exception as e:
-                print(f"[save_competitor_posts] Embedding indexing warning: {e}")
+                logger.warning(f"Embedding indexing warning: {e}")
 
         return {"inserted": inserted, "skipped": skipped, "new_post_urls": new_post_urls}
 

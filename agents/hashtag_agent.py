@@ -1,5 +1,9 @@
+import logging
+
 from services.llm_service import LLMService
 from services.memory_service import MemoryService
+
+logger = logging.getLogger(__name__)
 
 
 class HashtagAgent:
@@ -83,7 +87,7 @@ class HashtagAgent:
                 {"type": "hashtag", "platform": platform},
             )
         except Exception as mem_err:
-            print(f"[HashtagAgent] Memory store notice: {mem_err}")
+            logger.warning(f"Memory store notice: {mem_err}")
 
         result["_usage"] = usage
         return result

@@ -13,12 +13,15 @@ Disabled (every function is a no-op) unless S3_MEDIA_BUCKET is set.
 """
 
 import functools
+import logging
 import mimetypes
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
 from config import Config
+
+logger = logging.getLogger(__name__)
 
 UPLOAD_URL_PREFIX = "/static/uploads/"
 # Result keys that can point at a file under static/uploads/
@@ -99,7 +102,7 @@ def _upload_now(rel: str) -> bool:
         return True
     except Exception as e:
         _uploaded.discard(rel)
-        print(f"[Storage] S3 upload failed for {rel}: {e}")
+        logger.warning(f"S3 upload failed for {rel}: {e}")
         return False
 
 
@@ -140,7 +143,7 @@ def mirror_to_s3(fn):
         try:
             upload_result(result)
         except Exception as e:
-            print(f"[Storage] Could not queue S3 upload: {e}")
+            logger.warning(f"Could not queue S3 upload: {e}")
         return result
 
     return wrapper
@@ -168,7 +171,7 @@ def ensure_local(url_or_path: str | None) -> str | None:
         # A missing object is expected for files that were never uploaded
         code = (getattr(e, "response", None) or {}).get("Error", {}).get("Code")
         if code not in ("404", "NoSuchKey"):
-            print(f"[Storage] S3 download failed for {rel}: {e}")
+            logger.warning(f"S3 download failed for {rel}: {e}")
         return None
     finally:
         if os.path.exists(tmp):

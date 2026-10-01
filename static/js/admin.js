@@ -50,6 +50,7 @@ $(document).ready(function () {
                 if (!r.success) return;
                 const users = r.users || [];
                 window._allAdminUsers = users;
+                fillCostUserFilter();
                 renderAdminUserKpis(users);
                 renderAdminAccountSummary(users);
                 applyAdminUserFilters();
@@ -550,25 +551,126 @@ $(document).ready(function () {
     };
 
     // ── Tab 3: Global Cost History ───────────────────────────────────────
-    function loadAdminCostHistory() {
-        $.ajax({
-            url: '/api/admin/cost-history?limit=100',
+    // ── Global Cost History: server-side filters + pagination ───────────
+    const COST_TYPE_LABELS = { runs: 'Runs', runs_with_images: 'Runs with images', charges: 'Image charges' };
+    const COST_SORT_LABELS = { oldest: 'Oldest first', cost: 'Highest cost' };
+    const costState = { page: 1, pageSize: 25 };
+    let costRequest = null;
+
+    function costFilters() {
+        return {
+            q: $('#costFilterQ').val().trim(),
+            user_id: $('#costFilterUser').val(),
+            type: $('#costFilterType').val(),
+            platform: $('#costFilterPlatform').val(),
+            date_from: $('#costFilterFrom').val(),
+            date_to: $('#costFilterTo').val(),
+            min_cost: $('#costFilterMinCost').val(),
+            sort: $('#costFilterSort').val()
+        };
+    }
+
+    // Users for the "User" filter, from the users table already loaded
+    function fillCostUserFilter() {
+        const users = window._allAdminUsers || [];
+        const $sel = $('#costFilterUser');
+        if (!users.length || $sel.data('filled') === users.length) return;
+        const current = $sel.val();
+        $sel.html('<option value="">All users</option>' + users
+            .slice().sort((a, b) => String(a.name).localeCompare(String(b.name)))
+            .map(u => `<option value="${u.id}">${escapeHtml(u.name)} (${escapeHtml(u.email)})</option>`).join(''));
+        $sel.val(current).data('filled', users.length);
+    }
+    window.fillCostUserFilter = fillCostUserFilter;
+
+    function renderCostActiveFilters(f) {
+        const chips = [];
+        const chip = (key, text) => chips.push(`<span class="cost-chip">${escapeHtml(text)}<button type="button" data-clear="${key}" aria-label="Remove filter ${escapeAttr(text)}">&times;</button></span>`);
+        if (f.q) chip('q', `"${f.q}"`);
+        if (f.user_id) chip('user_id', $('#costFilterUser option:selected').text().replace(/ \(.*\)$/, ''));
+        if (f.type && f.type !== 'all') chip('type', COST_TYPE_LABELS[f.type]);
+        if (f.platform) chip('platform', $('#costFilterPlatform option:selected').text());
+        if (f.date_from || f.date_to) chip('dates', `${f.date_from || '…'} → ${f.date_to || 'today'}`);
+        if (f.min_cost) chip('min_cost', `≥ $${f.min_cost}`);
+        if (f.sort && f.sort !== 'newest') chip('sort', COST_SORT_LABELS[f.sort]);
+        $('#costActiveFilters').html(chips.join(''));
+    }
+
+    // 1 … 4 5 [6] 7 8 … 20
+    function costPageNumbers(page, pages) {
+        const keep = new Set([1, pages, page - 1, page, page + 1]);
+        if (page <= 3) [2, 3, 4].forEach(n => keep.add(n));
+        if (page >= pages - 2) [pages - 3, pages - 2, pages - 1].forEach(n => keep.add(n));
+        const list = [...keep].filter(n => n >= 1 && n <= pages).sort((a, b) => a - b);
+        const out = [];
+        list.forEach((n, i) => {
+            if (i && n - list[i - 1] > 1) out.push('gap');
+            out.push(n);
+        });
+        return out;
+    }
+
+    function renderCostPagination(r) {
+        const total = Number(r.total || 0), page = Number(r.page || 1), pages = Number(r.pages || 1), size = Number(r.page_size || costState.pageSize);
+        const from = total ? (page - 1) * size + 1 : 0, to = Math.min(total, page * size);
+        $('#costPageInfo').html(total ? `Showing <strong>${from.toLocaleString()}–${to.toLocaleString()}</strong> of <strong>${total.toLocaleString()}</strong>` : '');
+        if (pages <= 1) { $('#costPages').html(''); return; }
+        const btn = (label, target, opts = {}) => `<button type="button" class="cost-page-btn${opts.active ? ' active' : ''}" data-page="${target}"
+            ${opts.disabled ? 'disabled' : ''} ${opts.active ? 'aria-current="page"' : ''} aria-label="${opts.aria || 'Page ' + target}">${label}</button>`;
+        $('#costPages').html(
+            btn('<i class="fas fa-angle-left"></i>', page - 1, { disabled: page <= 1, aria: 'Previous page' })
+            + costPageNumbers(page, pages).map(n => n === 'gap' ? '<span class="cost-page-gap">…</span>' : btn(n, n, { active: n === page })).join('')
+            + btn('<i class="fas fa-angle-right"></i>', page + 1, { disabled: page >= pages, aria: 'Next page' })
+        );
+    }
+
+    function loadAdminCostHistory(page) {
+        if (page) costState.page = page;
+        const f = costFilters();
+        if (f.date_from && f.date_to && f.date_from > f.date_to) {
+            $('#costResultsSummary').html('<span class="text-danger">The start date is after the end date.</span>');
+            return;
+        }
+        const params = $.param(Object.assign({ page: costState.page, page_size: costState.pageSize },
+            Object.fromEntries(Object.entries(f).filter(([, v]) => v !== '' && v != null))));
+        renderCostActiveFilters(f);
+        $('#adminCostHistoryTbody').addClass('loading');
+        if (costRequest) costRequest.abort();
+        costRequest = $.ajax({
+            url: '/api/admin/cost-history?' + params,
             type: 'GET',
+            complete: function () { costRequest = null; $('#adminCostHistoryTbody').removeClass('loading'); },
+            error: function (xhr, status) {
+                if (status === 'abort') return;
+                $('#adminCostHistoryTbody').html('<tr><td colspan="8" class="text-center py-4 text-danger">Could not load the cost history.</td></tr>');
+            },
             success: function (r) {
                 if (!r.success) return;
                 const history = r.history || [];
                 const summary = r.summary || {};
+                // Past the last page (e.g. a narrower filter): go to the last one
+                if (!history.length && r.total > 0 && costState.page > r.pages) { loadAdminCostHistory(r.pages); return; }
 
                 const totalCost = Number(summary.total_system_cost_usd || 0);
-                const totalRuns = Number(summary.total_runs || history.length || 0);
+                const totalRuns = Number(summary.total_runs || 0);
                 $('#adminTotalSystemCost').text(money(totalCost));
                 $('#adminTotalRuns').text(totalRuns.toLocaleString());
                 $('#adminAvgRunCost').text(totalRuns ? '$' + (totalCost / totalRuns).toFixed(3) : '$0.00');
                 $('#adminTotalSystemTokens').text(Number(summary.total_tokens || 0).toLocaleString());
 
+                const filtered = r.filtered || {};
+                const isFiltered = $('#costActiveFilters').children().length > 0;
+                $('#costResultsSummary').html(
+                    `<strong>${Number(filtered.count || 0).toLocaleString()}</strong> ${isFiltered ? 'matching ' : ''}entr${filtered.count === 1 ? 'y' : 'ies'}`
+                    + ` · <strong>$${Number(filtered.cost_usd || 0).toFixed(4)}</strong> spend`
+                    + ` · <strong>${Number(filtered.tokens || 0).toLocaleString()}</strong> tokens`);
+                renderCostPagination(r);
+
                 let html = '';
                 if (!history.length) {
-                    html = '<tr><td colspan="8" class="text-center py-4 text-muted">No generation history recorded.</td></tr>';
+                    html = isFiltered
+                        ? '<tr><td colspan="8" class="text-center py-4 text-muted">Nothing matches these filters. <a href="#" id="costEmptyReset">Reset filters</a></td></tr>'
+                        : '<tr><td colspan="8" class="text-center py-4 text-muted">No generation history recorded.</td></tr>';
                 } else {
                     history.forEach(h => {
                         // Image/video charged outside a saved run (e.g. Analysis Dashboard): no run details
@@ -591,6 +693,49 @@ $(document).ready(function () {
             }
         });
     }
+
+    // Filters: text waits for a pause in typing; everything else applies at once
+    let costSearchTimer = null;
+    $('#costFilterQ').on('input', function () {
+        clearTimeout(costSearchTimer);
+        costSearchTimer = setTimeout(() => loadAdminCostHistory(1), 350);
+    });
+    $('#costFilterMinCost').on('input', function () {
+        clearTimeout(costSearchTimer);
+        costSearchTimer = setTimeout(() => loadAdminCostHistory(1), 450);
+    });
+    $('#costFilterUser, #costFilterType, #costFilterPlatform, #costFilterFrom, #costFilterTo, #costFilterSort')
+        .on('change', () => loadAdminCostHistory(1));
+    $('#costPageSize').on('change', function () {
+        costState.pageSize = Number($(this).val()) || 25;
+        loadAdminCostHistory(1);
+    });
+    $(document).on('click', '#costPages .cost-page-btn', function () {
+        const target = Number($(this).data('page'));
+        if (!target) return;
+        loadAdminCostHistory(target);
+        document.getElementById('costFilters').scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
+    function resetCostFilters() {
+        $('#costFilterQ, #costFilterFrom, #costFilterTo, #costFilterMinCost').val('');
+        $('#costFilterUser, #costFilterPlatform').val('');
+        $('#costFilterType').val('all');
+        $('#costFilterSort').val('newest');
+        loadAdminCostHistory(1);
+    }
+    $('#costFilterReset').on('click', resetCostFilters);
+    $(document).on('click', '#costEmptyReset', function (e) { e.preventDefault(); resetCostFilters(); });
+    $(document).on('click', '#costActiveFilters [data-clear]', function () {
+        const key = $(this).data('clear');
+        if (key === 'q') $('#costFilterQ').val('');
+        if (key === 'user_id') $('#costFilterUser').val('');
+        if (key === 'type') $('#costFilterType').val('all');
+        if (key === 'platform') $('#costFilterPlatform').val('');
+        if (key === 'dates') $('#costFilterFrom, #costFilterTo').val('');
+        if (key === 'min_cost') $('#costFilterMinCost').val('');
+        if (key === 'sort') $('#costFilterSort').val('newest');
+        loadAdminCostHistory(1);
+    });
 
     // ── Init ──────────────────────────────────────────────────────────────
 

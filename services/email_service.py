@@ -203,6 +203,7 @@ def _build_html(
                         <td style="padding: 16px 32px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 12px;">
                             This is an automated notification from the Analysis Dashboard's approval workflow.
                             {"Attached copies of the generated image(s) are included below." if slide_count > 0 else ""}
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #8a2be2; text-decoration: none; font-weight: 600;">StradIT</a></div>
                         </td>
                     </tr>
                 </table>
@@ -327,6 +328,7 @@ def _build_request_html(
                     <tr>
                         <td style="padding: 16px 32px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 12px;">
                             This is an automated review request from the Analysis Dashboard's approval workflow.
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #8a2be2; text-decoration: none; font-weight: 600;">StradIT</a></div>
                         </td>
                     </tr>
                 </table>
@@ -374,6 +376,7 @@ def _build_verification_html(name: str, verify_url: str) -> str:
                     <tr>
                         <td style="padding: 16px 32px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 12px;">
                             If you didn't create this account, you can safely ignore this email.
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #8a2be2; text-decoration: none; font-weight: 600;">StradIT</a></div>
                         </td>
                     </tr>
                 </table>
@@ -417,6 +420,7 @@ def _build_password_reset_html(name: str, reset_url: str, ttl_minutes: int) -> s
                     <tr>
                         <td style="padding: 16px 32px; background-color: #f8f9fc; border-top: 1px solid #e6e8ef; color: #667085; font-size: 12px;">
                             If you didn't ask to reset your password, you can safely ignore this email - your password won't change.
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #8a2be2; text-decoration: none; font-weight: 600;">StradIT</a></div>
                         </td>
                     </tr>
                 </table>
@@ -499,6 +503,7 @@ def _build_invitation_html(
                             Button not working? Copy this link into your browser:<br>
                             <a href="{_escape(accept_url)}" style="color: #8a2be2; word-break: break-all;">{_escape(accept_url)}</a><br><br>
                             If you weren't expecting this invitation, you can safely ignore this email.
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #8a2be2; text-decoration: none; font-weight: 600;">StradIT</a></div>
                         </td>
                     </tr>
                 </table>
@@ -559,6 +564,7 @@ def _build_sales_lead_html(user_name: str, user_email: str, company_name: str, p
                     <tr>
                         <td style="padding: 16px 32px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 12px;">
                             Submitted from the Enterprise onboarding step.
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #8a2be2; text-decoration: none; font-weight: 600;">StradIT</a></div>
                         </td>
                     </tr>
                 </table>

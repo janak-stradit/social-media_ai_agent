@@ -1,4 +1,8 @@
+import logging
+
 from services.llm_service import LLMService
+
+logger = logging.getLogger(__name__)
 
 try:
     from db import get_brand_asset
@@ -770,6 +774,6 @@ Example: {"relevant_indices": [0, 2, 5]}
         except Exception as e:
             import traceback
 
-            print(f"[StoryAgent] Error filtering posts: {e}")
+            logger.warning(f"Error filtering posts: {e}")
             traceback.print_exc()
             return posts

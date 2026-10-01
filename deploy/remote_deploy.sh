@@ -82,7 +82,7 @@ healthy() {
     # First start loads torch + the embedding model and runs init_db against RDS
     local code=""
     for _ in $(seq 1 36); do
-        code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/login || true)"
+        code="$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/api/health || true)"
         if [ "$code" = "200" ]; then
             sleep 5
             if sudo env APP_IMAGE="$1" "${COMPOSE[@]}" ps --status running --services | grep -qx scheduler; then

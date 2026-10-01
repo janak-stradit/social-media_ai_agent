@@ -1,8 +1,12 @@
-import numpy as np
 import json
+import logging
+
+import numpy as np
 from sentence_transformers import SentenceTransformer
 
-from db import engine, Session, CompetitorPostEmbedding
+from db import CompetitorPostEmbedding, Session, engine
+
+logger = logging.getLogger(__name__)
 
 
 class EmbeddingService:
@@ -16,7 +20,7 @@ class EmbeddingService:
             # Load the same model ChromaDB uses by default
             self.model = SentenceTransformer("all-MiniLM-L6-v2")
         except Exception as e:
-            print(f"[EmbeddingService] Initialization warning: {e}")
+            logger.warning(f"Initialization warning: {e}")
             self.enabled = False
 
     def get_embedding(self, text: str) -> list[float]:
@@ -26,7 +30,7 @@ class EmbeddingService:
             vector = self.model.encode(text)
             return vector.tolist()
         except Exception as e:
-            print(f"[EmbeddingService] Error generating embedding: {e}")
+            logger.warning(f"Error generating embedding: {e}")
             return []
 
     def get_embeddings(self, texts: list[str]) -> list[list[float]]:
@@ -36,7 +40,7 @@ class EmbeddingService:
             vectors = self.model.encode(texts)
             return vectors.tolist()
         except Exception as e:
-            print(f"[EmbeddingService] Error generating embeddings: {e}")
+            logger.warning(f"Error generating embeddings: {e}")
             return []
 
     def index_posts(self, posts: list) -> None:
@@ -70,7 +74,7 @@ class EmbeddingService:
             try:
                 session.commit()
             except Exception as e:
-                print(f"[EmbeddingService] index_posts warning: {e}")
+                logger.warning(f"index_posts warning: {e}")
 
     def cluster_posts(
         self,

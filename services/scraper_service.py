@@ -1,7 +1,10 @@
+import logging
 import os
 
 import requests
 import urllib3
+
+logger = logging.getLogger(__name__)
 
 # Disable SSL warnings for self-signed certificates (Not Secure HTTPS)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -71,7 +74,7 @@ class ScraperService:
             return context + "----------------------------------------\n"
 
         except Exception as e:
-            print(f"[ScraperService] Failed to fetch data for {company_name}: {e}")
+            logger.warning(f"Failed to fetch data for {company_name}: {e}")
             # Mock fallback data so the feature still works/demonstrates functionality
             return (
                 f"--- SCRAPED INTELLIGENCE FOR {company_name.upper()} ---\n"
@@ -122,7 +125,7 @@ class ScraperService:
             return all_posts
 
         except Exception as e:
-            print(f"[ScraperService] Failed to fetch store for {company_name}: {e}")
+            logger.warning(f"Failed to fetch store for {company_name}: {e}")
             # Mock fallback data for the dashboard
             return [
                 {

@@ -135,6 +135,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ steps.image.outputs.image }}
+          # Shown as "version" on every log line
+          build-args: GIT_SHA=${{ github.sha }}
           # Single-manifest image: attestation manifests show up in ECR as untagged
           # images, which the lifecycle policy would expire and break the tag.
           provenance: false

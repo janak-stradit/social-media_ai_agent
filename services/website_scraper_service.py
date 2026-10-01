@@ -35,12 +35,15 @@ import concurrent.futures
 import functools
 import ipaddress
 import json
+import logging
 import re
 import socket
 from html.parser import HTMLParser
 from urllib.parse import urljoin, urlparse
 
 import requests
+
+logger = logging.getLogger(__name__)
 
 _TIMEOUT_SECONDS = 8
 _BROWSER_TIMEOUT_MS = 20000
@@ -234,7 +237,7 @@ def _fetch_raw(
                 continue
 
             if response.status_code != 200:
-                print(f"[website_scraper_service] {url} returned HTTP {response.status_code}")
+                logger.warning(f"{url} returned HTTP {response.status_code}")
                 server = (response.headers.get("Server") or "").lower()
                 if response.status_code in (401, 403, 429) or (response.status_code == 503 and "cloudflare" in server):
                     return None, "blocked"
@@ -253,10 +256,10 @@ def _fetch_raw(
                 chunks.append(chunk)
             return (url, _decode(b"".join(chunks), content_type)), None
         except requests.Timeout:
-            print(f"[website_scraper_service] Timed out fetching {url}")
+            logger.warning(f"Timed out fetching {url}")
             return None, "timeout"
         except Exception as e:
-            print(f"[website_scraper_service] Failed to fetch {url}: {e}")
+            logger.warning(f"Failed to fetch {url}: {e}")
             return None, "unreachable"
     return None, "unreachable"  # too many redirects
 
@@ -365,7 +368,7 @@ class _BrowserFetcher:
         except PlaywrightTimeout:
             return None, "timeout"
         except Exception as e:
-            print(f"[website_scraper_service] Browser failed to fetch {url}: {e}")
+            logger.warning(f"Browser failed to fetch {url}: {e}")
             return None, "unreachable"
         finally:
             page.close()
@@ -528,7 +531,7 @@ def _parse(html: str) -> _PageParser:
         parser.feed(html)
         parser.close()
     except Exception as e:  # malformed markup - keep whatever was collected
-        print(f"[website_scraper_service] HTML parse warning: {e}")
+        logger.warning(f"HTML parse warning: {e}")
     return parser
 
 
@@ -1100,7 +1103,7 @@ def _scrape_with_browser(url: str) -> tuple[dict | None, str | None]:
             legal_pages = _find_legal_pages(final_url, parser, [])
             return _assemble(final_url, parser, pages, homepage_css, "browser", legal_pages), None
     except Exception as e:  # browser binary missing, launch failure, etc.
-        print(f"[website_scraper_service] Browser tier unavailable: {e}")
+        logger.warning(f"Browser tier unavailable: {e}")
         return None, None
 
 

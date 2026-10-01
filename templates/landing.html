@@ -3,7 +3,158 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Enterprise Social Media AI | AVIR AI</title>
+    <title>AVIR AI: AI Social Media Post Generator | StradIT</title>
+    <meta name="description" content="Turn your website into on-brand LinkedIn, Instagram and Facebook posts. AVIR AI by StradIT writes captions, hashtags and images that follow your brand.">
+    <meta name="author" content="StradIT">
+    <meta name="robots" content="index, follow, max-image-preview:large">
+    <link rel="canonical" href="{{ site_url }}/">
+    <meta name="theme-color" content="#8A2BE2">
+
+    <!-- Icons -->
+    <link rel="icon" href="/static/img/favicon.svg" type="image/svg+xml">
+    <link rel="icon" href="/favicon.ico" sizes="48x48">
+    <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png">
+
+    <!-- Social previews (LinkedIn, Facebook, WhatsApp, Slack, X) -->
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="AVIR AI by StradIT">
+    <meta property="og:locale" content="en_US">
+    <meta property="og:url" content="{{ site_url }}/">
+    <meta property="og:title" content="AVIR AI: AI Social Media Post Generator | StradIT">
+    <meta property="og:description" content="Turn your website into on-brand LinkedIn, Instagram and Facebook posts. AVIR AI by StradIT writes captions, hashtags and images that follow your brand.">
+    <meta property="og:image" content="{{ site_url }}/static/img/og-image.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="AVIR AI - on-brand social media posts, written and designed by AI. A product of StradIT.">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="AVIR AI: AI Social Media Post Generator | StradIT">
+    <meta name="twitter:description" content="Turn your website into on-brand LinkedIn, Instagram and Facebook posts. AVIR AI by StradIT writes captions, hashtags and images that follow your brand.">
+    <meta name="twitter:image" content="{{ site_url }}/static/img/og-image.png">
+
+    <!-- Structured data: who makes it, what it is, FAQ -->
+    <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://stradit.com/#organization",
+      "name": "StradIT",
+      "url": "https://stradit.com/",
+      "logo": "{{ site_url }}/static/img/brand/stradit-logo.png"
+    },
+    {
+      "@type": "WebSite",
+      "@id": "{{ site_url }}/#website",
+      "url": "{{ site_url }}/",
+      "name": "AVIR AI",
+      "inLanguage": "en",
+      "publisher": {
+        "@id": "https://stradit.com/#organization"
+      }
+    },
+    {
+      "@type": "WebPage",
+      "@id": "{{ site_url }}/#webpage",
+      "url": "{{ site_url }}/",
+      "name": "AVIR AI: AI Social Media Post Generator | StradIT",
+      "description": "Turn your website into on-brand LinkedIn, Instagram and Facebook posts. AVIR AI by StradIT writes captions, hashtags and images that follow your brand.",
+      "isPartOf": {
+        "@id": "{{ site_url }}/#website"
+      },
+      "about": {
+        "@id": "{{ site_url }}/#software"
+      },
+      "primaryImageOfPage": "{{ site_url }}/static/img/og-image.png",
+      "inLanguage": "en"
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "{{ site_url }}/#software",
+      "name": "AVIR AI",
+      "url": "{{ site_url }}/",
+      "applicationCategory": "BusinessApplication",
+      "applicationSubCategory": "Social media marketing",
+      "operatingSystem": "Web browser",
+      "description": "Turn your website into on-brand LinkedIn, Instagram and Facebook posts. AVIR AI by StradIT writes captions, hashtags and images that follow your brand.",
+      "image": "{{ site_url }}/static/img/og-image.png",
+      "publisher": {
+        "@id": "https://stradit.com/#organization"
+      },
+      "creator": {
+        "@id": "https://stradit.com/#organization"
+      },
+      "featureList": [
+        "AI captions and hashtags",
+        "AI image generation with your real logo",
+        "Brand profile from your website",
+        "LinkedIn, Instagram and Facebook",
+        "Approval workflow",
+        "Post scheduling"
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "{{ site_url }}/#faq",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "What is AVIR AI?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "AVIR AI is an AI social media studio from StradIT. You describe what you want to post, and it writes the caption, picks the hashtags and creates the image for LinkedIn, Instagram and Facebook - all in your brand's voice."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "How does AVIR AI learn my brand?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "When you sign up you add your website. AVIR AI reads it to build your brand profile - products, tone of voice, colours and logo - and every post follows it. You can review and edit the profile at any time."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Which social media platforms are supported?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "LinkedIn, Instagram and Facebook. One image can be shared across all three, and posts can be scheduled to your connected accounts. Video generation is coming soon."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Will AVIR AI change or redraw my logo?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. The AI never draws your logo - your actual logo file is placed on generated images, so it always looks exactly right."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Can my team review posts before they are published?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "Yes. You can send a post for approval, and the reviewer gets an email to approve it or ask for changes before anything goes live."
+          }
+        },
+        {
+          "@type": "Question",
+          "name": "Do I need design or copywriting skills?",
+          "acceptedAnswer": {
+            "@type": "Answer",
+            "text": "No. Write a short brief in plain language, then refine the result in chat - for example \"make it shorter\" or \"make the background blue\" - until it is ready to post."
+          }
+        }
+      ]
+    }
+  ]
+}
+    </script>
+
+    <!-- Fonts: connect early, swap in when ready (no invisible text) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
@@ -204,7 +355,33 @@
         .cta-panel-icons { position: absolute; inset: 0; }
         .cta-floating-icon { position: absolute; width: 56px; height: 56px; background: #fff; border-radius: var(--radius-md); box-shadow: var(--shadow-lg); display: flex; align-items: center; justify-content: center; font-size: 22px; animation: float-soft 6s ease-in-out infinite; }
 
-        footer { border-top: 1px solid var(--border-color); background: var(--bg-card); padding: 28px 24px; text-align: center; color: var(--text-secondary); font-size: 0.85rem; }
+        footer { border-top: 1px solid var(--border-color); background: var(--bg-card); padding: 28px 24px; color: var(--text-secondary); font-size: 0.85rem; }
+        .skip-link { position: absolute; left: 12px; top: -48px; z-index: 1000; background: #172033; color: #fff; padding: 8px 14px; border-radius: 8px; font-weight: 600; text-decoration: none; transition: top 0.15s ease; }
+        .skip-link:focus { top: 12px; }
+        .faq-section { padding: 40px 24px 70px; }
+        .faq-header { text-align: center; max-width: 720px; margin: 0 auto 2rem; }
+        .faq-list { max-width: 820px; margin: 0 auto; display: flex; flex-direction: column; gap: 0.75rem; }
+        .faq-item { background: var(--bg-card); border: 1px solid var(--border-color); border-radius: var(--radius-md, 12px); box-shadow: var(--shadow-sm); }
+        .faq-item summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 1.05rem 1.25rem; font-weight: 600; font-size: 1rem; color: var(--text-primary); }
+        .faq-item summary::-webkit-details-marker { display: none; }
+        .faq-item summary::after { content: "+"; font-size: 1.35rem; font-weight: 400; color: var(--primary); line-height: 1; transition: transform 0.2s ease; }
+        .faq-item[open] summary::after { transform: rotate(45deg); }
+        .faq-item summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--radius-md, 12px); }
+        .faq-item p { margin: 0; padding: 0 1.25rem 1.15rem; color: var(--text-secondary); line-height: 1.65; font-size: 0.95rem; }
+        @media (max-width: 640px) { .faq-section { padding: 30px 16px 50px; } }
+        .site-footer { max-width: 1280px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+        .footer-maker { display: inline-flex; align-items: center; gap: 10px; color: var(--text-secondary); text-decoration: none; }
+        .footer-maker strong { color: var(--text-primary); font-weight: 600; }
+        .footer-maker:hover strong { color: #8A2BE2; }
+        .footer-links { display: flex; gap: 1.25rem; flex-wrap: wrap; }
+        .footer-links a { color: var(--text-secondary); text-decoration: none; }
+        .footer-links a:hover { color: #8A2BE2; }
+        .footer-legal { width: 100%; text-align: center; font-size: 0.78rem; color: var(--text-muted, #9ca3af); padding-top: 14px; border-top: 1px solid var(--border-color); margin-top: 6px; }
+        .stradit-badge { display: inline-flex; align-items: center; background: #0f172a; border-radius: 7px; padding: 6px 10px; line-height: 0; }
+        .footer-maker:hover .stradit-badge { background: #1e293b; }
+        .stradit-mark { --h: 16px; display: inline-block; width: calc(var(--h) * 378 / 78); height: var(--h); overflow: hidden; }
+        .stradit-mark img { display: block; height: calc(var(--h) * 160 / 78); width: auto; max-width: none; margin: calc(var(--h) * -17 / 78) 0 0 calc(var(--h) * -46 / 78); }
+        @media (max-width: 640px) { .site-footer { flex-direction: column; text-align: center; } .footer-links { justify-content: center; } }
 
         @media (max-width: 992px) {
             .header-nav { display: none; }
@@ -356,6 +533,7 @@
 <body>
 
     <!-- Header -->
+    <a class="skip-link" href="#main">Skip to content</a>
     <header class="app-header">
         <a href="/" class="header-brand">
             <div class="brand-logo">
@@ -367,12 +545,13 @@
             </div>
             <div>
                 <span class="brand-name">AVIR AI <span class="beta-badge">Beta</span></span>
-                <span class="brand-tagline">Autonomous Social Studio</span>
+                <span class="brand-tagline">Autonomous Social Studio &middot; by StradIT</span>
             </div>
         </a>
         <nav class="header-nav">
             <a href="#workflow" class="header-nav-item">How it works</a>
             <a href="#platforms" class="header-nav-item">Platforms</a>
+            <a href="#faq" class="header-nav-item">FAQ</a>
         </nav>
         <div class="header-actions">
             <a href="/login" class="btn-outline">Sign In</a>
@@ -380,13 +559,14 @@
         </div>
     </header>
 
+    <main id="main">
     <!-- HERO -->
     <section class="hero">
         <div class="brand-hero-card">
             <div class="hero-copy">
                 <span class="eyebrow">AI Social Media Studio</span>
                 <h1 class="hero-title">
-                    Put your social strategy <span class="text-gradient">on autopilot</span>
+                    Put your social media strategy <span class="text-gradient">on autopilot</span>
                 </h1>
                 <p class="hero-subtitle">
                     Deploy intelligent agents that analyze your business, predict market trends, and execute full-funnel content campaigns entirely on their own.
@@ -574,6 +754,40 @@
         </div>
     </section>
 
+    <!-- FAQ (mirrors the FAQPage structured data in <head>) -->
+    <section class="faq-section" id="faq" aria-labelledby="faqTitle">
+        <div class="faq-header">
+            <span class="eyebrow">FAQ</span>
+            <h2 class="section-title" id="faqTitle">Questions about AVIR AI</h2>
+        </div>
+        <div class="faq-list">
+                <details class="faq-item" open>
+                    <summary>What is AVIR AI?</summary>
+                    <p>AVIR AI is an AI social media studio from StradIT. You describe what you want to post, and it writes the caption, picks the hashtags and creates the image for LinkedIn, Instagram and Facebook - all in your brand's voice.</p>
+                </details>
+                <details class="faq-item">
+                    <summary>How does AVIR AI learn my brand?</summary>
+                    <p>When you sign up you add your website. AVIR AI reads it to build your brand profile - products, tone of voice, colours and logo - and every post follows it. You can review and edit the profile at any time.</p>
+                </details>
+                <details class="faq-item">
+                    <summary>Which social media platforms are supported?</summary>
+                    <p>LinkedIn, Instagram and Facebook. One image can be shared across all three, and posts can be scheduled to your connected accounts. Video generation is coming soon.</p>
+                </details>
+                <details class="faq-item">
+                    <summary>Will AVIR AI change or redraw my logo?</summary>
+                    <p>No. The AI never draws your logo - your actual logo file is placed on generated images, so it always looks exactly right.</p>
+                </details>
+                <details class="faq-item">
+                    <summary>Can my team review posts before they are published?</summary>
+                    <p>Yes. You can send a post for approval, and the reviewer gets an email to approve it or ask for changes before anything goes live.</p>
+                </details>
+                <details class="faq-item">
+                    <summary>Do I need design or copywriting skills?</summary>
+                    <p>No. Write a short brief in plain language, then refine the result in chat - for example "make it shorter" or "make the background blue" - until it is ready to post.</p>
+                </details>
+        </div>
+    </section>
+
     <!-- CTA -->
     <section class="cta-section">
         <div class="brand-hero-card cta-card">
@@ -597,8 +811,23 @@
         </div>
     </section>
 
+    </main>
+
     <footer>
-        &copy; 2026 AVIR AI. All rights reserved.
+        <div class="site-footer">
+            <a class="footer-maker" href="https://stradit.com/" target="_blank" rel="noopener" title="Visit stradit.com">
+                <span><strong>AVIR AI</strong> is a product of</span>
+                <span class="stradit-badge"><span class="stradit-mark"><img src="/static/img/brand/stradit-logo.png" alt="StradIT" width="640" height="160"></span></span>
+            </a>
+            <nav class="footer-links" aria-label="Footer">
+                <a href="#workflow">How it works</a>
+                <a href="#faq">FAQ</a>
+                <a href="/login">Sign in</a>
+                <a href="/signup">Get started</a>
+                <a href="https://stradit.com/" target="_blank" rel="noopener">stradit.com</a>
+            </nav>
+            <div class="footer-legal">&copy; 2026 StradIT. All rights reserved.</div>
+        </div>
     </footer>
 
     <script>
