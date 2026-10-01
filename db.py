@@ -104,6 +104,11 @@ class User(Base):
     # Who this user's "Send for Approval" requests go to (set on the Brand
     # Configuration pages); falls back to Config.APPROVAL_NOTIFY_EMAIL.
     approval_reviewer_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Image access (Admin -> Users -> Image access): daily image limit
+    # (None = the default from Image Settings, -1 = unlimited) and image model
+    # (None = the default model).
+    image_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    image_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
 
 class SalesContactRequest(Base):
@@ -189,24 +194,27 @@ class CreditRequest(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
 
 
-class MediaCharge(Base):
-    """Cost of an image/video generated outside a saved run (e.g. the Analysis
-    Dashboard) - counted in the user's used credits and admin totals alongside
-    RunHistory.cost_usd. Images made inside a run are added to that run instead."""
+class ImageGeneration(Base):
+    """One row per generated or edited image - counts against the user's daily
+    image limit (get_image_quota). Its cost is charged to the run when there is
+    one (add_run_cost); rows with run_id NULL (e.g. Analysis Dashboard images)
+    are charged here and summed into the user's used credits and admin totals."""
 
-    __tablename__ = "media_charges"
+    __tablename__ = "image_generations"
     __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
         Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True
     )
-    kind: Mapped[str] = mapped_column(String(16), default="image", nullable=False)
+    run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    kind: Mapped[str] = mapped_column(String(16), default="image", nullable=False)  # image | edit | video
     platform: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(128), nullable=True)
     description: Mapped[str | None] = mapped_column(String(500), nullable=True)
     media_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
 
 
 class UserInvitation(Base):
@@ -514,6 +522,8 @@ def init_db():
             f"ALTER TABLE {usr_tbl} ADD COLUMN brand_scan_error VARCHAR(32)",
             f"ALTER TABLE {usr_tbl} ADD COLUMN brand_scan_updated_at TIMESTAMP",
             f"ALTER TABLE {usr_tbl} ADD COLUMN approval_reviewer_email VARCHAR(255)",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN image_limit INTEGER",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN image_model VARCHAR(128)",
         ]:
             try:
                 with engine.begin() as sub_conn:
@@ -778,7 +788,7 @@ _USER_OWNED_TABLES = (
     ApprovedAsset,
     ApprovalRequest,
     ScheduledPost,
-    MediaCharge,
+    ImageGeneration,
 )
 
 
@@ -1148,27 +1158,133 @@ def get_system_usage_totals() -> dict:
 
 
 def _media_charges_total(session, user_id: int | None = None) -> float:
-    query = session.query(func.coalesce(func.sum(MediaCharge.cost_usd), 0.0))
+    """Cost of images generated outside a run (run images are in the run's cost)."""
+    query = session.query(func.coalesce(func.sum(ImageGeneration.cost_usd), 0.0)).filter(ImageGeneration.run_id.is_(None))
     if user_id is not None:
-        query = query.filter(MediaCharge.user_id == user_id)
+        query = query.filter(ImageGeneration.user_id == user_id)
     return float(query.scalar() or 0.0)
 
 
-def record_media_charge(
-    user_id: int, cost_usd: float, kind: str = "image", platform: str | None = None,
-    description: str | None = None, media_url: str | None = None,
+def log_image_generation(
+    user_id: int,
+    cost_usd: float,
+    run_id: int | None = None,
+    kind: str = "image",
+    platform: str | None = None,
+    model: str | None = None,
+    description: str | None = None,
+    media_url: str | None = None,
 ) -> None:
-    """Charges a generation that isn't part of a saved run (see MediaCharge)."""
-    if not cost_usd or cost_usd <= 0:
-        return
+    """Records a generated/edited image: counts toward the daily limit and, when
+    run_id is None, is the charge for it (see ImageGeneration)."""
     with Session(engine) as session:
         session.add(
-            MediaCharge(
-                user_id=user_id, kind=kind, platform=platform, description=(description or "")[:500] or None,
-                media_url=media_url, cost_usd=round(float(cost_usd), 6),
+            ImageGeneration(
+                user_id=user_id, run_id=run_id, kind=kind, platform=platform, model=model,
+                description=(description or "")[:500] or None, media_url=media_url,
+                cost_usd=round(float(cost_usd or 0.0), 6),
             )
         )
         session.commit()
+
+
+# ── Image limits & model access ───────────────────────────────────────────
+IMAGE_LIMIT_DEFAULT = 2  # images per day per user, unless changed in Image Settings
+IMAGE_UNLIMITED = -1
+
+
+def _day_start_utc(now: datetime | None = None) -> datetime:
+    now = now or datetime.now(timezone.utc)
+    return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def get_image_settings() -> dict:
+    """Global image defaults (Admin -> Image Settings), stored in app_settings."""
+    from config import Config
+
+    try:
+        models = json.loads(get_setting("image_models", "") or "[]")
+    except ValueError:
+        models = []
+    models = [m for m in models if isinstance(m, dict) and m.get("id")]
+    default_model = get_setting("image_model_default", "") or Config.HEYROUTE_IMAGE_MODEL
+    if not any(m["id"] == default_model for m in models):
+        models.insert(0, {"id": default_model, "price": Config.HEYROUTE_IMAGE_COST_USD})
+    try:
+        default_limit = int(get_setting("image_limit_default", "") or IMAGE_LIMIT_DEFAULT)
+    except ValueError:
+        default_limit = IMAGE_LIMIT_DEFAULT
+    return {"default_limit": default_limit, "default_model": default_model, "models": models}
+
+
+def save_image_settings(default_limit: int, default_model: str, models: list[dict]) -> dict:
+    save_setting("image_limit_default", str(int(default_limit)))
+    save_setting("image_model_default", default_model)
+    save_setting("image_models", json.dumps(models))
+    return get_image_settings()
+
+
+def image_model_price(model: str | None) -> float:
+    """Price per image for a model (Image Settings), else HEYROUTE_IMAGE_COST_USD."""
+    from config import Config
+
+    for m in get_image_settings()["models"]:
+        if m["id"] == model:
+            try:
+                return float(m.get("price"))
+            except (TypeError, ValueError):
+                break
+    return Config.HEYROUTE_IMAGE_COST_USD
+
+
+def get_image_quota(user_id: int) -> dict:
+    """Today's image usage (resets at midnight UTC) and the user's limit/model.
+    Admins are unlimited unless an admin set a limit for them explicitly."""
+    settings = get_image_settings()
+    now = datetime.now(timezone.utc)
+    day_start = _day_start_utc(now)
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        used = (
+            session.query(func.count(ImageGeneration.id))
+            .filter(
+                ImageGeneration.user_id == user_id,
+                ImageGeneration.kind.in_(("image", "edit")),
+                ImageGeneration.created_at >= day_start.replace(tzinfo=None),
+            )
+            .scalar()
+            or 0
+        )
+        if user is None:
+            return {"used": used, "limit": 0, "unlimited": False, "remaining": 0, "model": settings["default_model"]}
+        raw_limit = user.image_limit
+        if raw_limit is None:
+            raw_limit = IMAGE_UNLIMITED if user.is_admin else settings["default_limit"]
+        unlimited = raw_limit == IMAGE_UNLIMITED
+        model = user.image_model or settings["default_model"]
+        resets_at = day_start + timedelta(days=1)
+        return {
+            "used": int(used),
+            "limit": None if unlimited else int(raw_limit),
+            "unlimited": unlimited,
+            "remaining": None if unlimited else max(0, int(raw_limit) - int(used)),
+            "is_default_limit": user.image_limit is None,
+            "model": model,
+            "is_default_model": not user.image_model,
+            "resets_at": resets_at.isoformat(),
+            "resets_in_seconds": int((resets_at - now).total_seconds()),
+        }
+
+
+def set_user_image_access(user_id: int, limit: int | None, model: str | None) -> bool:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if not user:
+            return False
+        user.image_limit = limit
+        user.image_model = model or None
+        session.commit()
+        return True
 
 
 INVITATION_TTL = timedelta(days=7)
@@ -1566,14 +1682,41 @@ def _brand_status(user: "User", profile: "UserBrandProfile | None") -> dict:
     return {"status": "not_onboarded"}
 
 
+def _image_access_summary(user: "User", used_today: int, settings: dict) -> dict:
+    """Same rules as get_image_quota, for the admin users table."""
+    limit = user.image_limit
+    if limit is None:
+        limit = IMAGE_UNLIMITED if user.is_admin else settings["default_limit"]
+    return {
+        "used_today": used_today,
+        "limit": None if limit == IMAGE_UNLIMITED else limit,
+        "unlimited": limit == IMAGE_UNLIMITED,
+        "custom_limit": user.image_limit,  # None = default
+        "model": user.image_model or settings["default_model"],
+        "custom_model": user.image_model,  # None = default
+    }
+
+
 def get_all_users_credit_summary() -> list[dict]:
     """Return credit summaries for all registered users (for admin management)."""
     with Session(engine) as session:
         users = session.query(User).order_by(User.created_at.asc()).all()
         profiles = {p.user_id: p for p in session.query(UserBrandProfile).all()}
         media_costs = dict(
-            session.query(MediaCharge.user_id, func.coalesce(func.sum(MediaCharge.cost_usd), 0.0))
-            .group_by(MediaCharge.user_id)
+            session.query(ImageGeneration.user_id, func.coalesce(func.sum(ImageGeneration.cost_usd), 0.0))
+            .filter(ImageGeneration.run_id.is_(None))
+            .group_by(ImageGeneration.user_id)
+            .all()
+        )
+        # Image access: today's count per user (resets midnight UTC) + limits/models
+        image_settings = get_image_settings()
+        images_today = dict(
+            session.query(ImageGeneration.user_id, func.count(ImageGeneration.id))
+            .filter(
+                ImageGeneration.kind.in_(("image", "edit")),
+                ImageGeneration.created_at >= _day_start_utc().replace(tzinfo=None),
+            )
+            .group_by(ImageGeneration.user_id)
             .all()
         )
         summaries = []
@@ -1620,6 +1763,7 @@ def get_all_users_credit_summary() -> list[dict]:
                     "has_pending_request": has_pending,
                     "created_at": u.created_at.strftime("%Y-%m-%d"),
                     "brand": _brand_status(u, profiles.get(u.id)),
+                    "images": _image_access_summary(u, int(images_today.get(u.id, 0)), image_settings),
                 }
             )
         return summaries
@@ -1678,9 +1822,10 @@ def get_global_cost_history(limit: int = 100) -> list[dict]:
 
         # Image/video charges made outside a run (e.g. Analysis Dashboard)
         charges = (
-            session.query(MediaCharge, User)
-            .outerjoin(User, MediaCharge.user_id == User.id)
-            .order_by(MediaCharge.created_at.desc())
+            session.query(ImageGeneration, User)
+            .outerjoin(User, ImageGeneration.user_id == User.id)
+            .filter(ImageGeneration.run_id.is_(None))
+            .order_by(ImageGeneration.created_at.desc())
             .limit(limit)
             .all()
         )
@@ -1699,7 +1844,7 @@ def get_global_cost_history(limit: int = 100) -> list[dict]:
                     "platforms": [charge.platform] if charge.platform else [],
                     "tokens_used": 0,
                     "cost_usd": round(charge.cost_usd or 0.0, 6),
-                    "media": {"images": [charge.media_url] if charge.media_url and charge.kind == "image" else [],
+                    "media": {"images": [charge.media_url] if charge.media_url and charge.kind in ("image", "edit") else [],
                               "videos": [charge.media_url] if charge.media_url and charge.kind == "video" else []},
                 }
             )

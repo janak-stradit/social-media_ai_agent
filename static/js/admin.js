@@ -204,6 +204,7 @@ $(document).ready(function () {
                             <div class="admin-credit-bar" title="${Math.round(pct)}% of the credit limit used"><span class="${barClass}" style="width:${pct}%"></span></div>
                             <div class="admin-credit-note">${note}</div>
                         </div>
+                        ${imagesLine(u)}
                     </td>
                     <td><span class="admin-status${isActive ? '' : ' off'}">${isActive ? 'Active' : 'Deactivated'}</span></td>
                     <td>
@@ -218,6 +219,7 @@ $(document).ready(function () {
                                 <ul class="dropdown-menu dropdown-menu-end admin-menu" aria-labelledby="${menuId}">
                                     <li><button type="button" class="dropdown-item" onclick="adminSetCustomCredit(${u.id}, ${limit})"><i class="fas fa-sliders"></i>Set credit limit</button></li>
                                     <li><button type="button" class="dropdown-item" onclick="adminEditUserProfile(${u.id})"><i class="fas fa-user-pen"></i>Edit profile</button></li>
+                                    <li><button type="button" class="dropdown-item" onclick="openImageAccessPanel(${u.id})"><i class="fas fa-image"></i>Image access…</button></li>
                                     <li><button type="button" class="dropdown-item" onclick="adminSetUserActive(${u.id}, ${!isActive})">
                                         <i class="fas ${isActive ? 'fa-user-slash' : 'fa-user-check'}"></i>${isActive ? 'Deactivate account' : 'Activate account'}</button></li>
                                     ${u.is_admin ? '' : `<li><hr class="dropdown-divider"></li>
@@ -683,6 +685,187 @@ $(document).ready(function () {
         if (e.key !== 'Escape') return;
         if ($('#imageLightbox').hasClass('show')) { $('#imageLightbox').removeClass('show'); return; }
         if ($('#runDetailsPanel').hasClass('open')) closeRunDetails();
+        if ($('#imageAccessPanel').hasClass('open')) closeImageAccessPanel();
+    });
+
+    // ── Image limits & model access ────────────────────────────────────
+    // Image Settings tab = defaults for everyone (daily limit, models + price);
+    // users table ⋯ -> Image access = one user's own limit / model.
+    window._imageSettings = null;
+
+    function imagePrice(id) {
+        const m = ((window._imageSettings || {}).models || []).find(x => x.id === id);
+        return m ? `$${Number(m.price).toFixed(2)}` : '';
+    }
+
+    function imagesLine(u) {
+        const im = u.images;
+        if (!im) return '';
+        const full = !im.unlimited && im.used_today >= im.limit;
+        const count = im.unlimited ? `${im.used_today} today · ∞` : `${im.used_today} / ${im.limit} today`;
+        const custom = (im.custom_limit !== null && im.custom_limit !== undefined) || im.custom_model
+            ? '<span class="tag">custom</span>' : '';
+        const title = `Images today: ${im.unlimited ? `${im.used_today} (unlimited)` : `${im.used_today} of ${im.limit}`}`
+            + ` · model ${im.model}. Click to change.`;
+        return `<div><span class="admin-images-line${full ? ' full' : ''}" role="button" tabindex="0" title="${escapeAttr(title)}"
+                    onclick="openImageAccessPanel(${u.id})"><i class="fas fa-image"></i>${count}${custom}</span></div>`;
+    }
+
+    window.loadImageSettings = function (render) {
+        return $.getJSON('/api/admin/image-settings').done(function (r) {
+            window._imageSettings = r.settings;
+            window._availableImageModels = r.available_models || [];
+            if (render) renderImageSettings();
+        });
+    };
+
+    function modelRowHtml(m, isDefault) {
+        return `
+            <tr>
+                <td><input type="text" class="form-control form-control-sm img-model-id" list="imgAvailableModels" maxlength="128"
+                           value="${escapeAttr(m.id || '')}" placeholder="e.g. gemini-3.1-flash-image" aria-label="Model id"></td>
+                <td><div class="img-price">$<input type="number" class="form-control form-control-sm img-model-price" min="0" step="0.01"
+                           value="${m.price === undefined ? '' : escapeAttr(m.price)}" aria-label="Price per image"></div></td>
+                <td><label class="img-default-radio"><input type="radio" name="imgDefaultModel"${isDefault ? ' checked' : ''}>Default</label></td>
+                <td><button type="button" class="img-remove" title="Remove this model" onclick="removeImageModelRow(this)"><i class="fas fa-trash-can"></i></button></td>
+            </tr>`;
+    }
+
+    function syncRemoveButtons() {
+        const $rows = $('#imgModelsTbody tr');
+        $rows.find('.img-remove').prop('disabled', $rows.length <= 1);
+    }
+
+    function renderImageSettings() {
+        const s = window._imageSettings;
+        if (!s) return;
+        $('#imgDefaultLimitInput').val(s.default_limit);
+        $('#imgModelsTbody').html(s.models.map(m => modelRowHtml(m, m.id === s.default_model)).join(''));
+        const available = window._availableImageModels || [];
+        $('#imgAvailableModels').html(available.map(id => `<option value="${escapeAttr(id)}">`).join(''));
+        $('#imgAvailableHint').text(available.length
+            ? `Your HeyRoute image key can use: ${available.join(', ')}.`
+            : 'Type the HeyRoute model id exactly as HeyRoute lists it.');
+        $('#imgSettingsError').addClass('d-none');
+        syncRemoveButtons();
+    }
+
+    window.addImageModelRow = function () {
+        $('#imgModelsTbody').append(modelRowHtml({ id: '', price: '' }, false));
+        syncRemoveButtons();
+        $('#imgModelsTbody tr:last .img-model-id').trigger('focus');
+    };
+
+    window.removeImageModelRow = function (btn) {
+        const $row = $(btn).closest('tr');
+        const wasDefault = $row.find('input[name=imgDefaultModel]').prop('checked');
+        $row.remove();
+        if (wasDefault) $('#imgModelsTbody input[name=imgDefaultModel]').first().prop('checked', true);
+        syncRemoveButtons();
+    };
+
+    window.saveImageSettings = function () {
+        const $err = $('#imgSettingsError').addClass('d-none');
+        let defaultModel = '';
+        const models = $('#imgModelsTbody tr').map(function () {
+            const id = $(this).find('.img-model-id').val().trim();
+            if ($(this).find('input[name=imgDefaultModel]').prop('checked')) defaultModel = id;
+            return { id: id, price: $(this).find('.img-model-price').val() };
+        }).get().filter(m => m.id);
+        const missingPrice = models.find(m => m.price === '' || Number(m.price) < 0);
+        const fail = msg => $err.text(msg).removeClass('d-none');
+        if (!models.length) return fail('Add at least one image model.');
+        if (missingPrice) return fail(`Enter a price for ${missingPrice.id}.`);
+        if (!defaultModel) return fail('Choose the default model.');
+        const $btn = $('#imgSettingsSaveBtn').prop('disabled', true);
+        $.ajax({
+            url: '/api/admin/image-settings',
+            type: 'PUT',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                default_limit: $('#imgDefaultLimitInput').val(),
+                default_model: defaultModel,
+                models: models.map(m => ({ id: m.id, price: Number(m.price) }))
+            }),
+            success: function (r) {
+                window._imageSettings = r.settings;
+                renderImageSettings();
+                showToast('Image settings saved.', 'success');
+                loadAdminUsers();  // limits/models shown in the users table follow the defaults
+            },
+            error: function (xhr) { fail((xhr.responseJSON || {}).error || 'Could not save image settings.'); },
+            complete: function () { $btn.prop('disabled', false); }
+        });
+    };
+
+    window.openImageAccessPanel = function (userId) {
+        const u = (window._allAdminUsers || []).find(x => x.id === userId);
+        if (!u) return;
+        const open = function () {
+            const s = window._imageSettings;
+            const im = u.images || {};
+            window._imageAccessUserId = userId;
+            $('#imageAccessUser').text(u.name).attr('title', u.email);
+            $('#imageAccessUsed').text(im.unlimited ? `${im.used_today} (unlimited)` : `${im.used_today} of ${im.limit}`);
+            $('#imageAccessDefaultHint').text(u.is_admin
+                ? 'Admins: unlimited'
+                : `${s.default_limit} image${s.default_limit === 1 ? '' : 's'} per day (Image Settings)`);
+            const custom = im.custom_limit;
+            const choice = custom === null || custom === undefined ? 'default' : (custom === -1 ? 'unlimited' : 'custom');
+            $(`input[name=imageAccessLimit][value=${choice}]`).prop('checked', true);
+            $('#imageAccessCustomInput').val(choice === 'custom' ? custom : (im.limit || s.default_limit));
+            const options = [`<option value="">Default - ${escapeHtml(s.default_model)} (${imagePrice(s.default_model)}/image)</option>`]
+                .concat(s.models.map(m => `<option value="${escapeAttr(m.id)}">${escapeHtml(m.id)} (${imagePrice(m.id)}/image)</option>`));
+            // A model that was removed from Image Settings still shows, so saving doesn't silently change it
+            if (im.custom_model && !s.models.some(m => m.id === im.custom_model)) {
+                options.push(`<option value="${escapeAttr(im.custom_model)}">${escapeHtml(im.custom_model)} (removed from Image Settings)</option>`);
+            }
+            $('#imageAccessModelSelect').html(options.join('')).val(im.custom_model || '');
+            $('#imageAccessError').addClass('d-none');
+            $('#imageAccessBackdrop, #imageAccessPanel').addClass('open');
+        };
+        if (window._imageSettings) open(); else loadImageSettings(false).done(open);
+    };
+
+    window.closeImageAccessPanel = function () {
+        $('#imageAccessBackdrop, #imageAccessPanel').removeClass('open');
+    };
+
+    $(document).on('focus input', '#imageAccessCustomInput', function () {
+        $('input[name=imageAccessLimit][value=custom]').prop('checked', true);
+    });
+
+    window.submitImageAccess = function () {
+        const $err = $('#imageAccessError').addClass('d-none');
+        const choice = $('input[name=imageAccessLimit]:checked').val();
+        let limit = null;
+        if (choice === 'unlimited') limit = -1;
+        if (choice === 'custom') {
+            limit = Number($('#imageAccessCustomInput').val());
+            if (!Number.isInteger(limit) || limit < 0 || limit > 10000) {
+                return $err.text('Enter a whole number of images per day (0-10000).').removeClass('d-none');
+            }
+        }
+        const $btn = $('#imageAccessSaveBtn').prop('disabled', true);
+        $.ajax({
+            url: `/api/admin/users/${window._imageAccessUserId}/image-access`,
+            type: 'PUT',
+            contentType: 'application/json',
+            data: JSON.stringify({ limit: limit, model: $('#imageAccessModelSelect').val() || null }),
+            success: function () {
+                closeImageAccessPanel();
+                showToast('Image access updated.', 'success');
+                loadAdminUsers();
+            },
+            error: function (xhr) {
+                $err.text((xhr.responseJSON || {}).error || 'Could not update image access.').removeClass('d-none');
+            },
+            complete: function () { $btn.prop('disabled', false); }
+        });
+    };
+
+    $(document).on('keydown', '.admin-images-line', function (e) {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.click(); }
     });
 
     // ── Invitations ────────────────────────────────────────────────────
@@ -826,4 +1009,5 @@ $(document).ready(function () {
     loadAdminRequests();
     loadAdminCostHistory();
     loadInvitations();
+    loadImageSettings(true);
 });

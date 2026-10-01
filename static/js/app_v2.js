@@ -277,6 +277,7 @@ $(document).ready(function () {
         renderHistory();
         loadUserUsageMetrics();
         loadBrandProfileQuickPrompts();
+        loadImageQuota();
         openModalFromHash();
     });
 
@@ -1290,6 +1291,7 @@ $(document).ready(function () {
                 renderAssistantResponse(msgId);
                 adoptAsRefineBase(msgId);
                 (r.media_errors || []).forEach(e => showToast('Media refinement failed - ' + e, 'error'));
+                window.loadImageQuota();
                 renderHistory();
                 loadUserUsageMetrics();
                 scrollToBottom();
@@ -1399,6 +1401,8 @@ $(document).ready(function () {
         `;
         assistantElem.find('.assistant-card').html(cardContent);
 
+        // This card's Image option follows today's image limit too
+        if (window.__imageQuota) window.applyImageQuota(window.__imageQuota);
         $(`#${msgId}_researchGenerateBtn`).on('click', function () {
             const platforms = [];
             $(`#${msgId}_researchPlatforms input:checked`).each(function () { platforms.push($(this).val()); });
@@ -1808,6 +1812,64 @@ $(document).ready(function () {
         });
     }, 1000);
 
+    // ── Daily image limit (Admin -> Image access) ──────────────────────
+    // "Images today: 1 of 2" next to the Image option; at the limit the Image
+    // option is switched off and its tooltip says when the limit resets.
+    window.__imageQuota = null;
+
+    function resetsInText(seconds) {
+        const s = Math.max(0, Number(seconds || 0));
+        const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+        return h ? `${h} h ${m} m` : `${m} m`;
+    }
+
+    function imageLimitText(q) {
+        return `You've used your ${q.limit} image${q.limit === 1 ? '' : 's'} for today. `
+            + `Your limit resets in ${resetsInText(q.resets_in_seconds)} (midnight UTC). For more, contact your admin.`;
+    }
+
+    window.applyImageQuota = function (q) {
+        if (!q) return;
+        window.__imageQuota = q;
+        const $badge = $('#imageQuotaBadge');
+        const blocked = !q.unlimited && q.remaining <= 0;
+        if (q.unlimited) {
+            $badge.html('<i class="fas fa-infinity me-1"></i>Unlimited images').attr('title', 'No daily image limit');
+        } else {
+            $badge.html(`<i class="fas fa-image me-1"></i>Images today: ${q.used} of ${q.limit}`)
+                .attr('title', blocked ? imageLimitText(q) : `${q.remaining} left today - resets in ${resetsInText(q.resets_in_seconds)}`);
+        }
+        $badge.removeClass('d-none').toggleClass('is-empty', blocked).toggleClass('is-low', !blocked && !q.unlimited && q.remaining === 1);
+        // Every Image option on the page (composer + research cards)
+        $('input[type=checkbox][value=image]').each(function () {
+            const $label = $(this).closest('label');
+            if (blocked) {
+                $(this).prop('checked', false).prop('disabled', true).trigger('change');
+                $label.addClass('quota-blocked').attr('title', imageLimitText(q));
+            } else if ($label.hasClass('quota-blocked')) {
+                $(this).prop('disabled', false);
+                $label.removeClass('quota-blocked').removeAttr('title');
+            }
+        });
+    };
+
+    function loadImageQuota() {
+        $.getJSON('/api/me/image-quota').done(r => window.applyImageQuota(r && r.quota));
+    }
+    window.loadImageQuota = loadImageQuota;
+
+    // The image slot when the server refused because today's limit is used up
+    function imageLimitCardHtml(q) {
+        return `
+            <div class="image-limit-card" role="status">
+                <div class="image-limit-icon"><i class="fas fa-hourglass-half"></i></div>
+                <div>
+                    <div class="image-limit-title">Daily image limit reached</div>
+                    <div class="image-limit-text">${escapeHtml(imageLimitText(q))}</div>
+                </div>
+            </div>`;
+    }
+
     const PLATFORM_NAMES = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube' };
     const platformName = p => PLATFORM_NAMES[p] || (p.charAt(0).toUpperCase() + p.slice(1));
 
@@ -1875,6 +1937,7 @@ $(document).ready(function () {
                     const h = msgId && window.chatHistory[msgId];
                     const sharedTargets = res.shared_platforms || [];
                     addMediaCost(msgId, res.cost);  // one charge, even when shared by several platforms
+                    if (res.quota) window.applyImageQuota(res.quota);
                     [platform, ...sharedTargets].forEach(target => {
                         const pContent = h && h.responses[h.currentIndex].content[target];
                         if (pContent) {
@@ -1928,7 +1991,15 @@ $(document).ready(function () {
                     shareWith.forEach(p => $(`#${msgId}_media_image_${p}`).html(failHtml));
                 }
             },
-            error: function () {
+            error: function (xhr) {
+                const body = xhr.responseJSON || {};
+                if (xhr.status === 403 && body.code === 'image_limit_reached') {
+                    const card = imageLimitCardHtml(body.quota || window.__imageQuota || {});
+                    $('#' + targetSlotId).html(card);
+                    shareWith.forEach(p => $(`#${msgId}_media_image_${p}`).html(card));
+                    window.applyImageQuota(body.quota);
+                    return;
+                }
                 const errHtml = `
                     <div class="alert alert-danger py-2 px-3 small mt-2">
                         <i class="fas fa-exclamation-circle me-1"></i>Could not render media preview.
