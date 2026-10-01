@@ -408,6 +408,50 @@
         .run-agents strong { color: #172033; }
         @media (max-width: 640px) { .run-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
+        /* Image limits: users-table line, Image access panel, Image Settings */
+        .admin-images-line {
+            display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; padding: 2px 8px 2px 6px;
+            font-size: 0.72rem; font-weight: 600; color: #4b5563; background: #f3f4f6; border: 1px solid #e5e7eb;
+            border-radius: 999px; cursor: pointer; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .admin-images-line:hover { border-color: #c4b5fd; background: #f5f3ff; }
+        .admin-images-line i { color: #8A2BE2; }
+        .admin-images-line.full { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
+        .admin-images-line.full i { color: #b91c1c; }
+        .admin-images-line .tag { font-size: 10px; font-weight: 700; color: #8A2BE2; background: #ede9fe; border-radius: 999px; padding: 0 6px; }
+        .img-choice { display: flex; flex-direction: column; gap: 0.45rem; }
+        .img-choice label {
+            display: flex; align-items: center; gap: 0.6rem; margin: 0; padding: 0.6rem 0.75rem; cursor: pointer;
+            font-size: 0.84rem; font-weight: 600; color: #1f2937; border: 1px solid #e5e7eb; border-radius: 10px;
+        }
+        .img-choice label:has(input:checked) { border-color: #a78bfa; background: #f5f3ff; }
+        .img-choice label small { display: block; font-weight: 500; color: #6b7280; font-size: 0.74rem; }
+        .img-choice input[type=number] { width: 90px; margin-left: auto; }
+        .img-settings-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 1.1rem 1.25rem; margin-bottom: 1rem; max-width: 820px; }
+        .img-settings-card h6 { font-weight: 700; font-size: 0.92rem; color: #172033; margin-bottom: 0.25rem; }
+        .img-settings-card p { font-size: 0.8rem; color: #6b7280; margin-bottom: 0.85rem; }
+        .img-limit-input { display: flex; align-items: center; gap: 0.5rem; font-size: 0.84rem; color: #4b5563; }
+        .img-limit-input input { width: 110px; }
+        .img-models { width: 100%; border-collapse: separate; border-spacing: 0 6px; }
+        .img-models th { font-size: 0.68rem; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.03em; padding: 0 6px; }
+        .img-models td { padding: 0 6px; vertical-align: middle; }
+        .img-models td:nth-child(2) { width: 140px; }
+        .img-models td:nth-child(3) { width: 90px; text-align: center; }
+        .img-models td:nth-child(4) { width: 44px; text-align: right; }
+        .img-price { display: flex; align-items: center; gap: 4px; font-size: 0.84rem; color: #6b7280; }
+        .img-default-radio { display: inline-flex; align-items: center; gap: 5px; font-size: 0.76rem; font-weight: 600; color: #4b5563; cursor: pointer; margin: 0; }
+        .img-remove { border: none; background: none; color: #9ca3af; padding: 4px 8px; border-radius: 6px; }
+        .img-remove:hover:not(:disabled) { color: #dc2626; background: #fef2f2; }
+        .img-remove:disabled { opacity: 0.35; }
+        .img-settings-actions { display: flex; gap: 0.6rem; align-items: center; max-width: 820px; }
+        @media (max-width: 640px) {
+            .img-models thead { display: none; }
+            .img-models, .img-models tbody { display: block; }
+            .img-models tr { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; padding: 8px 0; border-bottom: 1px dashed #eef0f4; }
+            .img-models td { padding: 0; width: auto !important; }
+            .img-models td:first-child { grid-column: 1 / -1; }
+        }
+
         /* Request decisions side by side */
         #adminReqTbody .btn-xs + .btn-xs { margin-top: 0; }
         #adminReqTbody td:last-child { white-space: nowrap; }
@@ -470,7 +514,7 @@
                 <i class="fas fa-user-shield"></i>
                 <div>
                     <div style="font-weight:700; font-size:0.95rem;">Admin Control Center</div>
-                    <div style="font-size:0.75rem; color:#6b7280;">Users, requests &amp; cost history</div>
+                    <div style="font-size:0.75rem; color:#6b7280;">Users, requests, images &amp; cost history</div>
                 </div>
             </div>
             <nav class="bc-nav">
@@ -487,6 +531,9 @@
                 <button type="button" class="bc-nav-item" data-admin-tab="invites" onclick="switchAdminTab('invites')">
                     <i class="fas fa-envelope-open-text"></i> Invitations
                     <span class="bc-nav-badge d-none" id="adminInvitesBadge">0</span>
+                </button>
+                <button type="button" class="bc-nav-item" data-admin-tab="images" onclick="switchAdminTab('images')">
+                    <i class="fas fa-image"></i> Image Settings
                 </button>
             </nav>
         </aside>
@@ -657,6 +704,46 @@
                     </div>
                 </div>
             </div>
+            <!-- PANE: IMAGE SETTINGS (daily image limit + models) -->
+            <div class="admin-pane d-none" id="adminPaneImages">
+                <div class="bc-pane-header">
+                    <div>
+                        <h5><i class="fas fa-image text-primary me-2"></i>Image Settings</h5>
+                        <p>How many images each user can create per day, and which image models you offer. Change a single user from the users table (⋯ &rarr; Image access).</p>
+                    </div>
+                </div>
+
+                <div class="img-settings-card">
+                    <h6>Default daily image limit</h6>
+                    <p>Applies to every user without a custom limit. Counts generated and edited images; resets at midnight UTC. Admins are unlimited unless you set a limit for them.</p>
+                    <div class="img-limit-input">
+                        <input type="number" id="imgDefaultLimitInput" class="form-control form-control-sm" min="0" max="10000" step="1">
+                        <span>images per user per day</span>
+                    </div>
+                </div>
+
+                <div class="img-settings-card">
+                    <h6>Image models</h6>
+                    <p>The models you can assign to users, with what you charge per image (used for credits and cost history). The default model is used by everyone without their own model.</p>
+                    <table class="img-models">
+                        <thead><tr><th>Model</th><th>Price / image</th><th>Default</th><th></th></tr></thead>
+                        <tbody id="imgModelsTbody"></tbody>
+                    </table>
+                    <datalist id="imgAvailableModels"></datalist>
+                    <button type="button" class="btn-xs btn-xs-outline-neutral mt-2" onclick="addImageModelRow()">
+                        <i class="fas fa-plus me-1"></i>Add model
+                    </button>
+                    <div class="small text-muted mt-2" id="imgAvailableHint"></div>
+                </div>
+
+                <div class="alert-inline alert-inline-danger d-none mb-3" id="imgSettingsError" style="max-width: 820px;"></div>
+                <div class="img-settings-actions">
+                    <button type="button" class="btn-xs btn-xs-solid-success" id="imgSettingsSaveBtn" onclick="saveImageSettings()">
+                        <i class="fas fa-check me-1"></i>Save image settings
+                    </button>
+                    <button type="button" class="btn-xs btn-xs-outline-neutral" onclick="loadImageSettings(true)">Discard changes</button>
+                </div>
+            </div>
         </main>
     </div>
 
@@ -706,6 +793,48 @@
             <button type="button" class="btn-xs btn-xs-outline-neutral" onclick="closeInvitePanel()">Cancel</button>
             <button type="button" class="btn-xs btn-xs-solid-success" id="inviteSendBtn" onclick="submitInvitation()">
                 <i class="fas fa-paper-plane me-1"></i>Send Invitation
+            </button>
+        </div>
+    </aside>
+
+    <!-- Image access panel (users table ⋯ -> Image access) -->
+    <div class="admin-panel-backdrop" id="imageAccessBackdrop" onclick="closeImageAccessPanel()"></div>
+    <aside class="admin-side-panel" id="imageAccessPanel" aria-labelledby="imageAccessTitle">
+        <div class="admin-side-panel-header">
+            <h5 id="imageAccessTitle"><i class="fas fa-image text-primary me-2"></i>Image access</h5>
+            <button type="button" class="admin-side-panel-close" onclick="closeImageAccessPanel()" aria-label="Close">
+                <i class="fas fa-xmark"></i>
+            </button>
+        </div>
+        <div class="admin-side-panel-body">
+            <div class="admin-side-panel-meta">
+                <div><span>User</span><strong id="imageAccessUser">—</strong></div>
+                <div><span>Images today</span><strong id="imageAccessUsed">—</strong></div>
+            </div>
+            <div class="admin-form-group">
+                <label>Daily image limit</label>
+                <div class="img-choice">
+                    <label><input type="radio" name="imageAccessLimit" value="default">
+                        <span>Default<small id="imageAccessDefaultHint">Follows Image Settings</small></span></label>
+                    <label><input type="radio" name="imageAccessLimit" value="custom">
+                        <span>Custom<small>Images per day for this user</small></span>
+                        <input type="number" id="imageAccessCustomInput" class="form-control form-control-sm" min="0" max="10000" step="1" aria-label="Custom daily limit"></label>
+                    <label><input type="radio" name="imageAccessLimit" value="unlimited">
+                        <span>Unlimited<small>No daily limit</small></span></label>
+                </div>
+            </div>
+            <div class="admin-form-group">
+                <label for="imageAccessModelSelect">Image model</label>
+                <select id="imageAccessModelSelect" class="form-select form-select-sm"></select>
+                <div class="small text-muted mt-1">Prices and models come from the Image Settings tab.</div>
+            </div>
+            <div class="small text-muted">Images count when they're created or edited, and the count resets at midnight UTC. When the limit is reached the user sees a message and the Image option is switched off until then.</div>
+            <div class="alert-inline alert-inline-danger d-none mt-3" id="imageAccessError"></div>
+        </div>
+        <div class="admin-side-panel-footer">
+            <button type="button" class="btn-xs btn-xs-outline-neutral" onclick="closeImageAccessPanel()">Cancel</button>
+            <button type="button" class="btn-xs btn-xs-solid-success" id="imageAccessSaveBtn" onclick="submitImageAccess()">
+                <i class="fas fa-check me-1"></i>Save
             </button>
         </div>
     </aside>
@@ -816,7 +945,7 @@
             document.querySelectorAll('.admin-pane').forEach(function (pane) {
                 pane.classList.add('d-none');
             });
-            var paneMap = { users: 'adminPaneUsers', requests: 'adminPaneRequests', cost: 'adminPaneCost', invites: 'adminPaneInvites' };
+            var paneMap = { users: 'adminPaneUsers', requests: 'adminPaneRequests', cost: 'adminPaneCost', invites: 'adminPaneInvites', images: 'adminPaneImages' };
             var pane = document.getElementById(paneMap[tab]);
             if (pane) pane.classList.remove('d-none');
         }

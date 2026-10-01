@@ -23,6 +23,17 @@ from services.storage_service import mirror_to_s3
 _PROMPT_LIMIT = 2000  # kie.ai's prompt cap (see _generate_image_kie)
 
 
+def _image_price(model: str | None) -> float:
+    """Price per image for `model` from Admin -> Image Settings (falls back to
+    HEYROUTE_IMAGE_COST_USD when the database isn't available)."""
+    try:
+        from db import image_model_price
+
+        return image_model_price(model)
+    except Exception:  # noqa: BLE001
+        return Config.HEYROUTE_IMAGE_COST_USD
+
+
 def _with_no_logo_rule(prompt: str) -> str:
     """Every image prompt ends with the no-AI-logo rule (the real logo is
     stamped on afterwards) - trimmed so the rule itself survives the cap."""
@@ -650,7 +661,13 @@ class MediaGenerationService:
         raise RuntimeError("HeyRoute image stream ended without a completed event.")
 
     def _generate_image_heyroute(
-        self, prompt: str, platform: str, size: str, image_path: str | list[str] | None = None, square: bool = False
+        self,
+        prompt: str,
+        platform: str,
+        size: str,
+        image_path: str | list[str] | None = None,
+        square: bool = False,
+        model: str | None = None,
     ) -> dict:
         """Same return shape as _generate_image_kie: {url (local), original_url,
         prompt, model, cost}."""
@@ -659,7 +676,8 @@ class MediaGenerationService:
         key = Config.HEYROUTE_IMAGE_API_KEY
         if not key:
             raise RuntimeError("HEYROUTE_IMAGE_API_KEY is not configured.")
-        model = Config.HEYROUTE_IMAGE_MODEL
+        # The user's model from Image access / Image Settings, else the global default
+        model = model or Config.HEYROUTE_IMAGE_MODEL
         # square=True: one image shared by every platform of a post (1:1 works on all)
         hint = self._HEYROUTE_ASPECT_HINTS["instagram"] if square else self._HEYROUTE_ASPECT_HINTS.get(platform)
         full_prompt = f"{prompt}\n\n{hint}" if hint and hint not in prompt else prompt
@@ -710,11 +728,18 @@ class MediaGenerationService:
             "original_url": original_url,
             "prompt": full_prompt,
             "model": f"heyroute/{model}",
-            "cost": Config.HEYROUTE_IMAGE_COST_USD,
+            "model_id": model,
+            "cost": _image_price(model),
         }
 
     def _generate_image_primary(
-        self, prompt: str, platform: str, size: str, image_path: str | list[str] | None = None, square: bool = False
+        self,
+        prompt: str,
+        platform: str,
+        size: str,
+        image_path: str | list[str] | None = None,
+        square: bool = False,
+        model: str | None = None,
     ) -> dict:
         """The default image provider: HeyRoute only (HEYROUTE_IMAGE_API_KEY),
         like video and text. No kie.ai fallback - a fallback failure used to
@@ -723,7 +748,7 @@ class MediaGenerationService:
         generate_image(ai_model=...)."""
         if not Config.HEYROUTE_IMAGE_API_KEY:
             raise RuntimeError("HEYROUTE_IMAGE_API_KEY is not configured - image generation runs on HeyRoute.")
-        return self._generate_image_heyroute(prompt, platform, size, image_path, square=square)
+        return self._generate_image_heyroute(prompt, platform, size, image_path, square=square, model=model)
 
     def _file_to_data_uri(self, path: str) -> str:
         mime = mimetypes.guess_type(path)[0] or "image/jpeg"
@@ -1251,6 +1276,7 @@ class MediaGenerationService:
         ai_model: str = "kie",
         logo_path: str | None = None,
         square: bool = False,
+        model: str | None = None,
     ) -> dict:
         """
         Generate a social media image. The model is told never to draw a
@@ -1326,7 +1352,9 @@ class MediaGenerationService:
                 result = self._generate_image_openrouter(prompt, platform, size, single_reference)
             elif ai_model == "kie":
                 # The default ("kie" is the frontend's historical name for it): HeyRoute
-                result = self._generate_image_primary(prompt, platform, size, resolved_references, square=square)
+                result = self._generate_image_primary(
+                    prompt, platform, size, resolved_references, square=square, model=model
+                )
             else:
                 # Default to pollinations
                 result = self._generate_pollinations_image(prompt, platform, size)
@@ -1373,7 +1401,12 @@ class MediaGenerationService:
 
     @mirror_to_s3
     def edit_image(
-        self, prompt: str, platform: str, image_path: str | list[str] | None = None, logo_path: str | None = None
+        self,
+        prompt: str,
+        platform: str,
+        image_path: str | list[str] | None = None,
+        logo_path: str | None = None,
+        model: str | None = None,
     ) -> dict:
         """
         Surgical follow-up edit of an existing image (Studio Chat refinement).
@@ -1390,7 +1423,7 @@ class MediaGenerationService:
         size = self.IMAGE_SIZES.get(platform, "1024x1024")
         try:
             result = self._generate_image_primary(
-                _with_no_logo_rule(prompt), platform, size, self._resolve_image_paths(image_path)
+                _with_no_logo_rule(prompt), platform, size, self._resolve_image_paths(image_path), model=model
             )
         except Exception as e:
             return {"success": False, "type": "image", "platform": platform, "error": str(e)}

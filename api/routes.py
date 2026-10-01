@@ -487,6 +487,33 @@ def _scrub_brand_voice_leak(text: str, brand_voice: str | None, company_name: st
     return corrected, (n1 + n2) > 0
 
 
+def _image_limit_message(quota: dict) -> str:
+    """Shown when a user has used all of today's images (daily limit, midnight UTC)."""
+    secs = max(0, int(quota.get("resets_in_seconds") or 0))
+    hours, minutes = secs // 3600, (secs % 3600) // 60
+    when = f"{hours} h {minutes} m" if hours else f"{minutes} m"
+    limit = quota.get("limit") or 0
+    return (
+        f"You've used your {limit} image{'s' if limit != 1 else ''} for today. "
+        f"Your limit resets in {when} (midnight UTC). For more, contact your admin."
+    )
+
+
+def _image_quota_or_block(user_id):
+    """(quota, None) when the user may create an image now, else (quota, response)."""
+    if user_id is None or not DB_AVAILABLE:
+        return None, None
+    from db import get_image_quota
+
+    quota = get_image_quota(user_id)
+    if not quota["unlimited"] and quota["remaining"] <= 0:
+        return quota, (
+            jsonify({"success": False, "code": "image_limit_reached", "error": _image_limit_message(quota), "quota": quota}),
+            403,
+        )
+    return quota, None
+
+
 def _mark_done_when_finished(futures, on_done):
     """Calls on_done() once, when the last of `futures` finishes (progress
     display for steps that run in parallel)."""
@@ -1186,6 +1213,7 @@ def refine_post():
     content: dict[str, typing.Any] = {}
     compliance_rules_active = active_rules_for_user(user_id)
     extra_tokens, extra_cost = 0, 0.0
+    image_logs: list[dict] = []  # image edits made below - logged once the run is saved
     from services.brand_logo_service import resolve_logo_path
 
     logo_path = resolve_logo_path(user_id) if targets & {"image", "video"} else None
@@ -1231,9 +1259,21 @@ def refine_post():
             base_image = b.get("image_clean_url") or b.get("image_url")
             references = [r for r in (base_image, extra_reference) if r]
             prompt = _build_image_edit_prompt(plan, p, entry["media_prompt"], bool(base_image))
-            result = media_service.edit_image(prompt, p, references or None, logo_path=logo_path)
-            if result.get("success"):
+            # An image edit is a full image generation: same daily limit + model
+            edit_quota, blocked = _image_quota_or_block(user_id)
+            if blocked:
+                media_errors.append(f"{p} image: {_image_limit_message(edit_quota)}")
+                result = None
+            else:
+                result = media_service.edit_image(
+                    prompt, p, references or None, logo_path=logo_path, model=edit_quota["model"] if edit_quota else None
+                )
+            if result and result.get("success"):
                 extra_cost += float(result.get("cost") or 0)
+                image_logs.append(
+                    {"cost": float(result.get("cost") or 0), "platform": p, "url": result.get("url"),
+                     "model": edit_quota["model"] if edit_quota else None, "description": prompt}
+                )
                 entry["media"]["image"] = {
                     "url": result["url"],
                     "clean_url": result.get("clean_url"),
@@ -1242,7 +1282,7 @@ def refine_post():
                     "model": result.get("model"),
                 }
                 entry["media_prompt"] = prompt
-            else:
+            elif result is not None:
                 media_errors.append(f"{p} image: {result.get('error')}")
 
         if "video" in targets and MEDIA_AVAILABLE and plan.get("video_prompt"):
@@ -1294,6 +1334,19 @@ def refine_post():
             )
         except Exception as db_err:
             current_app.logger.warning(f"[DB] Could not save refinement run: {db_err}")
+    # Edits count toward today's image limit; their cost is already in the run's
+    # cost (extra_cost), so they're logged against the run, not charged again
+    if image_logs and DB_AVAILABLE and user_id is not None:
+        try:
+            from db import log_image_generation
+
+            for log in image_logs:
+                log_image_generation(
+                    user_id, log["cost"], run_id=run_id, kind="edit", platform=log["platform"],
+                    model=log["model"], description=log["description"], media_url=log["url"],
+                )
+        except Exception as log_err:
+            current_app.logger.warning(f"[Images] Could not log image edits: {log_err}")
 
     return jsonify(
         {
@@ -1594,6 +1647,13 @@ def generate_media():
         if p in ("facebook", "instagram", "linkedin") and p != platform
     ]
 
+    # Daily image limit + the user's image model (Admin -> Image access)
+    quota = None
+    if media_type != "video":
+        quota, blocked = _image_quota_or_block(user_id)
+        if blocked:
+            return blocked
+
     try:
         caption_to_use = extract_prompt_for_type(caption, media_type)
         if media_type == "video":
@@ -1617,6 +1677,7 @@ def generate_media():
                 ai_model=ai_model,
                 logo_path=logo_path,
                 square=bool(shared_platforms),
+                model=quota["model"] if quota else None,
             )
             if shared_platforms and result.get("success"):
                 result["shared_platforms"] = shared_platforms
@@ -1634,21 +1695,26 @@ def generate_media():
                         add_run_cost(run_id, float(result.get("cost") or 0), user_id)
                     except Exception as cost_err:
                         current_app.logger.warning(f"[Credits] Could not record media cost: {cost_err}")
-        elif user_id is not None and result.get("success") and DB_AVAILABLE:
-            # Not part of a saved run (e.g. Analysis Dashboard): still charge it
+        if user_id is not None and result.get("success") and DB_AVAILABLE:
+            # Log it: counts toward today's image limit; without a run (e.g.
+            # Analysis Dashboard) this row is also the charge for it
             try:
-                from db import record_media_charge
+                from db import get_image_quota, log_image_generation
 
-                record_media_charge(
+                log_image_generation(
                     user_id,
                     float(result.get("cost") or 0),
-                    kind=media_type,
+                    run_id=run_id or None,
+                    kind="video" if media_type == "video" else "image",
                     platform=platform,
+                    model=quota["model"] if quota else None,
                     description=(image_prompt or video_prompt or caption)[:300],
                     media_url=result.get("url"),
                 )
+                if media_type != "video":
+                    result["quota"] = get_image_quota(user_id)
             except Exception as cost_err:
-                current_app.logger.warning(f"[Credits] Could not record media charge: {cost_err}")
+                current_app.logger.warning(f"[Credits] Could not log media generation: {cost_err}")
 
         return jsonify(result)
 
@@ -2246,6 +2312,105 @@ def admin_revoke_invitation(invitation_id):
     if not revoke_invitation(invitation_id):
         return jsonify({"success": False, "error": "Invitation not found or already accepted."}), 404
     return jsonify({"success": True})
+
+
+# ── Image limits & model access ──────────────────────────────────────────
+_heyroute_image_models_cache = {"at": 0.0, "ids": []}
+
+
+def _heyroute_image_models() -> list[str]:
+    """Models the HeyRoute image key may use (cached 10 min) - suggestions for
+    Admin -> Image Settings."""
+    import time
+
+    if time.time() - _heyroute_image_models_cache["at"] < 600:
+        return _heyroute_image_models_cache["ids"]
+    ids: list[str] = []
+    if Config.HEYROUTE_IMAGE_API_KEY:
+        try:
+            import openai
+
+            client = openai.OpenAI(api_key=Config.HEYROUTE_IMAGE_API_KEY, base_url=Config.HEYROUTE_BASE_URL, timeout=15, max_retries=0)
+            ids = sorted(m.id for m in client.models.list().data)
+        except Exception as e:  # noqa: BLE001
+            current_app.logger.warning(f"[Images] Could not list HeyRoute image models: {e}")
+    _heyroute_image_models_cache.update(at=time.time(), ids=ids)
+    return ids
+
+
+@api_bp.route("/me/image-quota", methods=["GET"])
+@login_required_api
+def my_image_quota():
+    """Today's image usage for Studio Chat's "Images today: 1 of 2"."""
+    if not DB_AVAILABLE:
+        return jsonify({"success": True, "quota": None})
+    from db import get_image_quota
+
+    return jsonify({"success": True, "quota": get_image_quota(get_current_user_id())})
+
+
+@api_bp.route("/admin/image-settings", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_get_image_settings():
+    from db import get_image_settings
+
+    return jsonify({"success": True, "settings": get_image_settings(), "available_models": _heyroute_image_models()})
+
+
+@api_bp.route("/admin/image-settings", methods=["PUT"])
+@login_required_api
+@admin_required_api
+def admin_save_image_settings():
+    from db import save_image_settings
+
+    data = request.get_json() or {}
+    try:
+        default_limit = int(data.get("default_limit"))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "Default daily limit must be a whole number."}), 400
+    if default_limit < 0 or default_limit > 10000:
+        return jsonify({"success": False, "error": "Default daily limit must be between 0 and 10000."}), 400
+    models = []
+    for m in data.get("models") or []:
+        model_id = str((m or {}).get("id") or "").strip()[:128]
+        try:
+            price = round(float((m or {}).get("price")), 4)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": f"Enter a price for {model_id or 'each model'}."}), 400
+        if model_id and price >= 0 and not any(x["id"] == model_id for x in models):
+            models.append({"id": model_id, "price": price})
+    if not models:
+        return jsonify({"success": False, "error": "Add at least one image model."}), 400
+    default_model = str(data.get("default_model") or "").strip()
+    if default_model not in [m["id"] for m in models]:
+        return jsonify({"success": False, "error": "The default model must be one of the listed models."}), 400
+    return jsonify({"success": True, "settings": save_image_settings(default_limit, default_model, models)})
+
+
+@api_bp.route("/admin/users/<int:target_user_id>/image-access", methods=["PUT"])
+@login_required_api
+@admin_required_api
+def admin_set_image_access(target_user_id):
+    """limit: null = default, -1 = unlimited, n >= 0 = custom daily limit;
+    model: null = default, else one of the Image Settings models."""
+    from db import IMAGE_UNLIMITED, get_image_quota, get_image_settings, set_user_image_access
+
+    data = request.get_json() or {}
+    limit = data.get("limit")
+    if limit is not None:
+        try:
+            limit = int(limit)
+        except (TypeError, ValueError):
+            return jsonify({"success": False, "error": "The limit must be a whole number."}), 400
+        if limit != IMAGE_UNLIMITED and not 0 <= limit <= 10000:
+            return jsonify({"success": False, "error": "The limit must be between 0 and 10000 images per day."}), 400
+    model = (data.get("model") or "").strip() or None
+    if model and model not in [m["id"] for m in get_image_settings()["models"]]:
+        return jsonify({"success": False, "error": "Choose a model from Image Settings."}), 400
+    if not set_user_image_access(target_user_id, limit, model):
+        return jsonify({"success": False, "error": "User not found"}), 404
+    return jsonify({"success": True, "quota": get_image_quota(target_user_id)})
 
 
 @api_bp.route("/admin/users/<int:target_user_id>/active", methods=["POST"])
