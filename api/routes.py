@@ -2,6 +2,7 @@ import json
 import os
 import re
 import urllib.parse
+import time
 import uuid
 import typing
 from typing import Optional
@@ -20,6 +21,8 @@ from agents.strategy_agent import StrategyAgent
 from agents.vision_agent import VisionAgent
 from auth.utils import admin_required_api, get_current_user_id, login_required_api
 from config import Config
+from services.observability import estimate_tokens, log_event
+from services.prompt_builder import IMAGE_TEXT_RULE, build_image_edit_prompt, build_image_versions_block
 from services.compliance_service import active_rules_for_user, check_caption
 from services.llm_service import LLMService
 from services.memory_service import MemoryService
@@ -127,6 +130,7 @@ def _persist_generated_media(run_id: int | None, platform: str, media_type: str,
         "size": result.get("size"),
         "model": result.get("model"),
         "source_image_url": result.get("source_image_url"),
+        "asset_id": result.get("asset_id"),
     }
     try:
         append_run_media(run_id, platform, media_type, media_payload, user_id=user_id)
@@ -523,6 +527,24 @@ def _quota_after_refine(user_id, targets) -> dict | None:
     return get_image_quota(user_id)
 
 
+def _conversation_for(user_id, data: dict, title: str) -> int | None:
+    """The conversation to save this message into: the client's current one,
+    or a new one. None when it can't be saved - the run is then saved alone."""
+    try:
+        from db import ensure_conversation
+
+        return ensure_conversation(user_id, data.get("conversation_id"), title)
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.warning(f"[DB] Could not get conversation: {e}")
+        return None
+
+
+def _size_wh(size) -> tuple[int | None, int | None]:
+    """ "1024x1024" -> (1024, 1024)."""
+    m = re.match(r"^\s*(\d+)\s*[xX×]\s*(\d+)\s*$", str(size or ""))
+    return (int(m.group(1)), int(m.group(2))) if m else (None, None)
+
+
 def _mark_done_when_finished(futures, on_done):
     """Calls on_done() once, when the last of `futures` finishes (progress
     display for steps that run in parallel)."""
@@ -561,6 +583,7 @@ def generate_content():
     data = request.get_json()
     if not data:
         return jsonify({"error": "Request body required"}), 400
+    started = time.time()
 
     story = data.get("story", "")
     image_path = data.get("image_path")
@@ -1037,6 +1060,9 @@ def generate_content():
                         "image_path": image_path,
                         "image_url": _public_upload_url(image_path),
                     }
+                if data.get("version_of_run_id"):  # Regenerate: another version of that reply
+                    content_to_save.setdefault("_meta", {})["version_of"] = data.get("version_of_run_id")
+                conversation_id = _conversation_for(user_id, data, story)
                 run_id = save_run(
                     story=story,
                     tone=tone,
@@ -1045,8 +1071,17 @@ def generate_content():
                     user_id=user_id,
                     tokens_used=total_tokens,
                     cost_usd=round(total_cost_usd, 6),
+                    conversation_id=conversation_id,
                 )
                 response["run_id"] = run_id
+                response["conversation_id"] = conversation_id
+                log_event(
+                    "generate", conversation_id=conversation_id, run_id=run_id, user_id=user_id,
+                    platforms=platforms, provider="heyroute", status="completed",
+                    context_token_estimate=estimate_tokens(story_prompt, previous_context),
+                    retrieved_memory_count=len(retrieved_memories or []),
+                    latency_ms=int((time.time() - started) * 1000),
+                )
             except Exception as db_err:
                 current_app.logger.warning(f"[DB] Could not save run: {db_err}")
 
@@ -1070,10 +1105,6 @@ def generate_content():
 
 # Shared on-image text discipline: image models misspell small or dense text,
 # so keep it to one short headline and never print stats or citations.
-IMAGE_TEXT_RULE = (
-    "On-image text: at most one short headline (max 8 words) and one short subline, spelled exactly; "
-    "no statistics, percentages, citations, source names or small print."
-)
 
 REFINE_SYSTEM_PROMPT = """You are the Refinement Editor of a social media content studio.
 The user already has a finished post (caption, hashtags, and possibly an image or video) and is sending a
@@ -1099,51 +1130,16 @@ Rules:
   on_image_text, even if the old image had them. When the user reports wrong, garbled or misspelled text,
   always fill this in, and keep it to headline + at most one subline.
 - video_prompt: a concise visual scene description (no dialogue, no on-screen statistics).
+- image_ref: when IMAGE VERSIONS are listed and the user explicitly points at a version other than the
+  ACTIVE one ("the first image", "the original", "the previous version", "the one before the last edit",
+  "go back to #2"), that version's number; otherwise null. "it", "this", "the image" mean the ACTIVE one.
 
 Return ONLY this JSON:
 {"intent": "refine", "targets": ["image"],
  "captions": {"<platform>": "<full revised caption>"},
  "hashtags": {"<platform>": ["#Tag"]},
  "image_instruction": "", "on_image_text": {"headline": "", "subline": ""},
- "video_prompt": "", "change_summary": "<one short sentence describing what changed>"}"""
-
-
-def _build_image_edit_prompt(plan: dict, platform: str, base_media_prompt: str, has_reference: bool) -> str:
-    """Deterministic image prompt for a refinement turn: the planner's literal
-    instruction plus the exact on-image text, so spelling fixes are explicit
-    (the model is told the correct words) instead of "check the spelling"."""
-    instruction = (plan.get("image_instruction") or "").strip()
-    text = plan.get("on_image_text") or {}
-    headline = (text.get("headline") or "").strip()
-    subline = (text.get("subline") or "").strip()
-    # Backstop for the planner rule: a stat line is exactly the dense, easily
-    # garbled (and unsourced-claim) text this path exists to remove.
-    if "%" in subline:
-        subline = ""
-
-    if has_reference:
-        parts = [
-            "Edit the provided image. Keep the layout, composition, color palette, people, vehicles and "
-            "brand elements exactly as they are, except for the change below.",
-            f"Change to make: {instruction}" if instruction else "",
-        ]
-    else:
-        parts = [
-            f"Create a professional {platform.capitalize()} social media image. {base_media_prompt[:800]}",
-            instruction,
-        ]
-
-    if headline:
-        lines = [f'Headline: "{headline}"'] + ([f'Subline: "{subline}"'] if subline else [])
-        parts.append(
-            "The ONLY text allowed on the image is the following, spelled exactly letter for letter:\n"
-            + "\n".join(lines)
-            + "\nRemove every other word, number, statistic, label and small print. "
-            "Use large, clean, high-contrast sans-serif type."
-        )
-    else:
-        parts.append(IMAGE_TEXT_RULE)
-    return "\n\n".join(p for p in parts if p)
+ "video_prompt": "", "image_ref": null, "change_summary": "<one short sentence describing what changed>"}"""
 
 
 @api_bp.route("/refine", methods=["POST"])
@@ -1194,10 +1190,27 @@ def refine_post():
             f"Image: {'exists - generated from: ' + (b.get('image_prompt') or b.get('media_prompt') or '')[:600] if b.get('image_url') else 'none yet'}\n"
             f"Video: {'exists' if b.get('video_url') else 'none yet'}"
         )
+    # The conversation's image versions, so "the first image" / "the previous
+    # version" can be resolved (plan["image_ref"]); "it" = the active image.
+    started = time.time()
+    conv_images, active_image_id = [], None
+    if DB_AVAILABLE and user_id is not None and data.get("conversation_id"):
+        try:
+            from db import conversation_images, get_active_image_id
+
+            conv_images = conversation_images(data.get("conversation_id"), user_id)
+            active_image_id = get_active_image_id(data.get("conversation_id"), user_id)
+        except Exception as img_err:  # noqa: BLE001 - versions are optional context
+            current_app.logger.warning(f"[Images] Could not load image versions: {img_err}")
+    selected_ids = {(base[p] or {}).get("image_asset_id") for p in platforms} - {None}
+    versions_block = build_image_versions_block(
+        conv_images, next(iter(selected_ids)) if len(selected_ids) == 1 else active_image_id
+    )
     user_prompt = (
         f"CONVERSATION SO FAR:\n{data.get('previous_context') or '(none)'}\n\n"
         f"CURRENT POST:\n" + "\n\n".join(post_lines) + "\n\n"
-        f"USER'S SELECTED OUTPUT TYPES: {', '.join(data.get('selected_outputs') or []) or '(none)'}\n\n"
+        + (versions_block + "\n\n" if versions_block else "")
+        + f"USER'S SELECTED OUTPUT TYPES: {', '.join(data.get('selected_outputs') or []) or '(none)'}\n\n"
         f"USER'S FOLLOW-UP MESSAGE: {instruction}"
     )
 
@@ -1217,12 +1230,22 @@ def refine_post():
     plan_hashtags = {str(k).lower(): v for k, v in (plan.get("hashtags") or {}).items()}
     if not targets:
         return jsonify({"error": "Could not tell what to change - try naming the caption, hashtags or image."}), 422
+    # Which image to edit: a version the user named ("the first image") wins
+    # over the version being refined (the active / "Refine this version" one).
+    referenced_image = None
+    try:
+        ref = int(plan.get("image_ref")) if plan.get("image_ref") not in (None, "", 0, "0") else None
+    except (TypeError, ValueError):
+        ref = None
+    if ref and 1 <= ref <= len(conv_images):
+        referenced_image = conv_images[ref - 1]
+    conversation_id = _conversation_for(user_id, data, instruction) if DB_AVAILABLE and user_id is not None else None
+    new_image_ids: list[int] = []  # edits made below, linked to the run once it is saved
     extra_reference = data.get("reference_image_path")
     media_errors = []
     content: dict[str, typing.Any] = {}
     compliance_rules_active = active_rules_for_user(user_id)
     extra_tokens, extra_cost = 0, 0.0
-    image_logs: list[dict] = []  # image edits made below - logged once the run is saved
     from services.brand_logo_service import resolve_logo_path
 
     logo_path = resolve_logo_path(user_id) if targets & {"image", "video"} else None
@@ -1240,6 +1263,7 @@ def refine_post():
                 "url": b["image_url"],
                 "clean_url": b.get("image_clean_url"),
                 "prompt": b.get("image_prompt"),
+                "asset_id": b.get("image_asset_id"),
             }
         if b.get("video_url"):
             entry["media"]["video"] = {"url": b["video_url"]}
@@ -1265,9 +1289,17 @@ def refine_post():
         if "image" in targets and MEDIA_AVAILABLE:
             # Edit the unbranded copy when there is one - the logo is stamped on
             # again afterwards, so the model never redraws or duplicates it
-            base_image = b.get("image_clean_url") or b.get("image_url")
+            from db import get_image_asset, image_lineage
+
+            base_asset = referenced_image or get_image_asset(b.get("image_asset_id"), user_id)
+            if base_asset:
+                base_image = base_asset.get("clean_url") or base_asset.get("url")
+                lineage = image_lineage(base_asset["id"], user_id)
+            else:  # a post from before image versions existed
+                base_image = b.get("image_clean_url") or b.get("image_url")
+                lineage = []
             references = [r for r in (base_image, extra_reference) if r]
-            prompt = _build_image_edit_prompt(plan, p, entry["media_prompt"], bool(base_image))
+            prompt = build_image_edit_prompt(plan, p, entry["media_prompt"], bool(base_image), lineage)
             # An image edit is a full image generation: same daily limit + model
             edit_quota, blocked = _image_quota_or_block(user_id)
             if blocked:
@@ -1280,18 +1312,44 @@ def refine_post():
                     "previous_url": prev.get("url"),
                     "previous_clean_url": prev.get("clean_url"),
                     "previous_prompt": prev.get("prompt"),
+                    "previous_asset_id": base_asset["id"] if base_asset else prev.get("asset_id"),
                 }
                 result = None
+                log_event("image.edit", conversation_id=conversation_id, platform=p, status="blocked_limit",
+                          parent_asset_id=base_asset["id"] if base_asset else None)
             else:
                 result = media_service.edit_image(
                     prompt, p, references or None, logo_path=logo_path, model=edit_quota["model"] if edit_quota else None
                 )
             if result and result.get("success"):
                 extra_cost += float(result.get("cost") or 0)
-                image_logs.append(
-                    {"cost": float(result.get("cost") or 0), "platform": p, "url": result.get("url"),
-                     "model": result.get("model_id") or (edit_quota["model"] if edit_quota else None),
-                     "description": prompt}
+                # The edit is a new version of the image it started from (a
+                # second edit of an older version branches; nothing is replaced)
+                asset_id = None
+                if DB_AVAILABLE and user_id is not None:
+                    try:
+                        from db import log_image_generation
+
+                        width, height = _size_wh(result.get("size"))
+                        asset_id = log_image_generation(
+                            user_id, float(result.get("cost") or 0), run_id=None, kind="edit", platform=p,
+                            model=result.get("model_id") or (edit_quota["model"] if edit_quota else None),
+                            description=prompt, media_url=result.get("url"),
+                            conversation_id=conversation_id,
+                            parent_id=base_asset["id"] if base_asset else None,
+                            prompt=prompt, edit_instruction=plan.get("image_instruction") or instruction,
+                            clean_url=result.get("clean_url"), width=width, height=height,
+                        )
+                        new_image_ids.append(asset_id)
+                    except Exception as log_err:  # noqa: BLE001 - the edit itself succeeded
+                        current_app.logger.warning(f"[Images] Could not log image edit: {log_err}")
+                log_event(
+                    "image.edit", conversation_id=conversation_id, asset_id=asset_id, platform=p,
+                    parent_asset_id=base_asset["id"] if base_asset else None,
+                    root_asset_id=lineage[0]["id"] if lineage else None,
+                    referenced_by_user=bool(referenced_image), provider="heyroute",
+                    model=result.get("model_id"), status="completed",
+                    context_token_estimate=estimate_tokens(prompt),
                 )
                 entry["media"]["image"] = {
                     "url": result["url"],
@@ -1299,10 +1357,15 @@ def refine_post():
                     "prompt": result.get("prompt"),
                     "resolution": result.get("size"),
                     "model": result.get("model"),
+                    "asset_id": asset_id,
+                    "parent_asset_id": base_asset["id"] if base_asset else None,
                 }
                 entry["media_prompt"] = prompt
             elif result is not None:
                 media_errors.append(f"{p} image: {result.get('error')}")
+                log_event("image.edit", conversation_id=conversation_id, platform=p, status="failed",
+                          parent_asset_id=base_asset["id"] if base_asset else None,
+                          error=str(result.get("error"))[:200])
 
         if "video" in targets and MEDIA_AVAILABLE and plan.get("video_prompt"):
             image_media = entry["media"].get("image") or {}
@@ -1342,6 +1405,8 @@ def refine_post():
             content_to_save: dict[str, typing.Any] = dict(content)
             content_to_save["_agents"] = agents_executed
             content_to_save["_meta"] = {"refined_from_run_id": data.get("base_run_id")}
+            if data.get("version_of_run_id"):  # Regenerate of a refinement
+                content_to_save["_meta"]["version_of"] = data.get("version_of_run_id")
             run_id = save_run(
                 story=instruction,
                 tone=tone,
@@ -1350,22 +1415,25 @@ def refine_post():
                 user_id=user_id,
                 tokens_used=usage.get("total_tokens", 0),
                 cost_usd=usage.get("cost_usd", 0.0),
+                conversation_id=conversation_id,
             )
         except Exception as db_err:
             current_app.logger.warning(f"[DB] Could not save refinement run: {db_err}")
-    # Edits count toward today's image limit; their cost is already in the run's
-    # cost (extra_cost), so they're logged against the run, not charged again
-    if image_logs and DB_AVAILABLE and user_id is not None:
+    # The edits' cost is already in the run's cost (extra_cost): linking them to
+    # the run stops them counting as separate charges
+    if new_image_ids and run_id:
         try:
-            from db import log_image_generation
+            from db import attach_images_to_run
 
-            for log in image_logs:
-                log_image_generation(
-                    user_id, log["cost"], run_id=run_id, kind="edit", platform=log["platform"],
-                    model=log["model"], description=log["description"], media_url=log["url"],
-                )
-        except Exception as log_err:
-            current_app.logger.warning(f"[Images] Could not log image edits: {log_err}")
+            attach_images_to_run(new_image_ids, run_id, user_id)
+        except Exception as link_err:  # noqa: BLE001 - the row stays a charge of its own
+            current_app.logger.warning(f"[Images] Could not link image edits to run {run_id}: {link_err}")
+    log_event(
+        "refine", conversation_id=conversation_id, run_id=run_id, targets=sorted(targets),
+        image_ref=ref, active_asset_id=active_image_id, new_asset_ids=new_image_ids or None,
+        status="completed", context_token_estimate=estimate_tokens(user_prompt),
+        latency_ms=int((time.time() - started) * 1000),
+    )
 
     return jsonify(
         {
@@ -1380,11 +1448,93 @@ def refine_post():
             "media_errors": media_errors,
             # Studio Chat updates "Images today" and the Generate button from this
             "image_quota": _quota_after_refine(user_id, targets),
+            "conversation_id": conversation_id,
         }
     )
 
 
 # ── History Endpoints ──────────────────────────────────────────────────────
+
+
+# ── Conversations (Studio Chat threads) ────────────────────────────────
+
+
+@api_bp.route("/conversations", methods=["GET"])
+@login_required_api
+def conversations_list():
+    """The sidebar: one entry per conversation, most recent first."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import list_conversations
+
+    limit = min(int(request.args.get("limit", 30)), 100)
+    archived = request.args.get("archived", "false").lower() == "true"
+    rows = list_conversations(get_current_user_id(), limit=limit, archived=archived)
+    return jsonify({"success": True, "conversations": rows, "count": len(rows)})
+
+
+@api_bp.route("/conversations/<int:conversation_id>", methods=["GET"])
+@login_required_api
+def conversation_detail(conversation_id):
+    """Every message (run) of the conversation, oldest first, to replay it."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import get_conversation
+
+    data = get_conversation(conversation_id, get_current_user_id())
+    if not data:
+        return jsonify({"error": "Conversation not found"}), 404
+    return jsonify({"success": True, **data})
+
+
+@api_bp.route("/conversations/<int:conversation_id>/archive", methods=["POST"])
+@login_required_api
+def conversation_archive(conversation_id):
+    from db import set_conversation_archived
+
+    if not DB_AVAILABLE or not set_conversation_archived(conversation_id, get_current_user_id(), True):
+        return jsonify({"error": "Conversation not found"}), 404
+    return jsonify({"success": True, "is_archived": True})
+
+
+@api_bp.route("/conversations/<int:conversation_id>/unarchive", methods=["POST"])
+@login_required_api
+def conversation_unarchive(conversation_id):
+    from db import set_conversation_archived
+
+    if not DB_AVAILABLE or not set_conversation_archived(conversation_id, get_current_user_id(), False):
+        return jsonify({"error": "Conversation not found"}), 404
+    return jsonify({"success": True, "is_archived": False})
+
+
+@api_bp.route("/conversations/<int:conversation_id>/active-image", methods=["POST"])
+@login_required_api
+def conversation_active_image(conversation_id):
+    """The user picked an image version ("Refine this version") - "it" and
+    "this" now mean that image, also after a refresh."""
+    from db import set_active_image
+
+    image_id = (request.get_json(silent=True) or {}).get("image_id")
+    try:
+        image_id = int(image_id)
+    except (TypeError, ValueError):
+        return jsonify({"error": "image_id is required"}), 400
+    if not DB_AVAILABLE or not set_active_image(conversation_id, get_current_user_id(), image_id):
+        return jsonify({"error": "Image not found in this conversation"}), 404
+    log_event("image.select", conversation_id=conversation_id, active_asset_id=image_id)
+    return jsonify({"success": True, "active_image_id": image_id})
+
+
+@api_bp.route("/images/<int:image_id>/lineage", methods=["GET"])
+@login_required_api
+def image_lineage_route(image_id):
+    """An image and its earlier versions, original first."""
+    from db import image_lineage
+
+    chain = image_lineage(image_id, get_current_user_id()) if DB_AVAILABLE else []
+    if not chain:
+        return jsonify({"error": "Image not found"}), 404
+    return jsonify({"success": True, "lineage": chain})
 
 
 @api_bp.route("/history", methods=["GET"])
@@ -1705,6 +1855,39 @@ def generate_media():
 
         if image_path:
             result["source_image_url"] = _public_upload_url(image_path)
+        if user_id is not None and result.get("success") and DB_AVAILABLE:
+            # Log it: counts toward today's image limit; without a run (e.g.
+            # Analysis Dashboard) this row is also the charge for it. Its id is
+            # the image's asset id - saved with the post, so an edit knows
+            # which image it starts from (image versions).
+            try:
+                from db import get_image_quota, log_image_generation
+
+                width, height = _size_wh(result.get("size") or result.get("resolution"))
+                result["asset_id"] = log_image_generation(
+                    user_id,
+                    float(result.get("cost") or 0),
+                    run_id=run_id or None,
+                    kind="video" if media_type == "video" else "image",
+                    platform=platform,
+                    model=result.get("model_id") or (quota["model"] if quota else None),
+                    description=(image_prompt or video_prompt or caption)[:300],
+                    media_url=result.get("url"),
+                    prompt=caption_to_use,
+                    clean_url=result.get("clean_url"),
+                    width=width,
+                    height=height,
+                )
+                if media_type != "video":
+                    result["quota"] = get_image_quota(user_id)
+                log_event(
+                    "image.generate" if media_type != "video" else "video.generate",
+                    run_id=run_id, asset_id=result["asset_id"], platform=platform, provider="heyroute",
+                    model=result.get("model_id"), status="completed",
+                    context_token_estimate=estimate_tokens(caption_to_use),
+                )
+            except Exception as cost_err:
+                current_app.logger.warning(f"[Credits] Could not log media generation: {cost_err}")
         if run_id:
             result["run_id"] = run_id
             if user_id is not None:
@@ -1716,26 +1899,9 @@ def generate_media():
                         add_run_cost(run_id, float(result.get("cost") or 0), user_id)
                     except Exception as cost_err:
                         current_app.logger.warning(f"[Credits] Could not record media cost: {cost_err}")
-        if user_id is not None and result.get("success") and DB_AVAILABLE:
-            # Log it: counts toward today's image limit; without a run (e.g.
-            # Analysis Dashboard) this row is also the charge for it
-            try:
-                from db import get_image_quota, log_image_generation
-
-                log_image_generation(
-                    user_id,
-                    float(result.get("cost") or 0),
-                    run_id=run_id or None,
-                    kind="video" if media_type == "video" else "image",
-                    platform=platform,
-                    model=result.get("model_id") or (quota["model"] if quota else None),
-                    description=(image_prompt or video_prompt or caption)[:300],
-                    media_url=result.get("url"),
-                )
-                if media_type != "video":
-                    result["quota"] = get_image_quota(user_id)
-            except Exception as cost_err:
-                current_app.logger.warning(f"[Credits] Could not log media generation: {cost_err}")
+        elif not result.get("success"):
+            log_event("image.generate", run_id=run_id, platform=platform, status="failed",
+                      error=str(result.get("error"))[:200])
 
         return jsonify(result)
 
