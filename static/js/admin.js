@@ -744,11 +744,24 @@ $(document).ready(function () {
         const available = window._availableImageModels || [];
         $('#imgAvailableModels').html(available.map(id => `<option value="${escapeAttr(id)}">`).join(''));
         $('#imgAvailableHint').text(available.length
-            ? `Your HeyRoute image key can use: ${available.join(', ')}.`
+            ? `Image models on your HeyRoute image key: ${available.join(', ')}. Other models on the key are text models and can't make images.`
             : 'Type the HeyRoute model id exactly as HeyRoute lists it.');
         $('#imgSettingsError').addClass('d-none');
         syncRemoveButtons();
+        flagNonImageModels();
     }
+
+    // Red outline + tooltip on a model the image key can't make images with
+    function flagNonImageModels() {
+        const available = window._availableImageModels || [];
+        $('#imgModelsTbody .img-model-id').each(function () {
+            const id = $(this).val().trim();
+            const bad = available.length && id && !available.includes(id);
+            $(this).toggleClass('is-invalid', !!bad)
+                .attr('title', bad ? `${id} can't make images on your HeyRoute image key - remove it or pick an image model.` : '');
+        });
+    }
+    $(document).on('input change', '#imgModelsTbody .img-model-id', flagNonImageModels);
 
     window.addImageModelRow = function () {
         $('#imgModelsTbody').append(modelRowHtml({ id: '', price: '' }, false));

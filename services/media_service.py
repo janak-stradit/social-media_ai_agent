@@ -708,6 +708,14 @@ class MediaGenerationService:
                 timeout=300,
             )
         if not resp.ok:
+            # A model the image key can't use (e.g. a text model picked in Image
+            # Settings): HeyRoute refuses it before generating anything, so make
+            # the image with the default model instead of failing the user.
+            if resp.status_code == 404 and "model_not_found" in resp.text and model != Config.HEYROUTE_IMAGE_MODEL:
+                print(f"[Media Service] HeyRoute image key can't use model {model!r}; using {Config.HEYROUTE_IMAGE_MODEL!r} instead")
+                return self._generate_image_heyroute(
+                    prompt, platform, size, image_path, square=square, model=Config.HEYROUTE_IMAGE_MODEL
+                )
             raise RuntimeError(f"HeyRoute image request failed: {resp.status_code} - {resp.text[:300]}")
 
         item = ((self._heyroute_image_payload(resp) or {}).get("data") or [{}])[0]
