@@ -41,6 +41,21 @@ logger = logging.getLogger(__name__)
 http_logger = logging.getLogger("avir.http")
 
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{6,64}$")
+# Pages search engines may index (see sitemap.xml); every other page gets
+# X-Robots-Tag: noindex - they're behind login or one-off (reset links etc.)
+_INDEXABLE_PATHS = ("/", "/signup", "/login")
+
+
+def _site_url() -> str:
+    """Public base URL for canonical links and the sitemap: APP_BASE_URL, else
+    this request's host with the scheme nginx saw (https in production)."""
+    from config import Config
+
+    if Config.APP_BASE_URL:
+        return Config.APP_BASE_URL.rstrip("/")
+    scheme = request.headers.get("X-Forwarded-Proto", request.scheme)
+    return f"{scheme}://{request.host}"
+
 # Logged at DEBUG (hidden at the default INFO): assets, health checks and the
 # once-a-second generation progress polling - they drown out real traffic
 _QUIET_PREFIXES = ("/static/", "/favicon.ico", "/api/generate/progress/", "/api/health")
@@ -70,6 +85,8 @@ def _install_request_logging(app: Flask) -> None:
         request_id = getattr(g, "request_id", None)
         if request_id:
             response.headers["X-Request-ID"] = request_id
+        if response.mimetype == "text/html" and request.path not in _INDEXABLE_PATHS:
+            response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
         started = getattr(g, "request_started", None)
         duration_ms = int((time.perf_counter() - started) * 1000) if started else -1
         path, status = request.path, response.status_code
@@ -301,7 +318,7 @@ def create_app(config_name="development"):
     def landing_page():
         if get_current_user_id():
             return redirect(url_for("index"))
-        return render_template("landing.html")
+        return render_template("landing.html", site_url=_site_url())
 
     @app.route("/logout")
     def logout_route():
@@ -323,7 +340,38 @@ def create_app(config_name="development"):
 
     @app.route("/favicon.ico")
     def favicon():
-        return "", 204
+        return send_from_directory(app.static_folder, "favicon.ico", mimetype="image/vnd.microsoft.icon", max_age=86400)
+
+    @app.route("/robots.txt")
+    def robots_txt():
+        site = _site_url()
+        body = "\n".join([
+            "User-agent: *",
+            "Allow: /",
+            # API responses and user-generated media are not content to index
+            "Disallow: /api/",
+            "Disallow: /static/uploads/",
+            "",
+            f"Sitemap: {site}/sitemap.xml",
+            "",
+        ])
+        return app.response_class(body, mimetype="text/plain", headers={"Cache-Control": "public, max-age=3600"})
+
+    @app.route("/sitemap.xml")
+    def sitemap_xml():
+        site = _site_url()
+        # lastmod = when the landing page itself last changed (its file in this build)
+        stamp = os.path.getmtime(os.path.join(app.root_path, "templates", "landing.html"))
+        lastmod = time.strftime("%Y-%m-%d", time.gmtime(stamp))
+        pages = [("/", "weekly", "1.0"), ("/signup", "monthly", "0.8"), ("/login", "monthly", "0.5")]
+        urls = "".join(
+            f"<url><loc>{site}{path}</loc><lastmod>{lastmod}</lastmod>"
+            f"<changefreq>{freq}</changefreq><priority>{prio}</priority></url>"
+            for path, freq, prio in pages
+        )
+        body = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+                f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{urls}</urlset>\n')
+        return app.response_class(body, mimetype="application/xml", headers={"Cache-Control": "public, max-age=3600"})
 
     @app.errorhandler(413)
     def too_large(e):
