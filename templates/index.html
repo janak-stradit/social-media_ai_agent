@@ -280,6 +280,10 @@
                     </div>
                 </div>
 
+                <!-- Image command chosen from the "/" menu (e.g. /metaad) -->
+                <div class="preset-bar d-none" id="presetBar" aria-live="polite"></div>
+                <div class="slash-menu d-none" id="slashMenu" role="listbox" aria-label="Image commands"></div>
+
                 <!-- Shown while Generate is off because today's images are used up -->
                 <div class="image-limit-dock-note d-none" id="imageLimitDockNote" role="status"></div>
 
@@ -300,7 +304,7 @@
 
                     <!-- Text Area -->
                     <textarea id="storyInput" class="chat-textarea" rows="1"
-                        placeholder="Describe your story, campaign brief, or product launch... (Shift + Enter for new line)"></textarea>
+                        placeholder="Describe your post, or type / for image commands like /metaad (Shift + Enter for a new line)"></textarea>
                     
                     <!-- Controls -->
                     <div class="chat-actions-group">

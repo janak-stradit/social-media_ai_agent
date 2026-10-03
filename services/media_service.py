@@ -26,6 +26,49 @@ logger = logging.getLogger(__name__)
 _PROMPT_LIMIT = 2000  # kie.ai's prompt cap (see _generate_image_kie)
 
 
+def _strip_corner_patch(img):
+    """Some HeyRoute images come back with a flat white rectangle pasted over
+    one corner (where the image model's visible watermark sits). Trims the
+    image just past it. Strict on purpose, so a genuinely white background
+    (e.g. a catalog shot) is never trimmed: the block must be pure, flat white
+    with clearly non-white image right next to it."""
+    import statistics
+
+    gray = img.convert("L")
+    w, h = gray.size
+    px = gray.load()
+    for right in (True, False):
+        for bottom in (True, False):
+            cx, cy = (w - 3 if right else 2), (h - 3 if bottom else 2)  # just inside the edge (JPEG borders)
+            step_x, step_y = (-1 if right else 1), (-1 if bottom else 1)
+            x = cx
+            while 0 < x < w - 1 and px[x, cy] > 245:
+                x += step_x
+            y = cy
+            while 0 < y < h - 1 and px[cx, y] > 245:
+                y += step_y
+            bw, bh = abs(x - cx), abs(y - cy)
+            if not (0.03 * w <= bw <= 0.25 * w and 0.03 * h <= bh <= 0.25 * h):
+                continue
+            xs = range(min(x, cx) + 1, max(x, cx)) if right else range(cx, x)
+            ys = range(min(y, cy) + 1, max(y, cy)) if bottom else range(cy, y)
+            inside = [px[i, j] for i in xs[::3] for j in ys[::3]]
+            beside = [px[x + step_x * k, j] for k in range(1, 6) for j in ys[::3] if 0 <= x + step_x * k < w]
+            above = [px[i, y + step_y * k] for k in range(1, 6) for i in xs[::3] if 0 <= y + step_y * k < h]
+            if not inside or not beside or not above:
+                continue
+            if statistics.mean(inside) < 250 or statistics.pstdev(inside) > 4:
+                continue
+            if statistics.mean(beside) > 235 or statistics.mean(above) > 235:
+                continue  # white continues past it: a real white background, leave it
+            pad_x, pad_y = bw + 3, bh + 3
+            box = (0 if right else pad_x, 0 if bottom else pad_y, w - pad_x if right else w, h - pad_y if bottom else h)
+            logger.warning(f"Removed a {bw}x{bh} white patch from the {'bottom' if bottom else 'top'}-"
+                           f"{'right' if right else 'left'} corner of a generated image")
+            return img.crop(box)
+    return img
+
+
 def _image_price(model: str | None) -> float:
     """Price per image for `model` from Admin -> Image Settings (falls back to
     HEYROUTE_IMAGE_COST_USD when the database isn't available)."""
@@ -511,7 +554,7 @@ class MediaGenerationService:
 
         try:
             with Image.open(io.BytesIO(img_data)) as img:
-                img = img.convert("RGB")
+                img = _strip_corner_patch(img.convert("RGB"))
                 img.thumbnail((max_side, max_side), Image.LANCZOS)
                 local_filename = f"gen_{platform}_{uuid.uuid4().hex[:8]}.jpg"
                 img.save(os.path.join(self.upload_folder, local_filename), format="JPEG", quality=90, optimize=True)
@@ -519,6 +562,66 @@ class MediaGenerationService:
         except Exception as err:  # never lose the image over compression
             logger.warning(f"Could not compress image, keeping original: {err}")
             return self._save_image_bytes(img_data, platform)[0]
+
+    def _fit_to_aspect(self, local_path: str, aspect: str) -> tuple[int, int]:
+        """Crops (centre) and resizes a saved image to the exact size for an
+        aspect ratio - e.g. 1080x1920 for a 9:16 story, which Meta requires.
+        The image model only treats the requested shape as a hint. Runs
+        before the logo is stamped, so the logo is never cut off."""
+        from PIL import Image
+
+        from services.image_presets import ASPECT_SIZES
+
+        target_w, target_h = ASPECT_SIZES[aspect]
+        with Image.open(local_path) as img:
+            img = img.convert("RGB")
+            w, h = img.size
+            target_ratio, ratio = target_w / target_h, w / h
+            if abs(ratio - target_ratio) / target_ratio > 0.02:
+                if ratio > target_ratio:  # too wide: trim the sides
+                    new_w = round(h * target_ratio)
+                    left = (w - new_w) // 2
+                    img = img.crop((left, 0, left + new_w, h))
+                else:  # too tall: trim top and bottom
+                    new_h = round(w / target_ratio)
+                    top = (h - new_h) // 2
+                    img = img.crop((0, top, w, top + new_h))
+            img = img.resize((target_w, target_h), Image.LANCZOS)
+            img.save(local_path, format="JPEG", quality=90, optimize=True)
+        return target_w, target_h
+
+    @mirror_to_s3
+    def create_preset_image(
+        self, prompt: str, image_path: str, aspect: str, logo_path: str | None = None, model: str | None = None
+    ) -> dict:
+        """One image for a Studio Chat image command (/3dbillboard, /metaad, ...):
+        the product photo is the reference, the result is cropped to the exact
+        size for `aspect`, then the real logo is stamped on when logo_path is set."""
+        if getattr(Config, "USE_MOCK_LLM", False):
+            return self._generate_mock_media("instagram", "image", prompt)
+        references = self._resolve_image_paths(image_path)
+        if not references:
+            return {"success": False, "type": "image", "error": "The product photo could not be found - attach it again."}
+        try:
+            result = self._generate_image_primary(_with_no_logo_rule(prompt), "preset", "1024x1024", references, model=model)
+            local = os.path.join(self.upload_folder, os.path.basename(result["url"]))
+            width, height = self._fit_to_aspect(local, aspect)
+        except Exception as e:  # noqa: BLE001 - reported to the user per image
+            return {"success": False, "type": "image", "error": str(e)}
+        return {
+            "success": True,
+            "type": "image",
+            "url": result["url"],
+            "prompt": result["prompt"],
+            "size": f"{width}x{height}",
+            "width": width,
+            "height": height,
+            "aspect": aspect,
+            "cost": result.get("cost", 0.0),
+            "model": result.get("model"),
+            "model_id": result.get("model_id"),
+            **self._stamp_logo(result["url"], logo_path),
+        }
 
     def _save_image_bytes(self, img_data: bytes, platform: str) -> tuple[str, str]:
         local_filename = f"gen_{platform}_{uuid.uuid4().hex[:8]}.png"
@@ -645,23 +748,60 @@ class MediaGenerationService:
 
     @staticmethod
     def _heyroute_image_payload(resp) -> dict:
-        """The {"data": [...]} payload from a JSON or SSE images response."""
+        """The {"data": [...]} payload from a JSON or streamed (SSE) images
+        response. Streams differ by model: "event: completed" with the whole
+        payload, or OpenAI-style "image_generation.completed" events carrying
+        b64_json directly. Partial-image events are skipped."""
         content_type = resp.headers.get("Content-Type", "")
-        if "text/event-stream" not in content_type:
+        if "text/event-stream" not in content_type and not resp.text.lstrip().startswith(("event:", "data:")):
             return resp.json()
         import json as _json
 
-        event = None
+        def normalized(obj: dict) -> dict:
+            return obj if obj.get("data") else {"data": [{"b64_json": obj.get("b64_json"), "url": obj.get("url")}]}
+
+        event, final = None, None
         for line in resp.text.splitlines():
-            if line.startswith("event: "):
-                event = line[len("event: "):].strip()
-            elif line.startswith("data: "):
-                data = line[len("data: "):]
-                if event == "error":
-                    raise RuntimeError(f"HeyRoute image error: {data[:300]}")
-                if event == "completed":
-                    return _json.loads(data)
-        raise RuntimeError("HeyRoute image stream ended without a completed event.")
+            if line.startswith("event:"):
+                event = line[len("event:"):].strip()
+                continue
+            if not line.startswith("data:"):
+                continue
+            data = line[len("data:"):].strip()
+            if not data or data == "[DONE]":
+                continue
+            try:
+                obj = _json.loads(data)
+            except ValueError:
+                continue
+            if not isinstance(obj, dict):
+                continue
+            kind = f"{event or ''} {obj.get('type') or ''}"
+            if "error" in kind or obj.get("error"):
+                raise RuntimeError(f"HeyRoute image error: {data[:300]}")
+            if "partial" in kind:
+                continue
+            if obj.get("data") or obj.get("b64_json") or obj.get("url"):
+                final = normalized(obj)
+                if "completed" in kind:
+                    return final
+        if final:
+            return final
+        raise RuntimeError("HeyRoute image stream ended without an image.")
+
+    @staticmethod
+    def _heyroute_error_text(resp) -> str:
+        """A readable reason for a failed image request - never a Cloudflare
+        HTML error page dumped into the chat."""
+        status = resp.status_code
+        if status in (522, 524, 504):
+            return f"HeyRoute took too long to create the image (timeout {status}). Please try again."
+        if status in (502, 503, 520, 521, 523):
+            return f"HeyRoute's image service is temporarily unavailable ({status}). Please try again in a minute."
+        text = resp.text or ""
+        if "<html" in text[:300].lower():
+            return f"HeyRoute image request failed ({status})."
+        return f"HeyRoute image request failed: {status} - {text[:300]}"
 
     def _generate_image_heyroute(
         self,
@@ -688,9 +828,12 @@ class MediaGenerationService:
         base = Config.HEYROUTE_BASE_URL
 
         def send(plain: bool = False):
+            # Streamed: HeyRoute is behind Cloudflare, which cuts a reply that
+            # hasn't started within 100 s (HTTP 524) - slow images (detailed
+            # scenes, pro models) used to fail that way. A stream starts at once.
             # plain=True: just model + prompt. Some models (e.g. gpt-image-2.5)
             # reject the extra n/stream fields with 400 invalid_request.
-            extra = {} if plain else {"n": 1, "stream": False}
+            extra = {} if plain else {"n": 1, "stream": True}
             if references:
                 files = []
                 try:
@@ -729,7 +872,8 @@ class MediaGenerationService:
                 return self._generate_image_heyroute(
                     prompt, platform, size, image_path, square=square, model=Config.HEYROUTE_IMAGE_MODEL
                 )
-            raise RuntimeError(f"HeyRoute image request failed: {resp.status_code} - {resp.text[:300]}")
+            logger.warning(f"HeyRoute image request failed: {resp.status_code} model={model} - {resp.text[:200]!r}")
+            raise RuntimeError(self._heyroute_error_text(resp))
 
         item = ((self._heyroute_image_payload(resp) or {}).get("data") or [{}])[0]
         original_url = item.get("url")
@@ -1428,9 +1572,11 @@ class MediaGenerationService:
         image_path: str | list[str] | None = None,
         logo_path: str | None = None,
         model: str | None = None,
+        aspect: str | None = None,
     ) -> dict:
         """
         Surgical follow-up edit of an existing image (Studio Chat refinement).
+        aspect ("9:16", ...): keep an image command's exact size (see _fit_to_aspect).
         Unlike generate_image(), the prompt is sent verbatim - no headline or
         "preserve facial features" wrapping - so a precise edit instruction
         ("replace the headline with exactly ...") isn't diluted. Uses kie.ai's
@@ -1446,6 +1592,9 @@ class MediaGenerationService:
             result = self._generate_image_primary(
                 _with_no_logo_rule(prompt), platform, size, self._resolve_image_paths(image_path), model=model
             )
+            if aspect:
+                width, height = self._fit_to_aspect(os.path.join(self.upload_folder, os.path.basename(result["url"])), aspect)
+                size = f"{width}x{height}"
         except Exception as e:
             return {"success": False, "type": "image", "platform": platform, "error": str(e)}
 

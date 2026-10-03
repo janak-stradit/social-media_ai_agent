@@ -1,4 +1,4 @@
-"""Upcoming US holidays and Indian festivals, surfaced as a distinct
+"""Upcoming US holidays, Indian festivals and UAE national days, surfaced as a distinct
 "Festive" category of Suggested Storyline - seasonal/greeting content ideas,
 independent of competitor posts. Computed live (deterministic, no LLM call
 needed for the calendar itself), not persisted.
@@ -28,6 +28,21 @@ US_FIXED_HOLIDAYS = [
     ("New Year's Day", 1, 1),
     ("Independence Day", 7, 4),
 ]
+
+
+# Fixed-date UAE/GCC days. Islamic festivals (Ramadan, Eid al-Fitr, Eid al-Adha)
+# are deliberately not listed: their dates depend on moon sighting, so they're
+# only used when the user names them (e.g. "/festive Eid").
+UAE_FIXED_HOLIDAYS = [
+    ("UAE National Day", 12, 2),
+]
+
+# Solemn / civic days that make poor product celebrations (still listed as
+# storyline ideas, but never picked automatically for a /festive image)
+NOT_CELEBRATIONS = {"Columbus Day", "Veterans Day"}
+
+# Brand profile regions (compliance_regions / regions_detected) -> calendar regions
+PROFILE_REGION_MAP = {"US": "USA", "India": "India", "UAE/GCC": "UAE"}
 
 
 def _nth_weekday(year: int, month: int, weekday: int, n: int) -> date:
@@ -67,6 +82,10 @@ def get_upcoming_festivals(days_ahead: int = 60, today: date | None = None) -> l
     for name, d in INDIAN_FESTIVALS_2026:
         candidates.append((name, d, "India"))
 
+    for name, month, day in UAE_FIXED_HOLIDAYS:
+        for year in (today.year, today.year + 1):
+            candidates.append((name, date(year, month, day), "UAE"))
+
     upcoming = [
         {
             "name": name,
@@ -79,3 +98,16 @@ def get_upcoming_festivals(days_ahead: int = 60, today: date | None = None) -> l
     ]
     upcoming.sort(key=lambda f: f["date"])
     return upcoming
+
+
+def next_celebration(profile_regions: list[str] | None = None, today: date | None = None, days_ahead: int = 120) -> dict | None:
+    """The next upcoming celebration for a /festive image: in the brand's
+    markets when the brand profile names them, else in any market. Skips
+    solemn/civic days. None when nothing is coming up."""
+    upcoming = [f for f in get_upcoming_festivals(days_ahead, today) if f["name"] not in NOT_CELEBRATIONS]
+    wanted = {PROFILE_REGION_MAP[r] for r in (profile_regions or []) if r in PROFILE_REGION_MAP}
+    if wanted:
+        preferred = [f for f in upcoming if f["region"] in wanted]
+        if preferred:
+            return preferred[0]
+    return upcoming[0] if upcoming else None

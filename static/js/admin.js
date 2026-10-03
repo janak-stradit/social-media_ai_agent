@@ -831,6 +831,7 @@ $(document).ready(function () {
         if ($('#imageLightbox').hasClass('show')) { $('#imageLightbox').removeClass('show'); return; }
         if ($('#runDetailsPanel').hasClass('open')) closeRunDetails();
         if ($('#imageAccessPanel').hasClass('open')) closeImageAccessPanel();
+        if ($('#presetEditPanel').hasClass('open')) closePresetEditor();
     });
 
     // ── Image limits & model access ────────────────────────────────────
@@ -1026,6 +1027,138 @@ $(document).ready(function () {
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.click(); }
     });
 
+    // ── Image Settings -> Image commands (/3dbillboard, /metaad, ...) ─────
+    window._adminPresets = [];
+    let presetEditingId = null;
+
+    window.loadAdminPresets = function () {
+        $.getJSON('/api/admin/image-presets').done(function (r) {
+            window._adminPresets = r.presets || [];
+            renderAdminPresets();
+        }).fail(function () {
+            $('#presetAdminList').html('<div class="small text-danger">Could not load the image commands.</div>');
+        });
+    };
+
+    function renderAdminPresets() {
+        $('#presetAdminList').html(window._adminPresets.map(p => {
+            const sizes = p.sizes.join(', ') + (p.all_sizes.length ? ` (or all ${p.all_sizes.length} sizes)` : '');
+            return `
+                <div class="preset-admin-row${p.enabled ? '' : ' off'}">
+                    <div class="preset-admin-icon"><i class="fas ${escapeAttr(p.icon)}"></i></div>
+                    <div class="preset-admin-main">
+                        <div class="preset-admin-title"><code>${escapeHtml(p.command)}</code>${escapeHtml(p.label)}${p.customized.some(f => f !== 'enabled') ? '<span class="preset-admin-tag" title="Name, description, hint, prompt or logo setting changed from the built-in version">Customized</span>' : ''}</div>
+                        <div class="preset-admin-desc">${escapeHtml(p.description)}</div>
+                        <div class="preset-admin-meta">${escapeHtml(sizes)}${p.ad_copy ? ' · ad copy' : ''} · ${p.stamp_logo ? 'logo stamped' : 'no logo'}${p.enabled ? '' : ' · <strong>Off - hidden from users</strong>'}</div>
+                    </div>
+                    <label class="preset-switch" title="${p.enabled ? 'On - users see it in the / menu' : 'Off - hidden from users'}">
+                        <input type="checkbox" ${p.enabled ? 'checked' : ''} data-preset-toggle="${escapeAttr(p.id)}" aria-label="${escapeAttr(p.command)} on or off"><span></span>
+                    </label>
+                    <button type="button" class="btn-xs btn-xs-outline-neutral" data-preset-edit="${escapeAttr(p.id)}"><i class="fas fa-pen me-1"></i>Edit</button>
+                </div>`;
+        }).join('') || '<div class="small text-muted">No image commands.</div>');
+    }
+
+    function replacePreset(updated) {
+        window._adminPresets = window._adminPresets.map(p => p.id === updated.id ? updated : p);
+        renderAdminPresets();
+    }
+
+    $(document).on('change', '[data-preset-toggle]', function () {
+        const id = $(this).data('preset-toggle');
+        const on = this.checked;
+        $.ajax({
+            url: `/api/admin/image-presets/${encodeURIComponent(id)}`, type: 'PUT', contentType: 'application/json',
+            data: JSON.stringify({ enabled: on }),
+            success: function (r) {
+                replacePreset(r.preset);
+                showToast(`/${id} is now ${on ? 'on' : 'off'} for everyone.`, on ? 'success' : 'info');
+            },
+            error: function (xhr) {
+                showToast((xhr.responseJSON || {}).error || 'Could not change the command.', 'error');
+                renderAdminPresets();  // back to the saved state
+            }
+        });
+    });
+    $(document).on('click', '[data-preset-edit]', function () { openPresetEditor($(this).data('preset-edit')); });
+
+    function fillPresetEditor(p) {
+        $('#presetEditTitle').html(`<i class="fas ${escapeAttr(p.icon)} text-primary me-2"></i>${escapeHtml(p.command)}`);
+        $('#presetLabelInput').val(p.label);
+        $('#presetDescInput').val(p.description);
+        $('#presetHintInput').val(p.placeholder);
+        $('#presetSceneInput').val(p.scene).trigger('input');
+        $('#presetLogoInput').prop('checked', !!p.stamp_logo);
+        $('#presetOccasionNote').toggleClass('d-none', !p.occasion);
+        $('#presetAlwaysAdded').html(escapeHtml(p.always_added)
+            + '<br><span class="text-muted">Plus: the product details from the photo, the brand\'s colours and style, the user\'s extra text, and the image size.</span>');
+        $('#presetBuiltinScene').text(p.defaults.scene);
+        $('#presetResetBtn').prop('disabled', !p.customized.length).data('armed', false)
+            .html('<i class="fas fa-rotate-left me-1"></i>Reset to built-in');
+        $('#presetEditError').addClass('d-none');
+    }
+
+    window.openPresetEditor = function (id) {
+        const p = window._adminPresets.find(x => x.id === id);
+        if (!p) return;
+        presetEditingId = id;
+        fillPresetEditor(p);
+        $('#presetEditBackdrop, #presetEditPanel').addClass('open');
+        setTimeout(() => $('#presetLabelInput').trigger('focus'), 150);
+    };
+
+    window.closePresetEditor = function () {
+        $('#presetEditBackdrop, #presetEditPanel').removeClass('open');
+        presetEditingId = null;
+    };
+
+    $(document).on('input', '#presetSceneInput', function () {
+        const n = $(this).val().length;
+        $('#presetSceneCount').text(`${n.toLocaleString()} / 3,000 characters${n < 80 ? ' - at least 80' : ''}`)
+            .toggleClass('text-danger', n < 80);
+    });
+
+    window.savePresetEditor = function () {
+        const id = presetEditingId;
+        if (!id) return;
+        const $btn = $('#presetSaveBtn').prop('disabled', true);
+        $.ajax({
+            url: `/api/admin/image-presets/${encodeURIComponent(id)}`, type: 'PUT', contentType: 'application/json',
+            data: JSON.stringify({
+                label: $('#presetLabelInput').val(), description: $('#presetDescInput').val(),
+                placeholder: $('#presetHintInput').val(), scene: $('#presetSceneInput').val(),
+                stamp_logo: $('#presetLogoInput').prop('checked')
+            }),
+            success: function (r) {
+                replacePreset(r.preset);
+                closePresetEditor();
+                showToast(`/${id} saved - users get the new version right away.`, 'success');
+            },
+            error: function (xhr) {
+                $('#presetEditError').text((xhr.responseJSON || {}).error || 'Could not save the command.').removeClass('d-none');
+            },
+            complete: function () { $btn.prop('disabled', false); }
+        });
+    };
+
+    // Two clicks: the first arms the button, so a stray click can't wipe an edited prompt
+    window.resetPresetEditor = function () {
+        const id = presetEditingId;
+        const $btn = $('#presetResetBtn');
+        if (!id) return;
+        if (!$btn.data('armed')) {
+            $btn.data('armed', true).html('<i class="fas fa-triangle-exclamation me-1"></i>Click again to reset');
+            return;
+        }
+        $.post(`/api/admin/image-presets/${encodeURIComponent(id)}/reset`).done(function (r) {
+            replacePreset(r.preset);
+            fillPresetEditor(r.preset);
+            showToast(`/${id} is back to the built-in version.`, 'info');
+        }).fail(function (xhr) {
+            $('#presetEditError').text((xhr.responseJSON || {}).error || 'Could not reset the command.').removeClass('d-none');
+        });
+    };
+
     // ── Invitations ────────────────────────────────────────────────────
     // Admin emails someone an invitation link (/signup?invite=...). Statuses:
     // pending / accepted / expired / revoked. Resend = new link + 7 days.
@@ -1168,4 +1301,5 @@ $(document).ready(function () {
     loadAdminCostHistory();
     loadInvitations();
     loadImageSettings(true);
+    loadAdminPresets();
 });

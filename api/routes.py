@@ -23,7 +23,7 @@ from agents.vision_agent import VisionAgent
 from auth.utils import admin_required_api, get_current_user_id, login_required_api
 from config import Config
 from services import storage_service
-from services.compliance_service import active_rules_for_user, check_caption
+from services.compliance_service import active_rules_for_user, check_caption, check_captions
 from services.llm_service import LLMService
 from services.memory_service import MemoryService
 from services.observability import estimate_tokens, log_event
@@ -765,24 +765,25 @@ def generate_content():
                     brand_profile_block,
                 )
 
-            def _hashtags_for(platform):
+            def _all_hashtags():
+                # Every platform's set in one call (see HashtagAgent.generate_hashtags_batch)
                 try:
-                    return hashtag_agent.generate_hashtags(
-                        platform,
+                    return hashtag_agent.generate_hashtags_batch(
+                        platforms,
                         story_analysis,
                         vision_analysis,
                         memory_context=mem_prompt,
                         brand_profile_block=brand_profile_block,
                     )
                 except Exception as tag_err:  # a post without hashtags beats no post at all
-                    logger.warning(f"{platform} failed: {tag_err}")
-                    return {"hashtags": [], "_usage": {}}
+                    logger.warning(f"Hashtags failed: {tag_err}")
+                    return {p: {"hashtags": [], "_usage": {}} for p in platforms}
 
             _progress("caption", "active")
             _progress("hashtag", "active")
-            with ThreadPoolExecutor(max_workers=min(8, 2 * len(platforms)), thread_name_prefix="gen") as pool:
+            with ThreadPoolExecutor(max_workers=min(8, len(platforms) + 1), thread_name_prefix="gen") as pool:
                 caption_futures = {p: pool.submit(_caption_for, p) for p in platforms}
-                hashtag_futures = {p: pool.submit(_hashtags_for, p) for p in platforms}
+                hashtag_future = pool.submit(_all_hashtags)
                 _mark_done_when_finished(list(caption_futures.values()), lambda: _progress("caption", "done"))
 
                 # Show each caption on the page the moment it's written, while the
@@ -795,7 +796,7 @@ def generate_content():
 
                 for _p, _future in caption_futures.items():
                     _future.add_done_callback(lambda f, platform=_p: _preview_caption(platform, f))
-                _mark_done_when_finished(list(hashtag_futures.values()), lambda: _progress("hashtag", "done"))
+                _mark_done_when_finished([hashtag_future], lambda: _progress("hashtag", "done"))
 
                 for platform, future in caption_futures.items():
                     res = future.result()
@@ -803,8 +804,9 @@ def generate_content():
                     total_tokens += usage.get("total_tokens", 0)
                     total_cost_usd += usage.get("cost_usd", 0.0)
                     captions[platform] = res
-                for platform, future in hashtag_futures.items():
-                    res = future.result()
+                all_tags = hashtag_future.result()
+                for platform in platforms:
+                    res = all_tags.get(platform) or {"hashtags": []}
                     usage = res.pop("_usage", None) or {}
                     total_tokens += usage.get("total_tokens", 0)
                     total_cost_usd += usage.get("cost_usd", 0.0)
@@ -972,19 +974,20 @@ def generate_content():
             rules = active_rules_for_user(user_id)
             if rules:
                 flag_total = 0
-                for platform in platforms:
-                    cap = captions.get(platform)
-                    if not cap:
-                        continue
-                    try:
-                        result, c_usage = check_caption(cap.get("primary_caption", ""), platform, rules, refine_llm)
-                    except Exception as c_err:  # never fail a generation over the check
-                        current_app.logger.warning(f"[Compliance] Check failed for {platform}: {c_err}")
-                        continue
-                    total_tokens += c_usage.get("total_tokens", 0)
-                    total_cost_usd += c_usage.get("cost_usd", 0.0)
+                # Every platform's caption reviewed in one call (check_captions)
+                try:
+                    checked, c_usage = check_captions(
+                        {p: (captions.get(p) or {}).get("primary_caption", "") for p in platforms if captions.get(p)},
+                        rules, refine_llm,
+                    )
+                except Exception as c_err:  # never fail a generation over the check
+                    current_app.logger.warning(f"[Compliance] Check failed: {c_err}")
+                    checked, c_usage = {}, {}
+                total_tokens += c_usage.get("total_tokens", 0)
+                total_cost_usd += c_usage.get("cost_usd", 0.0)
+                for platform, result in checked.items():
                     if result:
-                        cap["primary_caption"] = result.pop("caption")
+                        captions[platform]["primary_caption"] = result.pop("caption")
                         compliance_results[platform] = result
                         flag_total += len(result["flags"])
                 agents_executed.append(
@@ -1054,6 +1057,20 @@ def generate_content():
                 "media_prompt": media_prompt,
                 "compliance": compliance_results.get(platform),
             }
+
+        # Regenerate keeps the version's image (and video): a new caption doesn't
+        # buy a new image. The user asks for a new image with the image's own
+        # "New image" button or in chat.
+        if data.get("keep_media_from_run_id") and DB_AVAILABLE and user_id is not None:
+            try:
+                kept = get_run_by_id(int(data["keep_media_from_run_id"]), user_id=user_id) or {}
+                for platform, entry in (response.get("content") or {}).items():
+                    media = ((kept.get("content") or {}).get(platform) or {}).get("media") or {}
+                    keep = {k: v for k, v in media.items() if k in ("image", "video") and isinstance(v, dict) and v.get("url")}
+                    if keep and isinstance(entry, dict):
+                        entry["media"] = {**(entry.get("media") or {}), **keep}
+            except (TypeError, ValueError) as keep_err:
+                current_app.logger.warning(f"Could not keep media from run {data.get('keep_media_from_run_id')}: {keep_err}")
 
         # ── Persist to PostgreSQL ──────────────────────────────────────────
         run_id = None
@@ -1140,13 +1157,16 @@ Rules:
 - image_ref: when IMAGE VERSIONS are listed and the user explicitly points at a version other than the
   ACTIVE one ("the first image", "the original", "the previous version", "the one before the last edit",
   "go back to #2"), that version's number; otherwise null. "it", "this", "the image" mean the ACTIVE one.
+- image_platforms: when the post has several images (one per [KEY] in CURRENT POST) and the user names
+  which one(s) to change ("the story image", "only the Instagram one", "the 4:5 version"), those keys in
+  lowercase; otherwise [] (= every image).
 
 Return ONLY this JSON:
 {"intent": "refine", "targets": ["image"],
  "captions": {"<platform>": "<full revised caption>"},
  "hashtags": {"<platform>": ["#Tag"]},
  "image_instruction": "", "on_image_text": {"headline": "", "subline": ""},
- "video_prompt": "", "image_ref": null, "change_summary": "<one short sentence describing what changed>"}"""
+ "video_prompt": "", "image_ref": null, "image_platforms": [], "change_summary": "<one short sentence describing what changed>"}"""
 
 
 @api_bp.route("/refine", methods=["POST"])
@@ -1246,6 +1266,8 @@ def refine_post():
         ref = None
     if ref and 1 <= ref <= len(conv_images):
         referenced_image = conv_images[ref - 1]
+    # Only the image(s) the user named ("the story image"); none named = all
+    image_only = {str(k).lower() for k in (plan.get("image_platforms") or []) if isinstance(k, str)} & set(platforms)
     conversation_id = _conversation_for(user_id, data, instruction) if DB_AVAILABLE and user_id is not None else None
     new_image_ids: list[int] = []  # edits made below, linked to the run once it is saved
     extra_reference = data.get("reference_image_path")
@@ -1293,7 +1315,7 @@ def refine_post():
         if "hashtags" in targets and new_tags:
             entry["hashtags"] = {"hashtags": new_tags}
 
-        if "image" in targets and MEDIA_AVAILABLE:
+        if "image" in targets and MEDIA_AVAILABLE and (not image_only or p in image_only):
             # Edit the unbranded copy when there is one - the logo is stamped on
             # again afterwards, so the model never redraws or duplicates it
             from db import get_image_asset, image_lineage
@@ -1325,8 +1347,13 @@ def refine_post():
                 log_event("image.edit", conversation_id=conversation_id, platform=p, status="blocked_limit",
                           parent_asset_id=base_asset["id"] if base_asset else None)
             else:
+                from services.image_presets import ASPECT_SIZES
+
+                # An image command's image keeps its exact size (e.g. a 9:16 story)
+                aspect = b.get("image_aspect") if b.get("image_aspect") in ASPECT_SIZES else None
                 result = media_service.edit_image(
-                    prompt, p, references or None, logo_path=logo_path, model=edit_quota["model"] if edit_quota else None
+                    prompt, p, references or None, logo_path=logo_path,
+                    model=edit_quota["model"] if edit_quota else None, **({"aspect": aspect} if aspect else {}),
                 )
             if result and result.get("success"):
                 extra_cost += float(result.get("cost") or 0)
@@ -1366,6 +1393,7 @@ def refine_post():
                     "model": result.get("model"),
                     "asset_id": asset_id,
                     "parent_asset_id": base_asset["id"] if base_asset else None,
+                    "aspect": b.get("image_aspect") or None,
                 }
                 entry["media_prompt"] = prompt
             elif result is not None:
@@ -1412,6 +1440,9 @@ def refine_post():
             content_to_save: dict[str, typing.Any] = dict(content)
             content_to_save["_agents"] = agents_executed
             content_to_save["_meta"] = {"refined_from_run_id": data.get("base_run_id")}
+            preset_meta = data.get("preset") if isinstance(data.get("preset"), dict) else None
+            if preset_meta and preset_meta.get("id"):
+                content_to_save["_preset"] = {k: preset_meta.get(k) for k in ("id", "label", "icon", "text", "keys", "occasion")}
             if data.get("version_of_run_id"):  # Regenerate of a refinement
                 content_to_save["_meta"]["version_of"] = data.get("version_of_run_id")
             run_id = save_run(
@@ -1461,6 +1492,269 @@ def refine_post():
 
 
 # ── History Endpoints ──────────────────────────────────────────────────────
+
+
+# ── Image commands: product photo + /3dbillboard, /metaad, ... ────────────
+_PRESET_IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".gif")
+
+
+def _uploaded_image(path_or_url) -> str | None:
+    """The local file for an image the user uploaded - only files in the
+    uploads folder are accepted (never an arbitrary server path)."""
+    from services import storage_service
+
+    name = os.path.basename(str(path_or_url or "").split("?")[0])
+    if not name or not name.lower().endswith(_PRESET_IMAGE_EXTS):
+        return None
+    local = os.path.join(Config.UPLOAD_FOLDER, name)
+    if os.path.isfile(local):
+        return local
+    return storage_service.ensure_local(storage_service.UPLOAD_URL_PREFIX + name)
+
+
+def _fit_chars(text, limit: int) -> str:
+    """Shortens to the limit at a word boundary (Meta truncates longer ad text)."""
+    text = " ".join(str(text or "").split())
+    if len(text) <= limit:
+        return text
+    cut = text[: limit - 1].rsplit(" ", 1)[0].rstrip(",.;:-")
+    return cut + "…"
+
+
+def _meta_ad_copy(user_id, product_notes: str, user_text: str) -> tuple[dict | None, dict]:
+    """Headline / primary text / description / button for a Meta ad, within
+    Meta's lengths, with the primary text checked against the user's
+    compliance rules. (None, usage) when the text model fails."""
+    from services.brand_profile_service import build_brand_profile_block
+    from services.image_presets import META_CTAS
+    from services.prompt_builder import AD_COPY_SYSTEM_PROMPT, build_ad_copy_prompt
+
+    usage = {"total_tokens": 0, "cost_usd": 0.0}
+    try:
+        copy, u = refine_llm.generate_json(
+            AD_COPY_SYSTEM_PROMPT, build_ad_copy_prompt(product_notes, build_brand_profile_block(user_id), user_text),
+            temperature=0.6, max_tokens=600, return_usage=True,
+        )
+        usage = {"total_tokens": u.get("total_tokens", 0), "cost_usd": u.get("cost_usd", 0.0)}
+    except Exception as e:  # noqa: BLE001 - the images still go out
+        current_app.logger.warning(f"Meta ad copy failed: {e}")
+        return None, usage
+    ad = {
+        "headline": _fit_chars(copy.get("headline"), 40),
+        "primary_text": _fit_chars(copy.get("primary_text"), 125),
+        "description": _fit_chars(copy.get("description"), 30),
+        "cta": copy.get("cta") if copy.get("cta") in META_CTAS else "Learn More",
+    }
+    rules = active_rules_for_user(user_id)
+    if rules and ad["primary_text"]:
+        try:
+            checked, c_usage = check_caption(ad["primary_text"], "facebook", rules, refine_llm)
+            usage["total_tokens"] += c_usage.get("total_tokens", 0)
+            usage["cost_usd"] += c_usage.get("cost_usd", 0.0)
+            if checked:
+                ad["primary_text"] = checked.pop("caption", ad["primary_text"])
+                ad["compliance"] = checked
+        except Exception as e:  # noqa: BLE001
+            current_app.logger.warning(f"Ad copy compliance check failed: {e}")
+    return ad, usage
+
+
+@api_bp.route("/image-presets", methods=["GET"])
+@login_required_api
+def image_presets_list():
+    """The Studio Chat "/" command menu."""
+    from services.image_presets import list_presets
+
+    return jsonify({"success": True, "presets": list_presets()})
+
+
+@api_bp.route("/admin/image-presets", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_image_presets():
+    """Admin -> Image Settings -> Image commands."""
+    from services.image_presets import admin_presets
+
+    return jsonify({"success": True, "presets": admin_presets()})
+
+
+@api_bp.route("/admin/image-presets/<slug>", methods=["PUT"])
+@login_required_api
+@admin_required_api
+def admin_save_image_preset(slug):
+    """Turn a command on/off, or change its name, description, box hint,
+    prompt or logo stamping. Takes effect for everyone at once."""
+    from services.image_presets import save_preset_changes
+
+    try:
+        preset = save_preset_changes(slug, request.get_json(silent=True) or {})
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 400
+    log_event("preset.admin_change", preset=slug, changed=preset["customized"], enabled=preset["enabled"])
+    return jsonify({"success": True, "preset": preset})
+
+
+@api_bp.route("/admin/image-presets/<slug>/reset", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_reset_image_preset(slug):
+    from services.image_presets import reset_preset
+
+    try:
+        preset = reset_preset(slug)
+    except ValueError as e:
+        return jsonify({"success": False, "error": str(e)}), 404
+    log_event("preset.admin_reset", preset=slug)
+    return jsonify({"success": True, "preset": preset})
+
+
+@api_bp.route("/presets/run", methods=["POST"])
+@login_required_api
+def run_image_preset():
+    """Runs an image command on the user's product photo. Every image counts
+    toward the daily limit, and all of a command's images are checked against
+    it up front - a run never stops half-way for lack of images."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    from services.brand_logo_service import resolve_logo_path
+    from services.image_presets import get_preset, preset_outputs
+    from services.prompt_builder import build_preset_prompt
+
+    if not MEDIA_AVAILABLE:
+        return jsonify({"success": False, "error": "Image generation is not available right now."}), 503
+    started = time.time()
+    data = request.get_json(silent=True) or {}
+    preset = get_preset(data.get("preset"))
+    if not preset:
+        if get_preset(data.get("preset"), include_disabled=True):
+            return jsonify({"success": False, "code": "preset_disabled",
+                            "error": "This image command is turned off by your admin."}), 400
+        return jsonify({"success": False, "error": "Unknown command."}), 400
+    user_id = get_current_user_id()
+    product = _uploaded_image(data.get("image_path"))
+    if preset["requires_image"] and not product:
+        return jsonify({"success": False, "code": "image_required",
+                        "error": f"Attach a product photo to use /{preset['id']}."}), 400
+    outputs = preset_outputs(preset, bool(data.get("all_sizes")))
+    user_text = (data.get("text") or "").strip()[:500]
+    product_notes = (data.get("product_notes") or "").strip()[:600]
+
+    quota = None
+    if DB_AVAILABLE and user_id is not None:
+        stats = get_user_usage_stats(user_id)
+        if stats.get("remaining_credits", 0.0) <= 0.0:
+            return jsonify({"success": False, "credit_limit_exceeded": True,
+                            "error": f"Credit limit reached (${stats.get('credit_limit', 10.0):.2f}). "
+                                     "Please request a credit extension from admin."}), 402
+        from db import get_image_quota
+
+        quota = get_image_quota(user_id)
+        if not quota["unlimited"] and quota["remaining"] < len(outputs):
+            need = len(outputs)
+            msg = (_image_limit_message(quota) if quota["remaining"] <= 0 else
+                   f"/{preset['id']} needs {need} images and you have {quota['remaining']} left today. "
+                   "Choose fewer sizes, or try again after midnight UTC.")
+            return jsonify({"success": False, "code": "image_limit_reached", "error": msg, "quota": quota}), 403
+
+    brand = {}
+    if DB_AVAILABLE and user_id is not None:
+        try:
+            from db import get_user_brand_profile
+
+            brand = get_user_brand_profile(user_id) or {}
+        except Exception as e:  # noqa: BLE001 - the brand's look is optional
+            current_app.logger.warning(f"Could not load brand profile: {e}")
+    logo_path = resolve_logo_path(user_id) if preset.get("stamp_logo") else None
+    model = quota["model"] if quota else None
+    # /festive: the occasion the user named, else the next celebration in the brand's markets
+    occasion, occasion_auto = None, False
+    if preset.get("occasion"):
+        from services.festival_service import next_celebration
+        from services.image_presets import find_occasion
+
+        occasion = find_occasion(user_text)
+        if not occasion:
+            upcoming = next_celebration((brand.get("compliance_regions") or brand.get("regions_detected") or []))
+            if upcoming:
+                occasion, occasion_auto = upcoming["name"], True
+    prompts = {o["key"]: build_preset_prompt(preset, o, product_notes, brand, user_text, occasion) for o in outputs}
+
+    with ThreadPoolExecutor(max_workers=len(outputs) + 1, thread_name_prefix="preset") as pool:
+        jobs = {o["key"]: pool.submit(media_service.create_preset_image, prompts[o["key"]], product, o["aspect"], logo_path, model)
+                for o in outputs}
+        ad_job = pool.submit(_meta_ad_copy, user_id, product_notes, user_text) if preset.get("ad_copy") else None
+        results = {key: job.result() for key, job in jobs.items()}
+        ad_copy, ad_usage = ad_job.result() if ad_job else (None, {"total_tokens": 0, "cost_usd": 0.0})
+
+    conversation_id = _conversation_for(user_id, data, f"{preset['label']}: {user_text or 'product photo'}") \
+        if DB_AVAILABLE and user_id is not None else None
+    images, errors, image_ids, image_cost = [], [], [], 0.0
+    for out in outputs:
+        r = results[out["key"]]
+        if not r.get("success"):
+            errors.append(f"{out['label']}: {r.get('error')}")
+            continue
+        asset_id = None
+        if DB_AVAILABLE and user_id is not None:
+            from db import log_image_generation
+
+            asset_id = log_image_generation(
+                user_id, float(r.get("cost") or 0), run_id=None, kind="image", platform=out["key"],
+                model=r.get("model_id") or model, description=f"{preset['label']} ({out['label']})",
+                media_url=r["url"], conversation_id=conversation_id, prompt=prompts[out["key"]],
+                clean_url=r.get("clean_url"), width=r.get("width"), height=r.get("height"),
+            )
+            image_ids.append(asset_id)
+        image_cost += float(r.get("cost") or 0)
+        images.append({"key": out["key"], "label": out["label"], "aspect": out["aspect"], "url": r["url"],
+                       "clean_url": r.get("clean_url"), "prompt": prompts[out["key"]], "asset_id": asset_id,
+                       "width": r.get("width"), "height": r.get("height"), "model": r.get("model")})
+    if not images:
+        log_event("preset.run", preset=preset["id"], status="failed", errors=errors[:3])
+        return jsonify({"success": False, "error": "The images could not be created: " + "; ".join(errors)}), 502
+
+    # Saved like any message of the conversation: one entry per image (so chat
+    # follow-ups can edit it) plus the command's details under "_preset"
+    meta = {"id": preset["id"], "label": preset["label"], "icon": preset["icon"], "text": user_text,
+            "keys": [i["key"] for i in images], "all_sizes": bool(data.get("all_sizes")),
+            "source_image_url": "/static/uploads/" + os.path.basename(product) if product else None}
+    if occasion:
+        meta["occasion"], meta["occasion_auto"] = occasion, occasion_auto
+    if ad_copy:
+        meta["ad_copy"] = ad_copy
+    content: dict[str, typing.Any] = {"_preset": meta}
+    for img in images:
+        content[img["key"]] = {
+            "caption": {"primary_caption": ""}, "hashtags": {"hashtags": []}, "media_prompt": img["prompt"],
+            "media": {"image": {k: img[k] for k in ("url", "clean_url", "prompt", "asset_id", "aspect", "width", "height", "model")}},
+        }
+    if data.get("version_of_run_id"):
+        content["_meta"] = {"version_of": data.get("version_of_run_id")}
+    total_cost = round(image_cost + float(ad_usage.get("cost_usd") or 0), 6)
+    run_id = None
+    if DB_AVAILABLE and user_id is not None:
+        try:
+            from db import attach_images_to_run
+
+            run_id = save_run(story=f"/{preset['id']} {user_text}".strip(), tone="Auto", platforms=preset["platforms"],
+                              content=content, user_id=user_id, tokens_used=int(ad_usage.get("total_tokens") or 0),
+                              cost_usd=total_cost, conversation_id=conversation_id)
+            attach_images_to_run(image_ids, run_id, user_id)  # charged once, as part of the run
+        except Exception as db_err:  # noqa: BLE001 - the images are made; unlinked rows stay charged
+            current_app.logger.warning(f"Could not save image command run: {db_err}")
+    log_event("preset.run", preset=preset["id"], conversation_id=conversation_id, run_id=run_id,
+              new_asset_ids=image_ids or None, images=len(images), failed=len(errors) or None,
+              model=model, status="completed", latency_ms=int((time.time() - started) * 1000))
+
+    from db import get_image_quota
+
+    return jsonify({
+        "success": True, "run_id": run_id, "conversation_id": conversation_id, "preset": meta,
+        "images": images, "ad_copy": ad_copy, "errors": errors, "content": content,
+        "quota": get_image_quota(user_id) if DB_AVAILABLE and user_id is not None else None,
+        "usage": {"total_tokens": int(ad_usage.get("total_tokens") or 0), "cost_usd": total_cost,
+                  "media_cost_usd": round(image_cost, 6), "media_count": len(images)},
+    })
 
 
 # ── Conversations (Studio Chat threads) ────────────────────────────────
