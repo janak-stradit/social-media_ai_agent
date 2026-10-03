@@ -261,6 +261,49 @@ class LLMService:
             kwargs["max_tokens"] = max_tokens
         return kwargs
 
+    def _stream_completion(self, provider, kwargs, on_partial, every: float = 0.8):
+        """Streams a chat completion, calling on_partial(text_so_far) at most
+        every `every` seconds and once at the end. Returns (content, usage).
+        If streaming fails before any text arrives (e.g. the provider doesn't
+        support it), the same request is made without streaming."""
+        import time as _time
+
+        def notify(text):
+            try:
+                on_partial(text)
+            except Exception as cb_err:  # noqa: BLE001 - progress must never break generation
+                logger.warning(f"Partial-answer callback failed: {cb_err}")
+
+        parts, usage, last = [], None, 0.0
+        try:
+            stream = provider["client"].chat.completions.create(
+                **kwargs, stream=True, stream_options={"include_usage": True}
+            )
+            for chunk in stream:
+                if getattr(chunk, "usage", None):
+                    usage = chunk.usage
+                for choice in getattr(chunk, "choices", None) or []:
+                    text = getattr(getattr(choice, "delta", None), "content", None)
+                    if text:
+                        parts.append(text)
+                        now = _time.time()
+                        if now - last >= every:
+                            last = now
+                            notify("".join(parts))
+        except Exception as stream_err:  # noqa: BLE001
+            if parts:
+                raise  # failed mid-answer: the caller's retry handles it
+            logger.warning(f"Streaming unavailable ({stream_err}); asking without streaming")
+            response = provider["client"].chat.completions.create(**kwargs)
+            content = self._first_choice_text(response, provider["name"])
+            notify(content)
+            return content, getattr(response, "usage", None)
+        content = "".join(parts)
+        if not content.strip():
+            raise Exception(f"{provider['name']} streamed an empty answer")
+        notify(content)
+        return content, usage
+
     def _first_choice_text(self, response, provider_name):
         """Text of the first completion choice. A gateway (OpenRouter, HeyRoute)
         can answer HTTP 200 with an error body instead of choices (rate limit,
@@ -406,9 +449,21 @@ class LLMService:
         elif cleaned.startswith("```"):
             cleaned = cleaned.split("```")[1].split("```")[0].strip()
 
-        # Attempt 1: Standard json.loads with strict=False
+        # Attempt 1: Standard json.loads with strict=False. A model sometimes
+        # double-encodes its answer ("{\"themes\": ...}" as one JSON string);
+        # json.loads then returns that text, not the object - unwrap it.
         try:
-            return json.loads(cleaned, strict=False)
+            parsed = json.loads(cleaned, strict=False)
+            for _ in range(2):
+                if not isinstance(parsed, str):
+                    break
+                parsed = json.loads(parsed.strip(), strict=False)
+            if isinstance(parsed, dict):
+                return parsed
+            if isinstance(parsed, str):
+                cleaned = parsed.strip()  # still text: let the repair steps below try it
+            else:
+                return parsed  # a list etc. - returned as before
         except Exception:
             pass
 
@@ -444,8 +499,13 @@ class LLMService:
         return_usage=False,
         max_retries_per_provider=2,
         reasoning_effort=None,
+        on_partial=None,
     ):
         """Generate structured JSON response with optimal token budgeting.
+
+        on_partial(text_so_far): when given, the answer is streamed and this is
+        called about once a second with everything written so far (and once at
+        the end) - so a page can show the answer while it's being written.
 
         A provider call can "succeed" (no exception) but return an empty JSON
         object - seen in practice with free-tier OpenRouter models under load.
@@ -490,10 +550,12 @@ class LLMService:
                             provider, system_prompt, user_prompt, temperature, max_tokens, reasoning_effort
                         )
                         kwargs["response_format"] = {"type": "json_object"}
-                        response = provider["client"].chat.completions.create(**kwargs)
-                        content = self._first_choice_text(response, provider["name"])
-
-                        usage_raw = getattr(response, "usage", None)
+                        if on_partial:
+                            content, usage_raw = self._stream_completion(provider, kwargs, on_partial)
+                        else:
+                            response = provider["client"].chat.completions.create(**kwargs)
+                            content = self._first_choice_text(response, provider["name"])
+                            usage_raw = getattr(response, "usage", None)
                         in_t = (
                             getattr(usage_raw, "prompt_tokens", len(system_prompt + user_prompt) // 4)
                             if usage_raw

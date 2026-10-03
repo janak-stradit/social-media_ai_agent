@@ -410,6 +410,24 @@ def upload_image():
     return jsonify({"error": "Invalid file type"}), 400
 
 
+def _partial_research(text: str) -> dict:
+    """What can be shown of a research answer that's still being written: the
+    themes, facts and post ideas so far (the last item may be mid-sentence)."""
+    out = {"stage": "writing", "chars": len(text or "")}
+    try:
+        import json_repair
+
+        data = json_repair.repair_json(text or "{}", return_objects=True)
+    except Exception:  # noqa: BLE001
+        return out
+    if isinstance(data, dict):
+        for key, limit in (("themes", 8), ("research_notes", 8), ("hooks", 12)):
+            items = [str(x).strip()[:400] for x in (data.get(key) or []) if isinstance(x, (str, int, float)) and str(x).strip()]
+            if items:
+                out[key] = items[:limit]
+    return out
+
+
 @api_bp.route("/analyze-story", methods=["POST"])
 @login_required_api
 def analyze_story():
@@ -448,11 +466,25 @@ def analyze_story():
             story = f"Follow-up Refinement Request: {story}\n\n[PREVIOUS TURN CONTEXT & OUTPUTS]:\n{previous_context}"
 
         user_id = get_current_user_id()
+        # Live research (GET /api/generate/progress/<id>, field "research"): the
+        # page shows themes, facts and post ideas while they're being written
+        from services import progress_store
+
+        progress_id = data.get("progress_id")
+        progress_store.set_step(user_id, progress_id, "research", json.dumps({"stage": "thinking"}))
+
+        def _publish_partial(text):
+            progress_store.set_step(user_id, progress_id, "research", json.dumps(_partial_research(text)))
+
         retrieved_memories = memory_service.retrieve_context(story, user_id=user_id, n_results=2)
         mem_prompt = memory_service.format_memory_prompt(retrieved_memories)
 
-        analysis = story_agent.analyze(story, memory_context=mem_prompt)
-        key_points = story_agent.extract_key_points(story)
+        analysis = story_agent.analyze(
+            story, memory_context=mem_prompt, on_partial=_publish_partial if progress_store.valid_id(progress_id) else None
+        )
+        # key_points was a second, sequential AI call (8-90 s) whose result no
+        # page shows - kept in the response, empty, for API compatibility
+        key_points: list[str] = []
 
         return jsonify(
             {
