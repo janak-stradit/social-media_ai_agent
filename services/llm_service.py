@@ -290,7 +290,7 @@ class LLMService:
                         if now - last >= every:
                             last = now
                             notify("".join(parts))
-        except Exception as stream_err:  # noqa: BLE001
+        except Exception as stream_err:
             if parts:
                 raise  # failed mid-answer: the caller's retry handles it
             logger.warning(f"Streaming unavailable ({stream_err}); asking without streaming")
@@ -300,7 +300,7 @@ class LLMService:
             return content, getattr(response, "usage", None)
         content = "".join(parts)
         if not content.strip():
-            raise Exception(f"{provider['name']} streamed an empty answer")
+            raise RuntimeError(f"{provider['name']} streamed an empty answer")
         notify(content)
         return content, usage
 
@@ -460,12 +460,12 @@ class LLMService:
             inner = None
             try:
                 inner = json.loads(text, strict=False)
-            except Exception:
+            except ValueError:
                 try:
                     import json_repair
 
                     inner = json_repair.repair_json(text, return_objects=True)
-                except Exception:
+                except Exception:  # noqa: BLE001 - not unwrappable: parsed as-is below
                     inner = None
             if not (isinstance(inner, str) and inner.strip()[:1] in ("{", "[", '"')):
                 break

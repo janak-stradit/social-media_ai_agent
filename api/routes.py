@@ -400,14 +400,27 @@ def upload_image():
         file.save(filepath)
         storage_service.upload(filepath)
 
-        # Analyze image
-        try:
-            analysis = vision_agent.analyze_image(filepath)
-            return jsonify({"success": True, "image_id": unique_name, "filepath": filepath, "analysis": analysis})
-        except Exception as e:  # noqa: BLE001
-            return jsonify({"error": str(e)}), 500
+        # The AI analysis takes ~30-40 s: it runs in the background so the
+        # upload is done at once. The page asks for it via
+        # /api/upload/analysis; a generation that needs it waits for this same
+        # analysis instead of starting a second one (VisionAgent).
+        vision_agent.analyze_in_background(filepath)
+        return jsonify({"success": True, "image_id": unique_name, "filepath": filepath,
+                        "analysis": None, "analysis_pending": True})
 
     return jsonify({"error": "Invalid file type"}), 400
+
+
+@api_bp.route("/upload/analysis", methods=["GET"])
+@login_required_api
+def upload_analysis():
+    """The background analysis of an uploaded image, once it's finished:
+    {"ready": false} while it's still running."""
+    image = _uploaded_image(request.args.get("image_id"))
+    if not image:
+        return jsonify({"ready": False, "error": "Image not found"}), 404
+    analysis = vision_agent.cached_analysis(image)
+    return jsonify({"ready": analysis is not None, "analysis": analysis})
 
 
 def _partial_research(text: str) -> dict:
@@ -1688,6 +1701,11 @@ def run_image_preset():
     outputs = preset_outputs(preset, bool(data.get("all_sizes")))
     user_text = (data.get("text") or "").strip()[:500]
     product_notes = (data.get("product_notes") or "").strip()[:600]
+    if not product_notes and product:
+        # The upload's background analysis, if it has finished (never waited for:
+        # the image model sees the photo itself; the notes only add detail)
+        cached = vision_agent.cached_analysis(product) or {}
+        product_notes = str(cached.get("rich_description") or cached.get("raw_caption") or "")[:600]
 
     quota = None
     if DB_AVAILABLE and user_id is not None:
