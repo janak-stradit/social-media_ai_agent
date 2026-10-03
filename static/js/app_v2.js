@@ -1297,7 +1297,10 @@ $(document).ready(function () {
                             <div class="agent-step-icon"><div class="spinner-border spinner-border-sm text-primary" role="status"></div></div>
                             <span class="agent-step-name"><i class="fas fa-brain me-1 text-purple"></i>Story &amp; Research Agent</span>
                             <span class="agent-step-desc">Researching the topic &amp; retrieving relevant brand memory</span>
+                            <span class="research-elapsed ms-auto" data-started="${Date.now()}" aria-live="off">0s</span>
                         </div>
+                        <div class="research-live writing" id="${msgId}_research_live" aria-live="polite"></div>
+                        <div class="research-wait-note">Research usually takes under a minute; it can take longer when the AI service is busy.</div>
                     </div>
                 </div>
             </div>
@@ -1306,6 +1309,13 @@ $(document).ready(function () {
         $('#chatThread').append(elem);
         return elem;
     }
+    // Live "how long so far" on the research step - a long wait is visibly still working
+    setInterval(function () {
+        $('.research-elapsed').each(function () {
+            const secs = Math.floor((Date.now() - Number(this.dataset.started || Date.now())) / 1000);
+            $(this).text(secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${secs % 60}s`);
+        });
+    }, 1000);
 
     function appendRefineThinking(msgId) {
         const html = `
@@ -1447,14 +1457,73 @@ $(document).ready(function () {
         });
     }
 
+    // The research while it's being written (server: progress field "research")
+    const RESEARCH_SECTIONS = [
+        ['themes', 'Themes', 'pills'],
+        ['research_notes', 'Facts & trends', 'list'],
+        ['hooks', 'Post ideas', 'list']
+    ];
+
+    function renderResearchLive(msgId, data) {
+        const $live = $(`#${msgId}_research_live`);
+        if (!$live.length || !data) return;
+        const $desc = $(`#${msgId} .agent-step-desc`);
+        if (data.stage === 'thinking') {
+            $desc.text('Thinking about your topic...');
+            return;
+        }
+        const ideas = (data.hooks || []).length;
+        $desc.text(ideas ? `Writing the research - ${ideas} post idea${ideas === 1 ? '' : 's'} so far` : 'Writing the research...');
+        RESEARCH_SECTIONS.forEach(([key, title, kind]) => {
+            const items = data[key] || [];
+            if (!items.length) return;
+            let $sec = $live.find(`[data-sec="${key}"]`);
+            if (!$sec.length) {
+                $sec = $(`<div class="research-live-sec" data-sec="${key}"><div class="research-live-title">${title}</div>
+                    ${kind === 'pills' ? '<div class="research-theme-pills"></div>' : '<ul class="research-notes-list"></ul>'}</div>`);
+                $live.append($sec);
+            }
+            const $box = $sec.find(kind === 'pills' ? '.research-theme-pills' : 'ul');
+            if (key === 'hooks') $sec.find('.research-live-title').text(`Post ideas (${items.length})`);
+            items.forEach((text, i) => {
+                const $item = $box.children().eq(i);
+                if ($item.length) {
+                    if ($item.text() !== text) $item.text(text);  // the item still being written grows
+                } else {
+                    $box.append($(kind === 'pills' ? '<span class="research-theme-pill live-new"></span>' : '<li class="live-new"></li>').text(text));
+                }
+            });
+        });
+        scrollToBottom();
+    }
+
+    function pollResearchProgress(msgId, progressId) {
+        let stopped = false;
+        let timer = null;
+        (function poll() {
+            if (stopped) return;
+            $.getJSON(`/api/generate/progress/${encodeURIComponent(progressId)}`)
+                .done(function (res) {
+                    const raw = res && res.steps && res.steps.research;
+                    if (!raw || stopped) return;
+                    try { renderResearchLive(msgId, JSON.parse(raw)); } catch (e) { /* half-written progress: next poll */ }
+                })
+                .always(function () { if (!stopped) timer = setTimeout(poll, 1000); });
+        })();
+        return function stop() { stopped = true; clearTimeout(timer); };
+    }
+
     function runResearchThenAsk(msgId, story, targetCompany, activeImgPath, tone, brandVoice) {
         const assistantElem = appendResearchThinking(msgId);
+        const progressId = newProgressId();
+        const stopLive = pollResearchProgress(msgId, progressId);
 
         $.ajax({
             url: '/api/analyze-story',
             type: 'POST',
             contentType: 'application/json',
-            data: JSON.stringify({ story: story, target_company: targetCompany, previous_context: lastAssistantContext }),
+            data: JSON.stringify({ story: story, target_company: targetCompany, previous_context: lastAssistantContext, progress_id: progressId }),
+            complete: stopLive,
             success: function (r) {
                 renderResearchResult(msgId, assistantElem, r, story, targetCompany, activeImgPath, tone, brandVoice);
                 scrollToBottom();

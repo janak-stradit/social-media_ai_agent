@@ -40,11 +40,12 @@ class StoryAgent:
 
     From the (possibly researched) input, extract and return:
     1. Core themes (3-5 main themes)
-    2. Emotional tone (joy, sadness, excitement, inspiration, etc.)
-    3. Key hooks (attention-grabbing elements)
-    4. Target audience segments
-    5. Visual imagery descriptions
-    6. Call-to-action opportunities
+    2. Emotional tone (2-4 emotions: joy, sadness, excitement, inspiration, etc.)
+    3. Key hooks (3-5 attention-grabbing elements; when the brief asks for a series of posts - e.g. "10 days of
+       posts" - one distinct hook per post, at most 10)
+    4. Target audience segments (3-5)
+    5. Visual imagery descriptions (3-5)
+    6. Call-to-action opportunities (3-5)
     7. research_notes: 3-5 concrete, substantive facts, statistics, trends, or examples about the topic that a
        writer could actually use in the content - grounded in real knowledge, not vague restatements of the
        input. Leave this an empty list only if the input is already a complete, detailed story with nothing to add.
@@ -69,7 +70,7 @@ class StoryAgent:
                 pass
         return key.capitalize()
 
-    def analyze(self, story_text, memory_context=None, return_usage=False, brand_profile_block=None):
+    def analyze(self, story_text, memory_context=None, return_usage=False, brand_profile_block=None, on_partial=None):
         """Analyze story and return structured insights + usage.
         brand_profile_block (see services/brand_profile_service.py) is the
         Studio Chat user's own brand context derived from their onboarding
@@ -80,7 +81,7 @@ class StoryAgent:
         if brand_profile_block:
             user_prompt += f"\n\n{brand_profile_block}"
 
-        result, usage = self.llm.generate_json(self.SYSTEM_PROMPT, user_prompt, return_usage=True)
+        result, usage = self.llm.generate_json(self.SYSTEM_PROMPT, user_prompt, return_usage=True, on_partial=on_partial)
         if return_usage:
             return result, usage
         return result

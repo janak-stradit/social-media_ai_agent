@@ -200,3 +200,39 @@ def test_regenerate_keeps_the_versions_image(monkeypatch):
     captions = iter(["Sam's caption."])
     stolen = other_client.post("/api/generate", json={**body, "keep_media_from_run_id": first["run_id"]}).get_json()
     assert "media" not in stolen["content"]["linkedin"] or not stolen["content"]["linkedin"]["media"].get("image")
+
+
+# ── Research step: one AI call, structured result ──────────────────────────
+
+
+@pytest.mark.parametrize("wrap", [0, 1, 2])
+def test_double_encoded_json_reply_becomes_an_object(wrap):
+    import json
+
+    from services.llm_service import LLMService
+
+    obj = {"themes": ["AI"], "hooks": ['a "quoted" hook']}
+    raw = json.dumps(obj)
+    for _ in range(wrap):
+        raw = json.dumps(raw)  # the model wrapped its answer in a JSON string
+    assert LLMService.__new__(LLMService)._robust_parse_json(raw) == obj
+
+
+def test_research_makes_a_single_ai_call(monkeypatch):
+    import uuid
+
+    import db
+    from api import routes
+    from app import create_app
+
+    app = create_app("development")
+    app.config.update(TESTING=True)
+    user = db.create_user("Priya", f"{uuid.uuid4().hex[:8]}@example.com", "h")
+    client = app.test_client()
+    with client.session_transaction() as s:
+        s["user_id"] = user["id"]
+    monkeypatch.setattr(routes.memory_service, "retrieve_context", lambda *a, **k: [])
+    monkeypatch.setattr(routes.story_agent, "analyze", lambda *a, **k: {"themes": ["AI"], "hooks": ["Day 1"]})
+    monkeypatch.setattr(routes.story_agent, "extract_key_points", lambda *a, **k: pytest.fail("unused second call"))
+    body = client.post("/api/analyze-story", json={"story": "10 days of LinkedIn posts about AI"}).get_json()
+    assert body["success"] and body["analysis"]["hooks"] == ["Day 1"] and body["key_points"] == []
