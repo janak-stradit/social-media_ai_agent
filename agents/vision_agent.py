@@ -1,4 +1,8 @@
+import hashlib
+import json
 import logging
+import os
+import tempfile
 
 from services.hf_service import HuggingFaceService
 from services.llm_service import LLMService
@@ -23,8 +27,43 @@ class VisionAgent:
         self.hf = HuggingFaceService()
         self.llm = LLMService()
 
+    # Analyses of the same image are reused: a photo is analysed when it's
+    # uploaded and was analysed again when the post was generated - the same
+    # paid multimodal call twice. Keyed by the file's content (plus provider
+    # and prompt), shared by all workers on the host; failures aren't cached.
+    _CACHE_DIR = os.path.join(tempfile.gettempdir(), "avir-vision-cache")
+
+    def _cache_path(self, image_path):
+        try:
+            with open(image_path, "rb") as f:
+                digest = hashlib.sha256(f.read()).hexdigest()
+        except OSError:
+            return None
+        setup = hashlib.sha256(f"{self.hf.vision_provider}|{self.SYSTEM_PROMPT}".encode()).hexdigest()[:12]
+        return os.path.join(self._CACHE_DIR, f"{digest}_{setup}.json")
+
     def analyze_image(self, image_path):
-        """Full image analysis pipeline"""
+        """Full image analysis pipeline (cached per image - see _cache_path)."""
+        cache = self._cache_path(image_path) if image_path else None
+        if cache and os.path.exists(cache):
+            try:
+                with open(cache, encoding="utf-8") as f:
+                    return json.load(f)
+            except (OSError, ValueError):
+                pass
+        analysis = self._analyze_uncached(image_path)
+        if cache and isinstance(analysis, dict) and not analysis.get("error"):
+            try:
+                os.makedirs(self._CACHE_DIR, exist_ok=True)
+                tmp = f"{cache}.{os.getpid()}.tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    json.dump(analysis, f)
+                os.replace(tmp, cache)  # atomic: another worker never reads half a file
+            except OSError as err:
+                logger.warning(f"Could not cache image analysis: {err}")
+        return analysis
+
+    def _analyze_uncached(self, image_path):
         if self.hf.vision_provider == "heyroute":
             return self._analyze_image_heyroute(image_path)
 

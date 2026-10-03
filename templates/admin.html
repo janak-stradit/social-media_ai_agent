@@ -486,6 +486,37 @@
             .cost-pages { justify-content: center; }
         }
 
+        /* Image Settings -> Image commands */
+        .preset-admin-list { display: flex; flex-direction: column; gap: 0.5rem; }
+        .preset-admin-row { display: flex; align-items: center; gap: 0.85rem; padding: 0.7rem 0.85rem; border: 1px solid #e5e7eb; border-radius: 12px; }
+        .preset-admin-row.off { background: #f9fafb; }
+        .preset-admin-row.off .preset-admin-main { opacity: 0.55; }
+        .preset-admin-icon { width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #8A2BE2, #4169E1); color: #fff; }
+        .preset-admin-row.off .preset-admin-icon { background: #d1d5db; }
+        .preset-admin-main { flex: 1; min-width: 0; }
+        .preset-admin-title { font-weight: 700; font-size: 0.88rem; color: #172033; }
+        .preset-admin-title code { color: #6d28d9; font-size: 0.85rem; margin-right: 0.3rem; }
+        .preset-admin-tag { font-size: 10px; font-weight: 700; color: #b45309; background: #fffbeb; border: 1px solid #fde68a; border-radius: 999px; padding: 1px 7px; margin-left: 0.35rem; vertical-align: middle; }
+        .preset-admin-desc { font-size: 0.78rem; color: #4b5563; }
+        .preset-admin-meta { font-size: 0.72rem; color: #9ca3af; margin-top: 2px; }
+        .preset-switch { position: relative; width: 40px; height: 22px; flex-shrink: 0; margin: 0; cursor: pointer; }
+        .preset-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+        .preset-switch span { position: absolute; inset: 0; background: #d1d5db; border-radius: 999px; transition: background 0.15s; }
+        .preset-switch span::after { content: ""; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; background: #fff; border-radius: 50%; transition: transform 0.15s; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+        .preset-switch input:checked + span { background: #22c55e; }
+        .preset-switch input:checked + span::after { transform: translateX(18px); }
+        .preset-switch input:focus-visible + span { outline: 2px solid #8A2BE2; outline-offset: 2px; }
+        .preset-editor textarea { font-size: 0.82rem; line-height: 1.5; }
+        .preset-editor .preset-count { font-size: 0.72rem; color: #9ca3af; text-align: right; margin-top: 2px; }
+        .preset-always { font-size: 0.76rem; color: #4b5563; background: #f9fafb; border: 1px solid #eef0f4; border-radius: 10px; padding: 0.6rem 0.75rem; line-height: 1.5; }
+        .preset-builtin summary { cursor: pointer; font-size: 0.78rem; font-weight: 600; color: #6b7280; }
+        .preset-builtin pre { white-space: pre-wrap; font-size: 0.76rem; color: #4b5563; background: #f9fafb; border-radius: 8px; padding: 0.6rem; margin: 0.4rem 0 0; }
+        .admin-side-panel-footer .me-auto { margin-right: auto; }
+        @media (max-width: 640px) {
+            .preset-admin-row { flex-wrap: wrap; }
+            .preset-admin-main { flex-basis: calc(100% - 60px); }
+        }
+
         /* Request decisions side by side */
         #adminReqTbody .btn-xs + .btn-xs { margin-top: 0; }
         #adminReqTbody td:last-child { white-space: nowrap; }
@@ -840,6 +871,12 @@
                     <div class="small text-muted mt-2" id="imgAvailableHint"></div>
                 </div>
 
+                <div class="img-settings-card">
+                    <h6>Image commands</h6>
+                    <p>The "/" commands in Studio Chat (e.g. /metaad). Turn a command off to hide it from everyone, or edit its name and prompt - changes apply right away, no deploy needed.</p>
+                    <div class="preset-admin-list" id="presetAdminList"><div class="small text-muted">Loading commands...</div></div>
+                </div>
+
                 <div class="alert-inline alert-inline-danger d-none mb-3" id="imgSettingsError" style="max-width: 820px;"></div>
                 <div class="img-settings-actions">
                     <button type="button" class="btn-xs btn-xs-solid-success" id="imgSettingsSaveBtn" onclick="saveImageSettings()">
@@ -938,6 +975,61 @@
         <div class="admin-side-panel-footer">
             <button type="button" class="btn-xs btn-xs-outline-neutral" onclick="closeImageAccessPanel()">Cancel</button>
             <button type="button" class="btn-xs btn-xs-solid-success" id="imageAccessSaveBtn" onclick="submitImageAccess()">
+                <i class="fas fa-check me-1"></i>Save
+            </button>
+        </div>
+    </aside>
+
+    <!-- Image command editor (Image Settings -> Image commands -> Edit) -->
+    <div class="admin-panel-backdrop" id="presetEditBackdrop" onclick="closePresetEditor()"></div>
+    <aside class="admin-side-panel wide preset-editor" id="presetEditPanel" aria-labelledby="presetEditTitle">
+        <div class="admin-side-panel-header">
+            <h5 id="presetEditTitle"><i class="fas fa-wand-magic-sparkles text-primary me-2"></i>Edit command</h5>
+            <button type="button" class="admin-side-panel-close" onclick="closePresetEditor()" aria-label="Close">
+                <i class="fas fa-xmark"></i>
+            </button>
+        </div>
+        <div class="admin-side-panel-body">
+            <div class="admin-form-group">
+                <label for="presetLabelInput">Name <span class="text-muted fw-normal">(shown in the / menu)</span></label>
+                <input type="text" id="presetLabelInput" class="form-control form-control-sm" maxlength="40">
+            </div>
+            <div class="admin-form-group">
+                <label for="presetDescInput">Description</label>
+                <input type="text" id="presetDescInput" class="form-control form-control-sm" maxlength="160">
+            </div>
+            <div class="admin-form-group">
+                <label for="presetHintInput">Box hint <span class="text-muted fw-normal">(shown in the message box after choosing the command)</span></label>
+                <input type="text" id="presetHintInput" class="form-control form-control-sm" maxlength="120">
+            </div>
+            <div class="admin-form-group">
+                <label for="presetSceneInput">Prompt <span class="text-muted fw-normal">(what the image should look like)</span></label>
+                <textarea id="presetSceneInput" class="form-control form-control-sm" rows="9" maxlength="3000"></textarea>
+                <div class="preset-count" id="presetSceneCount"></div>
+                <div class="small text-muted d-none" id="presetOccasionNote"><i class="fas fa-circle-info me-1"></i>Keep <code>{occasion}</code> in the prompt - it is replaced by the festival's name.</div>
+            </div>
+            <div class="admin-form-group">
+                <label class="d-flex align-items-center gap-2 mb-0" for="presetLogoInput" style="font-weight: 600; font-size: 0.82rem;">
+                    <input type="checkbox" id="presetLogoInput"> Stamp the brand's logo on these images
+                </label>
+                <div class="small text-muted mt-1">Leave off for marketplace photos (Amazon and others reject logos) and when the product already shows its brand.</div>
+            </div>
+            <div class="admin-form-group">
+                <label>Always added to the prompt</label>
+                <div class="preset-always" id="presetAlwaysAdded"></div>
+            </div>
+            <details class="preset-builtin">
+                <summary>Built-in prompt</summary>
+                <pre id="presetBuiltinScene"></pre>
+            </details>
+            <div class="alert-inline alert-inline-danger d-none mt-3" id="presetEditError"></div>
+        </div>
+        <div class="admin-side-panel-footer">
+            <button type="button" class="btn-xs btn-xs-outline-neutral me-auto" id="presetResetBtn" onclick="resetPresetEditor()">
+                <i class="fas fa-rotate-left me-1"></i>Reset to built-in
+            </button>
+            <button type="button" class="btn-xs btn-xs-outline-neutral" onclick="closePresetEditor()">Cancel</button>
+            <button type="button" class="btn-xs btn-xs-solid-success" id="presetSaveBtn" onclick="savePresetEditor()">
                 <i class="fas fa-check me-1"></i>Save
             </button>
         </div>

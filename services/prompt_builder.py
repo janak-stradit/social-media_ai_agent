@@ -92,3 +92,54 @@ def build_image_versions_block(images: list[dict], active_id: int | None) -> str
         active = "  <- ACTIVE (the image the user is looking at)" if img["id"] == active_id else ""
         lines.append(f"#{n} [{img.get('platform') or 'post'}] {what}{active}")
     return "IMAGE VERSIONS IN THIS CONVERSATION (oldest first):\n" + "\n".join(lines)
+
+
+# ── Image commands (services/image_presets.py) ─────────────────────────────
+PRODUCT_LOCK = (
+    "Use the product from the reference photo exactly as it is: same shape, proportions, colours, materials, "
+    "label and printed text. Do not redesign, recolour or add text to the product, and keep the whole product visible. "
+    "Show the product exactly once - no second copy, smaller duplicate, reflection-copy or version of it anywhere else "
+    "in the image."
+)
+
+
+def build_preset_prompt(preset: dict, output: dict, product_notes: str = "", brand: dict | None = None,
+                        user_text: str = "", occasion: str | None = None) -> str:
+    """The image prompt for one output of an image command: the command's
+    scene, the product lock, the exact shape, the brand's look and the user's
+    extra direction (which wins over the scene's defaults). occasion fills
+    the /festive scene ("Diwali", "UAE National Day", ...)."""
+    from services.image_presets import ASPECT_HINTS
+
+    parts = [preset["scene"].replace("{occasion}", occasion or "seasonal holiday"), PRODUCT_LOCK]
+    if product_notes:
+        parts.append(f"The product (from the photo): {product_notes.strip()[:500]}")
+    brand = brand or {}
+    colors = [c for c in (brand.get("primary_colors") or []) if isinstance(c, str)][:4]
+    look = []
+    if colors:
+        look.append(f"accent colours {', '.join(colors)}")
+    if brand.get("visual_style"):
+        look.append(str(brand["visual_style"]).strip()[:200])
+    if look:
+        parts.append("Match the brand's look: " + "; ".join(look) + ".")
+    if user_text:
+        parts.append(f"Extra direction from the user (follow it where it differs from the above): {user_text.strip()[:400]}")
+    parts.append(ASPECT_HINTS.get(output["aspect"], ""))
+    return "\n\n".join(p for p in parts if p)
+
+
+AD_COPY_SYSTEM_PROMPT = """You write Meta (Facebook and Instagram) ad copy for one product.
+Return ONLY this JSON:
+{"headline": "<max 40 characters>", "primary_text": "<max 125 characters>",
+ "description": "<max 30 characters>", "cta": "<one of: Shop Now, Learn More, Order Now, Get Offer, Sign Up, Book Now, Contact Us, Download>"}
+Rules: plain, specific and benefit-led; match the brand voice if given. Never invent prices, discounts,
+statistics, awards, guarantees or health claims - only say what the inputs support. No hashtags. At most one emoji."""
+
+
+def build_ad_copy_prompt(product_notes: str, brand_block: str, user_text: str) -> str:
+    return (
+        f"PRODUCT (from the photo): {product_notes.strip()[:600] or 'see the user notes'}\n\n"
+        f"{brand_block.strip()[:1200]}\n\n"
+        f"USER NOTES: {user_text.strip()[:400] or '(none)'}"
+    )

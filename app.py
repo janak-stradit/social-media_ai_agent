@@ -386,8 +386,27 @@ def create_app(config_name="development"):
     return app
 
 
+def _quiet_windows_reload_error() -> None:
+    """On Windows, each auto-reload (a .py file changed) ends the old server
+    process while its listener thread is still waiting on the closed socket,
+    which prints a harmless "OSError: [WinError 10038]" traceback. Hide only
+    that one error; anything else in a thread is still reported."""
+    import threading
+
+    default_hook = threading.excepthook
+
+    def hook(args):
+        if isinstance(args.exc_value, OSError) and getattr(args.exc_value, "winerror", None) == 10038:
+            return
+        default_hook(args)
+
+    threading.excepthook = hook
+
+
 if __name__ == "__main__":
     # Local dev entrypoint only -- production runs via gunicorn (see Dockerfile), which never
     # executes this block. B201 (debug=True) and B104 (bind-all) are both dev-only here.
+    if os.name == "nt":
+        _quiet_windows_reload_error()
     app = create_app()
     app.run(host="0.0.0.0", port=5000, debug=True)  # nosec B201 B104

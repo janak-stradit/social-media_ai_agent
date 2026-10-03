@@ -96,31 +96,25 @@ def _verify_fixed(issue: str, final_caption: str, claimed: bool) -> bool:
     return not any(q.lower() in text for q in quotes)
 
 
-def check_caption(caption: str, platform: str, rules: list[dict], llm) -> tuple[dict | None, dict]:
-    """Reviews one caption against the active rules. Returns (result, usage);
-    result is None when there are no rules or no caption to check.
-
-    result: {caption (final text, fixes + disclaimers applied), rules_checked,
-    flags [{rule_id, framework, severity, issue, fix, auto_fixed}],
-    disclaimers_added [text], needs_attention (count of flags not auto-fixed)}"""
-    if not rules or not (caption or "").strip():
-        return None, {}
-
-    by_id = {rule["id"]: rule for rule in rules}
-    rules_text = "\n".join(
+def _rules_text(rules: list[dict]) -> str:
+    return "\n".join(
         f"- {rule['id']} ({rule['framework']}, {', '.join(rule['regions'])}): " + " ".join(rule["content_rules"])
         + (" [has a required disclaimer]" if rule.get("required_disclaimer") else "")
         for rule in rules
     )
-    user_prompt = f"PLATFORM: {platform}\n\nRULES:\n{rules_text}\n\nCAPTION:\n{caption}"
-    plan, usage = llm.generate_json(
-        COMPLIANCE_CHECK_SYSTEM_PROMPT, user_prompt, temperature=0.1, max_tokens=1500, return_usage=True
-    )
 
+
+def _finish(plan: dict, caption: str, rules: list[dict]) -> dict:
+    """One caption's result from the model's review: flags limited to the
+    provided rules, fixes verified, required disclaimers appended verbatim."""
+    by_id = {rule["id"]: rule for rule in rules}
+    plan = plan if isinstance(plan, dict) else {}
     final = (plan.get("revised_caption") or "").strip() or caption
 
     flags = []
     for flag in plan.get("flags") or []:
+        if not isinstance(flag, dict):
+            continue
         rule = by_id.get(str(flag.get("rule_id")))
         if not rule:  # the model may only cite provided rules
             continue
@@ -142,13 +136,73 @@ def check_caption(caption: str, platform: str, rules: list[dict], llm) -> tuple[
             final = f"{final}\n\n{disclaimer}"
             disclaimers_added.append(disclaimer)
 
-    return (
-        {
-            "caption": final,
-            "rules_checked": len(rules),
-            "flags": flags,
-            "disclaimers_added": disclaimers_added,
-            "needs_attention": sum(1 for f in flags if not f["auto_fixed"]),
-        },
-        usage or {},
+    return {
+        "caption": final,
+        "rules_checked": len(rules),
+        "flags": flags,
+        "disclaimers_added": disclaimers_added,
+        "needs_attention": sum(1 for f in flags if not f["auto_fixed"]),
+    }
+
+
+def check_caption(caption: str, platform: str, rules: list[dict], llm) -> tuple[dict | None, dict]:
+    """Reviews one caption against the active rules. Returns (result, usage);
+    result is None when there are no rules or no caption to check.
+
+    result: {caption (final text, fixes + disclaimers applied), rules_checked,
+    flags [{rule_id, framework, severity, issue, fix, auto_fixed}],
+    disclaimers_added [text], needs_attention (count of flags not auto-fixed)}"""
+    if not rules or not (caption or "").strip():
+        return None, {}
+    # Rules first: the unchanging part leads, so providers that cache repeated
+    # prompt prefixes can reuse it
+    user_prompt = f"RULES:\n{_rules_text(rules)}\n\nPLATFORM: {platform}\n\nCAPTION:\n{caption}"
+    plan, usage = llm.generate_json(
+        COMPLIANCE_CHECK_SYSTEM_PROMPT, user_prompt, temperature=0.1, max_tokens=1500, return_usage=True
     )
+    return _finish(plan, caption, rules), usage or {}
+
+
+_BATCH_ADDENDUM = """
+
+You will receive SEVERAL captions, one per platform. Review each one on its own, exactly as described
+above - a problem in one caption is never a flag on another. Return ONLY JSON with one key per platform:
+{"<platform>": {"flags": [...], "revised_caption": "", "disclaimer_rule_ids": []}}"""
+
+
+def check_captions(captions: dict[str, str], rules: list[dict], llm) -> tuple[dict[str, dict | None], dict]:
+    """Every platform's caption reviewed in ONE call (same rules, same review
+    as check_caption). Each AI call carries ~4k tokens of fixed provider
+    overhead and the rules text, so this saves both for every extra platform.
+    A platform missing from the answer is checked on its own. Returns
+    ({platform: result or None}, usage)."""
+    captions = {p: c for p, c in captions.items() if (c or "").strip()}
+    if not rules or not captions:
+        return {p: None for p in captions}, {}
+    if len(captions) == 1:
+        (p, c), = captions.items()
+        result, usage = check_caption(c, p, rules, llm)
+        return {p: result}, usage
+    blocks = "\n\n".join(f"=== PLATFORM: {p} ===\nCAPTION:\n{c}" for p, c in captions.items())
+    try:
+        plans, usage = llm.generate_json(
+            COMPLIANCE_CHECK_SYSTEM_PROMPT + _BATCH_ADDENDUM, f"RULES:\n{_rules_text(rules)}\n\n{blocks}",
+            temperature=0.1, max_tokens=1500 * len(captions), return_usage=True,
+        )
+    except Exception:  # noqa: BLE001 - fall back to one check per platform below
+        plans, usage = {}, {}
+    plans = {str(k).lower(): v for k, v in plans.items()} if isinstance(plans, dict) else {}
+    usage = dict(usage or {})
+    results = {}
+    for platform, caption in captions.items():
+        plan = plans.get(platform)
+        if isinstance(plan, dict) and ("revised_caption" in plan or "flags" in plan):
+            results[platform] = _finish(plan, caption, rules)
+            continue
+        result, single_usage = check_caption(caption, platform, rules, llm)
+        results[platform] = result
+        for key in ("input_tokens", "output_tokens", "total_tokens", "cost_usd"):
+            usage[key] = (usage.get(key) or 0) + ((single_usage or {}).get(key) or 0)
+    return results, usage
+
+

@@ -1,5 +1,16 @@
 $(document).ready(function () {
     let uploadedImagePath = null;
+    // Image commands (/3dbillboard, /metaad, ...) - declared up here because the
+    // Generate button's state reads them from code that can run during start-up
+    let imagePresets = [];
+    let activePreset = null;          // the chosen command (from /api/image-presets)
+    let presetAllSizes = false;       // /metaad: all sizes instead of the feed image
+    let uploadedImageAnalysis = null; // the attached photo's analysis -> product notes
+    const slash = { open: false, index: 0, matches: [] };
+    // True while an attached image is uploading + being analyzed: Generate and
+    // Analyze wait for it, otherwise the post would be made without the image.
+    let imageUploading = false;
+    let imageUploadXhr = null;
     let threadActiveImagePath = null;
     let lastRunId = null;
     let lastAssistantContext = null;
@@ -120,6 +131,7 @@ $(document).ready(function () {
                 image_clean_url: d.media?.image?.clean_url || d.media?.image?.previous_clean_url || null,
                 image_prompt: d.media?.image?.prompt || d.media?.image?.previous_prompt || null,
                 image_asset_id: d.media?.image?.asset_id || d.media?.image?.previous_asset_id || null,
+                image_aspect: d.media?.image?.aspect || null,
                 video_url: d.media?.video?.url || null
             };
         });
@@ -302,6 +314,7 @@ $(document).ready(function () {
         loadUserUsageMetrics();
         loadBrandProfileQuickPrompts();
         loadImageQuota();
+        loadImagePresets();
         openModalFromHash();
         restoreConversation();
     });
@@ -594,16 +607,27 @@ $(document).ready(function () {
     });
 
     $('#removeImgBtn').on('click', function () {
+        if (imageUploadXhr) imageUploadXhr.abort();
         clearAttachment();
         threadActiveImagePath = null;
     });
 
+    function setImageUploading(on) {
+        imageUploading = on;
+        $('#dropZone').toggleClass('image-uploading', on);
+        const busy = $('#dropZone').hasClass('dock-disabled');
+        $('#analyzeBtn').prop('disabled', on || busy).attr('title', on ? 'Wait until the image has finished uploading' : 'Analyze Brief');
+        updateGenerateGate();
+    }
+
     function clearAttachment() {
         uploadedImagePath = null;
+        uploadedImageAnalysis = null;
         $('#imageInput').val('');
         $('#previewImg').attr('src', '');
         $('#imagePreview').addClass('d-none');
         setAnalysisBadge('badge-neutral', 'Ready');
+        if (typeof updateGenerateGate === 'function') updateGenerateGate();
     }
 
     function handleImageUpload(file) {
@@ -617,8 +641,12 @@ $(document).ready(function () {
         };
         reader.readAsDataURL(file);
 
-        setAnalysisBadge('badge-warn', 'Uploading...');
-        $.ajax({
+        // A new image replaces one that is still uploading
+        if (imageUploadXhr) imageUploadXhr.abort();
+        uploadedImagePath = null;
+        setImageUploading(true);
+        setAnalysisBadge('badge-warn', '<i class="fas fa-spinner fa-spin me-1"></i>Uploading &amp; analyzing...');
+        const xhr = imageUploadXhr = $.ajax({
             url: '/api/upload',
             type: 'POST',
             data: formData,
@@ -627,12 +655,20 @@ $(document).ready(function () {
             success: function (r) {
                 uploadedImagePath = r.filepath;
                 threadActiveImagePath = r.filepath;
+                uploadedImageAnalysis = r.analysis || null;
                 setAnalysisBadge('badge-ok', '<i class="fas fa-check me-1"></i>Analyzed');
                 showToast('Visual asset uploaded & analyzed!', 'success');
             },
-            error: function () {
-                setAnalysisBadge('badge-fail', 'Upload failed');
-                showToast('Image upload failed', 'error');
+            error: function (_xhr, status) {
+                if (status === 'abort') return;  // removed or replaced while uploading
+                // Don't leave a preview that looks attached but would be ignored
+                clearAttachment();
+                showToast('Image upload failed - please attach it again.', 'error');
+            },
+            complete: function () {
+                if (imageUploadXhr !== xhr) return;  // a newer upload took over
+                imageUploadXhr = null;
+                setImageUploading(false);
             }
         });
     }
@@ -643,6 +679,10 @@ $(document).ready(function () {
 
     // ── Story Analysis ─────────────────────────────────────────────────
     window.analyzeStory = function () {
+        if (imageUploading) {
+            showToast('Wait until the image has finished uploading.', 'warning');
+            return;
+        }
         const story = $('#storyInput').val().trim();
         const targetCompany = $('#targetCompanySelect').val() || 'None';
 
@@ -686,6 +726,7 @@ $(document).ready(function () {
     function setChatDockDisabled(disabled) {
         $('#dropZone').toggleClass('dock-disabled', disabled);
         $('#storyInput, #generateBtn, #analyzeBtn, #attachBtn').prop('disabled', disabled);
+        if (!disabled && imageUploading) $('#analyzeBtn').prop('disabled', true);
         if (!disabled) updateGenerateGate();
     }
 
@@ -865,6 +906,24 @@ $(document).ready(function () {
 
     // ── Generate Content (Main Chat Flow) ──────────────────────────────
     window.generateContent = function () {
+        if (imageUploading) {
+            showToast('Wait until the image has finished uploading - then send.', 'warning');
+            return;
+        }
+        // An image command: chosen from the "/" menu, or typed ("/metaad blue background").
+        // A typed command replaces one already chosen.
+        const typed = /^\/([\w-]+)(?:\s+([\s\S]*))?$/.exec(storyInput.val().trim());
+        if (typed) {
+            if (!presetById(typed[1].toLowerCase())) {
+                showToast(`Unknown command /${typed[1]} - type / to see the image commands.`, 'warning');
+                return;
+            }
+            choosePreset(typed[1].toLowerCase(), typed[2] || '');
+        }
+        if (activePreset) {
+            runPreset(storyInput.val().trim());
+            return;
+        }
         if (imageGateBlocked()) {
             showToast(imageLimitText(window.__imageQuota), 'warning');
             return;
@@ -893,8 +952,9 @@ $(document).ready(function () {
         // it targets a platform the post doesn't have yet, which needs the full
         // pipeline to write for that platform.
         const refineBase = refineBaseMsgId ? window.chatHistory[refineBaseMsgId] : null;
+        const baseIsPreset = !!(refineBase && refineBase.preset);
         const canRefine = !!(refineBase && lastAssistantContext && story &&
-            pickedPlatforms.every(p => refineBase.platforms.includes(p)));
+            (baseIsPreset || pickedPlatforms.every(p => refineBase.platforms.includes(p))));
 
         // A follow-up in an existing thread continues on the same platforms
         // (and at least a caption) when none are picked, rather than falling
@@ -915,11 +975,12 @@ $(document).ready(function () {
         messageCounter++;
         const msgId = 'msg_' + Date.now() + '_' + messageCounter;
 
-        const refinePlatforms = canRefine ? (pickedPlatforms.length ? pickedPlatforms : refineBase.platforms.slice()) : null;
+        const refinePlatforms = canRefine
+            ? (baseIsPreset || !pickedPlatforms.length ? refineBase.platforms.slice() : pickedPlatforms) : null;
         const attachedImage = uploadedImagePath;
 
         // 1. Append User Chat Message Bubble
-        appendUserMessage(story, uploadedImagePath, refinePlatforms || platforms, tone, mediaType, brandVoice);
+        appendUserMessage(story, uploadedImagePath, baseIsPreset ? [] : (refinePlatforms || platforms), tone, mediaType, brandVoice);
 
         // Clear input area
         storyInput.val('').trigger('input');
@@ -979,9 +1040,11 @@ $(document).ready(function () {
         const toneBadge = tone ? `<span class="chat-badge"><i class="fas fa-sliders me-1"></i>${tone}</span>` : '';
         const mediaBadge = mediaType !== 'none' ? `<span class="chat-badge"><i class="fas fa-photo-film me-1"></i>${mediaType}</span>` : '';
 
-        const attachmentHtml = imagePath ? `
+        // A public URL (replayed conversation) shows itself; a fresh upload shows its preview
+        const attachSrc = imagePath && /^(\/|https?:)/.test(imagePath) ? imagePath : $('#previewImg').attr('src');
+        const attachmentHtml = imagePath && attachSrc ? `
             <div class="chat-user-attachment">
-                <img src="${$('#previewImg').attr('src')}" alt="Attached asset">
+                <img src="${escapeAttr(attachSrc)}" alt="Attached product photo">
             </div>
         ` : '';
 
@@ -1037,7 +1100,7 @@ $(document).ready(function () {
     // (a run reloaded from history that already has saved media, see
     // db.append_run_media / content[platform].media.{image,video}) so both
     // paths produce the identical card instead of two hand-maintained copies.
-    function buildGeneratedMediaHtml(mediaType, media) {
+    function buildGeneratedMediaHtml(mediaType, media, msgId, platform, reveal) {
         if (mediaType === 'video') {
             return `
                 <div class="media-output-card">
@@ -1051,21 +1114,41 @@ $(document).ready(function () {
                 </div>
             `;
         }
+        // "New image": Regenerate keeps the image, so this is how a post gets a fresh one
+        const newImageBtn = msgId && platform ? `
+                        <button type="button" class="btn-copy-sm" onclick="regenerateImage('${msgId}', '${platform}')"
+                                title="Create a new image for this post (uses 1 of today's images); the caption stays"><i class="fas fa-rotate me-1"></i>New image</button>` : '';
         return `
             <div class="media-output-card">
                 <div class="media-output-header">
                     <span><i class="fas fa-image text-primary me-2"></i>Generated Image (${media.resolution || '1024x1024'})</span>
                     <div class="media-output-actions">
                         <button type="button" class="btn-copy-sm" onclick="openImagePreview('${media.url}')" title="View the image larger"><i class="fas fa-expand me-1"></i>Preview</button>
-                        <button type="button" class="btn-copy-sm" onclick="downloadAsZip('${media.url}', this)"><i class="fas fa-file-zipper me-1"></i>Download</button>
+                        <button type="button" class="btn-copy-sm" onclick="downloadAsZip('${media.url}', this)"><i class="fas fa-file-zipper me-1"></i>Download</button>${newImageBtn}
                     </div>
                 </div>
                 <div class="media-output-body">
-                    <img src="${media.url}" class="media-output-img" alt="Generated media">
+                    <img src="${media.url}" class="media-output-img${reveal ? ' img-reveal' : ''}" alt="Generated media">
                 </div>
             </div>
         `;
     }
+
+    // Replaces a post's image with a new one (also on the platforms sharing it);
+    // the caption and hashtags stay as they are
+    window.regenerateImage = function (msgId, platform) {
+        const h = window.chatHistory[msgId];
+        if (!h) return;
+        const r = h.responses[h.currentIndex];
+        const content = r.content || {};
+        const url = content[platform]?.media?.image?.url;
+        const sharing = h.platforms.filter(p => p !== platform && url && content[p]?.media?.image?.url === url);
+        const pData = content[platform] || {};
+        const caption = pData.caption?.primary_caption || h.requestBody.story;
+        $(`#${msgId}_media_image_${platform}`).html(imageCreatingHtml(sharing.length > 0 || platform === 'instagram', 'Creating a new image'));
+        triggerMediaGenInChat(platform, caption, 'image', h.requestBody.tone, r.runId, h.activeImgPath,
+            `${msgId}_media_image_${platform}`, pData.media_prompt || caption, msgId, sharing);
+    };
 
     // ── Image preview (lightbox) ────────────────────────────────────────
     // Full-screen view of a generated image: fits the screen, Esc / click
@@ -1273,6 +1356,7 @@ $(document).ready(function () {
                 base_run_id: base.runId,
                 conversation_id: currentConversationId,
                 version_of_run_id: (window.chatHistory[msgId]?.responses || [])[0]?.runId,
+                preset: (window.chatHistory[base.msgId] || {}).presetRun || undefined,
                 reference_image_path: opts.attachedImage,
                 base: toRefinePayload(base.content, opts.platforms)
             }),
@@ -1313,6 +1397,9 @@ $(document).ready(function () {
                     content[p] = merged;
                 });
 
+                // An edit of a command's images stays a command result
+                const baseH = window.chatHistory[base.msgId] || {};
+                if (base.content && base.content._preset) content._preset = base.content._preset;
                 if (!window.chatHistory[msgId]) {
                     window.chatHistory[msgId] = {
                         responses: [],
@@ -1322,7 +1409,9 @@ $(document).ready(function () {
                         activeImgPath: null,
                         mediaType: 'none',
                         selectedOutputs: [],
-                        refine: opts
+                        refine: opts,
+                        preset: baseH.preset,
+                        presetRun: baseH.presetRun
                     };
                 }
                 const h = window.chatHistory[msgId];
@@ -1481,6 +1570,10 @@ $(document).ready(function () {
 
     function renderAssistantResponse(msgId) {
         const historyObj = window.chatHistory[msgId];
+        if (historyObj.preset || (historyObj.responses[historyObj.currentIndex]?.content || {})._preset) {
+            renderPresetResponse(msgId);
+            return;
+        }
         const rData = historyObj.responses[historyObj.currentIndex];
         const { requestBody, platforms, selectedOutputs } = historyObj;
         const { content, runId, usage, agentsExecuted, qualitySummary } = rData;
@@ -1596,7 +1689,7 @@ $(document).ready(function () {
                          no saved media yet for a type that was requested. -->
                     <div id="${msgId}_media_${p}" class="media-container-slot">
                         ${pData.media?.image?.limit_reached ? `<div id="${msgId}_media_image_${p}">${imageLimitCardHtml()}</div>`
-                            : pData.media?.image?.url ? buildGeneratedMediaHtml('image', pData.media.image)
+                            : pData.media?.image?.url ? `<div id="${msgId}_media_image_${p}">${buildGeneratedMediaHtml('image', pData.media.image, msgId, p)}</div>`
                             : (selectedOutputs || []).includes('image') ? `
                         <div id="${msgId}_media_image_${p}">
                             ${imageCreatingHtml(platforms.length > 1 || p === 'instagram')}
@@ -1736,7 +1829,11 @@ $(document).ready(function () {
                 const assistantElem = $(`#${mId}`);
                 const hasImage = !!h.activeImgPath;
                 assistantElem.replaceWith(appendAssistantThinking(mId, hasImage));
-                executeGeneration(mId, h.requestBody, $(`#${mId}`), h.platforms, h.activeImgPath, h.mediaType, h.selectedOutputs);
+                // New text, same image: the version being viewed keeps its image and
+                // video (the image's own "New image" button replaces it on request)
+                const viewed = h.responses[h.currentIndex] || {};
+                const body = viewed.runId ? Object.assign({}, h.requestBody, { keep_media_from_run_id: viewed.runId }) : h.requestBody;
+                executeGeneration(mId, body, $(`#${mId}`), h.platforms, h.activeImgPath, h.mediaType, h.selectedOutputs);
             }
         });
 
@@ -1923,11 +2020,14 @@ $(document).ready(function () {
     }
 
     function updateGenerateGate() {
-        const gated = imageGateBlocked();
+        const presetReason = presetBlockReason();
+        const gated = !activePreset && imageGateBlocked();  // a command checks its own limit
         const busy = $('#dropZone').hasClass('dock-disabled');
         const q = window.__imageQuota;
-        $('#generateBtn').prop('disabled', busy || gated).toggleClass('quota-gated', gated)
-            .attr('title', gated ? imageLimitText(q) : 'Send & Generate Content');
+        $('#generateBtn').prop('disabled', busy || gated || imageUploading || !!presetReason).toggleClass('quota-gated', gated)
+            .attr('title', presetReason || (gated ? imageLimitText(q)
+                : (imageUploading ? 'Wait until the image has finished uploading' : 'Send & Generate Content')));
+        renderPresetBar();
         $('#imageLimitDockNote').toggleClass('d-none', !gated).html(gated ? `
             <i class="fas fa-hourglass-half"></i>
             <span><strong>Daily image limit reached.</strong> This post has an image, so refining it resumes in
@@ -1962,6 +2062,351 @@ $(document).ready(function () {
                     <div class="image-limit-text">${escapeHtml(text)}</div>
                 </div>
             </div>`;
+    }
+
+    // ── Image commands: product photo + /3dbillboard, /metaad, ... ─────────
+    // Typing "/" opens the command menu; the chosen command shows as a chip
+    // above the box. Every image a command makes counts toward the daily
+    // limit, which is checked before anything is sent (api/routes.py).
+    // (state: imagePresets, activePreset, presetAllSizes, uploadedImageAnalysis, slash - declared at the top)
+    const defaultPlaceholder = $('#storyInput').attr('placeholder');
+
+    function loadImagePresets() {
+        $.getJSON('/api/image-presets').done(r => { imagePresets = (r && r.presets) || []; });
+    }
+
+    function presetById(id) { return imagePresets.find(p => p.id === id) || null; }
+    function presetImageCount(p, allSizes) {
+        if (!p) return 0;
+        return (allSizes ?? presetAllSizes) && p.all_sizes_images ? p.all_sizes_images : p.images;
+    }
+    function presetSizeLabels(p, allSizes) {
+        return ((allSizes && p.all_sizes && p.all_sizes.length) ? p.all_sizes : p.sizes) || [];
+    }
+    // The attached photo, else the last image in this chat
+    function presetProductImage() { return uploadedImagePath || threadActiveImagePath || null; }
+
+    function productNotesFromAnalysis() {
+        const a = uploadedImageAnalysis || {};
+        const colors = Array.isArray(a.colors) ? a.colors.join(', ') : (a.colors || '');
+        return [a.rich_description || a.raw_caption || '', colors ? `Colours: ${colors}` : ''].filter(Boolean).join(' ').slice(0, 600);
+    }
+
+    function presetBlockReason() {
+        if (!activePreset) return null;
+        if (activePreset.requires_image && !presetProductImage()) return `Attach a product photo to use ${activePreset.command}`;
+        const q = window.__imageQuota;
+        const need = presetImageCount(activePreset);
+        if (q && !q.unlimited && q.remaining < need) {
+            return q.remaining <= 0 ? imageLimitText(q)
+                : `${activePreset.command} needs ${need} images and you have ${q.remaining} left today`;
+        }
+        return null;
+    }
+
+    // ── "/" menu ──
+    function slashQuery() {
+        const m = /^\/([\w-]*)$/.exec(storyInput.val());  // only while the box holds just "/word"
+        return m ? m[1].toLowerCase() : null;
+    }
+
+    function closeSlashMenu() {
+        slash.open = false;
+        $('#slashMenu').addClass('d-none').empty();
+        storyInput.attr('aria-expanded', 'false');
+    }
+
+    function renderSlashMenu() {
+        const q = slashQuery();
+        if (q === null || !imagePresets.length) { closeSlashMenu(); return; }
+        slash.matches = imagePresets.filter(p => p.id.startsWith(q) || p.label.toLowerCase().includes(q));
+        slash.index = Math.min(slash.index, Math.max(0, slash.matches.length - 1));
+        const items = slash.matches.map((p, i) => `
+            <button type="button" class="slash-item${i === slash.index ? ' active' : ''}" role="option"
+                    aria-selected="${i === slash.index}" data-id="${escapeAttr(p.id)}" id="slashItem${i}">
+                <span class="slash-icon"><i class="fas ${escapeAttr(p.icon)}"></i></span>
+                <span class="slash-text">
+                    <span class="slash-cmd">${escapeHtml(p.command)}</span><span class="slash-label">${escapeHtml(p.label)}</span>
+                    <span class="slash-desc">${escapeHtml(p.description)}</span>
+                </span>
+                <span class="slash-meta">${p.images} image${p.images === 1 ? '' : 's'}${p.ad_copy ? ' + ad copy' : ''}</span>
+            </button>`).join('');
+        $('#slashMenu').html(`
+            <div class="slash-menu-head"><span>Image commands</span><span class="slash-keys">↑↓ choose · Enter use · Esc close</span></div>
+            ${items || `<div class="slash-empty">No command matches "/${escapeHtml(q)}"</div>`}`).removeClass('d-none');
+        slash.open = true;
+        storyInput.attr('aria-expanded', 'true').attr('aria-activedescendant', items ? `slashItem${slash.index}` : '');
+    }
+
+    function choosePreset(id, rest) {
+        const p = presetById(id);
+        if (!p) return;
+        activePreset = p;
+        presetAllSizes = false;
+        storyInput.val(rest || '').trigger('input');
+        closeSlashMenu();
+        storyInput.attr('placeholder', p.placeholder).trigger('focus');
+        updateGenerateGate();
+    }
+
+    window.clearPreset = function () {
+        activePreset = null;
+        presetAllSizes = false;
+        storyInput.attr('placeholder', defaultPlaceholder);
+        updateGenerateGate();
+    };
+
+    function renderPresetBar() {
+        const $bar = $('#presetBar');
+        if (!activePreset) { $bar.addClass('d-none').empty(); return; }
+        const p = activePreset;
+        const need = presetImageCount(p);
+        const q = window.__imageQuota;
+        const reason = presetBlockReason();
+        const sizes = p.all_sizes_images ? `
+            <div class="preset-sizes" role="group" aria-label="Image sizes">
+                <button type="button" class="preset-size${presetAllSizes ? '' : ' active'}" data-all="0" aria-pressed="${!presetAllSizes}">${escapeHtml(p.sizes.join(', '))} · ${p.images} image</button>
+                <button type="button" class="preset-size${presetAllSizes ? ' active' : ''}" data-all="1" aria-pressed="${presetAllSizes}">All ${p.all_sizes_images} sizes · ${p.all_sizes_images} images</button>
+            </div>` : '';
+        let status;
+        if (p.requires_image && !presetProductImage()) {
+            status = '<button type="button" class="preset-status warn" id="presetAttachBtn"><i class="fas fa-image me-1"></i>Attach a product photo</button>';
+        } else if (reason) {
+            status = `<span class="preset-status bad"><i class="fas fa-hourglass-half me-1"></i>${escapeHtml(reason)}</span>`;
+        } else {
+            status = `<span class="preset-status">${need} image${need === 1 ? '' : 's'}${p.ad_copy ? ' + ad copy' : ''}`
+                + `${q && !q.unlimited ? ` · ${q.remaining} left today` : ''}`
+                + `${!uploadedImagePath && threadActiveImagePath ? ' · uses the last image in this chat' : ''}</span>`;
+        }
+        $bar.html(`
+            <span class="preset-chip"><i class="fas ${escapeAttr(p.icon)}"></i>${escapeHtml(p.command)}
+                <span class="preset-chip-label">${escapeHtml(p.label)}</span>
+                <button type="button" class="preset-chip-x" onclick="clearPreset()" aria-label="Remove ${escapeAttr(p.label)}">&times;</button>
+            </span>${sizes}${status}`).removeClass('d-none');
+    }
+
+    storyInput.on('input', renderSlashMenu);
+    storyInput.on('blur', () => setTimeout(closeSlashMenu, 150));
+    // Capture phase: runs before the box's Enter-to-send handler
+    storyInput[0].addEventListener('keydown', function (e) {
+        if (slash.open) {
+            if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && slash.matches.length) {
+                e.preventDefault();
+                const n = slash.matches.length;
+                slash.index = (slash.index + (e.key === 'ArrowDown' ? 1 : n - 1)) % n;
+                renderSlashMenu();
+            } else if ((e.key === 'Enter' || e.key === 'Tab') && slash.matches.length && !e.shiftKey) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                choosePreset(slash.matches[slash.index].id);
+            } else if (e.key === 'Escape') {
+                e.preventDefault();
+                closeSlashMenu();
+            }
+            return;
+        }
+        // Backspace in an empty box removes the command chip
+        if (e.key === 'Backspace' && activePreset && !storyInput.val()) window.clearPreset();
+    }, true);
+    $(document).on('mousedown', '.slash-item', function (e) {
+        e.preventDefault();  // keep focus in the box
+        choosePreset($(this).data('id'));
+    });
+    $(document).on('click', '.preset-size', function () {
+        presetAllSizes = $(this).data('all') === 1 || $(this).data('all') === '1';
+        updateGenerateGate();
+    });
+    $(document).on('click', '#presetAttachBtn', () => $('#imageInput').trigger('click'));
+
+    // ── Running a command ──
+    function presetThinkingHtml(msgId, p, labels) {
+        return `
+            <div class="chat-message-assistant" id="${msgId}">
+                <div class="assistant-avatar">${assistantAvatarSvg()}</div>
+                <div class="assistant-card">
+                    <div class="assistant-header"><div class="assistant-title"><i class="fas ${escapeAttr(p.icon)}"></i>${escapeHtml(p.label)}</div></div>
+                    <div class="preset-grid${labels.length > 1 ? ' multi' : ''}">
+                        ${labels.map(l => `<div class="preset-tile">${imageCreatingHtml(!/16:9/.test(l), 'Creating ' + l)}</div>`).join('')}
+                    </div>
+                </div>
+            </div>`;
+    }
+
+    // opts.msgId: Regenerate an existing reply (adds a version to it)
+    function runPreset(text, opts) {
+        opts = opts || {};
+        const p = opts.preset || activePreset;
+        if (!p) return;
+        if (!opts.msgId) {
+            const reason = presetBlockReason();
+            if (reason) { showToast(reason, 'warning'); return; }
+        }
+        const imagePath = opts.imagePath || presetProductImage();
+        const allSizes = opts.allSizes != null ? opts.allSizes : presetAllSizes;
+        const notes = opts.productNotes != null ? opts.productNotes : productNotesFromAnalysis();
+        const labels = presetSizeLabels(p, allSizes);
+        let msgId = opts.msgId;
+        if (!msgId) {
+            $('#welcomeHero').addClass('d-none');
+            messageCounter++;
+            msgId = 'msg_' + Date.now() + '_' + messageCounter;
+            appendUserMessage(`${p.command}${text ? ' ' + text : ''}`, uploadedImagePath, [], null, p.label, 'Standard Enterprise');
+            storyInput.val('').trigger('input');
+            clearAttachment();
+            window.clearPreset();
+            $('#chatThread').append(presetThinkingHtml(msgId, p, labels));
+        } else {
+            $(`#${msgId}`).replaceWith(presetThinkingHtml(msgId, p, labels));
+        }
+        scrollToBottom();
+        setChatDockDisabled(true);
+        const prior = window.chatHistory[msgId];
+        window.currentGenerationRequest = $.ajax({
+            url: '/api/presets/run',
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({
+                preset: p.id, image_path: imagePath, text: text, all_sizes: allSizes, product_notes: notes,
+                conversation_id: currentConversationId,
+                version_of_run_id: prior && prior.responses.length ? prior.responses[0].runId : undefined
+            }),
+            success: function (r) {
+                window.currentGenerationRequest = null;
+                setChatDockDisabled(false);
+                if (r.conversation_id) setConversation(r.conversation_id);
+                if (r.quota) window.applyImageQuota(r.quota);
+                if (!window.chatHistory[msgId]) {
+                    window.chatHistory[msgId] = {
+                        responses: [], currentIndex: 0,
+                        requestBody: { story: `${p.command} ${text}`.trim(), platforms: r.preset.keys, tone: 'Auto' },
+                        platforms: r.preset.keys, activeImgPath: null, mediaType: 'image', selectedOutputs: ['image'],
+                        preset: { id: p.id, command: p.command, label: p.label, icon: p.icon, text: text, imagePath: imagePath, allSizes: allSizes, productNotes: notes },
+                        presetRun: r.preset
+                    };
+                }
+                const h = window.chatHistory[msgId];
+                h.platforms = r.preset.keys;
+                h.presetRun = r.preset;
+                h.responses.push({ content: r.content, runId: r.run_id, usage: r.usage, agentsExecuted: null, qualitySummary: null });
+                h.currentIndex = h.responses.length - 1;
+                lastRunId = r.run_id || lastRunId;
+                renderAssistantResponse(msgId);
+                adoptAsRefineBase(msgId);
+                (r.errors || []).forEach(e => showToast('An image could not be created - ' + e, 'error'));
+                renderHistory();
+                loadUserUsageMetrics();
+                scrollToBottom();
+            },
+            error: function (xhr, status) {
+                window.currentGenerationRequest = null;
+                setChatDockDisabled(false);
+                if (status === 'abort') { $(`#${msgId}`).remove(); return; }
+                const body = xhr.responseJSON || {};
+                let inner;
+                if (xhr.status === 403 && body.code === 'image_limit_reached') {
+                    if (body.quota) window.applyImageQuota(body.quota);
+                    inner = `<div class="image-limit-card" role="status"><div class="image-limit-icon"><i class="fas fa-hourglass-half"></i></div>
+                        <div><div class="image-limit-title">Not enough images left today</div><div class="image-limit-text">${escapeHtml(body.error || '')}</div></div></div>`;
+                } else {
+                    inner = `<div class="alert alert-warning mb-0"><i class="fas fa-triangle-exclamation me-2"></i>${escapeHtml(body.error || 'The images could not be created. Please try again.')}</div>`;
+                }
+                $(`#${msgId} .assistant-card`).html(`
+                    <div class="assistant-header"><div class="assistant-title"><i class="fas ${escapeAttr(p.icon)}"></i>${escapeHtml(p.label)}</div></div>${inner}`);
+            }
+        });
+    }
+
+    // The reply of an image command: the images (exact sizes), ad copy for
+    // /metaad, Regenerate, and "Refine this version" for chat edits.
+    function renderPresetResponse(msgId) {
+        const h = window.chatHistory[msgId];
+        const r = h.responses[h.currentIndex];
+        const content = r.content || {};
+        const meta = content._preset || h.presetRun || {};
+        const label = (h.preset && h.preset.label) || meta.label || 'Image command';
+        const icon = (h.preset && h.preset.icon) || meta.icon || 'fa-wand-magic-sparkles';
+        const total = h.responses.length, cur = h.currentIndex + 1;
+        const pager = total > 1 ? `
+            <div class="generation-pagination ms-2 d-inline-flex align-items-center bg-light rounded px-2 py-1 border">
+                <i class="fas fa-chevron-left cursor-pointer text-secondary me-2 gen-prev" data-msg="${msgId}" ${cur === 1 ? 'style="opacity: 0.5; pointer-events: none;"' : ''}></i>
+                <span class="small font-weight-bold">${cur} / ${total}</span>
+                <i class="fas fa-chevron-right cursor-pointer text-secondary ms-2 gen-next" data-msg="${msgId}" ${cur === total ? 'style="opacity: 0.5; pointer-events: none;"' : ''}></i>
+            </div>` : '';
+        const tiles = h.platforms.map(k => {
+            const img = content[k]?.media?.image;
+            if (!img) return '';
+            if (img.limit_reached) return `<div class="preset-tile">${imageLimitCardHtml()}</div>`;
+            const sizeLabel = { feed: 'Feed', portrait: 'Feed', story: 'Story', billboard: 'Billboard', showcase: 'Showcase', lifestyle: 'Lifestyle', catalog: 'Catalog', festive: 'Festive' }[k] || capitalize(k);
+            const name = `${sizeLabel}${img.aspect ? ' ' + img.aspect : ''}`;
+            return `
+                <figure class="preset-tile" ${img.aspect ? `data-aspect="${escapeAttr(img.aspect)}"` : ''}>
+                    <img class="media-output-img preset-img img-reveal" src="${escapeAttr(img.url)}" alt="${escapeAttr(label + ' - ' + name)}" loading="lazy">
+                    <figcaption>
+                        <span>${escapeHtml(name)}${img.width ? ` · ${img.width}×${img.height}` : ''}</span>
+                        <span class="preset-tile-actions">
+                            <button type="button" class="preset-mini" data-preview="${escapeAttr(img.url)}" title="Preview"><i class="fas fa-expand"></i></button>
+                            <a class="preset-mini" href="${escapeAttr(img.url)}" download title="Download"><i class="fas fa-download"></i></a>
+                        </span>
+                    </figcaption>
+                </figure>`;
+        }).join('');
+        const ad = meta.ad_copy;
+        const adText = ad ? `${ad.primary_text}\n\nHeadline: ${ad.headline}\nDescription: ${ad.description}\nButton: ${ad.cta}` : '';
+        const adHtml = ad ? `
+            <div class="preset-adcopy">
+                <div class="preset-adcopy-head"><span><i class="fab fa-meta me-1"></i>Ad copy</span>
+                    <button type="button" class="preset-copy" data-copy="${escapeAttr(adText)}"><i class="fas fa-copy me-1"></i>Copy all</button></div>
+                <dl>
+                    <dt>Primary text</dt><dd>${escapeHtml(ad.primary_text)}</dd>
+                    <dt>Headline</dt><dd><strong>${escapeHtml(ad.headline)}</strong></dd>
+                    <dt>Description</dt><dd>${escapeHtml(ad.description)}</dd>
+                    <dt>Button</dt><dd><span class="preset-cta">${escapeHtml(ad.cta)}</span></dd>
+                </dl>
+            </div>` : '';
+        const usage = r.usage;
+        const costHtml = usage && usage.cost_usd
+            ? `<span class="badge-cost-tag me-1" id="${msgId}_cost_badge" title="Images${ad ? ' + ad copy' : ''}">${costBadgeInner(usage)}</span>` : '';
+        const elem = $(`#${msgId}`);
+        elem.find('.assistant-card').html(`
+            <div class="assistant-header">
+                <div class="assistant-title"><div><i class="fas ${escapeAttr(icon)} text-primary me-1"></i>${escapeHtml(label)}${meta.occasion ? ` · ${escapeHtml(meta.occasion)}` : ''}</div>${pager}</div>
+                <div class="assistant-meta-tags">${costHtml}<span class="assistant-run-tag">${r.runId ? 'Run #' + r.runId : 'Generated'}</span></div>
+            </div>
+            ${meta.text ? `<div class="preset-brief"><i class="fas fa-quote-left me-1"></i>${escapeHtml(meta.text)}</div>` : ''}
+            ${meta.occasion_auto ? `<div class="preset-brief"><i class="fas fa-calendar-day me-1"></i>Made for the next festival, <strong>${escapeHtml(meta.occasion)}</strong>. For another occasion, type e.g. <em>/festive Eid</em>.</div>` : ''}
+            <div class="preset-grid${h.platforms.length > 1 ? ' multi' : ''}">${tiles}</div>
+            ${adHtml}
+            <div class="assistant-card-footer">
+                <button class="btn btn-sm btn-outline-primary btn-preset-regen" data-msg="${msgId}"><i class="fas fa-sync-alt me-1"></i>Regenerate</button>
+                <button class="btn btn-sm btn-outline-secondary btn-refine-base" data-msg="${msgId}" title="Your next message will edit this version">
+                    <i class="fas fa-wand-magic-sparkles me-1"></i>${refineBaseMsgId === msgId ? 'Refining this version' : 'Refine this version'}</button>
+            </div>
+            <div class="preset-tip"><i class="fas fa-lightbulb me-1"></i>Want a change? Just type it - e.g. "make the background darker".</div>`);
+
+        elem.find('.gen-prev, .gen-next').on('click', function () {
+            h.currentIndex = Math.max(0, Math.min(h.responses.length - 1, h.currentIndex + ($(this).hasClass('gen-next') ? 1 : -1)));
+            if (refineBaseMsgId === msgId) adoptAsRefineBase(msgId);
+            renderAssistantResponse(msgId);
+        });
+        elem.find('[data-preview]').on('click', function () { window.openImagePreview($(this).data('preview')); });
+        elem.find('.preset-copy').on('click', function () {
+            navigator.clipboard.writeText($(this).data('copy')).then(() => showToast('Ad copy copied', 'success'));
+        });
+        elem.find('.btn-refine-base').on('click', function () {
+            adoptAsRefineBase(msgId);
+            const imageId = h.platforms.map(k => content[k]?.media?.image?.asset_id).find(Boolean);
+            if (currentConversationId && imageId) {
+                $.ajax({ url: `/api/conversations/${currentConversationId}/active-image`, type: 'POST',
+                         contentType: 'application/json', data: JSON.stringify({ image_id: imageId }) });
+            }
+            storyInput.trigger('focus');
+            showToast('Your next message will edit these images.', 'info');
+        });
+        elem.find('.btn-preset-regen').on('click', function () {
+            const pr = h.preset || {};
+            const p = presetById(pr.id) || { id: pr.id, command: '/' + pr.id, label: label, icon: icon, sizes: [], all_sizes: [] };
+            runPreset(pr.text || '', { msgId: msgId, preset: p, imagePath: pr.imagePath, allSizes: !!pr.allSizes, productNotes: pr.productNotes || '' });
+        });
     }
 
     const PLATFORM_NAMES = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube' };
@@ -2050,20 +2495,7 @@ $(document).ready(function () {
                                 <video src="${res.url}?v=${Date.now()}" controls class="media-output-video" autoplay loop></video>
                             </div>
                         </div>
-                    ` : `
-                        <div class="media-output-card">
-                            <div class="media-output-header">
-                                <span><i class="fas fa-image text-primary me-2"></i>Generated Image (${res.resolution || '1024x1024'})</span>
-                                <div class="media-output-actions">
-                                    <button type="button" class="btn-copy-sm" onclick="openImagePreview('${res.url}')" title="View the image larger"><i class="fas fa-expand me-1"></i>Preview</button>
-                                    <button type="button" class="btn-copy-sm" onclick="downloadAsZip('${res.url}', this)"><i class="fas fa-file-zipper me-1"></i>Download</button>
-                                </div>
-                            </div>
-                            <div class="media-output-body">
-                                <img src="${res.url}" class="media-output-img img-reveal" alt="Generated media">
-                            </div>
-                        </div>
-                    `;
+                    ` : buildGeneratedMediaHtml('image', { url: res.url, resolution: res.resolution || res.size }, msgId, platform, true);
                     slot.html(mediaHtml);
                     // The same image in the other platforms' slots, each able to get its own
                     sharedTargets.forEach(target => {
@@ -2319,12 +2751,18 @@ $(document).ready(function () {
 
                     messageCounter++;
                     const msgId = 'msg_' + Date.now() + '_' + messageCounter;
-                    appendUserMessage(run.story, meta.image_url || null, platforms, run.tone, 'Text (Caption)', 'Standard Enterprise');
+                    const presetMeta = content._preset || null;  // an image command's run
+                    const msgPlatforms = presetMeta ? (presetMeta.keys || []) : platforms;
+                    if (presetMeta) {
+                        appendUserMessage(run.story, presetMeta.source_image_url || null, [], null, presetMeta.label, 'Standard Enterprise');
+                    } else {
+                        appendUserMessage(run.story, meta.image_url || null, platforms, run.tone, 'Text (Caption)', 'Standard Enterprise');
+                    }
                     appendAssistantThinking(msgId, false);
 
                     // Show the media this reply already has (no new generation)
                     const savedOutputs = [];
-                    platforms.forEach(p => {
+                    msgPlatforms.forEach(p => {
                         const media = content[p]?.media || {};
                         if ((media.image?.url || media.image?.limit_reached) && !savedOutputs.includes('image')) savedOutputs.push('image');
                         if (media.video?.url && !savedOutputs.includes('video')) savedOutputs.push('video');
@@ -2332,12 +2770,17 @@ $(document).ready(function () {
                     const h = {
                         responses: [rData],
                         currentIndex: 0,
-                        requestBody: { story: run.story, platforms: platforms, tone: run.tone, brand_voice: 'Standard Enterprise' },
-                        platforms: platforms,
+                        requestBody: { story: run.story, platforms: msgPlatforms, tone: run.tone, brand_voice: 'Standard Enterprise' },
+                        platforms: msgPlatforms,
                         activeImgPath: null,
                         mediaType: 'none',
                         selectedOutputs: savedOutputs
                     };
+                    if (presetMeta) {
+                        h.preset = { id: presetMeta.id, command: '/' + presetMeta.id, label: presetMeta.label, icon: presetMeta.icon,
+                                     text: presetMeta.text || '', imagePath: presetMeta.source_image_url, allSizes: !!presetMeta.all_sizes, productNotes: '' };
+                        h.presetRun = presetMeta;
+                    }
                     // A refinement: Regenerate re-applies it to the version it refined
                     const baseMsg = meta.refined_from_run_id && msgByRun[meta.refined_from_run_id];
                     if (baseMsg) {
