@@ -236,3 +236,94 @@ def test_research_makes_a_single_ai_call(monkeypatch):
     monkeypatch.setattr(routes.story_agent, "extract_key_points", lambda *a, **k: pytest.fail("unused second call"))
     body = client.post("/api/analyze-story", json={"story": "10 days of LinkedIn posts about AI"}).get_json()
     assert body["success"] and body["analysis"]["hooks"] == ["Day 1"] and body["key_points"] == []
+
+
+# ── Live research: readable while it's being written ───────────────────────
+
+RESEARCH = {
+    "themes": ["AI becomes a collaborator", "Trust—governance—matters"],
+    "research_notes": ['Gartner says "agentic AI" is rising', "On-device models cut latency"],
+    "hooks": [{"day": 1, "topic": "One model or many?", "post": "A whole long post..."},
+              {"day": 2, "topic": "Agents finish work", "post": "Another long post..."}, "Plain idea"],
+}
+
+
+@pytest.mark.parametrize("double_encoded", [False, True])
+def test_partial_research_grows_at_every_cut(double_encoded):
+    import json
+
+    from api.routes import _partial_research
+
+    text = json.dumps(RESEARCH)
+    if double_encoded:
+        text = json.dumps(text)  # the model wrapped its answer in a JSON string
+    counts = []
+    for cut in range(1, len(text) + 1):
+        p = _partial_research(text[:cut])
+        counts.append(sum(len(p.get(k, [])) for k in ("themes", "research_notes", "hooks")))
+    assert all(b >= a for a, b in zip(counts, counts[1:]))  # items never disappear mid-stream
+    final = _partial_research(text)
+    assert final["hooks"] == ["Day 1: One model or many?", "Day 2: Agents finish work", "Plain idea"]
+    assert final["themes"][1] == "Trust—governance—matters"
+
+
+def test_research_items_become_plain_text():
+    from agents.story_agent import normalize_research
+
+    out = normalize_research({"hooks": RESEARCH["hooks"], "themes": "single theme", "audience": [{"segment": "CFOs"}]})
+    assert out["hooks"] == ["Day 1: One model or many?", "Day 2: Agents finish work", "Plain idea"]
+    assert out["themes"] == ["single theme"] and out["audience"] == ["CFOs"]
+
+
+def test_double_encoded_reply_with_a_broken_inner_part_is_repaired():
+    from services.llm_service import LLMService
+
+    raw = '"{\\"themes\\": [\\"AI\\", \\"Trust\u0014governance\\"], \\"hooks\\": [\\"a\\"\n ]}"'
+    out = LLMService.__new__(LLMService)._robust_parse_json(raw)
+    assert isinstance(out, dict) and out["hooks"] == ["a"]
+
+
+def test_em_dash_written_as_control_character_is_restored():
+    from services.llm_service import LLMService
+
+    assert LLMService.__new__(LLMService)._robust_parse_json('{"a": "clear\u0014and practical"}') == {"a": "clear—and practical"}
+
+
+def test_streamed_answer_reports_progress_and_falls_back(monkeypatch):
+    from services.llm_service import LLMService
+
+    class Delta:
+        def __init__(self, t):
+            self.content = t
+
+    class Chunk:
+        def __init__(self, t=None, usage=None):
+            self.choices = [type("C", (), {"delta": Delta(t)})()] if t else []
+            self.usage = usage
+
+    calls = {"stream": 0, "plain": 0}
+
+    class Completions:
+        def create(self, **kw):
+            if kw.get("stream"):
+                calls["stream"] += 1
+                return iter([Chunk('{"themes": '), Chunk('["AI"]}'), Chunk(usage=type("U", (), {"prompt_tokens": 5, "completion_tokens": 3})())])
+            calls["plain"] += 1
+            return type("R", (), {"choices": [type("Ch", (), {"message": type("M", (), {"content": '{"themes": ["plain"]}'})()})()],
+                                  "usage": None})()
+
+    client = type("Cl", (), {"chat": type("Ch", (), {"completions": Completions()})()})()
+    llm = LLMService.__new__(LLMService)
+    llm.providers = [{"name": "heyroute", "client": client, "model": "m", "reasoning": True}]
+    seen = []
+    assert llm.generate_json("s", "u", on_partial=seen.append) == {"themes": ["AI"]}
+    assert seen[-1] == '{"themes": ["AI"]}' and calls == {"stream": 1, "plain": 0}
+
+    # a provider that can't stream: the same request without streaming
+    def broken(**kw):
+        if kw.get("stream"):
+            raise TypeError("stream not supported")
+        return Completions().create(**kw)
+
+    monkeypatch.setattr(client.chat.completions, "create", broken)
+    assert llm.generate_json("s", "u", on_partial=seen.append) == {"themes": ["plain"]}
