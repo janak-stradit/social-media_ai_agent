@@ -467,9 +467,9 @@ class LLMService:
                     inner = json_repair.repair_json(text, return_objects=True)
                 except Exception:
                     inner = None
-            if not (isinstance(inner, str) and inner.strip()[:1] in ("{", "[")):
+            if not (isinstance(inner, str) and inner.strip()[:1] in ("{", "[", '"')):
                 break
-            text = inner.strip()
+            text = inner.strip()  # another quoted layer is unwrapped on the next pass
         return text
 
     def _robust_parse_json(self, content_str: str) -> dict:

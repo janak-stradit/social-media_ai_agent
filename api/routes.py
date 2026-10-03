@@ -416,12 +416,25 @@ def _partial_research(text: str) -> dict:
     from agents.story_agent import research_item_text
 
     out = {"stage": "writing", "chars": len(text or "")}
+    text = (text or "").strip()
+    if text.startswith('"'):
+        # The answer is being written as one JSON string ("{\"themes\": ...):
+        # undo that first - json_repair mangles a half-written escaped string
+        body = text[1:]
+        before_quote = body[:-1]
+        if body.endswith('"') and (len(before_quote) - len(before_quote.rstrip("\\"))) % 2 == 0:
+            body = before_quote  # the closing quote (not an escaped \" inside the text)
+        body = re.sub(r"\\u[0-9a-fA-F]{0,3}$", "", body)  # a \uXXXX cut in half
+        if (len(body) - len(body.rstrip("\\"))) % 2 == 1:
+            body = body[:-1]  # a lone backslash cut off from what it escapes
+        try:
+            text = json.loads('"' + body + '"', strict=False)
+        except ValueError:
+            return out
     try:
         import json_repair
 
         data = json_repair.repair_json(text or "{}", return_objects=True)
-        if isinstance(data, str) and data.strip()[:1] == "{":
-            data = json_repair.repair_json(data, return_objects=True)  # the answer was one JSON string
     except Exception:  # noqa: BLE001
         return out
     if isinstance(data, dict):
