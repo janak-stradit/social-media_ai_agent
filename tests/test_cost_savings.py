@@ -261,7 +261,9 @@ def test_partial_research_grows_at_every_cut(double_encoded):
     for cut in range(1, len(text) + 1):
         p = _partial_research(text[:cut])
         counts.append(sum(len(p.get(k, [])) for k in ("themes", "research_notes", "hooks")))
-    assert all(b >= a for a, b in zip(counts, counts[1:]))  # items never disappear mid-stream
+    from itertools import pairwise
+
+    assert all(b >= a for a, b in pairwise(counts))  # items never disappear mid-stream
     final = _partial_research(text)
     assert final["hooks"] == ["Day 1: One model or many?", "Day 2: Agents finish work", "Plain idea"]
     assert final["themes"][1] == "Trust—governance—matters"
@@ -327,3 +329,86 @@ def test_streamed_answer_reports_progress_and_falls_back(monkeypatch):
 
     monkeypatch.setattr(client.chat.completions, "create", broken)
     assert llm.generate_json("s", "u", on_partial=seen.append) == {"themes": ["plain"]}
+
+
+# ── Upload: done at once, AI analysis in the background ────────────────────
+
+
+def test_concurrent_analyses_of_one_image_make_one_call(vision, monkeypatch):
+    import threading
+    import time
+
+    from agents.vision_agent import VisionAgent
+
+    agent, calls, tmp = vision
+
+    def slow(self, image_path):
+        calls.append(image_path)
+        time.sleep(1.0)
+        return {"rich_description": "orange bottle"}
+
+    monkeypatch.setattr(VisionAgent, "_analyze_uncached", slow)
+    path = _img(tmp / "d.png", "orange")
+    results = []
+    threads = [threading.Thread(target=lambda: results.append(agent.analyze_image(path))) for _ in range(3)]
+    threads[0].start()
+    time.sleep(0.2)  # the first one is running (its marker is written)
+    for t in threads[1:]:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(calls) == 1 and results == [{"rich_description": "orange bottle"}] * 3
+
+
+def test_stale_marker_from_a_crashed_worker_is_ignored(vision):
+    import os
+    import time
+
+    agent, calls, tmp = vision
+    path = _img(tmp / "e.png", "purple")
+    pending = agent._cache_path(path) + ".pending"
+    os.makedirs(os.path.dirname(pending), exist_ok=True)
+    open(pending, "w").close()
+    old = time.time() - 600
+    os.utime(pending, (old, old))
+    agent.analyze_image(path)
+    assert len(calls) == 1  # analysed right away, not stuck waiting
+
+
+def test_upload_returns_before_the_analysis_and_reports_it_later(monkeypatch, tmp_path):
+    import os
+    import time
+    import uuid
+
+    import db
+    from agents.vision_agent import VisionAgent
+    from api import routes
+    from app import create_app
+
+    monkeypatch.setattr(VisionAgent, "_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setattr(VisionAgent, "_analyze_uncached", lambda self, p: time.sleep(1.5) or {"rich_description": "a bottle"})
+    app = create_app("development")
+    app.config.update(TESTING=True)
+    user = db.create_user("Priya", f"{uuid.uuid4().hex[:8]}@example.com", "h")
+    client = app.test_client()
+    with client.session_transaction() as s:
+        s["user_id"] = user["id"]
+    from io import BytesIO
+
+    buf = BytesIO()
+    Image.new("RGB", (32, 32), "orange").save(buf, "PNG")
+    buf.seek(0)
+    t = time.time()
+    r = client.post("/api/upload", data={"image": (buf, "bottle.png")}, content_type="multipart/form-data").get_json()
+    assert time.time() - t < 1.0, "the upload waited for the AI analysis"
+    assert r["success"] and r["analysis_pending"] and r["analysis"] is None
+    assert client.get("/api/upload/analysis", query_string={"image_id": r["image_id"]}).get_json()["ready"] is False
+    for _ in range(40):
+        a = client.get("/api/upload/analysis", query_string={"image_id": r["image_id"]}).get_json()
+        if a["ready"]:
+            break
+        time.sleep(0.1)
+    assert a["ready"] and a["analysis"] == {"rich_description": "a bottle"}
+    assert client.get("/api/upload/analysis", query_string={"image_id": "../app.py"}).status_code == 404
+    os.remove(r["filepath"])
+    assert routes.vision_agent is not None

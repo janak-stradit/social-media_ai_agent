@@ -645,7 +645,7 @@ $(document).ready(function () {
         if (imageUploadXhr) imageUploadXhr.abort();
         uploadedImagePath = null;
         setImageUploading(true);
-        setAnalysisBadge('badge-warn', '<i class="fas fa-spinner fa-spin me-1"></i>Uploading &amp; analyzing...');
+        setAnalysisBadge('badge-warn', '<i class="fas fa-spinner fa-spin me-1"></i>Uploading...');
         const xhr = imageUploadXhr = $.ajax({
             url: '/api/upload',
             type: 'POST',
@@ -656,8 +656,13 @@ $(document).ready(function () {
                 uploadedImagePath = r.filepath;
                 threadActiveImagePath = r.filepath;
                 uploadedImageAnalysis = r.analysis || null;
-                setAnalysisBadge('badge-ok', '<i class="fas fa-check me-1"></i>Analyzed');
-                showToast('Visual asset uploaded & analyzed!', 'success');
+                if (r.analysis_pending && !r.analysis) {
+                    // Ready to use now; the AI analysis finishes in the background
+                    setAnalysisBadge('badge-ok', '<i class="fas fa-check me-1"></i>Uploaded <span class="analysis-sub"><i class="fas fa-spinner fa-spin ms-1 me-1"></i>analysing</span>');
+                    watchImageAnalysis(r.image_id, r.filepath);
+                } else {
+                    setAnalysisBadge('badge-ok', '<i class="fas fa-check me-1"></i>Analyzed');
+                }
             },
             error: function (_xhr, status) {
                 if (status === 'abort') return;  // removed or replaced while uploading
@@ -675,6 +680,31 @@ $(document).ready(function () {
 
     function setAnalysisBadge(cls, html) {
         $('#imageAnalysisStatus').attr('class', 'analysis-badge ' + cls).html(html);
+    }
+
+    // The upload's background AI analysis: picked up when it's done (it feeds
+    // the product notes of image commands). Nothing waits for it - a post
+    // generated before it finishes uses that same analysis on the server.
+    let analysisWatch = null;
+    function watchImageAnalysis(imageId, filepath) {
+        clearTimeout(analysisWatch);
+        const started = Date.now();
+        (function check() {
+            if (uploadedImagePath !== filepath) return;  // removed or replaced
+            $.getJSON('/api/upload/analysis', { image_id: imageId }).done(function (r) {
+                if (uploadedImagePath !== filepath) return;
+                if (r && r.ready) {
+                    uploadedImageAnalysis = r.analysis || null;
+                    setAnalysisBadge('badge-ok', '<i class="fas fa-check me-1"></i>Analyzed');
+                } else if (Date.now() - started < 180000) {
+                    analysisWatch = setTimeout(check, 2000);
+                } else {
+                    setAnalysisBadge('badge-ok', '<i class="fas fa-check me-1"></i>Uploaded');  // still usable
+                }
+            }).fail(function () {
+                if (uploadedImagePath === filepath && Date.now() - started < 180000) analysisWatch = setTimeout(check, 4000);
+            });
+        })();
     }
 
     // ── Story Analysis ─────────────────────────────────────────────────

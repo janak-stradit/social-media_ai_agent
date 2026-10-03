@@ -4188,3 +4188,6 @@ a:hover > .stradit-badge, .stradit-badge:hover { background: #1e293b; }
   .research-live .live-new { animation: none; }
   .research-live.writing li:last-child::after, .research-live.writing .research-theme-pill:last-child::after { animation: none; }
 }
+
+/* Upload badge: "Uploaded · analysing" while the background analysis runs */
+.analysis-badge .analysis-sub { font-weight: 500; opacity: .75; }

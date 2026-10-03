@@ -42,26 +42,89 @@ class VisionAgent:
         setup = hashlib.sha256(f"{self.hf.vision_provider}|{self.SYSTEM_PROMPT}".encode()).hexdigest()[:12]
         return os.path.join(self._CACHE_DIR, f"{digest}_{setup}.json")
 
-    def analyze_image(self, image_path):
-        """Full image analysis pipeline (cached per image - see _cache_path)."""
+    # An analysis already running for the same image (e.g. started in the
+    # background at upload) is waited for instead of paying for a second one.
+    # The marker file is shared by all workers; a stale one (crashed worker)
+    # stops counting after _PENDING_STALE seconds.
+    _PENDING_STALE = 150
+
+    @staticmethod
+    def _read_cache(cache):
+        try:
+            with open(cache, encoding="utf-8") as f:
+                return json.load(f)
+        except (OSError, ValueError):
+            return None
+
+    def cached_analysis(self, image_path):
+        """The finished analysis of this image if there is one - never calls the AI."""
         cache = self._cache_path(image_path) if image_path else None
-        if cache and os.path.exists(cache):
-            try:
-                with open(cache, encoding="utf-8") as f:
-                    return json.load(f)
-            except (OSError, ValueError):
-                pass
-        analysis = self._analyze_uncached(image_path)
-        if cache and isinstance(analysis, dict) and not analysis.get("error"):
-            try:
-                os.makedirs(self._CACHE_DIR, exist_ok=True)
-                tmp = f"{cache}.{os.getpid()}.tmp"
-                with open(tmp, "w", encoding="utf-8") as f:
-                    json.dump(analysis, f)
-                os.replace(tmp, cache)  # atomic: another worker never reads half a file
-            except OSError as err:
-                logger.warning(f"Could not cache image analysis: {err}")
-        return analysis
+        return self._read_cache(cache) if cache and os.path.exists(cache) else None
+
+    def analyze_image(self, image_path, wait_seconds: float = 120):
+        """Full image analysis pipeline (cached per image - see _cache_path).
+        If another worker is already analysing the same image, waits up to
+        wait_seconds for its result before analysing it itself."""
+        import time as _time
+
+        cache = self._cache_path(image_path) if image_path else None
+        if not cache:
+            return self._analyze_uncached(image_path)
+        if os.path.exists(cache):
+            cached = self._read_cache(cache)
+            if cached is not None:
+                return cached
+        pending = f"{cache}.pending"
+        deadline = _time.time() + wait_seconds
+        while self._fresh(pending) and _time.time() < deadline:
+            _time.sleep(0.5)
+            if os.path.exists(cache):
+                cached = self._read_cache(cache)
+                if cached is not None:
+                    return cached
+        try:
+            os.makedirs(self._CACHE_DIR, exist_ok=True)
+            with open(pending, "w", encoding="utf-8") as f:
+                f.write(str(os.getpid()))
+        except OSError:
+            pending = None
+        try:
+            analysis = self._analyze_uncached(image_path)
+            if isinstance(analysis, dict) and not analysis.get("error"):
+                try:
+                    tmp = f"{cache}.{os.getpid()}.tmp"
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        json.dump(analysis, f)
+                    os.replace(tmp, cache)  # atomic: another worker never reads half a file
+                except OSError as err:
+                    logger.warning(f"Could not cache image analysis: {err}")
+            return analysis
+        finally:
+            if pending:
+                try:
+                    os.remove(pending)
+                except OSError:
+                    pass
+
+    def _fresh(self, path):
+        try:
+            import time as _time
+
+            return _time.time() - os.path.getmtime(path) < self._PENDING_STALE
+        except OSError:
+            return False
+
+    def analyze_in_background(self, image_path):
+        """Starts the analysis without waiting for it (upload returns at once)."""
+        import threading
+
+        threading.Thread(target=self._background, args=(image_path,), daemon=True, name="vision-bg").start()
+
+    def _background(self, image_path):
+        try:
+            self.analyze_image(image_path, wait_seconds=0)
+        except Exception as err:  # noqa: BLE001 - a background analysis must never crash the worker
+            logger.warning(f"Background image analysis failed: {err}")
 
     def _analyze_uncached(self, image_path):
         if self.hf.vision_provider == "heyroute":
