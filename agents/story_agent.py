@@ -19,6 +19,38 @@ _LOGO_STAMPED_INSTRUCTION = (
 )
 
 
+RESEARCH_LIST_KEYS = ("themes", "emotions", "hooks", "audience", "imagery", "cta_opportunities", "research_notes")
+
+
+def research_item_text(item) -> str:
+    """One research list item as plain text. The model sometimes writes an item
+    as an object ({"day": 6, "topic": "...", "post": "..."}) - the page shows
+    text, so it becomes "Day 6: <topic>" (never a whole post)."""
+    if isinstance(item, (str, int, float)):
+        return str(item).strip()
+    if isinstance(item, dict):
+        text = next((str(item[k]).strip() for k in ("topic", "hook", "title", "idea", "text", "theme", "note")
+                     if isinstance(item.get(k), (str, int, float)) and str(item[k]).strip()), "")
+        if not text:
+            text = next((v.strip() for v in item.values() if isinstance(v, str) and v.strip()), "")
+        day = item.get("day")
+        return f"Day {day}: {text}" if text and isinstance(day, (int, str)) and str(day).strip() else text
+    return ""
+
+
+def normalize_research(result):
+    """Every research list as a list of plain strings (see research_item_text)."""
+    if not isinstance(result, dict):
+        return result
+    for key in RESEARCH_LIST_KEYS:
+        value = result.get(key)
+        if isinstance(value, list):
+            result[key] = [t for t in (research_item_text(v) for v in value) if t]
+        elif isinstance(value, str) and value.strip():
+            result[key] = [value.strip()]
+    return result
+
+
 class StoryAgent:
     """Agent that analyzes story text and extracts key themes, emotions, and hooks"""
 
@@ -49,6 +81,9 @@ class StoryAgent:
     7. research_notes: 3-5 concrete, substantive facts, statistics, trends, or examples about the topic that a
        writer could actually use in the content - grounded in real knowledge, not vague restatements of the
        input. Leave this an empty list only if the input is already a complete, detailed story with nothing to add.
+
+    Every list item is ONE short plain-text sentence - no objects, no numbering and no full posts (the posts
+    are written in the next step, from this research).
 
     Return ONLY a JSON object with these keys: themes, emotions, hooks, audience, imagery, cta_opportunities, research_notes"""
 
@@ -82,6 +117,7 @@ class StoryAgent:
             user_prompt += f"\n\n{brand_profile_block}"
 
         result, usage = self.llm.generate_json(self.SYSTEM_PROMPT, user_prompt, return_usage=True, on_partial=on_partial)
+        result = normalize_research(result)
         if return_usage:
             return result, usage
         return result

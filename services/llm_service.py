@@ -438,6 +438,40 @@ class LLMService:
             logger.warning(f"Provider {provider['name']} exhausted retries. Trying fallback...")
         raise Exception(f"LLM Generation failed for all providers. Last error: {str(last_error)}")
 
+    @classmethod
+    def _fix_dash_escapes(cls, value):
+        """The model sometimes writes an em dash (\\u2014) as \\u0014 - an invisible
+        control character that is never valid in text. Restores the dash."""
+        if isinstance(value, str):
+            return value.replace("\x14", "\u2014")
+        if isinstance(value, list):
+            return [cls._fix_dash_escapes(v) for v in value]
+        if isinstance(value, dict):
+            return {k: cls._fix_dash_escapes(v) for k, v in value.items()}
+        return value
+
+    @staticmethod
+    def _unwrap_json_string(text: str) -> str:
+        """'"{\\"a\\": 1}"' -> '{"a": 1}' (up to 3 layers). Text that isn't a
+        JSON string holding an object or list is returned unchanged."""
+        for _ in range(3):
+            if not text.startswith('"'):
+                break
+            inner = None
+            try:
+                inner = json.loads(text, strict=False)
+            except Exception:
+                try:
+                    import json_repair
+
+                    inner = json_repair.repair_json(text, return_objects=True)
+                except Exception:
+                    inner = None
+            if not (isinstance(inner, str) and inner.strip()[:1] in ("{", "[")):
+                break
+            text = inner.strip()
+        return text
+
     def _robust_parse_json(self, content_str: str) -> dict:
         """Parse JSON response resiliently using json_repair to handle invalid control characters, unescaped quotes, and formatting glitches."""
         if not content_str:
@@ -449,21 +483,14 @@ class LLMService:
         elif cleaned.startswith("```"):
             cleaned = cleaned.split("```")[1].split("```")[0].strip()
 
-        # Attempt 1: Standard json.loads with strict=False. A model sometimes
-        # double-encodes its answer ("{\"themes\": ...}" as one JSON string);
-        # json.loads then returns that text, not the object - unwrap it.
+        # A model sometimes double-encodes its answer: the whole object as one
+        # JSON string ("{\"themes\": ...}"). Unwrap that first, then parse the
+        # inner text with every attempt below (it may need repairs itself).
+        cleaned = self._unwrap_json_string(cleaned)
+
+        # Attempt 1: Standard json.loads with strict=False
         try:
-            parsed = json.loads(cleaned, strict=False)
-            for _ in range(2):
-                if not isinstance(parsed, str):
-                    break
-                parsed = json.loads(parsed.strip(), strict=False)
-            if isinstance(parsed, dict):
-                return parsed
-            if isinstance(parsed, str):
-                cleaned = parsed.strip()  # still text: let the repair steps below try it
-            else:
-                return parsed  # a list etc. - returned as before
+            return self._fix_dash_escapes(json.loads(cleaned, strict=False))
         except Exception:
             pass
 

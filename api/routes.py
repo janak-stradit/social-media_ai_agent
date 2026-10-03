@@ -413,16 +413,21 @@ def upload_image():
 def _partial_research(text: str) -> dict:
     """What can be shown of a research answer that's still being written: the
     themes, facts and post ideas so far (the last item may be mid-sentence)."""
+    from agents.story_agent import research_item_text
+
     out = {"stage": "writing", "chars": len(text or "")}
     try:
         import json_repair
 
         data = json_repair.repair_json(text or "{}", return_objects=True)
+        if isinstance(data, str) and data.strip()[:1] == "{":
+            data = json_repair.repair_json(data, return_objects=True)  # the answer was one JSON string
     except Exception:  # noqa: BLE001
         return out
     if isinstance(data, dict):
         for key, limit in (("themes", 8), ("research_notes", 8), ("hooks", 12)):
-            items = [str(x).strip()[:400] for x in (data.get(key) or []) if isinstance(x, (str, int, float)) and str(x).strip()]
+            items = [research_item_text(x)[:400] for x in (data.get(key) or []) if not isinstance(x, list)]
+            items = [i for i in items if i]
             if items:
                 out[key] = items[:limit]
     return out
