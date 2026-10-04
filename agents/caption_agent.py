@@ -186,8 +186,10 @@ class CaptionAgent:
         brand_voice=None,
         has_project_context=True,
         brand_profile_block=None,
+        on_partial=None,
     ):
         """Generate a platform-specific caption.
+        on_partial(text_so_far): streamed answer for a live preview (LLMService.generate_json).
 
         has_project_context: True when this brief is tied to a specific StradIT
         project/competitor storyline (e.g. from Analysis Dashboard counter-strategy
@@ -348,6 +350,7 @@ primary_caption
                 temperature=0.8,
                 return_usage=True,
                 reasoning_effort=self.REASONING_EFFORT,
+                on_partial=on_partial,
             )
 
             primary = parsed.get("primary_caption", "")

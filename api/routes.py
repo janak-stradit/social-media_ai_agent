@@ -423,12 +423,9 @@ def upload_analysis():
     return jsonify({"ready": analysis is not None, "analysis": analysis})
 
 
-def _partial_research(text: str) -> dict:
-    """What can be shown of a research answer that's still being written: the
-    themes, facts and post ideas so far (the last item may be mid-sentence)."""
-    from agents.story_agent import research_item_text
-
-    out = {"stage": "writing", "chars": len(text or "")}
+def _partial_json(text: str):
+    """The object in a JSON answer that's still being written (None if nothing
+    readable yet). Handles an answer written as one JSON string ("{\"a\": ...)."""
     text = (text or "").strip()
     if text.startswith('"'):
         # The answer is being written as one JSON string ("{\"themes\": ...):
@@ -443,13 +440,23 @@ def _partial_research(text: str) -> dict:
         try:
             text = json.loads('"' + body + '"', strict=False)
         except ValueError:
-            return out
+            return None
     try:
         import json_repair
 
         data = json_repair.repair_json(text or "{}", return_objects=True)
     except Exception:  # noqa: BLE001
-        return out
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _partial_research(text: str) -> dict:
+    """What can be shown of a research answer that's still being written: the
+    themes, facts and post ideas so far (the last item may be mid-sentence)."""
+    from agents.story_agent import research_item_text
+
+    out = {"stage": "writing", "chars": len(text or "")}
+    data = _partial_json(text)
     if isinstance(data, dict):
         for key, limit in (("themes", 8), ("research_notes", 8), ("hooks", 12)):
             items = [research_item_text(x)[:400] for x in (data.get(key) or []) if not isinstance(x, list)]
@@ -765,7 +772,10 @@ def generate_content():
             story_usage = None
         else:
             story_analysis, story_usage = story_agent.analyze(
-                story_prompt, memory_context=mem_prompt, return_usage=True, brand_profile_block=brand_profile_block
+                story_prompt, memory_context=mem_prompt, return_usage=True, brand_profile_block=brand_profile_block,
+                # Live: the pipeline card shows the research while it's written
+                on_partial=(lambda text: _progress("research", json.dumps(_partial_research(text))))
+                if progress_store.valid_id(progress_id) else None,
             )
             caption_input = extract_prompt_for_type(story_prompt, "text")
 
@@ -817,6 +827,12 @@ def generate_content():
             from concurrent.futures import ThreadPoolExecutor
 
             def _caption_for(platform):
+                def _draft(text, platform=platform):
+                    # The caption so far, as the page's live preview ("draft:<platform>")
+                    caption = (_partial_json(text) or {}).get("primary_caption")
+                    if isinstance(caption, str) and caption.strip():
+                        _progress(f"draft:{platform}", caption[:2000])
+
                 return caption_agent.generate_caption(
                     platform,
                     caption_input,
@@ -826,6 +842,7 @@ def generate_content():
                     brand_voice,
                     has_project_context,
                     brand_profile_block,
+                    on_partial=_draft if progress_store.valid_id(progress_id) else None,
                 )
 
             def _all_hashtags():
@@ -855,7 +872,7 @@ def generate_content():
                     if future.exception() is None:
                         text = (future.result() or {}).get("primary_caption") or ""
                         if text:
-                            _progress(f"preview:{platform}", text[:600])
+                            _progress(f"preview:{platform}", text[:2000])  # same length as the live draft
 
                 for _p, _future in caption_futures.items():
                     _future.add_done_callback(lambda f, platform=_p: _preview_caption(platform, f))
