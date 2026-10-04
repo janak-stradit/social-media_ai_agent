@@ -786,7 +786,15 @@ $(document).ready(function () {
         const $list = $(`#${msgId}_captionPreviews`);
         if (!$list.length || !text) return;
         const key = String(platform).replace(/[^a-z0-9_-]/gi, '');
-        if ($list.find(`[data-platform="${key}"]`).length) return;
+        const $existing = $list.find(`[data-platform="${key}"]`);
+        if ($existing.length) {
+            // The live draft becomes the finished caption
+            if ($existing.hasClass('is-draft')) {
+                smoothText($existing.removeClass('is-draft').find('.caption-preview-text')[0], text);
+                $existing.find('.caption-preview-label').html(`<i class="fas fa-eye me-1"></i>${escapeHtml(captionPlatformLabel(key))} caption - finishing touches in progress`);
+            }
+            return;
+        }
         const names = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', twitter: 'X', x: 'X', tiktok: 'TikTok' };
         const label = names[key.toLowerCase()] || key.charAt(0).toUpperCase() + key.slice(1);
         $list.removeClass('d-none').append(`
@@ -795,6 +803,45 @@ $(document).ready(function () {
                 <div class="caption-preview-text">${escapeHtml(text)}</div>
             </div>
         `);
+    }
+
+    function captionPlatformLabel(key) {
+        const names = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', twitter: 'X', x: 'X', tiktok: 'TikTok' };
+        return names[key.toLowerCase()] || key.charAt(0).toUpperCase() + key.slice(1);
+    }
+
+    // A caption while it's being written (server: "draft:<platform>")
+    function renderCaptionDraft(msgId, platform, text) {
+        const $list = $(`#${msgId}_captionPreviews`);
+        if (!$list.length || !text) return;
+        const key = String(platform).replace(/[^a-z0-9_-]/gi, '');
+        let $item = $list.find(`[data-platform="${key}"]`);
+        if (!$item.length) {
+            $item = $(`
+                <div class="caption-preview is-draft" data-platform="${key}">
+                    <div class="caption-preview-label"><i class="fas fa-pen-nib me-1"></i>Writing the ${escapeHtml(captionPlatformLabel(key))} caption...</div>
+                    <div class="caption-preview-text"></div>
+                </div>`);
+            $list.removeClass('d-none').append($item);
+        }
+        if (!$item.hasClass('is-draft')) return;  // already finished
+        smoothText($item.find('.caption-preview-text')[0], text);
+    }
+
+    // The story step's research, live inside the pipeline card
+    function renderPipelineResearch(msgId, raw) {
+        let data;
+        try { data = JSON.parse(raw); } catch (e) { return; }
+        const $step = $(`#${msgId}_step_story`);
+        if (!$step.length) return;
+        let $live = $(`#${msgId}_pipeline_research`);
+        if (!$live.length) {
+            $live = $(`<div class="research-live writing pipeline-research" id="${msgId}_pipeline_research" aria-live="polite"></div>`);
+            $step.after($live);
+        }
+        if ($step.hasClass('completed') || $step.data('state') === 'done') $live.removeClass('writing');
+        if (data.stage === 'thinking') return;
+        renderResearchLive(msgId, data, $live, $step.find('.agent-step-desc'));
     }
 
     // Plain-language message for a failed generation (the raw error stays
@@ -818,13 +865,17 @@ $(document).ready(function () {
             if (stopped) return;
             $.getJSON(`/api/generate/progress/${encodeURIComponent(progressId)}`)
                 .done(function (res) {
-                    Object.entries((res && res.steps) || {}).forEach(([step, value]) => {
+                    const steps = (res && res.steps) || {};
+                    Object.entries(steps).forEach(([step, value]) => {
                         if (step.startsWith('preview:')) renderCaptionPreview(msgId, step.slice(8), value);
+                        else if (step.startsWith('draft:')) {
+                            if (!steps[`preview:${step.slice(6)}`]) renderCaptionDraft(msgId, step.slice(6), value);
+                        } else if (step === 'research') renderPipelineResearch(msgId, value);
                         else setAgentStep(msgId, step, value);
                     });
                 })
                 .always(function () {
-                    if (!stopped) timer = setTimeout(poll, 1000);
+                    if (!stopped) timer = setTimeout(poll, 600);
                 });
         })();
         return function stop() {
@@ -1487,6 +1538,55 @@ $(document).ready(function () {
         });
     }
 
+    // ── Smooth streaming ──────────────────────────────────────────────────
+    // Streamed text arrives in bursts (an update every ~half second). Instead
+    // of jumping, the new part is typed out so it flows into the next update;
+    // when it falls behind it speeds up to catch up.
+    const smoothState = new WeakMap();
+    const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    function smoothText(el, target) {
+        if (!el) return;
+        target = String(target || '');
+        let st = smoothState.get(el);
+        if (!st) {
+            st = { shown: el.textContent || '', target: '', raf: null };
+            smoothState.set(el, st);
+        }
+        st.target = target;
+        if (!target.startsWith(st.shown)) st.shown = '';  // the text changed rather than grew: retype it
+        if (prefersReducedMotion) {
+            st.shown = target;
+            el.textContent = target;
+            return;
+        }
+        if (st.raf) return;  // already typing - it picks up the new target
+        let last = performance.now();
+        const tick = (now) => {
+            const remaining = st.target.length - st.shown.length;
+            if (remaining <= 0) { st.raf = null; return; }
+            const elapsed = Math.min(now - last, 100);
+            last = now;
+            // Finish the backlog in ~0.9 s, never slower than ~45 characters a second
+            const perMs = Math.max(remaining / 900, 0.045);
+            let next = st.shown.length + Math.max(1, Math.round(perMs * elapsed));
+            const space = st.target.indexOf(' ', next);  // end on a whole word when it's close
+            if (space !== -1 && space - next < 4) next = space;
+            st.shown = st.target.slice(0, next);
+            el.textContent = st.shown;
+            followStream();
+            st.raf = requestAnimationFrame(tick);
+        };
+        st.raf = requestAnimationFrame(tick);
+    }
+
+    // Follow streamed text only when the reader is already at the bottom -
+    // scrolling up to read stops the page from jumping
+    function followStream() {
+        const ws = document.getElementById('chatWorkspace');
+        if (ws && ws.scrollHeight - ws.scrollTop - ws.clientHeight < 160) ws.scrollTop = ws.scrollHeight;
+    }
+
     // The research while it's being written (server: progress field "research")
     const RESEARCH_SECTIONS = [
         ['themes', 'Themes', 'pills'],
@@ -1494,16 +1594,20 @@ $(document).ready(function () {
         ['hooks', 'Post ideas', 'list']
     ];
 
-    function renderResearchLive(msgId, data) {
-        const $live = $(`#${msgId}_research_live`);
+    function renderResearchLive(msgId, data, $live, $desc) {
+        $live = $live || $(`#${msgId}_research_live`);
         if (!$live.length || !data) return;
-        const $desc = $(`#${msgId} .agent-step-desc`);
+        $desc = $desc || $(`#${msgId} .agent-step-desc`);
         if (data.stage === 'thinking') {
             $desc.text('Thinking about your topic...');
             return;
         }
         const ideas = (data.hooks || []).length;
-        $desc.text(ideas ? `Writing the research - ${ideas} post idea${ideas === 1 ? '' : 's'} so far` : 'Writing the research...');
+        if (!$live.hasClass('writing')) {
+            $desc.text(ideas ? `Research ready - ${ideas} post idea${ideas === 1 ? '' : 's'}` : 'Research ready');
+        } else {
+            $desc.text(ideas ? `Writing the research - ${ideas} post idea${ideas === 1 ? '' : 's'} so far` : 'Writing the research...');
+        }
         RESEARCH_SECTIONS.forEach(([key, title, kind]) => {
             const items = data[key] || [];
             if (!items.length) return;
@@ -1516,15 +1620,15 @@ $(document).ready(function () {
             const $box = $sec.find(kind === 'pills' ? '.research-theme-pills' : 'ul');
             if (key === 'hooks') $sec.find('.research-live-title').text(`Post ideas (${items.length})`);
             items.forEach((text, i) => {
-                const $item = $box.children().eq(i);
-                if ($item.length) {
-                    if ($item.text() !== text) $item.text(text);  // the item still being written grows
-                } else {
-                    $box.append($(kind === 'pills' ? '<span class="research-theme-pill live-new"></span>' : '<li class="live-new"></li>').text(text));
+                let $item = $box.children().eq(i);
+                if (!$item.length) {
+                    $item = $(kind === 'pills' ? '<span class="research-theme-pill live-new"></span>' : '<li class="live-new"></li>');
+                    $box.append($item);
                 }
+                smoothText($item[0], text);  // the item still being written is typed out as it grows
             });
         });
-        scrollToBottom();
+        followStream();
     }
 
     function pollResearchProgress(msgId, progressId) {
@@ -1538,7 +1642,7 @@ $(document).ready(function () {
                     if (!raw || stopped) return;
                     try { renderResearchLive(msgId, JSON.parse(raw)); } catch (e) { /* half-written progress: next poll */ }
                 })
-                .always(function () { if (!stopped) timer = setTimeout(poll, 1000); });
+                .always(function () { if (!stopped) timer = setTimeout(poll, 600); });
         })();
         return function stop() { stopped = true; clearTimeout(timer); };
     }

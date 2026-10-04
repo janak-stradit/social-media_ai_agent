@@ -261,7 +261,7 @@ class LLMService:
             kwargs["max_tokens"] = max_tokens
         return kwargs
 
-    def _stream_completion(self, provider, kwargs, on_partial, every: float = 0.8):
+    def _stream_completion(self, provider, kwargs, on_partial, every: float = 0.5):
         """Streams a chat completion, calling on_partial(text_so_far) at most
         every `every` seconds and once at the end. Returns (content, usage).
         If streaming fails before any text arrives (e.g. the provider doesn't

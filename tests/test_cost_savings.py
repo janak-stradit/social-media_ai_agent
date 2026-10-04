@@ -412,3 +412,56 @@ def test_upload_returns_before_the_analysis_and_reports_it_later(monkeypatch, tm
     assert client.get("/api/upload/analysis", query_string={"image_id": "../app.py"}).status_code == 404
     os.remove(r["filepath"])
     assert routes.vision_agent is not None
+
+
+# ── Pipeline: research and captions published while they're written ───────
+
+
+def test_pipeline_publishes_research_and_caption_drafts(monkeypatch):
+    import json
+    import uuid
+
+    import db
+    from api import routes
+    from app import create_app
+    from services import progress_store
+
+    app = create_app("development")
+    app.config.update(TESTING=True)
+    user = db.create_user("Priya", f"{uuid.uuid4().hex[:8]}@example.com", "h")
+    client = app.test_client()
+    with client.session_transaction() as s:
+        s["user_id"] = user["id"]
+    seen = {"research": [], "drafts": []}
+
+    def analyze(*a, on_partial=None, **k):
+        for part in ('{"themes": ["Live', '{"themes": ["Live tracking", "ETAs"], "hooks": ["Day 1: Why'):
+            if on_partial:
+                on_partial(part)
+                seen["research"].append(json.loads(progress_store.get(user["id"], "pipe-test-0001")["research"]))
+        return {"themes": ["Live tracking", "ETAs"]}, {}
+
+    def caption(platform, *a, on_partial=None, **k):
+        for part in ('{"primary_caption": "Real-time', '{"primary_caption": "Real-time tracking for every truck'):
+            if on_partial:
+                on_partial(part)
+                seen["drafts"].append(progress_store.get(user["id"], "pipe-test-0001").get(f"draft:{platform}"))
+        return {"primary_caption": "Real-time tracking for every truck.", "usage": {}}
+
+    monkeypatch.setattr(routes.memory_service, "retrieve_context", lambda *a, **k: [])
+    monkeypatch.setattr(routes.memory_service, "store_campaign_run", lambda *a, **k: None)
+    monkeypatch.setattr(routes.story_agent, "analyze", analyze)
+    monkeypatch.setattr(routes.caption_agent, "generate_caption", caption)
+    monkeypatch.setattr(routes.hashtag_agent, "generate_hashtags_batch", lambda p, *a, **k: {x: {"hashtags": ["#A"], "_usage": {}} for x in p})
+    monkeypatch.setattr(routes, "active_rules_for_user", lambda uid: [])
+    body = {"story": "Announce live tracking", "platforms": ["linkedin"], "selected_outputs": ["text"], "progress_id": "pipe-test-0001"}
+    assert client.post("/api/generate", json=body).get_json()["success"]
+
+    assert seen["research"][0]["themes"] == ["Live"] and seen["research"][1]["hooks"] == ["Day 1: Why"]
+    assert seen["drafts"] == ["Real-time", "Real-time tracking for every truck"]
+
+    # no progress id: nothing streamed (plain calls)
+    seen["research"].clear()
+    seen["drafts"].clear()
+    client.post("/api/generate", json={**body, "progress_id": None})
+    assert seen == {"research": [], "drafts": []}
