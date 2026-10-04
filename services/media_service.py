@@ -69,6 +69,56 @@ def _strip_corner_patch(img):
     return img
 
 
+# Reference images are sent as PNG or JPEG no larger than this on the long side
+_REFERENCE_MAX_SIDE = 2048
+_REFERENCE_MAX_BYTES = 8 * 1024 * 1024
+_REFERENCE_MIME = {"PNG": "image/png", "JPEG": "image/jpeg"}
+
+
+def _reference_upload(path: str) -> tuple[str, bytes, str]:
+    """(file name, bytes, MIME type) of a reference image in a form every
+    image model accepts. The upstream providers reject (400 invalid_request)
+    a file whose label doesn't match its content - e.g. a JPEG saved under a
+    .png name, or a .webp that Windows' mimetypes can't name - as well as GIFs
+    and very large images. PNG/JPEG files that are fine are sent unchanged;
+    anything else is converted (PNG when it has transparency, else JPEG)."""
+    import io
+
+    from PIL import Image
+
+    stem = os.path.splitext(os.path.basename(path))[0] or "reference"
+    with open(path, "rb") as f:
+        data = f.read()
+    try:
+        with Image.open(io.BytesIO(data)) as img:
+            fmt = img.format
+            if fmt in _REFERENCE_MIME and max(img.size) <= _REFERENCE_MAX_SIDE and len(data) <= _REFERENCE_MAX_BYTES:
+                return f"{stem}.{'png' if fmt == 'PNG' else 'jpg'}", data, _REFERENCE_MIME[fmt]
+            img.seek(0)  # first frame of an animated GIF/WebP
+            alpha = img.mode in ("RGBA", "LA", "PA") or (img.mode == "P" and "transparency" in img.info)
+            img = img.convert("RGBA" if alpha else "RGB")
+            img.thumbnail((_REFERENCE_MAX_SIDE, _REFERENCE_MAX_SIDE), Image.LANCZOS)
+            out = io.BytesIO()
+            if alpha:
+                img.save(out, format="PNG", optimize=True)
+                return f"{stem}.png", out.getvalue(), "image/png"
+            img.save(out, format="JPEG", quality=92)
+            return f"{stem}.jpg", out.getvalue(), "image/jpeg"
+    except Exception as err:  # noqa: BLE001 - not an image Pillow can read: send it as it is
+        logger.warning(f"Could not prepare reference image {os.path.basename(path)}: {err}")
+        return os.path.basename(path), data, mimetypes.guess_type(path)[0] or "application/octet-stream"
+
+
+def _image_extension(img_data: bytes) -> str:
+    """The real file extension of image bytes (providers return PNG, JPEG or WebP)."""
+    head = img_data[:12]
+    if head.startswith(b"\xff\xd8"):
+        return ".jpg"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return ".webp"
+    return ".png"
+
+
 def _image_price(model: str | None) -> float:
     """Price per image for `model` from Admin -> Image Settings (falls back to
     HEYROUTE_IMAGE_COST_USD when the database isn't available)."""
@@ -624,7 +674,7 @@ class MediaGenerationService:
         }
 
     def _save_image_bytes(self, img_data: bytes, platform: str) -> tuple[str, str]:
-        local_filename = f"gen_{platform}_{uuid.uuid4().hex[:8]}.png"
+        local_filename = f"gen_{platform}_{uuid.uuid4().hex[:8]}{_image_extension(img_data)}"
         local_path = os.path.join(self.upload_folder, local_filename)
         with open(local_path, "wb") as f:
             f.write(img_data)
@@ -801,6 +851,15 @@ class MediaGenerationService:
         text = resp.text or ""
         if "<html" in text[:300].lower():
             return f"HeyRoute image request failed ({status})."
+        if status == 400 and "invalid_request" in text:
+            import re
+
+            ref = re.search(r"request id: ([A-Za-z0-9]+)", text)
+            return (
+                "The image service rejected this request (400 invalid_request). Usually the prompt or the "
+                "attached image was refused - try rewording the request or attaching a different image."
+                + (f" Reference: {ref.group(1)}" if ref else "")
+            )
         return f"HeyRoute image request failed: {status} - {text[:300]}"
 
     def _generate_image_heyroute(
@@ -825,6 +884,7 @@ class MediaGenerationService:
         hint = self._HEYROUTE_ASPECT_HINTS["instagram"] if square else self._HEYROUTE_ASPECT_HINTS.get(platform)
         full_prompt = f"{prompt}\n\n{hint}" if hint and hint not in prompt else prompt
         references = self._resolve_image_paths(image_path)[: self._HEYROUTE_MAX_REFERENCES]
+        uploads = [_reference_upload(ref) for ref in references]
         base = Config.HEYROUTE_BASE_URL
 
         def send(plain: bool = False):
@@ -835,21 +895,13 @@ class MediaGenerationService:
             # reject the extra n/stream fields with 400 invalid_request.
             extra = {} if plain else {"n": 1, "stream": True}
             if references:
-                files = []
-                try:
-                    for ref in references:
-                        mime = mimetypes.guess_type(ref)[0] or "image/png"
-                        files.append(("image", (os.path.basename(ref), open(ref, "rb"), mime)))
-                    return requests.post(
-                        f"{base}/images/edits",
-                        headers=self._heyroute_headers(key),
-                        data={"model": model, "prompt": full_prompt, **{k: str(v).lower() for k, v in extra.items()}},
-                        files=files,
-                        timeout=300,
-                    )
-                finally:
-                    for _, (_, handle, _) in files:
-                        handle.close()
+                return requests.post(
+                    f"{base}/images/edits",
+                    headers=self._heyroute_headers(key),
+                    data={"model": model, "prompt": full_prompt, **{k: str(v).lower() for k, v in extra.items()}},
+                    files=[("image", upload) for upload in uploads],
+                    timeout=300,
+                )
             return requests.post(
                 f"{base}/images/generations",
                 headers={**self._heyroute_headers(key), "Content-Type": "application/json"},
@@ -865,14 +917,24 @@ class MediaGenerationService:
             # key (404 model_not_found) or its provider is down (502/503/504).
             # Nothing was generated, so make the image with the default model
             # instead of failing the user.
-            unusable = (resp.status_code == 404 and "model_not_found" in resp.text) or resp.status_code in (502, 503, 504)
+            # A request the user's model rejects outright (400 invalid_request,
+            # even without the extra fields) gets the same treatment.
+            unusable = (
+                (resp.status_code == 404 and "model_not_found" in resp.text)
+                or (resp.status_code == 400 and "invalid_request" in resp.text)
+                or resp.status_code in (502, 503, 504)
+            )
             if unusable and model != Config.HEYROUTE_IMAGE_MODEL:
                 logger.warning(f"HeyRoute image model {model!r} unavailable ({resp.status_code}); "
                       f"using {Config.HEYROUTE_IMAGE_MODEL!r} instead")
                 return self._generate_image_heyroute(
                     prompt, platform, size, image_path, square=square, model=Config.HEYROUTE_IMAGE_MODEL
                 )
-            logger.warning(f"HeyRoute image request failed: {resp.status_code} model={model} - {resp.text[:200]!r}")
+            logger.warning(
+                f"HeyRoute image request failed: {resp.status_code} model={model} "
+                f"references={[(name, len(data), mime) for name, data, mime in uploads]} "
+                f"prompt_chars={len(full_prompt)} - {resp.text[:300]!r}"
+            )
             raise RuntimeError(self._heyroute_error_text(resp))
 
         item = ((self._heyroute_image_payload(resp) or {}).get("data") or [{}])[0]
