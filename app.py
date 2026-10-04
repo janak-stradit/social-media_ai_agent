@@ -41,6 +41,35 @@ logger = logging.getLogger(__name__)
 http_logger = logging.getLogger("avir.http")
 
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{6,64}$")
+
+# Browser caching of static files. Every url_for('static', ...) link carries a
+# fingerprint of the file's content (?v=...): a changed file gets a new link,
+# so browsers may keep each version for a year and still always see the
+# latest after a deploy. Uploads/generated images get unique file names and
+# never change, so they're cached for 30 days - except brand_logos/, which are
+# refreshed in place (services/brand_logo_service.py).
+STATIC_CACHE_VERSIONED = "public, max-age=31536000, immutable"
+STATIC_CACHE_UPLOADS = "public, max-age=2592000"
+_static_fingerprints: dict[str, tuple[float, str]] = {}
+
+
+def _static_fingerprint(static_folder: str, filename: str) -> str | None:
+    """First 10 hex characters of the file's MD5, recomputed only when the
+    file changes (its modification time). None for a missing file."""
+    import hashlib
+
+    path = os.path.join(static_folder, filename)
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return None
+    cached = _static_fingerprints.get(path)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    with open(path, "rb") as f:
+        digest = hashlib.md5(f.read(), usedforsecurity=False).hexdigest()[:10]
+    _static_fingerprints[path] = (mtime, digest)
+    return digest
 # Pages search engines may index (see sitemap.xml); every other page gets
 # X-Robots-Tag: noindex - they're behind login or one-off (reset links etc.)
 _INDEXABLE_PATHS = ("/", "/signup", "/login")
@@ -74,6 +103,13 @@ def _install_request_logging(app: Flask) -> None:
     The request id (nginx's X-Request-ID, or a new one) is on every line logged
     during the request and returned in the X-Request-ID response header."""
 
+    @app.url_defaults
+    def _version_static_links(endpoint, values):
+        if endpoint == "static" and values.get("filename") and "v" not in values:
+            version = _static_fingerprint(app.static_folder, values["filename"])
+            if version:
+                values["v"] = version
+
     @app.before_request
     def _start_request():
         incoming = request.headers.get("X-Request-ID", "")
@@ -87,6 +123,11 @@ def _install_request_logging(app: Flask) -> None:
             response.headers["X-Request-ID"] = request_id
         if response.mimetype == "text/html" and request.path not in _INDEXABLE_PATHS:
             response.headers.setdefault("X-Robots-Tag", "noindex, nofollow")
+        if request.path.startswith("/static/") and response.status_code in (200, 304):
+            if request.args.get("v"):
+                response.headers["Cache-Control"] = STATIC_CACHE_VERSIONED
+            elif request.path.startswith("/static/uploads/") and "/brand_logos/" not in request.path:
+                response.headers["Cache-Control"] = STATIC_CACHE_UPLOADS
         started = getattr(g, "request_started", None)
         duration_ms = int((time.perf_counter() - started) * 1000) if started else -1
         path, status = request.path, response.status_code

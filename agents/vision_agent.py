@@ -47,6 +47,31 @@ class VisionAgent:
     # The marker file is shared by all workers; a stale one (crashed worker)
     # stops counting after _PENDING_STALE seconds.
     _PENDING_STALE = 150
+    # Entries are removed after this long (checked at most once an hour per worker)
+    _CACHE_MAX_AGE = 7 * 24 * 3600
+    _last_prune = 0.0
+
+    @classmethod
+    def _prune_cache(cls):
+        """Removes analyses older than _CACHE_MAX_AGE and leftover temp/marker
+        files from crashed workers. Best-effort, at most once an hour."""
+        import time as _time
+
+        now = _time.time()
+        if now - cls._last_prune < 3600:
+            return
+        cls._last_prune = now
+        try:
+            for name in os.listdir(cls._CACHE_DIR):
+                path = os.path.join(cls._CACHE_DIR, name)
+                limit = cls._CACHE_MAX_AGE if name.endswith(".json") else 3600
+                try:
+                    if now - os.path.getmtime(path) > limit:
+                        os.remove(path)
+                except OSError:
+                    pass
+        except OSError:
+            pass
 
     @staticmethod
     def _read_cache(cache):
@@ -98,6 +123,7 @@ class VisionAgent:
                     os.replace(tmp, cache)  # atomic: another worker never reads half a file
                 except OSError as err:
                     logger.warning(f"Could not cache image analysis: {err}")
+                self._prune_cache()
             return analysis
         finally:
             if pending:

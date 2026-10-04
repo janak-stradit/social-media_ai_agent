@@ -120,6 +120,13 @@ def run_brand_analysis(
 
 
 def _save_profile(save_user_brand_profile, user_id: int, website: str, profile: dict) -> None:
+    # A re-scan may bring a new logo at the same address: fetch it fresh next time
+    try:
+        from services.brand_logo_service import forget_logo
+
+        forget_logo(profile.get("logo_url"))
+    except Exception as logo_err:  # noqa: BLE001
+        logger.warning(f"Could not reset the cached logo: {logo_err}")
     save_user_brand_profile(
         user_id,
         website=website,
