@@ -36,6 +36,9 @@ _PADDING_RATIO = 0.035  # of the shorter image side
 _MIN_CONTRAST = 60  # luminance difference below which the logo gets a soft backing plate
 _MAX_LOGO_BYTES = 5 * 1024 * 1024
 _CACHE_DIR = os.path.join(Config.UPLOAD_FOLDER, "brand_logos")
+# A company may change its logo at the same address: a cached logo is fetched
+# again after this long (and when the brand profile is re-scanned - forget_logo)
+LOGO_REFRESH_SECONDS = 7 * 24 * 3600
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -72,24 +75,47 @@ def _default_logo_path() -> str | None:
 def _cached_logo(logo_url: str) -> str | None:
     """Downloads (SSRF-checked) and normalizes a logo URL to a transparent
     PNG, cached by URL so each logo is fetched once."""
+    import time
+
     os.makedirs(_CACHE_DIR, exist_ok=True)
-    cache_path = os.path.join(_CACHE_DIR, hashlib.sha256(logo_url.encode()).hexdigest()[:24] + ".png")
-    if os.path.exists(cache_path):
+    cache_path = _logo_cache_path(logo_url)
+    have = os.path.exists(cache_path)
+    if have and time.time() - os.path.getmtime(cache_path) < LOGO_REFRESH_SECONDS:
         return cache_path
 
     data = _fetch_logo_bytes(logo_url)
-    if not data:
-        return None
-    try:
-        png = _render_svg(data) if _looks_like_svg(logo_url, data) else _normalize_raster(data)
-    except Exception as e:
-        logger.warning(f"Could not process logo {logo_url}: {e}")
-        return None
+    png = None
+    if data:
+        try:
+            png = _render_svg(data) if _looks_like_svg(logo_url, data) else _normalize_raster(data)
+        except Exception as e:
+            logger.warning(f"Could not process logo {logo_url}: {e}")
     if not png:
+        if have:
+            # The site is down or the logo moved: keep the last good logo and
+            # try again after another refresh period instead of on every image
+            os.utime(cache_path)
+            return cache_path
         return None
-    with open(cache_path, "wb") as f:
+    tmp = f"{cache_path}.{os.getpid()}.tmp"
+    with open(tmp, "wb") as f:
         f.write(png)
+    os.replace(tmp, cache_path)  # an image being stamped never reads half a file
     return cache_path
+
+
+def _logo_cache_path(logo_url: str) -> str:
+    return os.path.join(_CACHE_DIR, hashlib.sha256(logo_url.encode()).hexdigest()[:24] + ".png")
+
+
+def forget_logo(logo_url: str | None) -> None:
+    """Drops a cached logo so the next image fetches it fresh (brand re-scan)."""
+    if not logo_url:
+        return
+    try:
+        os.remove(_logo_cache_path(logo_url))
+    except OSError:
+        pass
 
 
 def _fetch_logo_bytes(url: str) -> bytes | None:
