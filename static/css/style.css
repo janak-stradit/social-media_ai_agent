@@ -3174,21 +3174,25 @@ body {
 .bc-content .form-control::placeholder { color: #9ca3af; }
 
 /* ── Buttons ─────────────────────────────────────────────────────────── */
+/* Outline button: brand-gradient border on white (two backgrounds - white
+   inside the padding box, the gradient under the transparent border);
+   fills with the gradient on hover. */
 .btn-primary-save {
   display: inline-flex; align-items: center;
-  background: var(--brand-gradient-strong);
-  color: #fff;
-  border: none;
+  background: linear-gradient(#fff, #fff) padding-box, var(--brand-gradient-strong) border-box;
+  color: var(--brand-strong);
+  border: 1.5px solid transparent;
   border-radius: var(--bp-radius-sm);
   padding: 0.6rem 1.25rem;
   font-weight: 600;
   font-size: 0.95rem;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 4px 10px rgba(var(--brand-rgb), 0.25);
+  box-shadow: 0 2px 6px rgba(var(--brand-rgb), 0.12);
 }
-.btn-primary-save:hover { color: #fff; transform: translateY(-2px); box-shadow: 0 6px 14px rgba(var(--brand-rgb), 0.35); }
-.btn-primary-save:disabled { background: #d1d5db; color: #9ca3af; box-shadow: none; transform: none; cursor: not-allowed; }
+.btn-primary-save:hover,
+.btn-primary-save:focus-visible { background: var(--brand-gradient-strong) border-box; color: #fff; transform: translateY(-2px); box-shadow: 0 6px 14px rgba(var(--brand-rgb), 0.35); }
+.btn-primary-save:disabled { background: #f3f4f6; border-color: #e5e7eb; color: #9ca3af; box-shadow: none; transform: none; cursor: not-allowed; }
 
 .btn-xs-outline-info {
   display: inline-flex; align-items: center;
@@ -4222,3 +4226,114 @@ a:hover > .stradit-badge, .stradit-badge:hover { background: #1e293b; }
   background: var(--brand); border-radius: 1px; animation: researchCaret 1s steps(1) infinite;
 }
 @media (prefers-reduced-motion: reduce) { .caption-preview.is-draft .caption-preview-text::after { animation: none; } }
+
+/* ══════════════════════════════════════════════════════════════════════
+   BRAND BUTTONS - one look for every main action button: brand-gradient
+   outline on white at rest, filled with the gradient on hover / when
+   pressed. Kept last (and !important) so it wins over the per-button
+   rules above and in page <style> blocks. Add new main buttons here.
+   ══════════════════════════════════════════════════════════════════════ */
+.btn-primary,
+.btn-primary-save,
+.btn-primary-blue,
+.btn-new-chat,
+.btn-chat-send,
+.btn-auth-submit,
+.btn-quick-fill,
+.btn-memory-graph-trigger,
+.btn-header-primary,
+.synth-nav-btn.primary-nav,
+.btn-landing-cta,
+.premium-btn {
+  background: linear-gradient(#fff, #fff) padding-box, var(--brand-gradient-strong) border-box !important;
+  color: var(--brand-strong) !important;
+  border: 1.5px solid transparent !important;
+  box-shadow: 0 2px 6px rgba(var(--brand-rgb), 0.12) !important;
+}
+.btn-primary:hover:not(:disabled),
+.btn-primary-save:hover:not(:disabled),
+.btn-primary-blue:hover:not(:disabled),
+.btn-new-chat:hover:not(:disabled),
+.btn-chat-send:hover:not(:disabled),
+.btn-auth-submit:hover:not(:disabled),
+.btn-quick-fill:hover:not(:disabled),
+.btn-memory-graph-trigger:hover:not(:disabled),
+.btn-header-primary:hover:not(:disabled),
+.synth-nav-btn.primary-nav:hover:not(:disabled),
+.btn-landing-cta:hover:not(:disabled),
+.premium-btn:hover:not(:disabled),
+.btn-primary:focus-visible,
+.btn-primary-save:focus-visible,
+.btn-primary-blue:focus-visible,
+.btn-new-chat:focus-visible,
+.btn-chat-send:focus-visible,
+.btn-auth-submit:focus-visible,
+.btn-quick-fill:focus-visible,
+.btn-memory-graph-trigger:focus-visible,
+.btn-header-primary:focus-visible,
+.synth-nav-btn.primary-nav:focus-visible,
+.btn-landing-cta:focus-visible,
+.premium-btn:focus-visible,
+.btn-primary:active:not(:disabled),
+.btn-primary-save:active:not(:disabled),
+.btn-primary-blue:active:not(:disabled),
+.btn-new-chat:active:not(:disabled),
+.btn-chat-send:active:not(:disabled),
+.btn-auth-submit:active:not(:disabled),
+.btn-quick-fill:active:not(:disabled),
+.btn-memory-graph-trigger:active:not(:disabled),
+.btn-header-primary:active:not(:disabled),
+.synth-nav-btn.primary-nav:active:not(:disabled),
+.btn-landing-cta:active:not(:disabled),
+.premium-btn:active:not(:disabled),
+.btn-primary.active, .btn-primary.show {
+  background: var(--brand-gradient-strong) border-box !important;
+  color: #fff !important;
+  box-shadow: 0 6px 14px rgba(var(--brand-rgb), 0.3) !important;
+}
+.btn-primary:disabled,
+.btn-primary-save:disabled,
+.btn-primary-blue:disabled,
+.btn-new-chat:disabled,
+.btn-chat-send:disabled,
+.btn-auth-submit:disabled,
+.btn-quick-fill:disabled,
+.btn-memory-graph-trigger:disabled,
+.btn-header-primary:disabled,
+.synth-nav-btn.primary-nav:disabled,
+.btn-landing-cta:disabled,
+.premium-btn:disabled,
+.btn-primary.disabled {
+  background: #f3f4f6 !important;
+  border-color: #e5e7eb !important;
+  color: #9ca3af !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+/* icons follow the text colour (some rules above paint them white) */
+.btn-primary i,
+.btn-primary-save i,
+.btn-primary-blue i,
+.btn-new-chat i,
+.btn-chat-send i,
+.btn-auth-submit i,
+.btn-quick-fill i,
+.btn-memory-graph-trigger i,
+.btn-header-primary i,
+.synth-nav-btn.primary-nav i,
+.btn-landing-cta i,
+.premium-btn i,
+.btn-primary svg,
+.btn-primary-save svg,
+.btn-primary-blue svg,
+.btn-new-chat svg,
+.btn-chat-send svg,
+.btn-auth-submit svg,
+.btn-quick-fill svg,
+.btn-memory-graph-trigger svg,
+.btn-header-primary svg,
+.synth-nav-btn.primary-nav svg,
+.btn-landing-cta svg,
+.premium-btn svg {
+  color: inherit !important;
+}

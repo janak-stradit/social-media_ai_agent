@@ -233,8 +233,8 @@
         @keyframes scroll-bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(6px); } }
 
         /* Buttons - same shapes as .btn-primary-save / .btn-xs-outline-info */
-        .btn-primary-save { display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: var(--brand-gradient-strong); color: #fff; border: none; border-radius: var(--radius-sm); padding: 0.6rem 1.25rem; font-family: inherit; font-weight: 600; font-size: 0.95rem; cursor: pointer; white-space: nowrap; transition: all 0.2s ease; box-shadow: 0 4px 10px rgba(var(--brand-rgb), 0.25); }
-        .btn-primary-save:hover { transform: translateY(-2px); box-shadow: 0 6px 14px rgba(var(--brand-rgb), 0.35); }
+        .btn-primary-save { display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: linear-gradient(#fff, #fff) padding-box, var(--brand-gradient-strong) border-box; color: var(--brand-strong); border: 1.5px solid transparent; border-radius: var(--radius-sm); padding: 0.6rem 1.25rem; font-family: inherit; font-weight: 600; font-size: 0.95rem; cursor: pointer; white-space: nowrap; transition: all 0.2s ease; box-shadow: 0 2px 6px rgba(var(--brand-rgb), 0.12); }
+        .btn-primary-save:hover { background: var(--brand-gradient-strong) border-box; color: #fff; transform: translateY(-2px); box-shadow: 0 6px 14px rgba(var(--brand-rgb), 0.35); }
         .btn-primary-save:focus-visible, .btn-outline:focus-visible { outline: 3px solid rgba(var(--brand-rgb), 0.35); outline-offset: 2px; }
         .btn-primary-save.btn-lg { padding: 0.85rem 1.75rem; font-size: 1rem; }
         .btn-outline { display: inline-flex; align-items: center; justify-content: center; gap: 8px; background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: var(--radius-sm); padding: 0.6rem 1.1rem; font-weight: 500; font-size: 0.9rem; box-shadow: var(--shadow-sm); transition: all 0.15s ease; }
@@ -510,7 +510,7 @@
         .hero-quickstart .btn-primary-save { position: relative; overflow: hidden; }
         .hero-quickstart .btn-primary-save::after {
             content: ''; position: absolute; top: 0; left: -60%; width: 40%; height: 100%;
-            background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+            background: linear-gradient(100deg, transparent, rgba(var(--brand-light-rgb), 0.25), transparent);
             transform: skewX(-20deg); pointer-events: none;
             animation: hero-shine 4.5s ease-in-out 1.6s infinite;
         }
