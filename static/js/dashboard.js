@@ -2674,7 +2674,7 @@ $(document).ready(function () {
         return `
             <div style="background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.1); font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;">
                 <div style="display:flex; align-items:center; gap:10px; padding:14px 16px;">
-                    <div style="width:42px;height:42px;border-radius:50%;background:var(--primary,#4f46e5);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;">SI</div>
+                    <div style="width:42px;height:42px;border-radius:50%;background:var(--brand-strong,#c2410c);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;">SI</div>
                     <div>
                         <div style="font-weight:700; font-size:0.92rem;">StradIT</div>
                         <div style="font-size:0.75rem; color:#666;">${platformDisplayName(platform)} &middot; Just now</div>

@@ -10,7 +10,7 @@
     <style>
         body {
             min-height: var(--vh100, 100vh); display: flex; align-items: center; justify-content: center;
-            background: linear-gradient(135deg, #F8FAFC 0%, #F3F0FF 50%, #F3F0FF 100%);
+            background: linear-gradient(135deg, #F8FAFC 0%, var(--brand-bg) 50%, var(--brand-bg) 100%);
             font-family: 'Inter', system-ui, sans-serif; margin: 0; padding: 24px;
         }
         .pending-card {
@@ -19,7 +19,7 @@
         }
         .pending-icon {
             width: 64px; height: 64px; border-radius: 16px; margin: 0 auto 24px;
-            background: linear-gradient(135deg, #FFA941, #D6821F); display: flex; align-items: center; justify-content: center;
+            background: linear-gradient(135deg, var(--warning), #b45309); display: flex; align-items: center; justify-content: center;
         }
         .pending-icon i { color: #fff; font-size: 26px; }
         .pending-copy { color: #6B7280; font-size: 14px; line-height: 1.6; margin-bottom: 24px; }

@@ -1525,9 +1525,9 @@ $(document).ready(function () {
         const height = canvas.height;
 
         const colors = {
-            core: '#4f46e5',
+            core: '#e85a1c',
             campaign: '#2563eb',
-            platform: '#8b5cf6',
+            platform: '#ffa066',
             tone: '#f59e0b'
         };
         const radii = {

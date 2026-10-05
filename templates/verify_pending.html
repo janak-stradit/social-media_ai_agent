@@ -35,11 +35,11 @@
         }
         .onboard-steps { display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 28px; }
         .onboard-step-dot { width: 8px; height: 8px; border-radius: 50%; background: #E5E7EB; transition: all 0.2s ease; }
-        .onboard-step-dot.active { background: #8A2BE2; width: 22px; border-radius: 4px; }
+        .onboard-step-dot.active { background: var(--brand); width: 22px; border-radius: 4px; }
         .onboard-step-label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #9CA3AF; margin-bottom: 8px; }
         .verify-icon {
             width: 64px; height: 64px; border-radius: 16px; margin: 0 auto 24px;
-            background: linear-gradient(135deg, #8A2BE2, #4169E1); display: flex; align-items: center; justify-content: center;
+            background: var(--brand-gradient-strong); display: flex; align-items: center; justify-content: center;
         }
         .verify-icon i { color: #fff; font-size: 26px; }
         .verify-copy { color: #6B7280; font-size: 14px; line-height: 1.6; margin-bottom: 24px; }
@@ -120,7 +120,7 @@
             const email = $('#resendEmail').val().trim();
             const $msg = $('#resendMsg');
             if (!email) {
-                $msg.css('color', '#FC4438').text('Enter your email first.').show();
+                $msg.css('color', '#dc2626').text('Enter your email first.').show();
                 return;
             }
             const $btn = $(this);
@@ -141,7 +141,7 @@
                         // validation error, not the cooldown (that's a 429,
                         // handled below) - safe to just re-enable immediately.
                         $btn.prop('disabled', false).text('Resend verification email');
-                        $msg.css('color', '#FC4438').text(res.error || 'Could not resend.').show();
+                        $msg.css('color', '#dc2626').text(res.error || 'Could not resend.').show();
                     }
                 },
                 error: function (xhr) {
@@ -151,11 +151,11 @@
                         // start the visible countdown either way so the user
                         // knows exactly how long to wait instead of a vague
                         // "please wait" with no indication of when.
-                        $msg.css('color', '#FFA941').text((xhr.responseJSON && xhr.responseJSON.error) || 'Please wait before requesting another email.').show();
+                        $msg.css('color', '#b45309').text((xhr.responseJSON && xhr.responseJSON.error) || 'Please wait before requesting another email.').show();
                         startResendCooldown();
                     } else {
                         $btn.prop('disabled', false).text('Resend verification email');
-                        $msg.css('color', '#FC4438').text((xhr.responseJSON && xhr.responseJSON.error) || 'Could not resend.').show();
+                        $msg.css('color', '#dc2626').text((xhr.responseJSON && xhr.responseJSON.error) || 'Could not resend.').show();
                     }
                 }
             });

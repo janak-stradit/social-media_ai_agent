@@ -12,8 +12,8 @@
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
     <style>
         :root {
-            --primary: #8A2BE2;
-            --primary-hover: #7322C4;
+            --primary: var(--brand);
+            --primary-hover: var(--brand-hover);
             --bg-gradient: linear-gradient(135deg, #f3f4f6 0%, #ffffff 100%);
             --glass-bg: rgba(255, 255, 255, 0.85);
             --glass-border: rgba(255, 255, 255, 0.5);
@@ -27,19 +27,19 @@
         }
 
         .premium-btn {
-            background: linear-gradient(135deg, var(--primary) 0%, #8A2BE2 100%);
+            background: linear-gradient(135deg, var(--brand) 0%, var(--brand) 100%);
             color: white;
             border: none;
             border-radius: 6px;
             padding: 0.6rem 1.25rem;
             font-weight: 600;
             transition: var(--transition);
-            box-shadow: 0 4px 10px rgba(138, 43, 226, 0.25);
+            box-shadow: 0 4px 10px rgba(var(--brand-rgb), 0.25);
         }
 
         .premium-btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 6px 16px rgba(138, 43, 226, 0.4);
+            box-shadow: 0 6px 16px rgba(var(--brand-rgb), 0.4);
             color: white;
         }
 
@@ -96,11 +96,11 @@
         }
 
         .quick-start-tab:hover {
-            color: var(--primary);
+            color: var(--brand-strong);
         }
 
         .quick-start-tab.active {
-            color: var(--primary);
+            color: var(--brand-strong);
             font-weight: 600;
             border-bottom-color: var(--primary);
         }
@@ -115,7 +115,7 @@
         }
 
         .quick-start-tab .badge.badge-urgent {
-            background: #ffa941;
+            background: #b45309; /* amber dark enough for the white count */
             animation: festive-badge-pulse 1.6s ease-in-out infinite;
         }
 
@@ -123,11 +123,11 @@
 
             0%,
             100% {
-                box-shadow: 0 0 0 0 rgba(255, 169, 65, 0.55);
+                box-shadow: 0 0 0 0 rgba(217, 119, 6, 0.55);
             }
 
             50% {
-                box-shadow: 0 0 0 4px rgba(255, 169, 65, 0);
+                box-shadow: 0 0 0 4px rgba(217, 119, 6, 0);
             }
         }
 
@@ -155,7 +155,7 @@
             border-color: var(--primary);
             outline: none;
             background: white;
-            box-shadow: 0 0 0 3px rgba(138, 43, 226, 0.15);
+            box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.15);
         }
 
         .select-icon {
@@ -197,7 +197,7 @@
         .competitor-post-card:hover {
             border-color: #C5C9DB;
             transform: translateY(-2px);
-            box-shadow: 0 8px 24px rgba(138, 43, 226, 0.08);
+            box-shadow: 0 8px 24px rgba(var(--brand-rgb), 0.08);
         }
 
         .competitor-post-card:hover::before {
@@ -235,12 +235,12 @@
             background: #ffffff;
             border-color: var(--primary);
             outline: none;
-            box-shadow: 0 0 0 3px rgba(138, 43, 226, 0.15);
+            box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.15);
         }
 
         .badge-premium {
-            background: rgba(138, 43, 226, 0.1);
-            color: var(--primary);
+            background: rgba(var(--brand-rgb), 0.1);
+            color: var(--brand-strong);
             font-weight: 700;
             padding: 0.4rem 0.8rem;
             border-radius: 20px;
@@ -326,7 +326,7 @@
         }
 
         .pipeline-stage-row-clickable:hover {
-            background: rgba(138, 43, 226, 0.05);
+            background: rgba(var(--brand-rgb), 0.05);
         }
 
         .pipeline-stage-row-clickable:hover .pipeline-step-dot {
@@ -342,7 +342,7 @@
            right, distinct from the muted primary-text used for reached-but-
            not-currently-viewed stages. */
         .pipeline-stage-row-active {
-            background: rgba(138, 43, 226, 0.08);
+            background: rgba(var(--brand-rgb), 0.08);
         }
 
         /* Pipeline Stage Detail Modal as a right-docked slide-in panel
@@ -419,11 +419,11 @@
         .cd-hero-desc { font-size: 0.95rem; line-height: 1.5; color: #667085; max-width: 480px; margin: 0; }
         .cd-hero-graphic {
             position: absolute; top: 0; right: 0; width: 50%; height: 100%;
-            background: linear-gradient(135deg, #c4b5fd 0%, #818cf8 100%);
+            background: linear-gradient(135deg, #ffd2b3 0%, #ffa066 100%);
             clip-path: polygon(15% 0, 100% 0, 100% 100%, 0 100%);
         }
         .cd-hero-caption { position: absolute; left: 12%; top: 50%; transform: translateY(-50%); font-size: 0.85rem; line-height: 1.3; font-weight: 500; color: #172033; }
-        .cd-hero-caption strong { position: relative; display: inline-block; padding-bottom: 4px; color: var(--primary); }
+        .cd-hero-caption strong { position: relative; display: inline-block; padding-bottom: 4px; color: #7c2d12; }
         .cd-hero-caption strong::after { content: ""; position: absolute; left: 0; bottom: 0; width: 100%; height: 2px; background: var(--primary); }
         .cd-hero-mock {
             position: absolute; right: 12%; top: 50%; width: 230px; padding: 1.15rem;
@@ -432,7 +432,7 @@
         }
         .cd-hero-mock-icon {
             width: 34px; height: 34px; border-radius: 8px; font-size: 13px;
-            background: linear-gradient(135deg, #8A2BE2 0%, #4169E1 100%); color: #fff;
+            background: var(--brand-gradient-strong); color: #fff;
             display: flex; align-items: center; justify-content: center;
         }
         .cd-mock-bar { height: 9px; background: #e2e8f0; border-radius: 4px; margin-bottom: 10px; }
@@ -441,8 +441,8 @@
         .kpi-stat-card { padding: 1.25rem 1.5rem; }
         .kpi-stat-card .kpi-icon-box {
             width: 44px; height: 44px; border-radius: 50%; font-size: 1.05rem;
-            background: linear-gradient(135deg, #8A2BE2 0%, #4169E1 100%); color: #fff;
-            box-shadow: 0 4px 10px rgba(138, 43, 226, 0.2);
+            background: var(--brand-gradient-strong); color: #fff;
+            box-shadow: 0 4px 10px rgba(var(--brand-rgb), 0.2);
         }
         .kpi-label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #667085; margin-bottom: 0.15rem; }
         .kpi-stat-card h4 { font-size: 1.35rem; letter-spacing: -0.01em; color: #172033 !important; }
@@ -464,16 +464,16 @@
             min-height: 40px; background: #fff; border: 1px solid #E6E8EF; border-radius: 6px; font-size: 0.85rem;
         }
         .cd-panel-search .form-control:focus,
-        .feed-search-box .form-control:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(138, 43, 226, 0.15); }
+        .feed-search-box .form-control:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.15); }
 
         .cd-quickstart { background: #fff; border-bottom: 1px solid #E6E8EF; }
         .cd-feed-body { background: #F8F9FC; }
         .feed-action-bar { background: #F8F9FC; border-color: #E6E8EF; }
         .synth-panel-header { background: #fff; padding: 1.1rem 1.25rem; border-bottom-color: #E6E8EF; }
         .synth-stepper { background: #F8F9FC; border-bottom-color: #E6E8EF; }
-        .synth-step.active .synth-step-dot { background: linear-gradient(135deg, #8A2BE2 0%, #4169E1 100%); border-color: transparent; }
+        .synth-step.active .synth-step-dot { background: var(--brand-gradient); border-color: transparent; }
         .synth-nav-btn { border-radius: 6px; border-width: 1px; border-color: #E6E8EF; font-weight: 600; }
-        .synth-nav-btn.primary-nav { background: linear-gradient(135deg, #8A2BE2 0%, #4169E1 100%); border-color: transparent; }
+        .synth-nav-btn.primary-nav { background: var(--brand-gradient-strong); border-color: transparent; }
         .synth-action-bar { border-top-color: #E6E8EF; }
         .synth-action-bar .btn { border-radius: 6px; font-weight: 600; }
 
@@ -484,7 +484,7 @@
             border-left: 3px solid transparent !important;
             transition: background 0.15s ease, border-color 0.15s ease;
         }
-        #pipelineHistoryList .list-group-item:hover { background: rgba(138, 43, 226, 0.04) !important; border-left-color: var(--primary) !important; }
+        #pipelineHistoryList .list-group-item:hover { background: rgba(var(--brand-rgb), 0.04) !important; border-left-color: var(--primary) !important; }
 
         /* Storyline cards (suggested + festive, rendered by dashboard.js). */
         .storyline-card {
@@ -492,11 +492,11 @@
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04); padding: 1rem !important;
             transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
         }
-        .storyline-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(138, 43, 226, 0.08); border-color: #C5C9DB !important; }
-        .storyline-card-festive { border-left: 3px solid #FFA941 !important; }
+        .storyline-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(var(--brand-rgb), 0.08); border-color: #C5C9DB !important; }
+        .storyline-card-festive { border-left: 3px solid var(--warning) !important; }
         .storyline-card .btn { border-radius: 6px !important; font-weight: 600 !important; }
 
-        .competitor-post-card.selected-card { background-color: #f3f0ff !important; }
+        .competitor-post-card.selected-card { background-color: var(--brand-bg) !important; }
 
         .modal-content { border: 1px solid #E6E8EF; border-radius: 16px; }
 
@@ -1127,10 +1127,10 @@
         <div class="modal-dialog modal-dialog-scrollable">
             <div class="modal-content" style="border: none;">
                 <div class="modal-header border-0 py-3 px-4"
-                    style="background: linear-gradient(135deg, rgba(138, 43, 226,0.06) 0%, rgba(138, 43, 226,0.02) 100%);">
+                    style="background: linear-gradient(135deg, rgba(var(--brand-rgb),0.06) 0%, rgba(var(--brand-rgb),0.02) 100%);">
                     <div class="d-flex align-items-center gap-3">
                         <div class="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0 shadow-sm"
-                            style="width: 40px; height: 40px; background: rgba(138, 43, 226, 0.1); color: var(--primary);">
+                            style="width: 40px; height: 40px; background: rgba(var(--brand-rgb), 0.1); color: var(--brand-strong);">
                             <i class="fas fa-layer-group"></i>
                         </div>
                         <div>
@@ -1187,7 +1187,7 @@
                             <div id="opportunityUnservedList" style="max-height: 480px; overflow-y: auto;"></div>
                         </div>
                         <div class="col-md-6">
-                            <h6 class="fw-bold text-indigo mb-3" style="color: var(--primary);"><i
+                            <h6 class="fw-bold text-indigo mb-3" style="color: var(--brand-strong);"><i
                                     class="fas fa-cubes me-2"></i>Emerging Domain Expansion &amp; Custom Integration
                             </h6>
                             <div id="opportunityDomainList" style="max-height: 480px; overflow-y: auto;"></div>
