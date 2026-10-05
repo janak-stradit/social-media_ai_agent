@@ -145,10 +145,10 @@ def _build_html(
                 <table role="presentation" width="600" cellpadding="0" cellspacing="0"
                        style="background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.06);">
                     <tr>
-                        <td style="background-color: #4338ca; height: 5px; line-height: 5px; font-size: 0;">&nbsp;</td>
+                        <td style="background-color: #e85a1c; height: 5px; line-height: 5px; font-size: 0;">&nbsp;</td>
                     </tr>
                     <tr>
-                        <td style="background-color: #4f46e5; background-image: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); padding: 26px 32px;">
+                        <td style="background-color: #e85a1c; background-image: linear-gradient(135deg, #ffa066 0%, #e85a1c 100%); padding: 26px 32px;">
                             <table role="presentation" cellpadding="0" cellspacing="0">
                                 <tr>
                                     <td style="vertical-align: middle; padding-right: 14px;">
@@ -172,7 +172,7 @@ def _build_html(
                             <table role="presentation" cellpadding="0" cellspacing="0">
                                 <tr>
                                     <td style="padding-right: 8px;">
-                                        <span style="display: inline-block; background-color: #eef2ff; color: #4338ca; font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 999px;">{_escape(platform_label)}</span>
+                                        <span style="display: inline-block; background-color: #fff4ec; color: #c2410c; font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 999px;">{_escape(platform_label)}</span>
                                     </td>
                                     <td>
                                         <span style="display: inline-block; background-color: #ecfdf5; color: #059669; font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 999px;">{_escape(asset_label)}</span>
@@ -189,13 +189,13 @@ def _build_html(
                     {image_block}
                     <tr>
                         <td style="padding: 0 32px 8px 32px;">
-                            <div style="font-size: 13px; font-weight: 700; color: #4338ca; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 8px;">Generated Caption</div>
-                            <div style="background-color: #f9fafb; border-left: 3px solid #4f46e5; border-radius: 8px; padding: 16px; font-size: 14px; line-height: 1.6; color: #1f2937; white-space: pre-wrap;">{caption_html}</div>
+                            <div style="font-size: 13px; font-weight: 700; color: #c2410c; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 8px;">Generated Caption</div>
+                            <div style="background-color: #f9fafb; border-left: 3px solid #c2410c; border-radius: 8px; padding: 16px; font-size: 14px; line-height: 1.6; color: #1f2937; white-space: pre-wrap;">{caption_html}</div>
                         </td>
                     </tr>
                     <tr>
                         <td style="padding: 20px 32px 32px 32px;">
-                            <div style="font-size: 13px; font-weight: 700; color: #4338ca; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 8px;">Story / Strategy Context</div>
+                            <div style="font-size: 13px; font-weight: 700; color: #c2410c; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 8px;">Story / Strategy Context</div>
                             <div style="background-color: #f9fafb; border-left: 3px solid #d1d5db; border-radius: 8px; padding: 16px; font-size: 13px; line-height: 1.6; color: #4b5563; white-space: pre-wrap; max-height: 400px; overflow: hidden;">{story_html}</div>
                         </td>
                     </tr>
@@ -203,7 +203,7 @@ def _build_html(
                         <td style="padding: 16px 32px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 12px;">
                             This is an automated notification from the Analysis Dashboard's approval workflow.
                             {"Attached copies of the generated image(s) are included below." if slide_count > 0 else ""}
-                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #8a2be2; text-decoration: none; font-weight: 600;">StradIT</a></div>
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a></div>
                         </td>
                     </tr>
                 </table>
@@ -262,10 +262,10 @@ def _build_request_html(
                 <table role="presentation" width="600" cellpadding="0" cellspacing="0"
                        style="background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.06);">
                     <tr>
-                        <td style="background-color: #4338ca; height: 5px; line-height: 5px; font-size: 0;">&nbsp;</td>
+                        <td style="background-color: #e85a1c; height: 5px; line-height: 5px; font-size: 0;">&nbsp;</td>
                     </tr>
                     <tr>
-                        <td style="background-color: #4f46e5; background-image: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); padding: 26px 32px;">
+                        <td style="background-color: #e85a1c; background-image: linear-gradient(135deg, #ffa066 0%, #e85a1c 100%); padding: 26px 32px;">
                             <table role="presentation" cellpadding="0" cellspacing="0">
                                 <tr>
                                     <td style="vertical-align: middle; padding-right: 14px;">
@@ -289,7 +289,7 @@ def _build_request_html(
                             <table role="presentation" cellpadding="0" cellspacing="0">
                                 <tr>
                                     <td style="padding-right: 8px;">
-                                        <span style="display: inline-block; background-color: #eef2ff; color: #4338ca; font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 999px;">{_escape(platform_label)}</span>
+                                        <span style="display: inline-block; background-color: #fff4ec; color: #c2410c; font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 999px;">{_escape(platform_label)}</span>
                                     </td>
                                     <td>
                                         <span style="display: inline-block; background-color: #ecfdf5; color: #059669; font-size: 12px; font-weight: 700; padding: 5px 12px; border-radius: 999px;">{_escape(asset_label)}</span>
@@ -306,20 +306,20 @@ def _build_request_html(
                     {image_block}
                     <tr>
                         <td style="padding: 0 32px 8px 32px;">
-                            <div style="font-size: 13px; font-weight: 700; color: #4338ca; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 8px;">Generated Caption</div>
-                            <div style="background-color: #f9fafb; border-left: 3px solid #4f46e5; border-radius: 8px; padding: 16px; font-size: 14px; line-height: 1.6; color: #1f2937; white-space: pre-wrap;">{caption_html}</div>
+                            <div style="font-size: 13px; font-weight: 700; color: #c2410c; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 8px;">Generated Caption</div>
+                            <div style="background-color: #f9fafb; border-left: 3px solid #c2410c; border-radius: 8px; padding: 16px; font-size: 14px; line-height: 1.6; color: #1f2937; white-space: pre-wrap;">{caption_html}</div>
                         </td>
                     </tr>
                     <tr>
                         <td style="padding: 20px 32px 8px 32px;">
-                            <div style="font-size: 13px; font-weight: 700; color: #4338ca; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 8px;">Story / Strategy Context</div>
+                            <div style="font-size: 13px; font-weight: 700; color: #c2410c; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 8px;">Story / Strategy Context</div>
                             <div style="background-color: #f9fafb; border-left: 3px solid #d1d5db; border-radius: 8px; padding: 16px; font-size: 13px; line-height: 1.6; color: #4b5563; white-space: pre-wrap; max-height: 400px; overflow: hidden;">{story_html}</div>
                         </td>
                     </tr>
                     <tr>
                         <td align="center" style="padding: 24px 32px 32px 32px;">
                             <a href="{_escape(approval_url)}"
-                               style="display: inline-block; background-color: #4f46e5; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 999px;">
+                               style="display: inline-block; background-color: #c2410c; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 999px;">
                                 Review &amp; Decide
                             </a>
                             <div style="color: #9ca3af; font-size: 12px; margin-top: 12px;">Opens the Analysis Dashboard - sign-in required.</div>
@@ -328,7 +328,7 @@ def _build_request_html(
                     <tr>
                         <td style="padding: 16px 32px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 12px;">
                             This is an automated review request from the Analysis Dashboard's approval workflow.
-                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #8a2be2; text-decoration: none; font-weight: 600;">StradIT</a></div>
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a></div>
                         </td>
                     </tr>
                 </table>
@@ -351,10 +351,10 @@ def _build_verification_html(name: str, verify_url: str) -> str:
                 <table role="presentation" width="560" cellpadding="0" cellspacing="0"
                        style="background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.06);">
                     <tr>
-                        <td style="background-color: #4338ca; height: 5px; line-height: 5px; font-size: 0;">&nbsp;</td>
+                        <td style="background-color: #e85a1c; height: 5px; line-height: 5px; font-size: 0;">&nbsp;</td>
                     </tr>
                     <tr>
-                        <td style="background-color: #4f46e5; background-image: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); padding: 32px; text-align: center;">
+                        <td style="background-color: #e85a1c; background-image: linear-gradient(135deg, #ffa066 0%, #e85a1c 100%); padding: 32px; text-align: center;">
                             <span style="color: #ffffff; font-size: 22px; font-weight: 700;">Welcome to AVIR AI</span>
                         </td>
                     </tr>
@@ -367,7 +367,7 @@ def _build_verification_html(name: str, verify_url: str) -> str:
                     <tr>
                         <td align="center" style="padding: 24px 32px 32px 32px;">
                             <a href="{_escape(verify_url)}"
-                               style="display: inline-block; background-color: #4f46e5; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 999px;">
+                               style="display: inline-block; background-color: #c2410c; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 999px;">
                                 Verify my email
                             </a>
                             <div style="color: #9ca3af; font-size: 12px; margin-top: 12px;">This link expires in 24 hours.</div>
@@ -376,7 +376,7 @@ def _build_verification_html(name: str, verify_url: str) -> str:
                     <tr>
                         <td style="padding: 16px 32px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 12px;">
                             If you didn't create this account, you can safely ignore this email.
-                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #8a2be2; text-decoration: none; font-weight: 600;">StradIT</a></div>
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a></div>
                         </td>
                     </tr>
                 </table>
@@ -398,7 +398,7 @@ def _build_password_reset_html(name: str, reset_url: str, ttl_minutes: int) -> s
                 <table role="presentation" width="560" cellpadding="0" cellspacing="0"
                        style="background-color: #ffffff; border: 1px solid #e6e8ef; border-radius: 16px; overflow: hidden;">
                     <tr>
-                        <td style="background-color: #8a2be2; background-image: linear-gradient(135deg, #8a2be2 0%, #4169e1 100%); padding: 32px; text-align: center;">
+                        <td style="background-color: #e85a1c; background-image: linear-gradient(135deg, #ffa066 0%, #e85a1c 100%); padding: 32px; text-align: center;">
                             <span style="color: #ffffff; font-size: 22px; font-weight: 700;">Reset your password</span>
                         </td>
                     </tr>
@@ -411,7 +411,7 @@ def _build_password_reset_html(name: str, reset_url: str, ttl_minutes: int) -> s
                     <tr>
                         <td align="center" style="padding: 24px 32px 32px 32px;">
                             <a href="{_escape(reset_url)}"
-                               style="display: inline-block; background-color: #8a2be2; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 6px;">
+                               style="display: inline-block; background-color: #c2410c; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 6px;">
                                 Reset my password
                             </a>
                             <div style="color: #667085; font-size: 12px; margin-top: 12px;">This link expires in {ttl_minutes} minutes and can only be used once.</div>
@@ -420,7 +420,7 @@ def _build_password_reset_html(name: str, reset_url: str, ttl_minutes: int) -> s
                     <tr>
                         <td style="padding: 16px 32px; background-color: #f8f9fc; border-top: 1px solid #e6e8ef; color: #667085; font-size: 12px;">
                             If you didn't ask to reset your password, you can safely ignore this email - your password won't change.
-                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #8a2be2; text-decoration: none; font-weight: 600;">StradIT</a></div>
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a></div>
                         </td>
                     </tr>
                 </table>
@@ -445,10 +445,10 @@ def _build_invitation_html(
                     <tr>
                         <td style="padding: 0 32px 8px 32px;">
                             <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
-                                   style="background-color: #f5f3ff; border-left: 3px solid #8a2be2; border-radius: 8px;">
+                                   style="background-color: #fff4ec; border-left: 3px solid #e85a1c; border-radius: 8px;">
                                 <tr>
                                     <td style="padding: 14px 16px; color: #3b3355; font-size: 14px; line-height: 1.6;">
-                                        <div style="font-size: 12px; font-weight: 700; color: #8a2be2; margin-bottom: 4px;">A note from {inviter}</div>
+                                        <div style="font-size: 12px; font-weight: 700; color: #c2410c; margin-bottom: 4px;">A note from {inviter}</div>
                                         {_escape(message)}
                                     </td>
                                 </tr>
@@ -467,7 +467,7 @@ def _build_invitation_html(
                 <table role="presentation" width="560" cellpadding="0" cellspacing="0"
                        style="background-color: #ffffff; border: 1px solid #e6e8ef; border-radius: 16px; overflow: hidden;">
                     <tr>
-                        <td style="background-color: #8a2be2; background-image: linear-gradient(135deg, #8a2be2 0%, #4169e1 100%); padding: 32px; text-align: center;">
+                        <td style="background-color: #e85a1c; background-image: linear-gradient(135deg, #ffa066 0%, #e85a1c 100%); padding: 32px; text-align: center;">
                             <div style="color: #ffffff; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.85;">AVIR AI</div>
                             <div style="color: #ffffff; font-size: 22px; font-weight: 700; margin-top: 6px;">You're invited to AVIR AI</div>
                         </td>
@@ -492,7 +492,7 @@ def _build_invitation_html(
                     <tr>
                         <td align="center" style="padding: 28px 32px 32px 32px;">
                             <a href="{_escape(accept_url)}"
-                               style="display: inline-block; background-color: #8a2be2; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 6px;">
+                               style="display: inline-block; background-color: #c2410c; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 6px;">
                                 Accept invitation
                             </a>
                             <div style="color: #667085; font-size: 12px; margin-top: 12px;">This invitation expires in {expires_days} days and can only be used once.</div>
@@ -501,9 +501,9 @@ def _build_invitation_html(
                     <tr>
                         <td style="padding: 16px 32px; background-color: #f8f9fc; border-top: 1px solid #e6e8ef; color: #667085; font-size: 12px; line-height: 1.6;">
                             Button not working? Copy this link into your browser:<br>
-                            <a href="{_escape(accept_url)}" style="color: #8a2be2; word-break: break-all;">{_escape(accept_url)}</a><br><br>
+                            <a href="{_escape(accept_url)}" style="color: #c2410c; word-break: break-all;">{_escape(accept_url)}</a><br><br>
                             If you weren't expecting this invitation, you can safely ignore this email.
-                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #8a2be2; text-decoration: none; font-weight: 600;">StradIT</a></div>
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a></div>
                         </td>
                     </tr>
                 </table>
@@ -525,8 +525,8 @@ def _build_sales_lead_html(user_name: str, user_email: str, company_name: str, p
         f"""
                     <tr>
                         <td style="padding: 20px 32px 32px 32px;">
-                            <div style="font-size: 13px; font-weight: 700; color: #4338ca; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 8px;">Message</div>
-                            <div style="background-color: #f9fafb; border-left: 3px solid #4f46e5; border-radius: 8px; padding: 16px; font-size: 14px; line-height: 1.6; color: #1f2937; white-space: pre-wrap;">{_escape(message)}</div>
+                            <div style="font-size: 13px; font-weight: 700; color: #c2410c; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 8px;">Message</div>
+                            <div style="background-color: #f9fafb; border-left: 3px solid #c2410c; border-radius: 8px; padding: 16px; font-size: 14px; line-height: 1.6; color: #1f2937; white-space: pre-wrap;">{_escape(message)}</div>
                         </td>
                     </tr>
         """
@@ -543,10 +543,10 @@ def _build_sales_lead_html(user_name: str, user_email: str, company_name: str, p
                 <table role="presentation" width="600" cellpadding="0" cellspacing="0"
                        style="background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.06);">
                     <tr>
-                        <td style="background-color: #4338ca; height: 5px; line-height: 5px; font-size: 0;">&nbsp;</td>
+                        <td style="background-color: #e85a1c; height: 5px; line-height: 5px; font-size: 0;">&nbsp;</td>
                     </tr>
                     <tr>
-                        <td style="background-color: #4f46e5; background-image: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%); padding: 26px 32px;">
+                        <td style="background-color: #e85a1c; background-image: linear-gradient(135deg, #ffa066 0%, #e85a1c 100%); padding: 26px 32px;">
                             <span style="color: #ffffff; font-size: 20px; font-weight: 700;">New Enterprise Lead</span>
                             <div style="color: rgba(255,255,255,0.85); font-size: 13px; margin-top: 2px;">AVIR AI &mdash; Onboarding</div>
                         </td>
@@ -564,7 +564,7 @@ def _build_sales_lead_html(user_name: str, user_email: str, company_name: str, p
                     <tr>
                         <td style="padding: 16px 32px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 12px;">
                             Submitted from the Enterprise onboarding step.
-                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #8a2be2; text-decoration: none; font-weight: 600;">StradIT</a></div>
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a></div>
                         </td>
                     </tr>
                 </table>

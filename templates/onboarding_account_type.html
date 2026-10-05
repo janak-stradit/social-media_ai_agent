@@ -25,7 +25,7 @@
             transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease, background 0.2s ease;
         }
         .account-type-card:hover { transform: translateY(-2px); border-color: var(--bp-border-hover) !important; box-shadow: var(--bp-shadow-md); }
-        .account-type-card.selected { background: var(--bp-primary-light); border-color: var(--bp-primary) !important; box-shadow: 0 0 0 3px rgba(138, 43, 226, 0.15); }
+        .account-type-card.selected { background: var(--bp-primary-light); border-color: var(--bp-primary) !important; box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.15); }
         .account-type-card:focus-visible { outline: 2px solid var(--bp-primary); outline-offset: 3px; }
         .account-type-card:disabled { cursor: progress; }
         .account-type-card .card-icon-circle { margin-top: 2px; }
@@ -60,8 +60,8 @@
             background: var(--bp-bg); color: #9CA3AF; font-size: 10px; border: 1px solid var(--bp-border);
             transition: all 0.2s ease;
         }
-        .progress-step.active .step-icon { background: var(--bp-primary-light); color: var(--bp-primary); border-color: #D8B4FE; }
-        .progress-step.done .step-icon { background: var(--bp-primary-gradient); color: #fff; border-color: transparent; }
+        .progress-step.active .step-icon { background: var(--bp-primary-light); color: var(--brand-strong); border-color: var(--brand-border); }
+        .progress-step.done .step-icon { background: var(--brand-gradient-strong); color: #fff; border-color: transparent; }
         .step-label { font-size: 0.9rem; font-weight: 500; color: #9CA3AF; padding-top: 2px; transition: color 0.2s ease; }
         .progress-step.active .step-label, .progress-step.done .step-label { color: var(--bp-text); }
         .progress-step.final .step-label { font-weight: 700; }
