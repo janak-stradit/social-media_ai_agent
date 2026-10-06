@@ -249,6 +249,7 @@
             radial-gradient(600px 420px at 85% 20%, rgba(255, 160, 102, 0.35), transparent 70%),
             radial-gradient(520px 380px at 70% 85%, rgba(255, 200, 150, 0.35), transparent 70%),
             radial-gradient(420px 300px at 8% 10%, rgba(255, 214, 186, 0.45), transparent 70%);
+            -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent); mask-image: linear-gradient(to bottom, #000 70%, transparent);
             pointer-events: none; }
         .hero::after { content: ''; position: absolute; inset: 0; background-image: radial-gradient(rgba(124, 45, 18, 0.09) 1px, transparent 1px); background-size: 22px 22px; -webkit-mask-image: linear-gradient(to bottom, #000 40%, transparent); mask-image: linear-gradient(to bottom, #000 40%, transparent); pointer-events: none; }
         .hero-grid { position: relative; z-index: 1; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(32px, 4vw, 72px); align-items: center; }
@@ -327,17 +328,6 @@
         .chip-sched i { background: #ecfdf5; color: #047857; }
         .chip-tags { right: -3%; top: 432px; animation-delay: -4s; }
         .chip-tags i { background: #eff6ff; color: #1d4ed8; }
-
-        /* ── Marquee ─────────────────────────────────────────────── */
-        .marquee-section { padding: 26px 0 30px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: #fff; }
-        .marquee-label { text-align: center; font-size: 0.8rem; font-weight: 600; color: var(--muted); letter-spacing: 0.04em; margin-bottom: 16px; }
-        .marquee { overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent); }
-        .marquee + .marquee { margin-top: 10px; }
-        .marquee-track { display: flex; gap: 10px; width: max-content; animation: marquee 48s linear infinite; }
-        .marquee.reverse .marquee-track { animation-direction: reverse; animation-duration: 56s; }
-        .marquee:hover .marquee-track { animation-play-state: paused; }
-        .m-chip { display: inline-flex; align-items: center; gap: 9px; padding: 9px 16px; border-radius: 999px; background: var(--canvas); border: 1px solid var(--line); font-size: 0.9rem; font-weight: 600; color: var(--ink-2); white-space: nowrap; }
-        .m-chip i { color: var(--brand); }
 
         /* ── One brief, every channel ────────────────────────────── */
         .channels-grid { display: grid; grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 64px; align-items: center; }
@@ -548,18 +538,17 @@
         @keyframes spin { to { transform: rotate(360deg); } }
         @keyframes shimmer { to { background-position: -200% 0; } }
         @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
-        @keyframes marquee { to { transform: translateX(-50%); } }
         @keyframes panel-in { from { opacity: 0; transform: translateY(14px) scale(0.98); } }
         @keyframes twinkle { 50% { opacity: 0.35; } }
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
             html { scroll-behavior: auto; }
             .reveal { opacity: 1; transform: none; }
-            .marquee-track { animation: none; }
         }
 
         /* ── Responsive ──────────────────────────────────────────── */
         @media (max-width: 1080px) {
+            .app-header .brand-tagline { display: none; }
             .hero-grid, .channels-grid { grid-template-columns: 1fr; gap: 48px; }
             .stage { max-width: 560px; margin: 0 auto; width: 100%; justify-self: center; height: 580px; }
             .studio-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -731,51 +720,6 @@
             </div>
         </div>
         <a href="#channels" class="hero-scroll">See what it makes <i class="fas fa-chevron-down" aria-hidden="true"></i></a>
-    </section>
-
-    <!-- WHAT YOU CAN CREATE -->
-    <section class="marquee-section" aria-label="Kinds of posts you can create">
-        <p class="marquee-label">Every kind of post your brand needs</p>
-        <div class="marquee" aria-hidden="true">
-            <div class="marquee-track">
-                <span class="m-chip"><i class="fas fa-rocket"></i>Product launch</span>
-                <span class="m-chip"><i class="fas fa-gift"></i>Festive greeting</span>
-                <span class="m-chip"><i class="fas fa-bullhorn"></i>Meta ad</span>
-                <span class="m-chip"><i class="fas fa-briefcase"></i>Hiring post</span>
-                <span class="m-chip"><i class="fas fa-lightbulb"></i>Thought leadership</span>
-                <span class="m-chip"><i class="fas fa-calendar-days"></i>Event promo</span>
-                <span class="m-chip"><i class="fas fa-tag"></i>Offer &amp; discount</span>
-                <span class="m-chip"><i class="fas fa-star"></i>Customer story</span>
-                <span class="m-chip"><i class="fas fa-rocket"></i>Product launch</span>
-                <span class="m-chip"><i class="fas fa-gift"></i>Festive greeting</span>
-                <span class="m-chip"><i class="fas fa-bullhorn"></i>Meta ad</span>
-                <span class="m-chip"><i class="fas fa-briefcase"></i>Hiring post</span>
-                <span class="m-chip"><i class="fas fa-lightbulb"></i>Thought leadership</span>
-                <span class="m-chip"><i class="fas fa-calendar-days"></i>Event promo</span>
-                <span class="m-chip"><i class="fas fa-tag"></i>Offer &amp; discount</span>
-                <span class="m-chip"><i class="fas fa-star"></i>Customer story</span>
-            </div>
-        </div>
-        <div class="marquee reverse" aria-hidden="true">
-            <div class="marquee-track">
-                <span class="m-chip"><i class="fas fa-city"></i>3D billboard</span>
-                <span class="m-chip"><i class="fas fa-gem"></i>Premium showcase</span>
-                <span class="m-chip"><i class="fas fa-mug-saucer"></i>Lifestyle shot</span>
-                <span class="m-chip"><i class="fas fa-box-open"></i>Catalog image</span>
-                <span class="m-chip"><i class="fas fa-people-group"></i>Behind the scenes</span>
-                <span class="m-chip"><i class="fas fa-trophy"></i>Milestone</span>
-                <span class="m-chip"><i class="fas fa-handshake"></i>Partnership news</span>
-                <span class="m-chip"><i class="fas fa-graduation-cap"></i>Tips &amp; how-tos</span>
-                <span class="m-chip"><i class="fas fa-city"></i>3D billboard</span>
-                <span class="m-chip"><i class="fas fa-gem"></i>Premium showcase</span>
-                <span class="m-chip"><i class="fas fa-mug-saucer"></i>Lifestyle shot</span>
-                <span class="m-chip"><i class="fas fa-box-open"></i>Catalog image</span>
-                <span class="m-chip"><i class="fas fa-people-group"></i>Behind the scenes</span>
-                <span class="m-chip"><i class="fas fa-trophy"></i>Milestone</span>
-                <span class="m-chip"><i class="fas fa-handshake"></i>Partnership news</span>
-                <span class="m-chip"><i class="fas fa-graduation-cap"></i>Tips &amp; how-tos</span>
-            </div>
-        </div>
     </section>
 
     <!-- ONE BRIEF, EVERY CHANNEL -->
@@ -1107,7 +1051,6 @@
             </div>
             <div class="footer-legal">
                 <span>&copy; 2026 StradIT. All rights reserved.</span>
-                <span>Made for brands in the US, UAE and India.</span>
             </div>
         </div>
     </footer>
