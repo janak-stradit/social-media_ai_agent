@@ -27,11 +27,11 @@
   --accent-2:       #e85a1c;
   /* Decorative (no text on it) / buttons and tiles */
   --brand-gradient:        linear-gradient(135deg, #ffa066 0%, #e85a1c 100%);
-  /* Icon circles, avatars and mock tiles: dark slate. The logo keeps the
-     orange pair via --brand-logo-gradient; main buttons are solid
-     --brand-strong (see BRAND BUTTONS). */
+  /* Icon circles, avatars and mock tiles: dark slate. The logo is orange via
+     --brand-logo-gradient, ending on the same --brand-strong as the solid
+     main buttons (see BRAND BUTTONS) so the two read as one colour. */
   --brand-gradient-strong: linear-gradient(135deg, #334155, #0f172a);
-  --brand-logo-gradient:   linear-gradient(135deg, var(--accent), var(--accent-2));
+  --brand-logo-gradient:   linear-gradient(135deg, var(--brand), var(--brand-strong));
   --neutral-accent: #334155;
   --navy:       #0f172a;
   --navy-light: #1e293b;
@@ -1235,7 +1235,7 @@ body {
   width: 48px;
   height: 48px;
   border-radius: 14px;
-  background: var(--brand-gradient-strong);
+  background: var(--brand-logo-gradient);
   display: flex;
   align-items: center;
   justify-content: center;
