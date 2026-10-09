@@ -4,6 +4,22 @@
     IDs match what app_v2.js already updates (headerUser*, dropHeader*,
     drop*Li, dropRequestCreditBtn, dropHeaderModelInfoBtn, logoutBtn). -#}
 {%- set p = request.path -%}
+{#- Header bell: timely nudges (services/nudge_service.py), each opening
+    Studio Chat with an idea loaded. Filled in by static/js/user_menu.js. -#}
+<div class="nb" id="notifBell">
+    <button type="button" class="nb-trigger" id="notifBellBtn" aria-haspopup="true" aria-expanded="false" aria-controls="notifBellPanel" aria-label="Notifications" title="Notifications">
+        <i class="fas fa-bell" aria-hidden="true"></i>
+        <span class="nb-count" id="notifBellCount" hidden></span>
+    </button>
+    <div class="nb-panel" id="notifBellPanel" role="dialog" aria-label="Notifications" hidden>
+        <div class="nb-head">
+            <span>Notifications</span>
+            <button type="button" class="nb-read-all" id="notifBellReadAll" hidden>Mark all as read</button>
+        </div>
+        <div class="nb-list" id="notifBellList"></div>
+        <a class="nb-foot" href="/settings#notifications">Notification settings</a>
+    </div>
+</div>
 <div class="um" id="userMenu">
     <button type="button" class="um-trigger" id="userMenuDropdown" aria-haspopup="true" aria-expanded="false" aria-controls="userMenuPanel">
         <span class="um-avatar" id="headerUserAvatar" aria-hidden="true">U</span>
@@ -56,6 +72,9 @@
         <nav class="um-links">
             <a class="um-link{{ ' active' if p == '/dashboard' }}" href="/dashboard" role="menuitem">
                 <i class="fas fa-comments" aria-hidden="true"></i>Studio Chat
+            </a>
+            <a class="um-link{{ ' active' if p.startswith('/calendar') }}" href="/calendar" role="menuitem">
+                <i class="fas fa-calendar-days" aria-hidden="true"></i>Content Calendar
             </a>
             <a class="um-link{{ ' active' if p.startswith('/competitor-dashboard') }}" href="/competitor-dashboard" role="menuitem">
                 <i class="fas fa-chart-line" aria-hidden="true"></i>Analysis Dashboard

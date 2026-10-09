@@ -397,7 +397,7 @@ df -h / && sudo docker system df          # disk space
 | `[DB] Warning – could not initialise DB` (web) | Wrong `DATABASE_URL`, missing database, or RDS security group (see Troubleshooting) |
 | `Unable to locate credentials` | S3 from the container can't read the EC2 role; set the metadata hop limit to 2 (Step 4) |
 | `AccessDenied ... s3:PutObject` / `no identity-based policy allows` | The EC2 role has no (or the wrong) permission policy - attach `deploy/aws/ec2-app-policy.json` with your bucket name (Step 4) |
-| `WORKER TIMEOUT` (gunicorn) | A request ran longer than 900 s |
+| `WORKER TIMEOUT` (gunicorn) | A request ran longer than 1900 s |
 | `502 Bad Gateway` in nginx `error.log` | The web container is down or restarting |
 
 Logs rotate automatically (5 × 20 MB per container), so they can't fill the disk. They're
@@ -419,8 +419,8 @@ docker run --rm -p 5000:5000 -e SCHEDULER_ENABLED=false -v "$PWD/.env:/app/.env:
   `scheduler` container is the only process that publishes scheduled posts. Running the
   scheduler in each gunicorn worker would publish every post multiple times. Locally
   (`python app.py`) nothing changes; the scheduler still runs inside the app.
-- **Timeouts:** gunicorn `--timeout 900` and nginx `proxy_read_timeout 900s`, because one
-  generation (LLM + image/video) can take several minutes.
+- **Timeouts:** gunicorn `--timeout 1900` and nginx `proxy_read_timeout 1900s`, because one
+  generation (LLM + image/video) can take several minutes - a video up to 30.
 - **Secrets are never in the image.** `.dockerignore` excludes `.env`; the server mounts
   `/opt/socialmedia/.env` read-only into the containers.
 - **Generated content and uploads** are backed up to S3 when `S3_MEDIA_BUCKET` is set (Step 4).

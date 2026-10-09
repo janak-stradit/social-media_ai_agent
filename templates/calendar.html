@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Content Calendar — AVIR AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body class="calendar-page">
+
+<!-- ═══════════════════════ TOP HEADER ═══════════════════════ -->
+<header class="app-header">
+    <div class="header-brand">
+        <div class="brand-logo">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+            </svg>
+        </div>
+        <div class="brand-text">
+            <span class="brand-name">AVIR AI <span class="beta-badge">Beta</span></span>
+            <span class="brand-tagline">Content Calendar</span>
+        </div>
+    </div>
+        <nav class="header-nav">
+        <a href="/dashboard" class="header-nav-item"><i class="fas fa-comments me-2"></i>Studio Chat</a>
+        <a href="/calendar" class="header-nav-item active"><i class="fas fa-calendar-days me-2"></i>Content Calendar</a>
+    </nav>
+    <div class="header-actions">
+        {% include 'partials/user_menu.html' %}
+    </div>
+</header>
+
+<!-- Filled in by static/js/calendar.js from /api/calendar (services/calendar_service.py) -->
+<main class="cal-main">
+
+    <!-- This week's goal -->
+    <section class="cal-goal" aria-labelledby="calGoalTitle">
+        <div class="cal-ring" id="calRing" role="img" aria-label="Weekly goal progress">
+            <svg viewBox="0 0 64 64" aria-hidden="true">
+                <circle class="cal-ring-track" cx="32" cy="32" r="27"></circle>
+                <circle class="cal-ring-fill" id="calRingFill" cx="32" cy="32" r="27" transform="rotate(-90 32 32)"></circle>
+            </svg>
+            <span class="cal-ring-text"><strong id="calDone">–</strong><small>of <span id="calGoalOf">–</span></small></span>
+        </div>
+        <div class="cal-goal-copy">
+            <h1 id="calGoalTitle">This week</h1>
+            <p id="calGoalText">Loading your week...</p>
+            <div class="cal-week" id="calWeek" aria-hidden="true"></div>
+        </div>
+        <div class="cal-goal-side">
+            <div class="cal-streak d-none" id="calStreak"><i class="fas fa-fire"></i><span></span></div>
+            <div class="cal-stepper" role="group" aria-label="Posts per week goal">
+                <span class="cal-stepper-label">Weekly goal</span>
+                <button type="button" id="calGoalDown" aria-label="One post fewer per week"><i class="fas fa-minus"></i></button>
+                <strong id="calGoalValue" aria-live="polite">–</strong>
+                <button type="button" id="calGoalUp" aria-label="One post more per week"><i class="fas fa-plus"></i></button>
+            </div>
+        </div>
+    </section>
+
+    <!-- The month -->
+    <section class="cal-board" aria-label="Calendar">
+        <div class="cal-toolbar">
+            <div class="cal-nav">
+                <button type="button" id="calPrev" aria-label="Previous month"><i class="fas fa-chevron-left"></i></button>
+                <h2 id="calMonth" aria-live="polite">&nbsp;</h2>
+                <button type="button" id="calNext" aria-label="Next month"><i class="fas fa-chevron-right"></i></button>
+                <button type="button" class="cal-today-btn" id="calToday">Today</button>
+            </div>
+            <div class="cal-legend" aria-hidden="true">
+                <span><i class="cal-dot is-post"></i>Created</span>
+                <span><i class="cal-dot is-scheduled"></i>Scheduled</span>
+                <span><i class="cal-dot is-slot"></i>Suggested</span>
+                <span><i class="cal-dot is-occasion"></i>Occasion</span>
+            </div>
+        </div>
+        <div class="cal-weekdays" aria-hidden="true">
+            <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+        </div>
+        <div class="cal-grid" id="calGrid"></div>
+        <p class="cal-note" id="calNote"></p>
+    </section>
+</main>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="toast" class="ent-toast" role="alert">
+        <div class="ent-toast-body" id="toastBody"></div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
+<script src="{{ url_for('static', filename='js/calendar.js') }}"></script>
+</body>
+</html>

@@ -190,6 +190,31 @@ $(document).ready(function () {
     $(window).on('resize', function () { if (!isPhone()) setMobileDrawer(false); });
 
     // Phones: composer options (platforms, voice, tone, output) fold away
+    // Composer "Style" button: brand voice + tone behind one menu. The button
+    // names what was changed, so a non-default choice is never hidden.
+    function updateStyleMenuLabel() {
+        const tone = $('#toneSelect').val();
+        const voice = $('#brandVoiceSelect').val();
+        const parts = [];
+        if (voice && voice !== 'Standard Enterprise') parts.push(voice);
+        if (tone) parts.push($('#toneSelect option:selected').text());
+        $('#styleMenuLabel').text(parts.length ? parts.join(' · ') : 'Style');
+        $('#styleMenuBtn').toggleClass('is-set', parts.length > 0);
+    }
+    function setStyleMenuOpen(open) {
+        $('#styleMenuPanel').toggleClass('d-none', !open);
+        $('#styleMenuBtn').attr('aria-expanded', open ? 'true' : 'false').toggleClass('open', open);
+    }
+    $('#styleMenuBtn').on('click', function () { setStyleMenuOpen($('#styleMenuPanel').hasClass('d-none')); });
+    $(document).on('click', function (e) {
+        if (!$(e.target).closest('#styleMenu').length) setStyleMenuOpen(false);
+    });
+    $(document).on('keydown', function (e) {
+        if (e.key === 'Escape' && !$('#styleMenuPanel').hasClass('d-none')) { setStyleMenuOpen(false); $('#styleMenuBtn').focus(); }
+    });
+    $('#toneSelect, #brandVoiceSelect').on('change', updateStyleMenuLabel);
+    updateStyleMenuLabel();
+
     $('#dockOptionsBtn').on('click', function () {
         const open = !$('#dropZone').hasClass('options-open');
         $('#dropZone').toggleClass('options-open', open);
@@ -237,7 +262,22 @@ $(document).ready(function () {
         });
     }
 
+    // "2 of 3 this week" in the header bar - the weekly posting goal from the
+    // Content Calendar. Refreshed with the usage numbers after each generation.
+    function loadGoalPill() {
+        $.getJSON('/api/me/goal?tz=' + (-new Date().getTimezoneOffset())).done(function (r) {
+            const p = r && r.progress;
+            if (!p) return;
+            const shown = Math.max(p.goal, Math.min(p.done, 7));
+            $('#goalPillDots').html(Array.from({ length: shown }, (_, i) => `<i class="${i < p.done ? 'on' : ''}"></i>`).join(''));
+            $('#goalPillText').text(p.goal_met ? `Goal reached: ${p.done} this week` : `${p.done} of ${p.goal} this week`);
+            $('#goalPill').removeClass('d-none').toggleClass('is-met', !!p.goal_met)
+                .attr('aria-label', `${p.done} of ${p.goal} posts created this week. Open your Content Calendar.`);
+        });
+    }
+
     function loadUserUsageMetrics() {
+        loadGoalPill();
         $.ajax({
             url: '/api/metrics/usage',
             type: 'GET',
@@ -316,7 +356,7 @@ $(document).ready(function () {
         loadImageQuota();
         loadImagePresets();
         openModalFromHash();
-        restoreConversation();
+        if (!openEmailedIdea()) restoreConversation();
     });
 
     function openModalFromHash() {
@@ -398,7 +438,7 @@ $(document).ready(function () {
                 </button>
             `;
         });
-        $('.quick-prompts-grid').html(html);
+        $('#brandIdeasGrid').html(html);
     }
 
     function pickGreeting(companyName) {
@@ -431,9 +471,9 @@ $(document).ready(function () {
         const $btn = $('#regenerateGreetingBtn');
         if ($btn.prop('disabled')) return;
 
-        const shownTitles = $('.quick-prompt-card .quick-prompt-header span').map(function () { return $(this).text(); }).get();
+        const shownTitles = $('#brandIdeasGrid .quick-prompt-card .quick-prompt-header span').map(function () { return $(this).text(); }).get();
         $btn.prop('disabled', true).find('i').addClass('fa-spin');
-        $('.quick-prompts-grid').addClass('is-loading').css('opacity', 0.5);
+        $('#brandIdeasGrid').addClass('is-loading').css('opacity', 0.5);
 
         $.ajax({
             url: '/api/brand-profile/quick-prompts/generate',
@@ -454,7 +494,7 @@ $(document).ready(function () {
             },
             complete: function () {
                 $btn.prop('disabled', false).find('i').removeClass('fa-spin');
-                $('.quick-prompts-grid').removeClass('is-loading').css('opacity', '');
+                $('#brandIdeasGrid').removeClass('is-loading').css('opacity', '');
             }
         });
 
@@ -505,10 +545,127 @@ $(document).ready(function () {
                     $('.welcome-title').text(pickGreeting(r.company_name));
                     $('.welcome-desc').text('These ideas are grounded in your brand - pick one, or type your own brief below.');
                     $('#regenerateGreetingBtn').removeClass('d-none');
+                    loadIdeaFeed(false);  // trending / post types / dates for their industry
                 }
             }
         });
     }
+
+    // ── "Ideas for you": trending in the user's industry, post types that
+    // work, upcoming dates (/api/ideas/feed, services/trend_service.py). The
+    // first feed of the day takes a minute or two to write, so the "From your
+    // brand" cards stay up until it arrives; a card fills the composer and
+    // picks its platform and output.
+    const IDEA_GROUPS = {
+        trending: { icon: 'fa-arrow-trend-up', empty: 'No trending topics found for your industry this week.' },
+        playbook: { icon: 'fa-layer-group', empty: 'No post types yet - try refreshing.' },
+        dates: { icon: 'fa-calendar-day', empty: 'No occasions in your markets in the next 30 days.' }
+    };
+    const IDEA_FORMATS = { text: ['fa-align-left', 'Text'], image: ['fa-image', 'Image'], video: ['fa-video', 'Video'] };
+    const IDEA_PLATFORMS = {
+        linkedin: ['fa-linkedin', 'LinkedIn'], instagram: ['fa-instagram', 'Instagram'],
+        facebook: ['fa-facebook', 'Facebook'], youtube: ['fa-youtube', 'YouTube']
+    };
+    let _ideaFeed = null;
+    let _ideaTabPicked = false;  // the user chose a tab: don't switch it under them
+
+    function ideaCardHtml(idea, group) {
+        const format = IDEA_FORMATS[idea.format] || IDEA_FORMATS.text;
+        const platform = IDEA_PLATFORMS[idea.platform] || IDEA_PLATFORMS.linkedin;
+        // One quiet line saying where the idea comes from: the news story, the post type or the date
+        let origin = '';
+        if (group === 'trending') {
+            const name = escapeHtml(idea.source_title || 'This week');
+            origin = `<i class="fas fa-arrow-trend-up"></i>In the news` + (idea.source_url
+                ? ` · <a class="idea-source" href="${escapeAttr(idea.source_url)}" target="_blank" rel="noopener noreferrer" title="${escapeAttr(idea.topic || '')}">${name}<i class="fas fa-arrow-up-right-from-square"></i></a>`
+                : (idea.source_title ? ` · ${name}` : ''));
+        } else if (group === 'dates') {
+            origin = `<i class="fas fa-calendar-day"></i>${escapeHtml(idea.occasion || 'Upcoming date')}`;
+        } else {
+            origin = `<i class="fas fa-layer-group"></i>${escapeHtml((idea.post_type || 'Post type').split(':')[0])}`;
+        }
+        return `
+            <div class="idea-card" role="button" tabindex="0" data-prompt="${escapeAttr(idea.prompt)}"
+                 data-platform="${escapeAttr(idea.platform)}" data-format="${escapeAttr(idea.format)}">
+                <div class="idea-origin">${origin}</div>
+                <h3 class="idea-title">${escapeHtml(idea.title)}</h3>
+                <p class="idea-text">${escapeHtml(idea.summary || idea.why_now || idea.prompt)}</p>
+                <div class="idea-foot">
+                    <span class="idea-makes"><i class="fas ${format[0]}"></i>${format[1]} for <i class="fab ${platform[0]}"></i>${platform[1]}</span>
+                    <span class="idea-use">Use this idea<i class="fas fa-arrow-right"></i></span>
+                </div>
+            </div>`;
+    }
+
+    function ideaFeedMetaText(feed, group) {
+        const when = feed.trends_updated_at ? new Date(feed.trends_updated_at) : null;
+        if (group === 'trending') {
+            return `Built on this week's news in ${feed.industry}`
+                + (when ? ` · updated ${when.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}` : '')
+                + '. Click an idea to start a post.';
+        }
+        return group === 'dates'
+            ? 'Occasions coming up in your markets. Click an idea to start a post.'
+            : 'Formats that work for your industry, any week. Click an idea to start a post.';
+    }
+
+    function showIdeaGroup(group) {
+        $('.idea-tab').each(function () {
+            const on = $(this).data('group') === group;
+            $(this).toggleClass('active', on).attr('aria-selected', on ? 'true' : 'false');
+        });
+        const isBrand = group === 'brand';
+        $('#brandIdeasSection').toggleClass('d-none', !isBrand);
+        $('#ideaFeedGrid').toggleClass('d-none', isBrand);
+        $('#refreshIdeaFeedBtn').toggleClass('d-none', isBrand || !_ideaFeed);
+        if (isBrand) return $('#ideaFeedMeta').addClass('d-none');
+        if (!_ideaFeed) {
+            $('#ideaFeedMeta').addClass('d-none');
+            $('#ideaFeedMeta').text('Finding what your industry is talking about this week. The first look of the day takes a minute or two.').removeClass('d-none');
+            return $('#ideaFeedGrid').html('<div class="idea-card is-loading" aria-hidden="true"><span></span><span></span><span></span></div>'.repeat(4));
+        }
+        const ideas = (_ideaFeed.groups || {})[group] || [];
+        const meta = ideaFeedMetaText(_ideaFeed, group);
+        $('#ideaFeedMeta').text(meta).toggleClass('d-none', !ideas.length);
+        $('#ideaFeedGrid').html(ideas.length
+            ? ideas.map(idea => ideaCardHtml(idea, group)).join('')
+            : `<div class="idea-feed-empty">${IDEA_GROUPS[group].empty}</div>`);
+    }
+
+    function loadIdeaFeed(refresh) {
+        $('#ideaFeedBar').removeClass('d-none');
+        const $busy = $('.idea-tab-busy').addClass('on');
+        const $btn = $('#refreshIdeaFeedBtn').prop('disabled', true);
+        $btn.find('i').addClass('fa-spin');
+        $.getJSON('/api/ideas/feed' + (refresh ? '?refresh=1' : '')).done(function (r) {
+            const feed = r && r.feed;
+            if (!feed || !feed.groups) return;
+            _ideaFeed = feed;
+            const active = $('.idea-tab.active').data('group');
+            // Lead with what's timely once it's here, unless the user already chose a tab
+            const lead = (feed.groups.trending || []).length ? 'trending' : 'playbook';
+            showIdeaGroup(refresh || _ideaTabPicked ? active : lead);
+        }).fail(function (xhr) {
+            const body = xhr.responseJSON || {};
+            if (refresh) showToast(body.error || 'Could not load new ideas.', 'error');
+            if (!_ideaFeed && $('.idea-tab.active').data('group') !== 'brand') {
+                $('#ideaFeedGrid').html(`<div class="idea-feed-empty">${escapeHtml(body.error || 'Could not load ideas right now.')}</div>`);
+            }
+        }).always(function () {
+            $busy.removeClass('on');
+            $btn.prop('disabled', false).find('i').removeClass('fa-spin');
+        });
+    }
+
+    $(document).on('click', '.idea-tab', function () {
+        _ideaTabPicked = true;
+        showIdeaGroup($(this).data('group'));
+    });
+    $('#refreshIdeaFeedBtn').on('click', function () { loadIdeaFeed(true); });
+    $(document).on('click', '.idea-source', function (e) { e.stopPropagation(); });  // the link, not the card
+    $(document).on('keydown', '.idea-card', function (e) {
+        if (e.target === this && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); this.click(); }
+    });
 
     // ── Auto-resizing Textarea & Char Counter ──────────────────────────
     const storyInput = $('#storyInput');
@@ -526,11 +683,62 @@ $(document).ready(function () {
     });
 
     // ── Quick Prompt Templates ─────────────────────────────────────────
-    $(document).on('click', '.quick-prompt-card', function () {
+    $(document).on('click', '.quick-prompt-card, .idea-card:not(.is-loading)', function () {
         const promptText = $(this).attr('data-prompt');
-        storyInput.val(promptText).trigger('input').focus();
-        showToast('Prompt loaded into brief input!', 'info');
+        if (!$(this).hasClass('idea-card')) {
+            storyInput.val(promptText).trigger('input').focus();
+            return showToast('Prompt loaded into brief input!', 'info');
+        }
+        useIdea({ prompt: promptText, platform: $(this).attr('data-platform'), format: $(this).attr('data-format') });
     });
+
+    // The weekly ideas email's "Create this post" button opens
+    // /dashboard?idea=<token>: start a fresh chat with that idea loaded.
+    // Returns true when the page was opened from such a link.
+    function openEmailedIdea() {
+        // A suggested day clicked on the Content Calendar hands its idea over here (calendar.js)
+        let handed = null;
+        try {
+            handed = sessionStorage.getItem('avir_pending_idea');
+            sessionStorage.removeItem('avir_pending_idea');
+        } catch (e) { /* storage blocked */ }
+        if (handed) {
+            try {
+                const idea = JSON.parse(handed);
+                $.when(window.__quotaLoaded).always(function () { useIdea(idea); });
+                return true;
+            } catch (e) { /* not an idea: carry on */ }
+        }
+        const token = new URLSearchParams(window.location.search).get('idea');
+        if (!token) return false;
+        history.replaceState(null, '', window.location.pathname);  // a reload shouldn't load it again
+        $.getJSON('/api/ideas/link/' + encodeURIComponent(token)).done(function (r) {
+            if (r && r.idea) $.when(window.__quotaLoaded).always(function () { useIdea(r.idea); });
+        }).fail(function (xhr) {
+            showToast((xhr.responseJSON || {}).error || 'This idea link is no longer available.', 'warning');
+        });
+        return true;
+    }
+
+    // An idea (an "Ideas for you" card, or one from the weekly email) fills
+    // the brief and picks its platform and output. Image and Video are only
+    // ticked when this user can use them today.
+    function useIdea(idea) {
+        storyInput.val(idea.prompt || '').trigger('input').focus();
+        const platform = idea.platform;
+        const format = idea.format || 'text';
+        $('.platform-chips-inline input[type="checkbox"]').each(function () {
+            $(this).prop('checked', $(this).val() === platform).trigger('change');
+        });
+        $('input[name="outputOptions"]').each(function () {
+            const want = $(this).val() === 'text' || $(this).val() === format;
+            $(this).prop('checked', want && !$(this).prop('disabled')).trigger('change');
+        });
+        const missed = format !== 'text' && !$(`input[name="outputOptions"][value="${format}"]`).prop('checked');
+        showToast(missed
+            ? `Idea loaded. ${format === 'video' ? 'Video' : 'Image'} isn't available on your account right now, so it's set to text.`
+            : 'Idea loaded with its platform and output - edit the brief or press Generate.', 'info');
+    }
 
     // ── New Chat / Reset Thread ────────────────────────────────────────
     $('#newChatBtn').on('click', function () {
@@ -1398,17 +1606,22 @@ $(document).ready(function () {
         });
     }, 1000);
 
-    function appendRefineThinking(msgId) {
+    function appendRefineThinking(msgId, selectedOutputs) {
+        // A refine that makes a video holds the request open for the whole
+        // render (10+ minutes), so it shows the video loader instead of a bare
+        // "refining" spinner
+        const wantsVideo = (selectedOutputs || []).includes('video');
         const html = `
             <div class="chat-message-assistant" id="${msgId}">
                 <div class="assistant-avatar">${assistantAvatarSvg()}</div>
                 <div class="assistant-card">
                     <div class="assistant-header">
-                        <div class="assistant-title"><i class="fas fa-wand-magic-sparkles"></i>Refining Your Post</div>
+                        <div class="assistant-title"><i class="fas ${wantsVideo ? 'fa-video' : 'fa-wand-magic-sparkles'}"></i>${wantsVideo ? 'Creating Your Video' : 'Refining Your Post'}</div>
                         <button type="button" class="btn btn-sm btn-outline-danger" onclick="cancelGeneration('${msgId}')">
                             <i class="fas fa-stop me-1"></i>Stop
                         </button>
                     </div>
+                    ${wantsVideo ? videoCreatingHtml() : `
                     <div class="agent-stepper">
                         <div class="agent-stepper-title"><i class="fas fa-cogs me-1"></i>Autonomous Agent Working:</div>
                         <div class="agent-step-item active">
@@ -1416,7 +1629,7 @@ $(document).ready(function () {
                             <span class="agent-step-name"><i class="fas fa-pen-ruler me-1 text-purple"></i>Refinement Editor</span>
                             <span class="agent-step-desc">Applying only your requested change to the current version</span>
                         </div>
-                    </div>
+                    </div>`}
                 </div>
             </div>
         `;
@@ -1429,7 +1642,7 @@ $(document).ready(function () {
     // /api/refine. Untargeted parts carry over unchanged; if the server says
     // the message is actually a new post, falls back to the full pipeline.
     function runRefine(msgId, opts, assistantElem) {
-        assistantElem = assistantElem || appendRefineThinking(msgId);
+        assistantElem = assistantElem || appendRefineThinking(msgId, opts.selectedOutputs);
         scrollToBottom();
         setChatDockDisabled(true);
         const base = opts.base;
@@ -1724,7 +1937,7 @@ $(document).ready(function () {
                     <div class="media-chips-inline" id="${msgId}_researchOutputs">
                         <label class="media-chip-sm"><input type="checkbox" value="text" checked><span class="chip-content">Text (Caption)</span></label>
                         <label class="media-chip-sm"><input type="checkbox" value="image"><span class="chip-content"><i class="fas fa-image me-1 text-primary"></i>Image</span></label>
-                        <span class="coming-soon" title="Coming soon"><label class="media-chip-sm"><input type="checkbox" value="video" disabled><span class="chip-content"><i class="fas fa-video me-1 text-purple"></i>Video<span class="soon-tag">Soon</span></span></label></span>
+                        <span class="coming-soon video-gate" title="Coming soon"><label class="media-chip-sm"><input type="checkbox" value="video" disabled><span class="chip-content"><i class="fas fa-video me-1 text-purple"></i>Video<span class="soon-tag">Soon</span></span></label></span>
                     </div>
                 </div>
                 <button type="button" class="btn btn-primary btn-sm mt-2 research-generate-btn" id="${msgId}_researchGenerateBtn">
@@ -1736,6 +1949,7 @@ $(document).ready(function () {
 
         // This card's Image option follows today's image limit too
         if (window.__imageQuota) window.applyImageQuota(window.__imageQuota);
+        window.applyVideoAccess(window.__videoEnabled);  // and its Video option, the user's video access
         $(`#${msgId}_researchGenerateBtn`).on('click', function () {
             const platforms = [];
             $(`#${msgId}_researchPlatforms input:checked`).each(function () { platforms.push($(this).val()); });
@@ -1900,15 +2114,7 @@ $(document).ready(function () {
                         ` : ''}
                         ${pData.media?.video?.url ? buildGeneratedMediaHtml('video', pData.media.video)
                             : (selectedOutputs || []).includes('video') ? `
-                        <div class="media-output-card" id="${msgId}_media_video_${p}">
-                            <div class="media-output-header">
-                                <span><i class="fas fa-spinner fa-spin me-2 text-purple"></i>Generating AI VIDEO...</span>
-                            </div>
-                            <div class="media-output-body text-center p-4">
-                                <div class="spinner-border text-purple mb-2" role="status"></div>
-                                <p class="text-muted small mb-0">Multi-agent media pipeline is processing video generation</p>
-                            </div>
-                        </div>
+                        <div id="${msgId}_media_video_${p}">${videoCreatingHtml()}</div>
                         ` : ''}
                     </div>
 
@@ -2024,7 +2230,7 @@ $(document).ready(function () {
             if (h && h.refine) {
                 // A refinement re-applies the same instruction to the same base version
                 const assistantElem = $(`#${mId}`);
-                assistantElem.replaceWith(appendRefineThinking(mId));
+                assistantElem.replaceWith(appendRefineThinking(mId, h.refine && h.refine.selectedOutputs));
                 runRefine(mId, h.refine, $(`#${mId}`));
                 return;
             }
@@ -2158,6 +2364,47 @@ $(document).ready(function () {
                 <div class="img-creating-hint">Usually takes about a minute</div>
             </div>`;
     }
+    // Video placeholder: a dark 16:9 "screen" with slow moving light, the
+    // current stage, elapsed time and an estimated progress line. A video
+    // takes 10-15 minutes, so the stage and the line follow the clock (the
+    // server reports nothing until the video is done).
+    const VIDEO_STAGES = [
+        [0, 'Reading your brief'],
+        [20, 'Composing the scene'],
+        [90, 'Rendering frames'],
+        [420, 'Adding motion and sound'],
+        [660, 'Finishing your video']
+    ];
+    function videoCreatingHtml() {
+        return `
+            <div class="vid-creating" data-started="${Date.now()}" role="status" aria-live="polite">
+                <div class="vid-creating-glow" aria-hidden="true"><span></span><span></span><span></span></div>
+                <div class="vid-creating-grain" aria-hidden="true"></div>
+                <div class="vid-creating-badge"><i class="fas fa-video"></i>Video</div>
+                <div class="vid-creating-play" aria-hidden="true"><i class="fas fa-play"></i></div>
+                <div class="vid-creating-foot">
+                    <div class="vid-creating-caption">
+                        <span class="vid-creating-label">${VIDEO_STAGES[0][1]}</span>
+                        <span class="vid-creating-time">0s</span>
+                    </div>
+                    <div class="vid-creating-bar" aria-hidden="true"><span></span></div>
+                    <div class="vid-creating-hint">Usually takes 10 to 15 minutes. Keep this tab open.</div>
+                </div>
+            </div>`;
+    }
+    setInterval(function () {
+        $('.vid-creating').each(function () {
+            const secs = Math.floor((Date.now() - Number(this.dataset.started || Date.now())) / 1000);
+            const stage = VIDEO_STAGES.filter(st => secs >= st[0]).pop()[1];
+            const $label = $(this).find('.vid-creating-label');
+            if ($label.text() !== stage) $label.text(stage);
+            $(this).find('.vid-creating-time').text(secs < 60 ? `${secs}s` : `${Math.floor(secs / 60)}m ${String(secs % 60).padStart(2, '0')}s`);
+            // Eases toward the end and never reaches it: about 80% at ten minutes
+            $(this).find('.vid-creating-bar span').css('width', (96 * (1 - Math.exp(-secs / 360))).toFixed(1) + '%');
+            if (secs >= 900) $(this).find('.vid-creating-hint').text('Taking longer than usual - still working, keep this tab open.');
+        });
+    }, 1000);
+
     setInterval(function () {
         $('.img-creating').each(function () {
             const secs = Math.floor((Date.now() - Number(this.dataset.started || Date.now())) / 1000);
@@ -2243,8 +2490,25 @@ $(document).ready(function () {
         startNewChat();
     });
 
+    // Video is "coming soon" unless an admin switched it on for this user
+    // (Admin -> Users -> Image access -> Video); admins always have it.
+    window.applyVideoAccess = function (enabled) {
+        window.__videoEnabled = !!enabled;
+        $('.video-gate').each(function () {
+            const $input = $(this).find('input');
+            $(this).toggleClass('coming-soon', !enabled).attr('title', enabled ? null : 'Coming soon');
+            $(this).find('.soon-tag').toggleClass('d-none', !!enabled);
+            if (!enabled && $input.prop('checked')) $input.prop('checked', false).trigger('change');
+            $input.prop('disabled', !enabled);
+        });
+    };
+
     function loadImageQuota() {
-        $.getJSON('/api/me/image-quota').done(r => window.applyImageQuota(r && r.quota));
+        // kept so an emailed idea waits for it before ticking Image / Video (openEmailedIdea)
+        window.__quotaLoaded = $.getJSON('/api/me/image-quota').done(function (r) {
+            window.applyImageQuota(r && r.quota);
+            window.applyVideoAccess(!!(r && r.video_quota && r.video_quota.enabled));
+        });
     }
     window.loadImageQuota = loadImageQuota;
 
@@ -2727,6 +2991,15 @@ $(document).ready(function () {
                     $('#' + targetSlotId).html(card);
                     shareWith.forEach(p => $(`#${msgId}_media_image_${p}`).html(card));
                     window.applyImageQuota(body.quota);
+                    return;
+                }
+                if (xhr.status === 403 && (body.code === 'video_limit_reached' || body.code === 'video_not_enabled')) {
+                    $('#' + targetSlotId).html(`
+                        <div class="alert alert-warning py-2 px-3 small mt-2">
+                            <i class="fas fa-hourglass-half me-1"></i>${escapeHtml(body.error || 'Video is not available right now.')}
+                        </div>
+                    `);
+                    if (body.code === 'video_not_enabled') window.applyVideoAccess(false);
                     return;
                 }
                 const errHtml = `

@@ -197,12 +197,23 @@ def create_app(config_name="development"):
     @app.route("/dashboard")
     @login_required_page
     def index():
+        # An emailed idea clicked while logged out (auth/utils.login_required_page)
+        pending_idea = session.pop("pending_idea", None)
+        if pending_idea and not request.args.get("idea"):
+            return redirect(url_for("index", idea=pending_idea))
         return render_template("index.html")
 
     @app.route("/settings")
     @login_required_page
     def settings_route():
         return render_template("settings.html")
+
+    @app.route("/calendar")
+    @login_required_page
+    def calendar_page():
+        """Content Calendar: the weekly posting goal and what was created,
+        scheduled and suggested on each day (services/calendar_service.py)."""
+        return render_template("calendar.html")
 
     @app.route("/brand-profile")
     @login_required_page

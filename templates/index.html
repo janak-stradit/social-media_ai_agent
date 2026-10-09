@@ -95,6 +95,11 @@
                 <p class="chat-header-subtitle">Describe your idea, attach visual assets, and set campaign configs below</p>
             </div>
             <div class="d-flex gap-2 align-items-center">
+                <!-- This week's posting goal (app_v2.js loadGoalPill); opens the Content Calendar -->
+                <a href="/calendar" class="goal-pill d-none" id="goalPill" title="Open your Content Calendar">
+                    <span class="goal-pill-dots" id="goalPillDots" aria-hidden="true"></span>
+                    <span class="goal-pill-text" id="goalPillText"></span>
+                </a>
                 <a href="/competitor-dashboard" class="btn-xs-outline-info text-decoration-none" title="Open Analysis Dashboard">
                     <i class="fas fa-chart-line me-2"></i><span class="btn-label">Analysis Dashboard</span>
                 </a>
@@ -131,6 +136,25 @@
                     </div>
                 </div>
 
+                <!-- "Ideas for you" (app_v2.js loadIdeaFeed, /api/ideas/feed): tabs for
+                     what's trending in the user's industry, post types that work and
+                     upcoming dates. Hidden until the user has a brand profile; the
+                     "From your brand" tab is the idea cards below. -->
+                <div class="idea-feed-bar d-none" id="ideaFeedBar">
+                    <div class="idea-tabs" role="tablist" aria-label="Ideas for you">
+                        <button type="button" class="idea-tab" role="tab" data-group="trending" aria-selected="false"><i class="fas fa-arrow-trend-up"></i>Trending<span class="idea-tab-busy" aria-hidden="true"></span></button>
+                        <button type="button" class="idea-tab" role="tab" data-group="playbook" aria-selected="false"><i class="fas fa-layer-group"></i>Post types that work</button>
+                        <button type="button" class="idea-tab" role="tab" data-group="dates" aria-selected="false"><i class="fas fa-calendar-day"></i>Upcoming dates</button>
+                        <button type="button" class="idea-tab active" role="tab" data-group="brand" aria-selected="true"><i class="fas fa-wand-magic-sparkles"></i>From your brand</button>
+                    </div>
+                    <button type="button" class="btn-regenerate-greeting d-none" id="refreshIdeaFeedBtn" title="Get new ideas">
+                        <i class="fas fa-arrows-rotate"></i>
+                    </button>
+                </div>
+                <div class="idea-feed-meta d-none" id="ideaFeedMeta"></div>
+                <div class="quick-prompts-grid d-none" id="ideaFeedGrid" role="tabpanel"></div>
+
+                <div id="brandIdeasSection">
                 <div class="welcome-section-row">
                     <div class="welcome-section-label">Start from an idea</div>
                     <button type="button" class="btn-regenerate-greeting d-none" id="regenerateGreetingBtn" onclick="regenerateGreeting()" title="Regenerate prompt ideas">
@@ -139,7 +163,7 @@
                 </div>
                 
                 <!-- Quick Prompt Cards -->
-                <div class="quick-prompts-grid">
+                <div class="quick-prompts-grid" id="brandIdeasGrid">
                     <button class="quick-prompt-card" data-prompt="Launch our new flagship AI product that boosts developer productivity by 10x. Target tech professionals, engineering leads, and CTOs. Highlight speed, efficiency, and automated workflows.">
                         <div class="quick-prompt-header">
                             <i class="fas fa-rocket text-primary"></i>
@@ -172,6 +196,7 @@
                         <p class="quick-prompt-text">Create high-converting promotional post for an annual subscription sale...</p>
                     </button>
                 </div>
+                </div>
             </div>
 
             <!-- Chat Stream Thread -->
@@ -183,88 +208,7 @@
 
         <!-- ── FLOATING CHAT INPUT DOCK ── -->
         <div class="chat-input-dock-container">
-            <div class="chat-input-dock" id="dropZone">
-                
-                <!-- Top Inline Configuration Bar -->
-                <div class="chat-config-bar">
-                    
-                    <!-- Platform Selection -->
-                    <div class="config-group">
-                        <span class="config-label"><i class="fas fa-share-nodes me-1"></i>Platforms:</span>
-                        <div class="platform-chips-inline">
-                            <label class="platform-chip-sm" for="fbCheck">
-                                <input type="checkbox" value="facebook" id="fbCheck">
-                                <span class="chip-content"><i class="fab fa-facebook me-1 color-fb"></i>FB</span>
-                            </label>
-                            <label class="platform-chip-sm" for="igCheck">
-                                <input type="checkbox" value="instagram" id="igCheck">
-                                <span class="chip-content"><i class="fab fa-instagram me-1 color-ig"></i>IG</span>
-                            </label>
-                            <label class="platform-chip-sm" for="liCheck">
-                                <input type="checkbox" value="linkedin" id="liCheck">
-                                <span class="chip-content"><i class="fab fa-linkedin me-1 color-li"></i>LinkedIn</span>
-                            </label>
-                            <label class="platform-chip-sm" for="ytCheck">
-                                <input type="checkbox" value="youtube" id="ytCheck">
-                                <span class="chip-content"><i class="fab fa-youtube me-1 color-yt"></i>YouTube</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="config-divider"></div>
-
-                    <!-- Brand Voice Selection -->
-                    <div class="config-group">
-                        <span class="config-label"><i class="fas fa-user-astronaut me-1"></i>Voice:</span>
-                        <select id="brandVoiceSelect" class="chat-select-sm">
-                            <option value="Standard Enterprise">Standard Enterprise</option>
-                            <option value="B2B Tech Leader">B2B Tech Leader</option>
-                            <option value="High-Growth Startup">High-Growth Startup</option>
-                            <option value="Friendly Lifestyle Coach">Friendly Lifestyle Coach</option>
-                            <option value="Bold Viral Marketer">Bold Viral Marketer</option>
-                        </select>
-                    </div>
-
-
-
-                    <!-- Tone Selection -->
-                    <div class="config-group">
-                        <span class="config-label"><i class="fas fa-sliders me-1"></i>Tone:</span>
-                        <select id="toneSelect" class="chat-select-sm">
-                            <option value="">Auto-Detect</option>
-                            <option value="professional">Professional</option>
-                            <option value="casual">Casual</option>
-                            <option value="humorous">Humorous</option>
-                            <option value="inspirational">Inspirational</option>
-                            <option value="urgent">Urgent</option>
-                        </select>
-                    </div>
-
-                    <div class="config-divider"></div>
-
-                    <!-- Media Output Selection -->
-                    <div class="config-group">
-                        <span class="config-label"><i class="fas fa-photo-film me-1"></i>Output:</span>
-                        <div class="media-chips-inline">
-                            <label class="media-chip-sm" for="mediaText">
-                                <input type="checkbox" name="outputOptions" value="text" id="mediaText" checked>
-                                <span class="chip-content">Text (Caption)</span>
-                            </label>
-                            <label class="media-chip-sm" for="mediaImage">
-                                <input type="checkbox" name="outputOptions" value="image" id="mediaImage">
-                                <span class="chip-content"><i class="fas fa-image me-1 text-primary"></i>Image</span>
-                            </label>
-                            <span class="image-quota d-none" id="imageQuotaBadge" aria-live="polite"></span>
-                            <span class="coming-soon" title="Coming soon">
-                                <label class="media-chip-sm" for="mediaVideo">
-                                    <input type="checkbox" name="outputOptions" value="video" id="mediaVideo" disabled>
-                                    <span class="chip-content"><i class="fas fa-video me-1 text-purple"></i>Video<span class="soon-tag">Soon</span></span>
-                                </label>
-                            </span>
-                        </div>
-                    </div>
-
-                </div>
+            <div class="chat-input-dock composer-v2" id="dropZone">
 
                 <!-- Attachment Preview Strip (When Image is Uploaded) -->
                 <div id="imagePreview" class="attachment-preview-strip d-none">
@@ -287,32 +231,114 @@
                 <!-- Shown while Generate is off because today's images are used up -->
                 <div class="image-limit-dock-note d-none" id="imageLimitDockNote" role="status"></div>
 
-                <!-- Textarea & Action Buttons Bar -->
+                <!-- 1. The brief: the first thing to do, so it comes first -->
                 <div class="chat-input-row">
-                    
-                    <!-- Phones: platforms/voice/tone/output fold away behind this button -->
-                    <button type="button" class="btn-chat-attach btn-dock-options" id="dockOptionsBtn" title="Platforms, voice, tone &amp; output" aria-expanded="false" aria-controls="dropZone">
+                    <textarea id="storyInput" class="chat-textarea" rows="2"
+                        placeholder="What would you like to post about?"></textarea>
+                </div>
+
+                <!-- 2. One toolbar: where it goes, what to make, how it sounds, then Generate -->
+                <div class="composer-bar">
+
+                    <!-- Phones: the options below fold away behind this button -->
+                    <button type="button" class="btn-chat-attach btn-dock-options" id="dockOptionsBtn" title="Platforms, output &amp; style" aria-expanded="false" aria-controls="dropZone">
                         <i class="fas fa-sliders"></i>
                     </button>
 
-                    <!-- Upload Asset Button -->
-                    <button type="button" class="btn-chat-attach" id="attachBtn" onclick="document.getElementById('imageInput').click()" title="Attach visual asset (Image)">
+                    <button type="button" class="btn-chat-attach" id="attachBtn" onclick="document.getElementById('imageInput').click()" title="Attach an image" aria-label="Attach an image">
                         <i class="fas fa-paperclip"></i>
                     </button>
                     <input type="file" id="imageInput" accept="image/*" class="d-none">
 
+                    <div class="chat-config-bar">
 
-                    <!-- Text Area -->
-                    <textarea id="storyInput" class="chat-textarea" rows="1"
-                        placeholder="Describe your post, or type / for image commands like /metaad (Shift + Enter for a new line)"></textarea>
-                    
-                    <!-- Controls -->
+                        <!-- Platform Selection -->
+                        <div class="config-group">
+                            <span class="config-label">Post to</span>
+                            <div class="platform-chips-inline">
+                                <label class="platform-chip-sm" for="fbCheck">
+                                    <input type="checkbox" value="facebook" id="fbCheck">
+                                    <span class="chip-content"><i class="fab fa-facebook me-1 color-fb"></i>Facebook</span>
+                                </label>
+                                <label class="platform-chip-sm" for="igCheck">
+                                    <input type="checkbox" value="instagram" id="igCheck">
+                                    <span class="chip-content"><i class="fab fa-instagram me-1 color-ig"></i>Instagram</span>
+                                </label>
+                                <label class="platform-chip-sm" for="liCheck">
+                                    <input type="checkbox" value="linkedin" id="liCheck">
+                                    <span class="chip-content"><i class="fab fa-linkedin me-1 color-li"></i>LinkedIn</span>
+                                </label>
+                                <label class="platform-chip-sm" for="ytCheck">
+                                    <input type="checkbox" value="youtube" id="ytCheck">
+                                    <span class="chip-content"><i class="fab fa-youtube me-1 color-yt"></i>YouTube</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="config-divider"></div>
+
+                        <!-- Media Output Selection -->
+                        <div class="config-group">
+                            <span class="config-label">Create</span>
+                            <div class="media-chips-inline">
+                                <label class="media-chip-sm" for="mediaText">
+                                    <input type="checkbox" name="outputOptions" value="text" id="mediaText" checked>
+                                    <span class="chip-content"><i class="fas fa-align-left me-1"></i>Caption</span>
+                                </label>
+                                <label class="media-chip-sm" for="mediaImage">
+                                    <input type="checkbox" name="outputOptions" value="image" id="mediaImage">
+                                    <span class="chip-content"><i class="fas fa-image me-1 text-primary"></i>Image</span>
+                                </label>
+                                <!-- "Soon" for everyone until an admin switches video on for the
+                                     user (applyVideoAccess in app_v2.js opens it) -->
+                                <span class="coming-soon video-gate" title="Coming soon">
+                                    <label class="media-chip-sm" for="mediaVideo">
+                                        <input type="checkbox" name="outputOptions" value="video" id="mediaVideo" disabled>
+                                        <span class="chip-content"><i class="fas fa-video me-1 text-purple"></i>Video<span class="soon-tag">Soon</span></span>
+                                    </label>
+                                </span>
+                                <span class="image-quota d-none" id="imageQuotaBadge" aria-live="polite"></span>
+                            </div>
+                        </div>
+
+                        <!-- Voice + tone: sensible defaults, so they sit behind one button -->
+                        <div class="style-menu" id="styleMenu">
+                            <button type="button" class="style-menu-btn" id="styleMenuBtn" aria-expanded="false" aria-controls="styleMenuPanel" title="Brand voice and tone">
+                                <i class="fas fa-sliders"></i><span id="styleMenuLabel">Style</span><i class="fas fa-chevron-up style-menu-caret"></i>
+                            </button>
+                            <div class="style-menu-panel d-none" id="styleMenuPanel">
+                                <label class="style-menu-field" for="brandVoiceSelect">
+                                    <span>Brand voice</span>
+                                    <select id="brandVoiceSelect" class="chat-select-sm">
+                                        <option value="Standard Enterprise">Standard Enterprise</option>
+                                        <option value="B2B Tech Leader">B2B Tech Leader</option>
+                                        <option value="High-Growth Startup">High-Growth Startup</option>
+                                        <option value="Friendly Lifestyle Coach">Friendly Lifestyle Coach</option>
+                                        <option value="Bold Viral Marketer">Bold Viral Marketer</option>
+                                    </select>
+                                </label>
+                                <label class="style-menu-field" for="toneSelect">
+                                    <span>Tone</span>
+                                    <select id="toneSelect" class="chat-select-sm">
+                                        <option value="">Auto-Detect</option>
+                                        <option value="professional">Professional</option>
+                                        <option value="casual">Casual</option>
+                                        <option value="humorous">Humorous</option>
+                                        <option value="inspirational">Inspirational</option>
+                                        <option value="urgent">Urgent</option>
+                                    </select>
+                                </label>
+                            </div>
+                        </div>
+
+                    </div>
+
                     <div class="chat-actions-group">
-                        <button type="button" class="btn-chat-secondary" onclick="analyzeStory()" id="analyzeBtn" title="Analyze Brief">
+                        <button type="button" class="btn-chat-secondary" onclick="analyzeStory()" id="analyzeBtn" title="Check your brief before generating">
                             <i class="fas fa-brain"></i>
                             <span class="d-none d-md-inline ms-1">Analyze</span>
                         </button>
-                        
+
                         <button type="button" id="generateBtn" class="btn-chat-send" onclick="generateContent()" title="Send & Generate Content">
                             <i class="fas fa-paper-plane me-1"></i>
                             <span class="d-none d-md-inline ms-1">Generate</span>
@@ -320,10 +346,9 @@
                     </div>
                 </div>
 
-                <!-- Dock Footer info -->
                 <div class="chat-dock-footer">
+                    <span class="dock-tip">Type <kbd>/</kbd> for image commands &middot; <kbd>Shift</kbd> + <kbd>Enter</kbd> for a new line</span>
                     <span id="charCount" class="char-count">0 chars</span>
-                    <span class="dock-tip"><i class="fas fa-sparkles me-1"></i>Autonomous Multi-Agent System (Story, Vision, Caption, Hashtag, Quality Checks)</span>
                 </div>
 
             </div>

@@ -10,6 +10,79 @@ $(document).ready(function () {
     loadUserSocialAccounts();
     loadScheduledPosts();
 
+    // ── Notifications tab: weekly ideas email on/off + "send me one now" ──
+    function ideasEmailMeta(s) {
+        const last = s.last_sent_at
+            ? `Last sent ${new Date(s.last_sent_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}.`
+            : 'Not sent yet.';
+        return `Goes to ${s.email}. ${last}`;
+    }
+    function loadNotificationSettings() {
+        $.getJSON('/api/me/notifications').done(function (r) {
+            const s = r && r.ideas_email;
+            if (!s) return;
+            $('#ideasEmailSwitch').prop('checked', !!s.enabled).prop('disabled', false);
+            $('#nudgesEmailSwitch').prop('checked', !!s.nudges_enabled).prop('disabled', false);
+            $('#recapEmailSwitch').prop('checked', !!s.recap_enabled).prop('disabled', false);
+            $('#ideasEmailMeta').text(ideasEmailMeta(s));
+        });
+    }
+    const EMAIL_SWITCHES = {
+        ideasEmailSwitch: ['ideas_email_enabled', 'Weekly ideas email'],
+        nudgesEmailSwitch: ['nudges_email_enabled', 'Reminder emails'],
+        recapEmailSwitch: ['recap_email_enabled', 'Monthly recap']
+    };
+    $('#ideasEmailSwitch, #nudgesEmailSwitch, #recapEmailSwitch').on('change', function () {
+        const $switch = $(this).prop('disabled', true);
+        const enabled = $switch.prop('checked');
+        const [field, what] = EMAIL_SWITCHES[this.id];
+        $.ajax({
+            url: '/api/me/notifications',
+            type: 'PUT',
+            contentType: 'application/json',
+            data: JSON.stringify({ [field]: enabled }),
+            success: function () { showToast(`${what} switched ${enabled ? 'on' : 'off'}.`, 'success'); },
+            error: function () {
+                $switch.prop('checked', !enabled);
+                showToast('Could not save your email setting.', 'error');
+            },
+            complete: function () { $switch.prop('disabled', false); }
+        });
+    });
+    $('#sendIdeasEmailNowBtn').on('click', function () {
+        const $btn = $(this).prop('disabled', true);
+        const label = $btn.html();
+        $btn.html('<span class="spinner-border spinner-border-sm me-1" role="status"></span>Writing your ideas...');
+        $.ajax({
+            url: '/api/me/notifications/ideas-email/send-now',
+            type: 'POST',
+            success: function (r) {
+                showToast(`Sent ${r.ideas} ideas to ${r.email}.`, 'success');
+                loadNotificationSettings();
+            },
+            error: function (xhr) { showToast((xhr.responseJSON || {}).error || 'The email could not be sent.', 'error'); },
+            complete: function () { $btn.prop('disabled', false).html(label); }
+        });
+    });
+    $('#sendRecapEmailNowBtn').on('click', function () {
+        const $btn = $(this).prop('disabled', true);
+        const label = $btn.html();
+        $btn.html('<span class="spinner-border spinner-border-sm me-1" role="status"></span>Putting your recap together...');
+        $.ajax({
+            url: '/api/me/notifications/recap-email/send-now',
+            type: 'POST',
+            success: function (r) { showToast(`Sent your recap (${r.posts} posts) to ${r.email}.`, 'success'); },
+            error: function (xhr) { showToast((xhr.responseJSON || {}).error || 'The email could not be sent.', 'error'); },
+            complete: function () { $btn.prop('disabled', false).html(label); }
+        });
+    });
+    loadNotificationSettings();
+    // The email's "Email settings" link lands on /settings#notifications
+    if (window.location.hash === '#notifications') {
+        const tab = document.getElementById('notifications-tab');
+        if (tab && window.bootstrap) bootstrap.Tab.getOrCreateInstance(tab).show();
+    }
+
     // Reload scheduled posts when switching to Tab 3
     $('#scheduled-posts-tab').on('shown.bs.tab', function () {
         loadScheduledPosts();

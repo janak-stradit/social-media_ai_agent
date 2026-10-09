@@ -258,22 +258,10 @@ def get_models_info():
         image_status = "STANDBY"
 
     # 4. Dynamic Video Generation Model Detection
-    if getattr(Config, "GOOGLE_API_KEY", None) or os.getenv("GOOGLE_API_KEY"):
-        video_model = getattr(Config, "GEMINI_VIDEO_MODEL", "veo-3.1-generate-preview")
-        video_provider = "Google Gemini (Veo 3.1)"
-        video_status = "ACTIVE"
-    elif getattr(Config, "Z_AI_API_KEY", None):
-        video_model = getattr(Config, "Z_AI_VIDEO_MODEL", "cogvideox-3")
-        video_provider = "Z.AI (CogVideoX-3)"
-        video_status = "ACTIVE"
-    elif getattr(Config, "AWS_ACCESS_KEY_ID", None) or getattr(Config, "AWS_PROFILE", None):
-        video_model = getattr(Config, "BEDROCK_VIDEO_MODEL", "amazon.nova-reel-v1:0")
-        video_provider = f"AWS Bedrock Nova Reel ({getattr(Config, 'AWS_REGION', 'us-east-1')})"
-        video_status = "ACTIVE"
-    else:
-        video_model = getattr(Config, "VIDEO_MODEL", "google/veo-3.1-lite")
-        video_provider = "OpenRouter Video API"
-        video_status = "STANDBY"
+    # (HeyRoute is the only video provider - see media_service.generate_video)
+    video_model = Config.HEYROUTE_VIDEO_MODEL
+    video_provider = "HeyRoute"
+    video_status = "ACTIVE" if Config.HEYROUTE_VIDEO_API_KEY else "STANDBY"
 
     # 5. Dynamic RAG Memory Engine Stats
     try:
@@ -593,6 +581,36 @@ def _image_quota_or_block(user_id):
             403,
         )
     return quota, None
+
+
+def _video_quota_or_block(user_id):
+    """(quota, None) when the user may create a video now, else (quota, response)."""
+    if user_id is None or not DB_AVAILABLE:
+        return None, None
+    from db import get_video_quota
+
+    quota = get_video_quota(user_id)
+    code = _video_block_code(quota)
+    if code:
+        return quota, (
+            jsonify({"success": False, "code": code, "error": _video_block_message(quota), "quota": quota}),
+            403,
+        )
+    return quota, None
+
+
+def _video_block_code(quota) -> str | None:
+    if not quota["enabled"]:
+        return "video_not_enabled"  # still "coming soon" for this user (Admin -> Users switches it on)
+    if not quota["unlimited"] and quota["remaining"] <= 0:
+        return "video_limit_reached"
+    return None
+
+
+def _video_block_message(quota) -> str:
+    if not quota["enabled"]:
+        return "Video is coming soon for your account. Ask your admin if you need it switched on."
+    return _image_limit_message(quota).replace(" image", " video")
 
 
 def _quota_after_refine(user_id, targets) -> dict | None:
@@ -1485,13 +1503,44 @@ def refine_post():
         if "video" in targets and MEDIA_AVAILABLE and plan.get("video_prompt"):
             image_media = entry["media"].get("image") or {}
             video_ref = image_media.get("clean_url") or image_media.get("url") or extra_reference
-            result = media_service.generate_video(
-                plan["video_prompt"], p, tone, image_path=video_ref, logo_path=logo_path
-            )
+            # A refined video is a full video generation: same daily limit
+            video_quota, blocked = _video_quota_or_block(user_id)
+            if blocked:
+                result = {"success": False, "error": _video_block_message(video_quota)}
+                log_event("video.generate", conversation_id=conversation_id, platform=p,
+                          status="blocked_limit" if video_quota["enabled"] else "blocked_not_enabled")
+            else:
+                result = media_service.generate_video(
+                    plan["video_prompt"], p, tone, image_path=video_ref, logo_path=logo_path
+                )
             if result.get("success"):
-                entry["media"]["video"] = {"url": result["url"], "resolution": result.get("resolution")}
+                extra_cost += float(result.get("cost") or 0)
+                asset_id = None
+                if DB_AVAILABLE and user_id is not None:
+                    try:
+                        from db import log_image_generation
+
+                        width, height = _size_wh(result.get("resolution"))
+                        asset_id = log_image_generation(
+                            user_id, float(result.get("cost") or 0), run_id=None, kind="video", platform=p,
+                            model=result.get("model"), description=plan["video_prompt"],
+                            media_url=result.get("url"), conversation_id=conversation_id,
+                            prompt=result.get("prompt"), width=width, height=height,
+                        )
+                        new_image_ids.append(asset_id)  # linked to the run below, like image edits
+                    except Exception as log_err:  # noqa: BLE001 - the video itself succeeded
+                        current_app.logger.warning(f"[Video] Could not log video: {log_err}")
+                log_event("video.generate", conversation_id=conversation_id, asset_id=asset_id, platform=p,
+                          provider="heyroute", model=result.get("model"), status="completed",
+                          context_token_estimate=estimate_tokens(plan["video_prompt"]))
+                entry["media"]["video"] = {
+                    "url": result["url"], "resolution": result.get("resolution"), "asset_id": asset_id,
+                }
             else:
                 media_errors.append(f"{p} video: {result.get('error')}")
+                if not blocked:
+                    log_event("video.generate", conversation_id=conversation_id, platform=p, status="failed",
+                              error=str(result.get("error"))[:200])
 
         content[p] = entry
 
@@ -2206,10 +2255,12 @@ def generate_media():
 
     # Daily image limit + the user's image model (Admin -> Image access)
     quota = None
-    if media_type != "video":
+    if media_type == "video":
+        _, blocked = _video_quota_or_block(user_id)
+    else:
         quota, blocked = _image_quota_or_block(user_id)
-        if blocked:
-            return blocked
+    if blocked:
+        return blocked
 
     try:
         caption_to_use = extract_prompt_for_type(caption, media_type)
@@ -2256,7 +2307,7 @@ def generate_media():
                     run_id=run_id or None,
                     kind="video" if media_type == "video" else "image",
                     platform=platform,
-                    model=result.get("model_id") or (quota["model"] if quota else None),
+                    model=result.get("model_id") or result.get("model") or (quota["model"] if quota else None),
                     description=(image_prompt or video_prompt or caption)[:300],
                     media_url=result.get("url"),
                     prompt=caption_to_use,
@@ -2264,12 +2315,16 @@ def generate_media():
                     width=width,
                     height=height,
                 )
-                if media_type != "video":
+                if media_type == "video":
+                    from db import get_video_quota
+
+                    result["video_quota"] = get_video_quota(user_id)
+                else:
                     result["quota"] = get_image_quota(user_id)
                 log_event(
                     "image.generate" if media_type != "video" else "video.generate",
                     run_id=run_id, asset_id=result["asset_id"], platform=platform, provider="heyroute",
-                    model=result.get("model_id"), status="completed",
+                    model=result.get("model_id") or result.get("model"), status="completed",
                     context_token_estimate=estimate_tokens(caption_to_use),
                 )
             except Exception as cost_err:
@@ -2285,9 +2340,9 @@ def generate_media():
                         add_run_cost(run_id, float(result.get("cost") or 0), user_id)
                     except Exception as cost_err:
                         current_app.logger.warning(f"[Credits] Could not record media cost: {cost_err}")
-        elif not result.get("success"):
-            log_event("image.generate", run_id=run_id, platform=platform, status="failed",
-                      error=str(result.get("error"))[:200])
+        if not result.get("success"):
+            log_event("video.generate" if media_type == "video" else "image.generate", run_id=run_id,
+                      platform=platform, status="failed", error=str(result.get("error"))[:200])
 
         return jsonify(result)
 
@@ -2925,12 +2980,14 @@ def _heyroute_image_models(fresh: bool = False) -> list[str]:
 @api_bp.route("/me/image-quota", methods=["GET"])
 @login_required_api
 def my_image_quota():
-    """Today's image usage for Studio Chat's "Images today: 1 of 2"."""
+    """Today's image usage for Studio Chat's "Images today: 1 of 2", and
+    whether the Video option is switched on for this user (video_quota.enabled)."""
     if not DB_AVAILABLE:
-        return jsonify({"success": True, "quota": None})
-    from db import get_image_quota
+        return jsonify({"success": True, "quota": None, "video_quota": None})
+    from db import get_image_quota, get_video_quota
 
-    return jsonify({"success": True, "quota": get_image_quota(get_current_user_id())})
+    user_id = get_current_user_id()
+    return jsonify({"success": True, "quota": get_image_quota(user_id), "video_quota": get_video_quota(user_id)})
 
 
 @api_bp.route("/admin/image-settings", methods=["GET"])
@@ -2988,12 +3045,15 @@ def admin_save_image_settings():
 @admin_required_api
 def admin_set_image_access(target_user_id):
     """limit: null = default, -1 = unlimited, n >= 0 = custom daily limit;
-    model: null = default, else one of the Image Settings models."""
+    model: null = default, else one of the Image Settings models;
+    video_enabled (optional): true = the user gets the Video option."""
     from db import (
         IMAGE_UNLIMITED,
         get_image_quota,
         get_image_settings,
+        get_video_quota,
         set_user_image_access,
+        set_user_video_access,
     )
 
     data = request.get_json() or {}
@@ -3010,7 +3070,10 @@ def admin_set_image_access(target_user_id):
         return jsonify({"success": False, "error": "Choose a model from Image Settings."}), 400
     if not set_user_image_access(target_user_id, limit, model):
         return jsonify({"success": False, "error": "User not found"}), 404
-    return jsonify({"success": True, "quota": get_image_quota(target_user_id)})
+    if "video_enabled" in data:
+        set_user_video_access(target_user_id, bool(data["video_enabled"]))
+    return jsonify({"success": True, "quota": get_image_quota(target_user_id),
+                    "video_quota": get_video_quota(target_user_id)})
 
 
 @api_bp.route("/admin/users/<int:target_user_id>/active", methods=["POST"])
@@ -3154,6 +3217,28 @@ def admin_get_credit_requests():
         return jsonify({"error": str(e), "success": False}), 500
 
 
+def _email_credit_decision(res: dict, approved: bool) -> bool:
+    """Tell the user their credit request was approved / rejected. The
+    decision is already saved: a mail failure is logged, never raised."""
+    if not res.get("user_email"):
+        return False
+    try:
+        from services.email_service import EmailService
+
+        EmailService().send_credit_decision_email(
+            to_email=res["user_email"],
+            name=res.get("user_name") or "there",
+            approved=approved,
+            requested_amount=float(res.get("requested_amount") or 0),
+            credit_limit=res.get("new_credit_limit") if approved else res.get("credit_limit"),
+            dashboard_url=f"{(Config.APP_BASE_URL or request.host_url).rstrip('/')}/dashboard",
+        )
+        return True
+    except Exception as mail_err:  # noqa: BLE001
+        current_app.logger.warning(f"[Credits] Could not email the credit decision to user {res.get('user_id')}: {mail_err}")
+        return False
+
+
 @api_bp.route("/admin/credit-requests/<int:req_id>/approve", methods=["POST"])
 @login_required_api
 @admin_required_api
@@ -3166,7 +3251,9 @@ def admin_approve_request(req_id):
         if not res:
             return jsonify({"error": "Pending request not found"}), 404
 
-        return jsonify({"success": True, "result": res, "message": "Credit extension approved and limit increased."})
+        emailed = _email_credit_decision(res, approved=True)
+        return jsonify({"success": True, "result": res, "email_sent": emailed,
+                        "message": "Credit extension approved and limit increased."})
     except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
 
@@ -3183,7 +3270,9 @@ def admin_reject_request(req_id):
         if not res:
             return jsonify({"error": "Pending request not found"}), 404
 
-        return jsonify({"success": True, "result": res, "message": "Credit extension request rejected."})
+        emailed = _email_credit_decision(res, approved=False)
+        return jsonify({"success": True, "result": res, "email_sent": emailed,
+                        "message": "Credit extension request rejected."})
     except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
 
@@ -4228,6 +4317,282 @@ def brand_profile_quick_prompts():
                 profile is None and user and user.account_type in VALID_SELF_SERVE_ACCOUNT_TYPES
             ),
         }
+    )
+
+
+@api_bp.route("/ideas/feed", methods=["GET"])
+@login_required_api
+def idea_feed():
+    """Studio Chat's "Ideas for you": this week's trending topics in the
+    user's industry, post types that work for it and upcoming dates, each as
+    a ready brief (services/trend_service.py). Served from the user's saved
+    feed while it is current; ?refresh=1 writes a new one. groups is empty
+    without a brand profile - the page keeps its "From your brand" cards."""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({"success": True, "feed": None})
+
+    from services.trend_service import cached_idea_feed, generate_idea_feed
+
+    refresh = request.args.get("refresh") in ("1", "true")
+    if not refresh:
+        cached = cached_idea_feed(user_id)
+        if cached:
+            return jsonify({"success": True, "feed": cached})
+    # Writing a feed is an LLM call: not without credit
+    try:
+        stats = get_user_usage_stats(user_id)
+        if stats.get("remaining_credits", 0.0) <= 0.0:
+            return jsonify({"error": "Credit limit reached. Please request a credit extension.", "credit_limit_exceeded": True}), 402
+    except Exception as _cred_err:
+        current_app.logger.warning(f"[Credits] Check error: {_cred_err}")
+    try:
+        feed, _usage = generate_idea_feed(user_id, force=refresh)
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.warning(f"[Ideas] Could not build the idea feed: {e}")
+        return jsonify({"error": "Could not load ideas right now. Please try again in a minute."}), 500
+    return jsonify({"success": True, "feed": feed})
+
+
+@api_bp.route("/ideas/link/<token>", methods=["GET"])
+@login_required_api
+def idea_link(token):
+    """The idea behind a "Create this post" button in the weekly ideas email
+    (/dashboard?idea=<token>) - only for the user it was sent to."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import open_idea_link
+
+    idea = open_idea_link(token, get_current_user_id())
+    if not idea:
+        return jsonify({"success": False, "error": "This idea link is no longer available."}), 404
+    return jsonify({"success": True, "idea": idea})
+
+
+@api_bp.route("/me/notifications", methods=["GET"])
+@login_required_api
+def my_notifications():
+    """Settings -> Notifications: is the weekly ideas email on for this user."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import get_ideas_email_settings
+
+    return jsonify({"success": True, "ideas_email": get_ideas_email_settings(get_current_user_id()),
+                    "weekly_send_active": bool(Config.WEEKLY_IDEAS_EMAIL), "nudge_emails_active": bool(Config.NUDGE_EMAILS)})
+
+
+@api_bp.route("/me/notifications", methods=["PUT"])
+@login_required_api
+def update_my_notifications():
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import get_ideas_email_settings, set_ideas_email_enabled
+
+    data = request.get_json() or {}
+    if not any(k in data for k in ("ideas_email_enabled", "nudges_email_enabled", "recap_email_enabled")):
+        return jsonify({"success": False, "error": "ideas_email_enabled, nudges_email_enabled or recap_email_enabled (bool) is required"}), 400
+    user_id = get_current_user_id()
+    if "ideas_email_enabled" in data:
+        set_ideas_email_enabled(user_id, bool(data["ideas_email_enabled"]))
+    if "nudges_email_enabled" in data:
+        from db import set_nudge_email_enabled
+
+        set_nudge_email_enabled(user_id, bool(data["nudges_email_enabled"]))
+    if "recap_email_enabled" in data:
+        from db import set_recap_email_enabled
+
+        set_recap_email_enabled(user_id, bool(data["recap_email_enabled"]))
+    return jsonify({"success": True, "ideas_email": get_ideas_email_settings(user_id)})
+
+
+@api_bp.route("/me/notifications/recap-email/send-now", methods=["POST"])
+@login_required_api
+def send_my_recap_email_now():
+    """Settings -> Notifications -> "Send me last month's recap now": the
+    same email the monthly run sends, to the logged-in user's own address."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from datetime import datetime, timezone
+
+    from db import get_ideas_email_settings
+    from services.recap_service import previous_month, send_recap_email
+
+    user_id = get_current_user_id()
+    year, month = previous_month(datetime.now(timezone.utc).date())
+    try:
+        outcome = send_recap_email(user_id, Config.APP_BASE_URL or request.host_url, year, month)
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.warning(f"[Recap email] Could not send to user {user_id}: {e}")
+        return jsonify({"success": False, "error": "The email could not be sent. Please try again later."}), 502
+    if not outcome["sent"]:
+        return jsonify({"success": False, "error": "You didn't create any posts last month, so there is nothing to recap yet."}), 409
+    return jsonify({"success": True, "email": (get_ideas_email_settings(user_id) or {}).get("email"), "posts": outcome["posts"]})
+
+
+def _tz_minutes() -> int:
+    """The browser's offset from UTC in minutes (?tz=330 for India), 0 when missing."""
+    try:
+        return int(request.args.get("tz", 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+@api_bp.route("/calendar", methods=["GET"])
+@login_required_api
+def content_calendar():
+    """The Content Calendar page's data for ?month=YYYY-MM (default: this
+    month): posts created, posts scheduled, occasions, suggested slots and
+    this week's goal (services/calendar_service.py)."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from datetime import datetime, timedelta, timezone
+
+    from services.calendar_service import calendar_month
+
+    tz = _tz_minutes()
+    local_now = datetime.now(timezone.utc) + timedelta(minutes=tz)
+    year, month = local_now.year, local_now.month
+    raw = request.args.get("month") or ""
+    if raw:
+        try:
+            year, month = (int(part) for part in raw.split("-", 1))
+            if not (2000 <= year <= 2100 and 1 <= month <= 12):
+                raise ValueError
+        except ValueError:
+            return jsonify({"success": False, "error": "month must look like 2026-10"}), 400
+    return jsonify({"success": True, **calendar_month(get_current_user_id(), year, month, tz)})
+
+
+@api_bp.route("/me/goal", methods=["GET"])
+@login_required_api
+def my_weekly_goal():
+    """This week's posting goal and progress (Studio Chat's goal pill)."""
+    if not DB_AVAILABLE:
+        return jsonify({"success": True, "progress": None})
+    from services.calendar_service import week_progress
+
+    return jsonify({"success": True, "progress": week_progress(get_current_user_id(), _tz_minutes())})
+
+
+@api_bp.route("/me/goal", methods=["PUT"])
+@login_required_api
+def set_my_weekly_goal():
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import set_weekly_post_goal
+    from services.calendar_service import week_progress
+
+    try:
+        goal = int((request.get_json() or {}).get("weekly_post_goal"))
+    except (TypeError, ValueError):
+        goal = 0
+    if not 1 <= goal <= 7:
+        return jsonify({"success": False, "error": "Choose a goal between 1 and 7 posts a week."}), 400
+    user_id = get_current_user_id()
+    set_weekly_post_goal(user_id, goal)
+    return jsonify({"success": True, "progress": week_progress(user_id, _tz_minutes())})
+
+
+@api_bp.route("/me/bell", methods=["GET"])
+@login_required_api
+def my_bell():
+    """The header bell: unread count + the latest nudges (services/nudge_service.py)."""
+    if not DB_AVAILABLE:
+        return jsonify({"success": True, "unread": 0, "items": []})
+    from db import list_notifications
+
+    return jsonify({"success": True, **list_notifications(get_current_user_id())})
+
+
+@api_bp.route("/me/bell/read", methods=["POST"])
+@login_required_api
+def read_my_bell():
+    """Body: {ids: [..]} marks those read; no ids marks everything read."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import list_notifications, mark_notifications_read
+
+    ids = (request.get_json(silent=True) or {}).get("ids")
+    user_id = get_current_user_id()
+    mark_notifications_read(user_id, ids if isinstance(ids, list) else None)
+    return jsonify({"success": True, "unread": list_notifications(user_id, limit=1)["unread"]})
+
+
+@api_bp.route("/me/notifications/ideas-email/send-now", methods=["POST"])
+@login_required_api
+def send_my_ideas_email_now():
+    """Settings -> Notifications -> "Send me this week's ideas now": the same
+    email the weekly run sends, to the logged-in user's own address."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from datetime import datetime, timezone
+
+    from db import get_ideas_email_settings
+    from services.idea_digest_service import send_ideas_email
+
+    user_id = get_current_user_id()
+    settings = get_ideas_email_settings(user_id) or {}
+    if settings.get("last_sent_at"):
+        last = datetime.fromisoformat(settings["last_sent_at"])
+        if (datetime.now(timezone.utc) - last).total_seconds() < 120:
+            return jsonify({"success": False, "error": "We just sent you one - check your inbox in a minute."}), 429
+    try:
+        outcome = send_ideas_email(user_id, Config.APP_BASE_URL or request.host_url)
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.warning(f"[Ideas email] Could not send to user {user_id}: {e}")
+        return jsonify({"success": False, "error": "The email could not be sent. Please try again later."}), 502
+    if not outcome["sent"]:
+        return jsonify({"success": False, "error": "There are no ideas to send yet - add your website in My Brand Configuration first."}), 409
+    return jsonify({"success": True, "email": settings.get("email"), "ideas": outcome["ideas"]})
+
+
+_UNSUBSCRIBE_PAGE = """<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Email settings - AVIR AI</title></head>
+<body style="margin:0;background:#f8f9fc;font-family:'Segoe UI',Arial,sans-serif;color:#172033">
+<div style="max-width:440px;margin:12vh auto;padding:32px;background:#fff;border:1px solid #e6e8ef;border-radius:16px;text-align:center">
+<h1 style="font-size:20px;margin:0 0 10px">{title}</h1>
+<p style="font-size:14.5px;line-height:1.6;color:#475569;margin:0 0 22px">{text}</p>
+{action}
+</div></body></html>"""
+
+
+@api_bp.route("/notifications/ideas-email/unsubscribe/<token>", methods=["GET", "POST"], defaults={"kind": "ideas"})
+@api_bp.route("/notifications/nudges-email/unsubscribe/<token>", methods=["GET", "POST"], defaults={"kind": "nudges"})
+@api_bp.route("/notifications/recap-email/unsubscribe/<token>", methods=["GET", "POST"], defaults={"kind": "recap"})
+def unsubscribe_ideas_email(token, kind):
+    """The unsubscribe link of the weekly ideas email (kind "ideas") or of
+    the nudge emails ("nudges") - works without logging in (the token is
+    signed, and only valid for its own kind). Opening it only asks; the
+    button, or a mail app's one-click unsubscribe (a POST), switches that
+    email off - so a mail scanner that pre-opens links can't unsubscribe anyone."""
+    from html import escape
+
+    from services.idea_digest_service import user_from_unsubscribe_token
+
+    what = {"ideas": "weekly ideas email", "nudges": "reminder emails", "recap": "monthly recap email"}[kind]
+    user_id = user_from_unsubscribe_token(token, kind)
+    if not user_id or not DB_AVAILABLE:
+        return _UNSUBSCRIBE_PAGE.format(
+            title="This link isn't valid", action="",
+            text="We couldn't read this unsubscribe link. You can switch these emails off under Settings &rarr; Notifications.",
+        ), 400
+    if request.method == "POST":
+        from db import set_ideas_email_enabled, set_nudge_email_enabled, set_recap_email_enabled
+
+        {"ideas": set_ideas_email_enabled, "nudges": set_nudge_email_enabled, "recap": set_recap_email_enabled}[kind](user_id, False)
+        return _UNSUBSCRIBE_PAGE.format(
+            title="You're unsubscribed", action="",
+            text=f"You won't get the {what} any more. You can switch it back on any time under Settings &rarr; Notifications.",
+        )
+    return _UNSUBSCRIBE_PAGE.format(
+        title=f"Stop the {what}?",
+        text=f"You'll no longer get the {what}. Account emails, like password resets, are not affected.",
+        action=(
+            f'<form method="post" action="{escape(request.path)}">'
+            '<button type="submit" style="background:#c2410c;color:#fff;border:0;border-radius:6px;padding:12px 26px;'
+            'font-size:15px;font-weight:700;cursor:pointer">Unsubscribe</button></form>'
+        ),
     )
 
 

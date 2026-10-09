@@ -942,7 +942,7 @@
     <div class="admin-panel-backdrop" id="imageAccessBackdrop" onclick="closeImageAccessPanel()"></div>
     <aside class="admin-side-panel" id="imageAccessPanel" aria-labelledby="imageAccessTitle">
         <div class="admin-side-panel-header">
-            <h5 id="imageAccessTitle"><i class="fas fa-image text-primary me-2"></i>Image access</h5>
+            <h5 id="imageAccessTitle"><i class="fas fa-image text-primary me-2"></i>Image &amp; video access</h5>
             <button type="button" class="admin-side-panel-close" onclick="closeImageAccessPanel()" aria-label="Close">
                 <i class="fas fa-xmark"></i>
             </button>
@@ -970,6 +970,14 @@
                 <div class="small text-muted mt-1">Prices and models come from the Image Settings tab.</div>
             </div>
             <div class="small text-muted">Images count when they're created or edited, and the count resets at midnight UTC. When the limit is reached the user sees a message and the Image option is switched off until then.</div>
+            <div class="admin-form-group mt-3">
+                <label for="videoAccessSwitch">Video</label>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" role="switch" id="videoAccessSwitch">
+                    <label class="form-check-label" for="videoAccessSwitch">Allow this user to generate videos</label>
+                </div>
+                <div class="small text-muted mt-1" id="videoAccessHint">Off: the Video option shows "Soon" for this user. Videos are billed per second, so switch it on only for users who should have it.</div>
+            </div>
             <div class="alert-inline alert-inline-danger d-none mt-3" id="imageAccessError"></div>
         </div>
         <div class="admin-side-panel-footer">

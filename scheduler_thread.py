@@ -112,6 +112,8 @@ def refresh_youtube_tokens():
 def run_scheduler(app_root_path):
     logger.info("Background scheduling thread started...")
     last_refresh_time = 0
+    last_trends_time = 0
+    last_digest_time = 0
 
     while True:
         try:
@@ -127,6 +129,44 @@ def run_scheduler(app_root_path):
                 last_refresh_time = current_time
             except Exception as e:
                 logger.warning(f"Error running token refresh: {e}")
+
+        # Industry trends for "Ideas for you": once an hour, look up again the
+        # industries whose trends are over a day old (services/trend_service.py)
+        if current_time - last_trends_time >= 3600:
+            last_trends_time = current_time
+            try:
+                from services.trend_service import refresh_stale_trends
+
+                refreshed = refresh_stale_trends()
+                if refreshed:
+                    logger.info(f"Refreshed industry trends for {refreshed} industries.")
+            except Exception as e:
+                logger.warning(f"Error refreshing industry trends: {e}")
+
+        # Weekly ideas email: checked hourly; sends only on the configured day
+        # with WEEKLY_IDEAS_EMAIL=true (services/idea_digest_service.py)
+        if current_time - last_digest_time >= 3600:
+            last_digest_time = current_time
+            try:
+                from services.idea_digest_service import run_weekly_digest
+
+                run_weekly_digest()
+            except Exception as e:
+                logger.warning(f"Error running the weekly ideas email: {e}")
+            # Monthly recap: sends only early in the month with MONTHLY_RECAP_EMAIL=true
+            try:
+                from services.recap_service import run_monthly_recap
+
+                run_monthly_recap()
+            except Exception as e:
+                logger.warning(f"Error running the monthly recap: {e}")
+            # Timely nudges for the header bell (emailed too with NUDGE_EMAILS=true)
+            try:
+                from services.nudge_service import run_nudges
+
+                run_nudges()
+            except Exception as e:
+                logger.warning(f"Error running nudges: {e}")
 
         # Check every 20 seconds
         time.sleep(20)

@@ -59,14 +59,20 @@ class Config:
     HEYROUTE_IMAGE_MODEL = os.getenv("HEYROUTE_IMAGE_MODEL", "gemini-3.1-flash-image")
     #gemini-3.1-flash-lite-preview , gemini-3.1-flash-image
     # Video is generated ONLY through HeyRoute (HEYROUTE_VIDEO_API_KEY) - no
-    # other video provider is tried. grok-video: text-to-video, 6/10/15 s only,
-    # no reference image. Optionally a second HeyRoute model to try if the
-    # first fails (e.g. grok-imagine-video-1.5); empty = none.
-    HEYROUTE_VIDEO_MODEL = os.getenv("HEYROUTE_VIDEO_MODEL", "gemini-3.1-flash-lite")
+    # other video provider is tried. minimax-h3-original-768p: 4-15 s, always
+    # 1376x768 landscape, one reference image, well over ten minutes per clip
+    # (per-model rules: media_service._heyroute_video_body). Optionally a
+    # second HeyRoute model to try if the first fails; empty = none.
+    HEYROUTE_VIDEO_MODEL = os.getenv("HEYROUTE_VIDEO_MODEL", "minimax-h3-original-768p")
     HEYROUTE_VIDEO_FALLBACK_MODEL = os.getenv("HEYROUTE_VIDEO_FALLBACK_MODEL", "")
     HEYROUTE_VIDEO_RESOLUTION = os.getenv("HEYROUTE_VIDEO_RESOLUTION", "720p")
     HEYROUTE_VIDEO_SECONDS = int(os.getenv("HEYROUTE_VIDEO_SECONDS", "8"))
     HEYROUTE_VIDEO_TIMEOUT = int(os.getenv("HEYROUTE_VIDEO_TIMEOUT", "900"))
+    # What HeyRoute charges per second of generated video (its API doesn't
+    # report cost). Added to the post's cost, so it counts against the user's
+    # credits. 0.70 is minimax-h3-original-768p's price - change it with the
+    # model (HeyRoute help -> Generate videos -> Billing).
+    HEYROUTE_VIDEO_COST_PER_SECOND_USD = float(os.getenv("HEYROUTE_VIDEO_COST_PER_SECOND_USD", "0.70"))
 
     # SMTP - approval-notification emails
     SMTP_HOST = os.getenv("SMTP_HOST")
@@ -83,11 +89,52 @@ class Config:
     APP_BASE_URL = os.getenv("APP_BASE_URL")
 
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+    # "Ideas for you" (services/trend_service.py): this week's topics per
+    # industry come from Gemini with Google Search (needs a GOOGLE_API_KEY
+    # whose plan includes search grounding); when that call fails, from
+    # Google News headlines. Looked up once per industry per TRENDS_MAX_AGE_HOURS.
+    TRENDS_MODEL = os.getenv("TRENDS_MODEL", "gemini-flash-latest")
+    # Weekly ideas email (services/idea_digest_service.py): three ideas from
+    # the user's feed, each opening Studio Chat with its brief filled in.
+    # Off until WEEKLY_IDEAS_EMAIL=true - nothing is mailed by the scheduler
+    # before that. Needs SMTP and APP_BASE_URL (the links in the email).
+    # Sent on IDEAS_EMAIL_WEEKDAY (0 = Monday) from IDEAS_EMAIL_HOUR_UTC.
+    WEEKLY_IDEAS_EMAIL = os.getenv("WEEKLY_IDEAS_EMAIL", "false").lower() == "true"
+    IDEAS_EMAIL_WEEKDAY = int(os.getenv("IDEAS_EMAIL_WEEKDAY", "0"))
+    IDEAS_EMAIL_HOUR_UTC = int(os.getenv("IDEAS_EMAIL_HOUR_UTC", "4"))
+    # Timely nudges (services/nudge_service.py): an occasion NUDGE_OCCASION_DAYS
+    # away, this week's top story in the user's industry, a reminder after
+    # NUDGE_INACTIVE_DAYS without a post. They always appear under the header
+    # bell; they are also emailed only when NUDGE_EMAILS=true (needs SMTP and
+    # APP_BASE_URL). A user gets at most IDEA_EMAILS_PER_WEEK idea emails a
+    # week, the weekly one included.
+    NUDGE_EMAILS = os.getenv("NUDGE_EMAILS", "false").lower() == "true"
+    NUDGE_OCCASION_DAYS = int(os.getenv("NUDGE_OCCASION_DAYS", "5"))
+    NUDGE_INACTIVE_DAYS = int(os.getenv("NUDGE_INACTIVE_DAYS", "10"))
+    IDEA_EMAILS_PER_WEEK = int(os.getenv("IDEA_EMAILS_PER_WEEK", "2"))
+    # Monthly recap email (services/recap_service.py): what the user created
+    # last month and what to try next. Off until MONTHLY_RECAP_EMAIL=true.
+    # Sent from day RECAP_EMAIL_DAY of the month, at IDEAS_EMAIL_HOUR_UTC,
+    # only to users who created at least one post that month.
+    MONTHLY_RECAP_EMAIL = os.getenv("MONTHLY_RECAP_EMAIL", "false").lower() == "true"
+    RECAP_EMAIL_DAY = int(os.getenv("RECAP_EMAIL_DAY", "1"))
+    TRENDS_MAX_AGE_HOURS = int(os.getenv("TRENDS_MAX_AGE_HOURS", "24"))
     GEMINI_VIDEO_MODEL = os.getenv("GEMINI_VIDEO_MODEL", "veo-3.1-generate-preview")
     # Veo 3.1 accepts only 4, 6 or 8 seconds (8 when a reference image is
     # given); any other value is rejected, e.g. the 5 previously hard-coded.
     GEMINI_VIDEO_DURATION = int(os.getenv("GEMINI_VIDEO_DURATION", "8"))
     GENERATE_NATIVE_AUDIO = os.getenv("GENERATE_NATIVE_AUDIO", "true").lower() == "true"
+    # The video model makes the sound itself (minimax-h3 and grok-imagine
+    # return video + audio in one file; the narration is part of their
+    # prompt). true = when a clip still comes back silent, add a separate
+    # text-to-speech voiceover; false = leave it silent.
+    VIDEO_TTS_FALLBACK = os.getenv("VIDEO_TTS_FALLBACK", "false").lower() == "true"
+    # That fallback voiceover: Gemini speech (GOOGLE_API_KEY), a
+    # natural human-sounding voice. Without the key, or if the call fails, the
+    # old gTTS voice is used. Voices: Sulafat (warm), Kore (firm), Puck
+    # (upbeat), Charon (informative), Achird (friendly), Aoede (breezy), ...
+    VOICEOVER_TTS_MODEL = os.getenv("VOICEOVER_TTS_MODEL", "gemini-2.5-flash-preview-tts")
+    VOICEOVER_VOICE = os.getenv("VOICEOVER_VOICE", "Sulafat")
 
     # Mock LLM Mode toggle (true/false)
     USE_MOCK_LLM = os.getenv("USE_MOCK_LLM", "false").lower() in ("true", "1", "yes")

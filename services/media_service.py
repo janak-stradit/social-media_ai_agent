@@ -463,44 +463,36 @@ class MediaGenerationService:
         cleaned = re.sub(r"\s+", " ", cleaned).strip()
         return cleaned
 
+    _VIDEO_PROMPT_LIMIT = 1500
+    # Aspect ratio per platform (width, height); anything else is 16:9.
+    _VIDEO_ASPECTS = {"instagram": (9, 16), "facebook": (16, 9), "linkedin": (16, 9)}
+
     def _build_video_prompt(
         self, caption: str, platform: str, tone: str | None = None, has_reference_image: bool = False
     ) -> str:
+        """The video model's prompt: the brief's own scene description (the
+        strategy's video_prompt when the caller has one, else the caption)
+        with the platform's style. The scene is never swapped for a stock one."""
         platform_style = {
-            "instagram": "vibrant portrait vertical video, cinematic lighting, modern style",
-            "facebook": "professional, warm corporate, polished corporate video",
-            "linkedin": "premium executive, corporate office, clean aesthetic, professional",
-        }.get(platform, "highly professional and cinematic")
+            "instagram": "vibrant vertical video, modern style",
+            "facebook": "warm, polished brand video",
+            "linkedin": "premium, clean, professional aesthetic",
+        }.get(platform, "professional and cinematic")
 
-        lower_caption = caption.lower()
-        is_character_continuation = any(
-            k in lower_caption
-            for k in ["character", "preserve", "attached", "aidan", "continuation", "part 1", "part 2", "same face"]
+        scene = self._clean_motion_text(caption) or "A polished brand promo scene"
+        if len(scene) > self._VIDEO_PROMPT_LIMIT:
+            # Cut at the last full sentence that fits
+            cut = scene[: self._VIDEO_PROMPT_LIMIT]
+            scene = cut[: cut.rfind(". ") + 1] or cut
+        reference = (
+            "Start from the provided image as the first frame and keep its subject, colors and composition. "
+            if has_reference_image
+            else ""
         )
-
-        if has_reference_image or is_character_continuation:
-            prompt = (
-                "Animate source image character: professional executive speaking confidently to camera "
-                "with realistic speaking lip sync, subtle hand gestures, organic head nods, and direct eye contact. "
-                "Steady medium shot with slow cinematic push-in. Preserve exact face, hairstyle, skin tone, outfit, logo, lighting, "
-                "and modern office background. 4k photorealistic video, 24fps, smooth natural motion."
-            )
-        else:
-            cleaned_desc = self._clean_motion_text(caption)
-            if len(cleaned_desc) > 200:
-                cleaned_desc = self._compress_video_prompt(cleaned_desc)
-            if not cleaned_desc:
-                cleaned_desc = "Professional presenter speaking directly to camera in a modern corporate studio"
-
-            prompt = (
-                f"High-quality cinematic video: {cleaned_desc}. "
-                f"Style: {platform_style}. "
-                f"Realistic character motion, natural facial expressions, continuous speaking lip-sync, "
-                f"subtle gestures, professional studio lighting, 4k ultra-high-fidelity render."
-            )
-
-        # Ensure strict adherence to model limits (Amazon Nova Reel 512-character max)
-        return prompt[:480]
+        return (
+            f"{reference}{scene.rstrip('.')}. "
+            f"Style: {platform_style}. Smooth natural motion, cinematic lighting, high-fidelity render."
+        )
 
     def _generate_video_openrouter(self, prompt: str, platform: str, image_path: str | None = None) -> dict:
         """Submit an OpenRouter video job, poll until done, and save the MP4 locally."""
@@ -997,9 +989,10 @@ class MediaGenerationService:
         if not task_id:
             raise RuntimeError(f"HeyRoute video create returned no task id: {created.text[:300]}")
 
-        deadline = time.time() + Config.HEYROUTE_VIDEO_TIMEOUT
+        timeout = self._heyroute_video_timeout(body.get("model") or "")
+        deadline = time.time() + timeout
         while time.time() < deadline:
-            time.sleep(10)
+            time.sleep(15)
             task = requests.get(f"{base}/videos/{task_id}", headers=headers, timeout=60).json() or {}
             status = task.get("status")
             if status == "completed":
@@ -1009,35 +1002,72 @@ class MediaGenerationService:
             if status == "failed":
                 raise RuntimeError(f"HeyRoute video failed ({body.get('model')}): "
                                    f"{(task.get('error') or {}).get('message', 'task failed')}")
-        raise RuntimeError(f"HeyRoute video timed out after {Config.HEYROUTE_VIDEO_TIMEOUT}s (task {task_id}).")
+        raise RuntimeError(f"HeyRoute video timed out after {timeout}s (task {task_id}).")
+
+    # HeyRoute video models differ in what they accept (help -> Generate videos):
+    #   grok-video          6 / 10 / 15 s only; no ratio, resolution or reference image; silent
+    #   grok-imagine-video* 1-15 s; ratio, resolution, first-frame image; own soundtrack
+    #   minimax-h3-*        4-15 s (quantized tier: 4-10); always its own frame (768p is
+    #                       1376x768 landscape - ratio is ignored); exactly ONE reference
+    #                       item; own soundtrack (video + audio in one pass); a clip
+    #                       takes well over ten minutes
+    @staticmethod
+    def _heyroute_video_family(model: str) -> str:
+        if model.startswith("minimax-h3"):
+            return "minimax"
+        return "grok-imagine" if model.startswith("grok-imagine") else "grok-video"
+
+    @classmethod
+    def _heyroute_makes_audio(cls, model: str) -> bool:
+        """Models that return video + audio in one file: they are given the narration in the prompt."""
+        return cls._heyroute_video_family(model) != "grok-video"
 
     @staticmethod
-    def _heyroute_takes_reference(model: str) -> bool:
-        """grok-imagine-video* accept a first-frame image, ratio and resolution;
-        grok-video accepts none of them (HeyRoute: forwarded but unverified)."""
-        return model.startswith("grok-imagine")
+    def _video_has_audio(path: str) -> bool:
+        """True when the MP4 at `path` really carries an audio track."""
+        try:
+            from moviepy.video.io.VideoFileClip import VideoFileClip
+
+            with VideoFileClip(path) as clip:
+                return clip.audio is not None
+        except Exception:  # noqa: BLE001 - unreadable file: treat as silent
+            return False
+
+    @classmethod
+    def _heyroute_takes_reference(cls, model: str) -> bool:
+        return cls._heyroute_video_family(model) != "grok-video"
+
+    @classmethod
+    def _heyroute_video_timeout(cls, model: str) -> int:
+        """HeyRoute: allow at least 30 minutes for the minimax-h3 tiers."""
+        slow = cls._heyroute_video_family(model) == "minimax"
+        return max(Config.HEYROUTE_VIDEO_TIMEOUT, 1800) if slow else Config.HEYROUTE_VIDEO_TIMEOUT
 
     def _heyroute_video_body(self, model: str, prompt: str, platform: str, image_path: str | None) -> dict:
+        family = self._heyroute_video_family(model)
         seconds = max(1, min(15, int(Config.HEYROUTE_VIDEO_SECONDS)))
-        if not self._heyroute_takes_reference(model):
-            # grok-video: only 6 / 10 / 15 seconds (anything else is a 400),
-            # and ratio / resolution / reference images are not supported.
+        if family == "grok-video":
+            # Anything but 6 / 10 / 15 seconds is a 400
             return {"model": model, "prompt": prompt,
                     "seconds": str(min((6, 10, 15), key=lambda s: abs(s - seconds)))}
-        body = {
-            "model": model,
-            "prompt": prompt,
-            "seconds": str(seconds),
-            "ratio": self._HEYROUTE_VIDEO_RATIOS.get(platform, "16:9"),
-            "resolution": Config.HEYROUTE_VIDEO_RESOLUTION,
-        }
+        if family == "minimax":
+            body = {"model": model, "prompt": prompt,
+                    "seconds": str(max(4, min(10 if "quantized" in model else 15, seconds)))}
+        else:
+            body = {
+                "model": model,
+                "prompt": prompt,
+                "seconds": str(seconds),
+                "ratio": self._HEYROUTE_VIDEO_RATIOS.get(platform, "16:9"),
+                "resolution": Config.HEYROUTE_VIDEO_RESOLUTION,
+            }
         resolved = self._resolve_image_path(image_path)
         if resolved and os.path.exists(resolved):
-            body["input_reference"] = self._file_to_data_uri(resolved)
+            body["input_reference"] = self._file_to_data_uri(resolved)  # one item, never an array
         return body
 
     def _generate_video_heyroute(self, prompt: str, platform: str, image_path: str | None = None) -> dict:
-        """HEYROUTE_VIDEO_MODEL (grok-video by default), then
+        """HEYROUTE_VIDEO_MODEL, then
         HEYROUTE_VIDEO_FALLBACK_MODEL if one is set. Same return shape as
         _generate_google_gemini_video. Raises if every attempt fails."""
         key = Config.HEYROUTE_VIDEO_API_KEY
@@ -1045,21 +1075,20 @@ class MediaGenerationService:
             raise RuntimeError("HEYROUTE_VIDEO_API_KEY is not configured.")
 
         models = [m for m in (Config.HEYROUTE_VIDEO_MODEL, Config.HEYROUTE_VIDEO_FALLBACK_MODEL) if m]
-        # grok-imagine generates its own audio; grok-video is treated as silent
-        # so the existing narration step runs.
-        attempts = [
-            (self._heyroute_video_body(m, prompt, platform, image_path), self._heyroute_takes_reference(m))
-            for m in models
-        ]
+        attempts = [self._heyroute_video_body(m, prompt, platform, image_path) for m in models]
 
         last_error = None
-        for body, native_audio in attempts:
+        for body in attempts:
             try:
                 logger.info(f"Generating video via HeyRoute {body['model']}...")
                 content = self._heyroute_video_task(key, body)
                 filename = f"heyroute_video_{uuid.uuid4().hex[:8]}.mp4"
                 with open(os.path.join(self.upload_folder, filename), "wb") as f:
                     f.write(content)
+                # Whether the model's own soundtrack is there is read off the file, not assumed
+                native_audio = self._video_has_audio(os.path.join(self.upload_folder, filename))
+                if not native_audio:
+                    logger.warning(f"HeyRoute {body['model']} returned a video with no audio track.")
                 return {
                     "success": True,
                     "url": f"/static/uploads/{filename}",
@@ -1067,6 +1096,7 @@ class MediaGenerationService:
                     "model": body["model"],
                     "provider": f"HeyRoute ({body['model']})",
                     "duration": int(body["seconds"]),
+                    "cost": round(int(body["seconds"]) * Config.HEYROUTE_VIDEO_COST_PER_SECOND_USD, 6),
                     "has_native_audio": native_audio,
                     "audio_mode": "single_pass_native" if native_audio else "none",
                 }
@@ -1449,6 +1479,51 @@ class MediaGenerationService:
             "cost": 0.0,
             "model": "mock-media-v1",
         }
+
+    def _generate_mock_video(self, platform: str, caption: str) -> dict:
+        """A real (2 s, plain) MP4 for offline testing, so the page's video
+        player has something it can play."""
+        import subprocess
+
+        import imageio_ffmpeg
+
+        aspect_w, aspect_h = self._VIDEO_ASPECTS.get(platform, (16, 9))
+        w, h = (1280, 720) if aspect_w > aspect_h else (720, 1280)
+        filename = f"mock_video_{uuid.uuid4().hex[:8]}.mp4"
+        filepath = os.path.join(self.upload_folder, filename)
+        try:
+            subprocess.run(
+                [imageio_ffmpeg.get_ffmpeg_exe(), "-y", "-loglevel", "error", "-f", "lavfi",
+                 "-i", f"color=c=0x1e293b:s={w}x{h}:d=2", "-pix_fmt", "yuv420p", filepath],
+                check=True, timeout=60,
+            )
+        except Exception as err:
+            return {"success": False, "type": "video", "platform": platform, "error": f"Mock video failed: {err}"}
+        return {
+            "success": True,
+            "type": "video",
+            "platform": platform,
+            "url": f"/static/uploads/{filename}",
+            "prompt": caption or "Mock video placeholder",
+            "duration": 2,
+            "resolution": f"{w}x{h}",
+            "provider": "mock",
+            "cost": 0.0,
+            "model": "mock-media-v1",
+        }
+
+    def _video_resolution(self, url: str | None) -> str | None:
+        """ "WxH" of a saved video, or None when it can't be read."""
+        path = self._resolve_image_path(url)
+        if not path or not os.path.exists(path):
+            return None
+        try:
+            from moviepy.video.io.VideoFileClip import VideoFileClip
+
+            with VideoFileClip(path) as clip:
+                return f"{clip.w}x{clip.h}"
+        except Exception:
+            return None
 
     def _generate_image_openai(self, prompt: str, platform: str, size: str) -> dict:
         """Generate an image using OpenAI DALL-E 3."""
@@ -1940,10 +2015,10 @@ class MediaGenerationService:
 
         if getattr(Config, "USE_MOCK_LLM", False):
             logger.info("USE_MOCK_LLM is enabled. Generating mock video asset...")
-            return self._generate_mock_media(platform, "video", caption)
+            return self._generate_mock_video(platform, caption)
 
         # Video is generated ONLY through HeyRoute (HEYROUTE_VIDEO_API_KEY,
-        # HEYROUTE_VIDEO_MODEL = grok-video by default). No other video provider
+        # HEYROUTE_VIDEO_MODEL). No other video provider
         # (Gemini / Veo, Bedrock) is tried: when HeyRoute fails, the request
         # fails with HeyRoute's own error.
         if not Config.HEYROUTE_VIDEO_API_KEY:
@@ -1955,18 +2030,31 @@ class MediaGenerationService:
             }
 
         video_models = [m for m in (Config.HEYROUTE_VIDEO_MODEL, Config.HEYROUTE_VIDEO_FALLBACK_MODEL) if m]
-        # A keyframe image only helps a model that takes one (grok-imagine);
-        # grok-video ignores reference images, so for it none is generated or
-        # billed.
+        # grok-video ignores reference images. minimax-h3 uses one when the post
+        # has it; only grok-imagine gets a keyframe generated (and billed) for it.
         takes_reference = any(self._heyroute_takes_reference(m) for m in video_models)
+        wants_keyframe = any(self._heyroute_video_family(m) == "grok-imagine" for m in video_models)
         resolved_image = self._resolve_image_path(image_path) if takes_reference else None
-        if takes_reference and not resolved_image:
+        keyframe_cost = 0.0  # the keyframe is a billed image: charged with the video
+        if wants_keyframe and not resolved_image:
             logger.info("No user image uploaded for video. Auto-generating keyframe image...")
             keyframe_res = self.generate_image(caption, platform, tone)
             if keyframe_res.get("success") and keyframe_res.get("url"):
                 resolved_image = self._resolve_image_path(keyframe_res["url"])
+                keyframe_cost = float(keyframe_res.get("cost") or 0)
+        source_image_url = f"/{resolved_image.replace(os.sep, '/').lstrip('/')}" if resolved_image else None
 
         prompt = self._build_video_prompt(caption, platform, tone, has_reference_image=bool(resolved_image))
+        if any(self._heyroute_makes_audio(m) for m in video_models):
+            # The model makes video and sound together: the narration goes in its
+            # prompt, short enough to finish before the logo's last two seconds
+            clip_seconds = max(4, min(self._MAX_VIDEO_SECONDS, int(Config.HEYROUTE_VIDEO_SECONDS)))
+            narration = self._extract_speech_dialogue(caption, max_seconds=max(3, clip_seconds - 2))
+            if narration:
+                prompt += (
+                    f' Audio: a warm, natural human narrator says, in a relaxed conversational voice: "{narration}" '
+                    "Soft background music under the voice. No other speech."
+                )
 
         try:
             try:
@@ -1991,39 +2079,34 @@ class MediaGenerationService:
                     "platform": platform,
                     "url": result["url"],
                     "prompt": prompt,
-                    "provider": result.get("provider", "Google Gemini (Veo)"),
+                    "duration": result.get("duration"),
+                    "resolution": self._video_resolution(result["url"]),
+                    "model": result.get("model"),
+                    "cost": round(float(result.get("cost") or 0) + keyframe_cost, 6),
+                    "provider": result.get("provider"),
                     "has_native_audio": True,
                     "audio_mode": "single_pass_native",
+                    "source_image_url": source_image_url,
                 }
 
-            # --- Video Post-processing for Silent Video Models (Fallback/AWS Bedrock) ---
+            # --- Post-processing for a clip that came back without audio ---
             if result.get("url"):
                 try:
                     # Resolve silent video path
                     silent_video_path = self._resolve_image_path(result["url"])
                     if silent_video_path and os.path.exists(silent_video_path):
                         # Extract dialogue for TTS
-                        tts_text = self._extract_speech_dialogue(caption)
+                        # The voiceover has to fit the clip: the final video is never
+                        # longer than what was generated (15 s at most)
+                        clip_seconds = min(self._MAX_VIDEO_SECONDS, float(result.get("duration") or self._MAX_VIDEO_SECONDS))
+                        # A silent clip stays silent unless the separate voiceover is switched on
+                        tts_text = (
+                            self._extract_speech_dialogue(caption, max_seconds=clip_seconds)
+                            if Config.VIDEO_TTS_FALLBACK else None
+                        )
                         temp_audio_path = None
                         if tts_text:
-                            from gtts import gTTS
-
-                            tld_map = {
-                                "b2b tech leader": "co.uk",
-                                "bold viral marketer": "com",
-                                "friendly lifestyle coach": "com.au",
-                                "high-growth startup": "co.in",
-                                "standard enterprise": "ca",
-                                "professional": "co.uk",
-                                "casual": "com.au",
-                                "enthusiastic": "com",
-                                "urgent": "com",
-                            }
-                            tld_accent = tld_map.get((tone or "").lower(), "com")
-                            temp_audio_name = f"temp_tts_{uuid.uuid4().hex[:8]}.mp3"
-                            temp_audio_path = os.path.join(self.upload_folder, temp_audio_name)
-                            tts = gTTS(text=tts_text, lang="en", tld=tld_accent)
-                            tts.save(temp_audio_path)
+                            temp_audio_path = self._synthesize_voiceover(tts_text, tone)
 
                         # Output path
                         processed_video_name = f"processed_{os.path.basename(silent_video_path)}"
@@ -2032,25 +2115,17 @@ class MediaGenerationService:
                         from moviepy.audio.io.AudioFileClip import AudioFileClip
                         from moviepy.video.io.VideoFileClip import VideoFileClip
 
-                        try:
-                            from moviepy.video.fx.loop import loop
-                        except ImportError:
-                            try:
-                                from moviepy.video.fx.all import loop
-                            except ImportError:
-                                loop = None
-
                         with VideoFileClip(silent_video_path) as video_clip:
-                            # 1. Crop and resize to exactly 1080x1420 px
-                            target_w, target_h = 1080, 1420
-                            target_aspect = target_w / target_h
+                            # 1. Crop to the platform's aspect ratio (no upscaling)
+                            aspect_w, aspect_h = self._VIDEO_ASPECTS.get(platform, (16, 9))
+                            target_aspect = aspect_w / aspect_h
                             orig_w, orig_h = video_clip.w, video_clip.h
                             orig_aspect = orig_w / orig_h
 
                             if orig_aspect > target_aspect:
                                 # Clip is wider than target aspect ratio. Keep height, crop width.
                                 crop_h = orig_h
-                                crop_w = int(orig_h * target_aspect)
+                                crop_w = int(orig_h * target_aspect) // 2 * 2  # libx264 needs even sizes
                                 x1 = (orig_w - crop_w) // 2
                                 y1 = 0
                                 x2 = x1 + crop_w
@@ -2058,7 +2133,7 @@ class MediaGenerationService:
                             else:
                                 # Clip is taller than target aspect ratio. Keep width, crop height.
                                 crop_w = orig_w
-                                crop_h = int(orig_w / target_aspect)
+                                crop_h = int(orig_w / target_aspect) // 2 * 2
                                 x1 = 0
                                 y1 = (orig_h - crop_h) // 2
                                 x2 = crop_w
@@ -2077,27 +2152,27 @@ class MediaGenerationService:
                                 except ImportError:
                                     video_cropped = video_clip
 
-                            if hasattr(video_cropped, "resized"):
-                                video_resized = video_cropped.resized((target_w, target_h))
-                            else:
-                                video_resized = video_cropped.resize((target_w, target_h))
+                            video_resized = video_cropped
 
                             # 2. Merge audio if available
                             if temp_audio_path and os.path.exists(temp_audio_path):
                                 with AudioFileClip(temp_audio_path) as audio_clip:
-                                    if audio_clip.duration > video_resized.duration and loop is not None:
-                                        video_clip_looped = loop(video_resized, duration=audio_clip.duration)
-                                        if hasattr(video_clip_looped, "with_audio"):
-                                            final_clip = video_clip_looped.with_audio(audio_clip)
-                                        else:
-                                            final_clip = video_clip_looped.set_audio(audio_clip)
+                                    # The video keeps its own length (never looped to fit a
+                                    # long voiceover, never over 15 s); audio that still
+                                    # overruns is cut at the end of the clip
+                                    final_seconds = min(video_resized.duration, self._MAX_VIDEO_SECONDS)
+                                    if hasattr(video_resized, "with_audio"):
+                                        if video_resized.duration > final_seconds:
+                                            video_resized = video_resized.subclipped(0, final_seconds)
+                                        if audio_clip.duration > final_seconds:
+                                            audio_clip = audio_clip.subclipped(0, final_seconds)
+                                        final_clip = video_resized.with_audio(audio_clip)
                                     else:
-                                        if hasattr(video_resized, "with_audio"):
-                                            video_trimmed = video_resized.with_duration(audio_clip.duration)
-                                            final_clip = video_trimmed.with_audio(audio_clip)
-                                        else:
-                                            video_trimmed = video_resized.subclip(0, audio_clip.duration)
-                                            final_clip = video_trimmed.set_audio(audio_clip)
+                                        if video_resized.duration > final_seconds:
+                                            video_resized = video_resized.subclip(0, final_seconds)
+                                        if audio_clip.duration > final_seconds:
+                                            audio_clip = audio_clip.subclip(0, final_seconds)
+                                        final_clip = video_resized.set_audio(audio_clip)
 
                                     final_clip.write_videofile(
                                         processed_video_path,
@@ -2124,7 +2199,7 @@ class MediaGenerationService:
                         if os.path.exists(processed_video_path):
                             os.replace(processed_video_path, silent_video_path)
                             logger.info(
-                                f"Video successfully cropped/resized to 1080x1420 px at {silent_video_path}"
+                                f"Video cropped to {aspect_w}:{aspect_h} at {silent_video_path}"
                             )
                     # Apply watermark after processing/saving
                     if silent_video_path is not None:
@@ -2140,14 +2215,13 @@ class MediaGenerationService:
                 "url": result["url"],
                 "prompt": result["prompt"],
                 "duration": result.get("duration"),
-                "resolution": "1080x1420",
+                "resolution": self._video_resolution(result["url"]),
                 "model": result["model"],
-                "cost": result.get("cost"),
+                "cost": round(float(result.get("cost") or 0) + keyframe_cost, 6),
                 "provider": result.get("provider") or self.media_provider,
-                # resolved_image can legitimately be None here (no reference image was provided
-                # or auto-keyframe generation failed) -- video generation still proceeds without
-                # one, so this field is omitted rather than crashing on None.replace().
-                "source_image_url": (f"/{resolved_image.replace(os.sep, '/').lstrip('/')}" if resolved_image else None),
+                # None when there is no reference image (none given, or the
+                # auto-keyframe failed) - the video is generated without one.
+                "source_image_url": source_image_url,
             }
         except Exception as e:
             return {
@@ -2366,37 +2440,88 @@ Return JSON with keys:
                 f"Sleek visual composition, shallow depth of field, studio lighting, highly detailed."
             )
 
-    def _compress_video_prompt(self, user_caption: str) -> str:
-        """
-        Compress a long user prompt/caption into a highly optimized visual motion prompt
-        for video generation models (like Nova Reel), strictly under 400 characters.
-        """
-        system_prompt = (
-            "You are an expert AI video prompt engineer. Your job is to compress a user's video generation request "
-            "into a concise, highly descriptive motion and visual prompt suitable for video generation models (e.g. Amazon Nova Reel). "
-            "Focus purely on: subject actions, character movements (like lip sync, speaking, hand gestures, head nods, eye contact), "
-            "camera motion (like cinematic push-in, steady shot), and style. "
-            "Remove all conversational meta-instructions, negations (do not say 'no text', 'no cuts'), and redundant words. "
-            "SOURCE OF TRUTH ENFORCEMENT: The visual prompt must exactly represent the project and problem context given in the request. Do NOT invent or hallucinate features, projects, or problems. "
-            "The output must be a single, continuous prompt, strictly under 400 characters."
-        )
-        try:
-            # Same reasoning-model headroom concern as _enhance_image_prompt above.
-            compressed = self.llm_service.generate(
-                system_prompt=system_prompt, user_prompt=user_caption, temperature=0.3, max_tokens=500
-            )
-            compressed_str = compressed.strip()
-            return compressed_str[:400]
-        except Exception as e:
-            logger.warning(f"Prompt compression failed: {e}. Using fallback truncation.")
-            return user_caption[:400]
+    def _synthesize_voiceover(self, text: str, tone: str) -> str:
+        """Speak `text` into a temp audio file in the upload folder and return
+        its path: a natural Gemini voice when GOOGLE_API_KEY is set, else (or
+        if that call fails) the robotic gTTS voice."""
+        base = os.path.join(self.upload_folder, f"temp_tts_{uuid.uuid4().hex[:8]}")
+        google_key = getattr(Config, "GOOGLE_API_KEY", None) or os.getenv("GOOGLE_API_KEY")
+        if google_key:
+            try:
+                import re
+                import wave
 
-    def _extract_speech_dialogue(self, caption: str) -> str:
+                import google.genai as genai
+                from google.genai import types
+
+                style = f"a {tone.lower()}" if tone and tone.lower() not in ("auto", "auto-detect") else "a warm"
+                # 60 s cap: without it a stalled connection holds the whole video back
+                client = genai.Client(api_key=google_key, http_options=types.HttpOptions(timeout=60_000))
+                response = client.models.generate_content(
+                    model=Config.VOICEOVER_TTS_MODEL,
+                    contents=f"Read this aloud as {style}, natural human narrator of a brand video, "
+                             f"at a relaxed conversational pace: {text}",
+                    config=types.GenerateContentConfig(
+                        response_modalities=["AUDIO"],
+                        speech_config=types.SpeechConfig(
+                            voice_config=types.VoiceConfig(
+                                prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=Config.VOICEOVER_VOICE)
+                            )
+                        ),
+                    ),
+                )
+                audio = response.candidates[0].content.parts[0].inline_data
+                # Raw 16-bit mono PCM, e.g. "audio/L16;codec=pcm;rate=24000"
+                rate = re.search(r"rate=(\d+)", audio.mime_type or "")
+                with wave.open(base + ".wav", "wb") as wav:
+                    wav.setnchannels(1)
+                    wav.setsampwidth(2)
+                    wav.setframerate(int(rate.group(1)) if rate else 24000)
+                    wav.writeframes(audio.data)
+                return base + ".wav"
+            except Exception as tts_err:  # noqa: BLE001 - a voiceover is better robotic than missing
+                logger.warning(f"Gemini voiceover failed, using gTTS: {tts_err}")
+
+        from gtts import gTTS
+
+        tld_map = {
+            "b2b tech leader": "co.uk",
+            "bold viral marketer": "com",
+            "friendly lifestyle coach": "com.au",
+            "high-growth startup": "co.in",
+            "standard enterprise": "ca",
+            "professional": "co.uk",
+            "casual": "com.au",
+            "enthusiastic": "com",
+            "urgent": "com",
+        }
+        gTTS(text=text, lang="en", tld=tld_map.get((tone or "").lower(), "com")).save(base + ".mp3")
+        return base + ".mp3"
+
+    _MAX_VIDEO_SECONDS = 15  # no finished video is longer than this
+    _VOICEOVER_WORDS_PER_SECOND = 2.2  # relaxed narration pace
+
+    @staticmethod
+    def _fit_words(text: str, max_words: int) -> str:
+        """`text` cut to `max_words`, at the last sentence end when there is one."""
+        import re
+
+        words = text.split()
+        if len(words) <= max_words:
+            return text
+        cut = " ".join(words[:max_words])
+        ends = [m.end() for m in re.finditer(r"[.!?](?=\s|$)", cut)]
+        return cut[: ends[-1]] if ends else cut
+
+    def _extract_speech_dialogue(self, caption: str, max_seconds: float | None = None) -> str:
         """
         Extract only the spoken dialogue or text that should be read aloud from a prompt.
-        If no dialogue is specified, return the cleaned caption.
+        If no dialogue is specified, return the cleaned caption. With max_seconds, the
+        result is short enough to be spoken in that time.
         """
         import re
+
+        max_words = max(6, int(max_seconds * self._VOICEOVER_WORDS_PER_SECOND)) if max_seconds else None
 
         # Check for explicit 'Speak exactly this dialogue only: "..."' or similar pattern
         match = re.search(
@@ -2404,7 +2529,7 @@ Return JSON with keys:
         )
         if match:
             extracted = match.group(1).strip().lstrip("—").strip()
-            if extracted:
+            if extracted and (max_words is None or len(extracted.split()) <= max_words):
                 return extracted
 
         system_prompt = (
@@ -2415,12 +2540,17 @@ Return JSON with keys:
             "only the content inside those quotes. If there is no specific dialogue, return a cleaned version "
             "of the prompt suitable for speaking."
         )
+        if max_words:
+            system_prompt += (
+                f" The voiceover must be spoken in under {int(max_seconds)} seconds: write at most {max_words} "
+                "words, as one or two complete sentences that carry the main message. Never exceed the word limit."
+            )
         try:
             dialogue = self.llm_service.generate(
                 system_prompt=system_prompt, user_prompt=caption, temperature=0.1, max_tokens=300
             )
-            clean_dialogue = dialogue.strip().replace('"', "").lstrip("—").strip()
-            return clean_dialogue or self._clean_text_for_tts(caption)
+            clean_dialogue = dialogue.strip().replace('"', "").lstrip("—").strip() or self._clean_text_for_tts(caption)
         except Exception as e:
             logger.warning(f"Dialogue extraction failed: {e}")
-            return self._clean_text_for_tts(caption)
+            clean_dialogue = self._clean_text_for_tts(caption)
+        return self._fit_words(clean_dialogue, max_words) if max_words else clean_dialogue
