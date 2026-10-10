@@ -1332,7 +1332,7 @@ $(document).ready(function () {
         $('#emailAutomationList').html(EMAIL_AUTOMATIONS.map(a => {
             const st = (r.automation || {})[a.id] || {};
             const on = !!st.enabled;
-            return `<div class="em-switch">
+            return `<div class="em-switch form-check form-switch">
                 <input class="form-check-input" type="checkbox" role="switch" id="emAuto_${a.id}" data-automation="${a.id}" ${on ? 'checked' : ''}
                     aria-describedby="emAutoHelp_${a.id}">
                 <div><label for="emAuto_${a.id}" class="mb-0"><strong><i class="fas ${a.icon} me-1" style="color:var(--brand-strong)"></i>${a.name}</strong></label>
@@ -1382,24 +1382,39 @@ $(document).ready(function () {
             $('#emIndustry').append(opt(r.industries));
             $('#emAccountType').append(opt(r.account_types));
             $('#emRegion').append(opt(r.regions));
-            const regionName = { USA: 'US', India: 'India', UAE: 'UAE / GCC' };
-            $('#emOccasion').html((r.occasions || []).length
-                ? r.occasions.map(o => `<option value="${escapeAttr(o.key)}">${escapeHtml(o.name)} &middot; ${escapeHtml(o.date)} &middot; ${regionName[o.region] || o.region} (in ${o.days_until} days)</option>`).join('')
-                : '<option value="">No occasions in the next 60 days</option>');
+            fillOccasions();
         });
+    }
+
+    // Festival emails go to the occasion's market: list only the chosen market's occasions
+    const OCCASION_MARKET = { USA: 'US', India: 'India', UAE: 'UAE/GCC' };
+    const MARKET_NAME = { US: 'US', India: 'India', 'UAE/GCC': 'UAE / GCC' };
+    function fillOccasions() {
+        const market = $('#emRegion').val();
+        const list = ((emailState.options || {}).occasions || []).filter(o => !market || OCCASION_MARKET[o.region] === market);
+        $('#emOccasion').html(list.length
+            ? list.map(o => `<option value="${escapeAttr(o.key)}">${escapeHtml(o.name)} &middot; ${escapeHtml(o.date)} &middot; ${MARKET_NAME[OCCASION_MARKET[o.region]] || o.region} (in ${o.days_until} days)</option>`).join('')
+            : `<option value="">No ${market ? MARKET_NAME[market] + ' ' : ''}occasions in the next 60 days</option>`);
     }
 
     $(document).on('change', 'input[name="emCampaignKind"]', function () {
         $('#emOccasionWrap').toggleClass('d-none', $(this).val() !== 'festival');
         resetCampaignPreview();
     });
-    $(document).on('change', '#emIndustry, #emAccountType, #emRegion, #emOccasion', resetCampaignPreview);
+    $(document).on('change', '#emIndustry, #emAccountType, #emOccasion', resetCampaignPreview);
+    $(document).on('change', '#emRegion', function () { fillOccasions(); resetCampaignPreview(); });
 
     $('#emPreviewBtn').on('click', function () {
         const $btn = $(this).prop('disabled', true);
         $.ajax({ url: '/api/admin/email-campaign/preview', method: 'POST', contentType: 'application/json', data: JSON.stringify(campaignPayload()) })
             .done(function (r) {
                 const skipped = r.skipped || {};
+                if (skipped.other_market !== undefined) {
+                    $('#emPreview').removeClass('d-none').html('This occasion is in a different market from the one selected - pick an occasion for that market.');
+                    emailState.previewOk = false;
+                    $('#emSendBtn').prop('disabled', true);
+                    return;
+                }
                 const skipText = [
                     skipped.opted_out ? `${skipped.opted_out} unsubscribed` : '',
                     skipped.emailed_recently ? `${skipped.emailed_recently} emailed in the last 24h` : '',

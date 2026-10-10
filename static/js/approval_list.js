@@ -22,6 +22,7 @@ $(document).ready(function () {
     function statusBadgeHtml(status) {
         if (status === 'approved') return '<span class="ap-status ap-status-approved"><i class="fas fa-check-circle"></i>Accepted</span>';
         if (status === 'rejected') return '<span class="ap-status ap-status-rejected"><i class="fas fa-times-circle"></i>Rejected</span>';
+        if (status === 'partial') return '<span class="ap-status ap-status-partial"><i class="fas fa-circle-half-stroke"></i>Partly approved</span>';
         return '<span class="ap-status ap-status-pending"><i class="fas fa-hourglass-half"></i>Pending</span>';
     }
 
@@ -35,6 +36,7 @@ $(document).ready(function () {
         pending: ['Pending requests', 'Waiting for a reviewer to accept or reject them.'],
         approved: ['Accepted requests', 'Approved content, with who accepted it and when.'],
         rejected: ['Rejected requests', 'Content sent back, with who rejected it and when.'],
+        partial: ['Partly approved', 'Posts approved on some platforms, with changes asked on others.'],
     };
 
     // Counts in the side panel come from the unfiltered list, so they're
@@ -45,6 +47,7 @@ $(document).ready(function () {
         $('#apCountPending').text(count('pending'));
         $('#apCountApproved').text(count('approved'));
         $('#apCountRejected').text(count('rejected'));
+        $('#apCountPartial').text(count('partial'));
     }
 
     function renderList(requests) {
@@ -62,7 +65,7 @@ $(document).ready(function () {
             const shortCaption = caption.length > 140 ? caption.slice(0, 140) + '…' : caption;
             const created = req.created_at ? new Date(req.created_at).toLocaleString() : '';
             const decidedLine = req.decided_at
-                ? `<div class="ap-row-decided">${req.status === 'approved' ? 'Accepted' : 'Rejected'}${req.decided_by ? ' by ' + escapeHtml(req.decided_by) : ''} &middot; ${new Date(req.decided_at).toLocaleString()}</div>`
+                ? `<div class="ap-row-decided">${{ approved: 'Accepted', rejected: 'Rejected', partial: 'Partly approved' }[req.status] || 'Decided'}${req.decided_by ? ' by ' + escapeHtml(req.decided_by) : ''} &middot; ${new Date(req.decided_at).toLocaleString()}</div>`
                 : '';
             const pendingClass = (req.status || 'pending') === 'pending' ? ' is-pending' : '';
 
@@ -71,7 +74,9 @@ $(document).ready(function () {
                     ${thumb}
                     <div class="flex-grow-1" style="min-width: 0;">
                         <div class="ap-row-meta">
-                            <span class="ap-tag ap-tag-primary">${platformDisplayName(req.platform)}</span>
+                            ${req.items && req.items.length
+                                ? req.items.map(i => `<span class="ap-tag ap-tag-primary">${platformDisplayName(i.platform)}${i.media === 'carousel' ? ` · ${i.images.length} slides` : ''}</span>`).join('')
+                                : `<span class="ap-tag ap-tag-primary">${platformDisplayName(req.platform)}</span>`}
                             <span class="ap-tag">${escapeHtml(req.asset_type || 'content')}</span>
                             <span class="ap-row-date">${created}</span>
                         </div>

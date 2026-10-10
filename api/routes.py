@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import typing
 import urllib.parse
@@ -1764,8 +1765,14 @@ def run_image_preset():
     if preset["requires_image"] and not product:
         return jsonify({"success": False, "code": "image_required",
                         "error": f"Attach a product photo to use /{preset['id']}."}), 400
-    outputs = preset_outputs(preset, bool(data.get("all_sizes")))
     user_text = (data.get("text") or "").strip()[:500]
+    if preset.get("carousel"):
+        from services import carousel_service
+
+        carousel_aspect = carousel_service.carousel_aspect(user_text)
+        outputs = carousel_service.placeholder_outputs(carousel_service.slide_count(user_text), carousel_aspect)
+    else:
+        outputs = preset_outputs(preset, bool(data.get("all_sizes")))
     product_notes = (data.get("product_notes") or "").strip()[:600]
     if not product_notes and product:
         # The upload's background analysis, if it has finished (never waited for:
@@ -1811,10 +1818,29 @@ def run_image_preset():
             upcoming = next_celebration((brand.get("compliance_regions") or brand.get("regions_detected") or []))
             if upcoming:
                 occasion, occasion_auto = upcoming["name"], True
-    prompts = {o["key"]: build_preset_prompt(preset, o, product_notes, brand, user_text, occasion) for o in outputs}
+    plan, plan_usage = None, {"total_tokens": 0, "cost_usd": 0.0}
+    if preset.get("carousel"):
+        # One text call writes the slide plan (+ caption and hashtags), then every slide is drawn in that style
+        from services.brand_profile_service import build_brand_profile_block
 
-    with ThreadPoolExecutor(max_workers=len(outputs) + 1, thread_name_prefix="preset") as pool:
-        jobs = {o["key"]: pool.submit(media_service.create_preset_image, prompts[o["key"]], product, o["aspect"], logo_path, model)
+        brand_block = build_brand_profile_block(user_id) if DB_AVAILABLE and user_id is not None else ""
+        try:
+            plan, plan_usage = carousel_service.plan_carousel(user_text, len(outputs), brand_block, product_notes)
+        except Exception as plan_err:  # noqa: BLE001
+            current_app.logger.warning(f"Carousel plan failed: {plan_err}")
+            return jsonify({"success": False, "error": "The carousel could not be planned. Please try again."}), 502
+        outputs = carousel_service.outputs_for(plan, carousel_aspect)
+        prompts = {o["key"]: carousel_service.slide_prompt(preset["scene"], plan, i, brand, product_notes, bool(product),
+                                                           carousel_aspect)
+                   for i, o in enumerate(outputs, start=1)}
+    else:
+        prompts = {o["key"]: build_preset_prompt(preset, o, product_notes, brand, user_text, occasion) for o in outputs}
+
+    # At most 5 images at once: a 10-slide carousel shouldn't flood the image gateway
+    with ThreadPoolExecutor(max_workers=min(len(outputs), 5) + 1, thread_name_prefix="preset") as pool:
+        no_photo_needed = {"require_reference": False} if preset.get("carousel") else {}
+        jobs = {o["key"]: pool.submit(media_service.create_preset_image, prompts[o["key"]], product, o["aspect"], logo_path,
+                                      model, **no_photo_needed)
                 for o in outputs}
         ad_job = pool.submit(_meta_ad_copy, user_id, product_notes, user_text) if preset.get("ad_copy") else None
         results = {key: job.result() for key, job in jobs.items()}
@@ -1856,6 +1882,14 @@ def run_image_preset():
         meta["occasion"], meta["occasion_auto"] = occasion, occasion_auto
     if ad_copy:
         meta["ad_copy"] = ad_copy
+    if plan:
+        made = set(meta["keys"])
+        meta["carousel"] = {
+            "aspect": carousel_aspect, "caption": plan["caption"], "hashtags": plan["hashtags"], "style": plan["style"],
+            "slides": [{"key": f"slide{i}", **s} for i, s in enumerate(plan["slides"], start=1) if f"slide{i}" in made],
+        }
+        ad_usage = {"total_tokens": int(ad_usage.get("total_tokens") or 0) + int(plan_usage.get("total_tokens") or 0),
+                    "cost_usd": float(ad_usage.get("cost_usd") or 0) + float(plan_usage.get("cost_usd") or 0)}
     content: dict[str, typing.Any] = {"_preset": meta}
     for img in images:
         content[img["key"]] = {
@@ -1920,6 +1954,24 @@ def conversation_detail(conversation_id):
     if not data:
         return jsonify({"error": "Conversation not found"}), 404
     return jsonify({"success": True, **data})
+
+
+@api_bp.route("/conversations/<int:conversation_id>/images", methods=["GET"])
+@login_required_api
+def conversation_images_route(conversation_id):
+    """Every image made in the conversation (newest first) - Send for approval
+    lets the user pick carousel slides from them."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import conversation_images, get_conversation
+
+    user_id = get_current_user_id()
+    if not get_conversation(conversation_id, user_id):
+        return jsonify({"error": "Conversation not found"}), 404
+    images = [{"id": i["id"], "url": i["url"], "description": (i.get("prompt") or "")[:120], "width": i["width"],
+               "height": i["height"], "created_at": i["created_at"]}
+              for i in reversed(conversation_images(conversation_id, user_id)) if i.get("url")]
+    return jsonify({"success": True, "images": images})
 
 
 @api_bp.route("/conversations/<int:conversation_id>/archive", methods=["POST"])
@@ -2479,6 +2531,8 @@ def create_approval_request_route():
             jsonify({"error": "No approval reviewer set - add a reviewer email in Brand Configuration first."}),
             400,
         )
+    if data.get("items") is not None:
+        return _create_bundle_approval(data, pipeline_client_id, user_id, reviewer_email)
 
     # Compliance review for the reviewer (requester's active rules) - the
     # caption itself is stored as submitted; the fix is only suggested.
@@ -2507,7 +2561,7 @@ def create_approval_request_route():
             image_urls=image_urls,
         )
 
-        base_url = Config.APP_BASE_URL or request.host_url.rstrip("/")
+        base_url = (Config.APP_BASE_URL or request.host_url).rstrip("/")
         approval_url = f"{base_url}/approve/{req['id']}"
 
         email_result = {"success": False, "error": "SMTP not configured"}
@@ -2533,6 +2587,65 @@ def create_approval_request_route():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
+def _requester_company(req: dict) -> str | None:
+    """The requester's company name, for the post previews."""
+    if not req or not req.get("user_id"):
+        return None
+    try:
+        from db import get_user_brand_profile
+
+        return (get_user_brand_profile(req["user_id"]) or {}).get("company_name") or None
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _create_bundle_approval(data: dict, pipeline_client_id: str, user_id, reviewer_email: str):
+    """A whole post (one item per platform) in one request and one email."""
+    from services.approval_bundle_service import (
+        BundleError,
+        normalize_items,
+        prepare_items,
+        summary,
+    )
+
+    upload_folder = current_app.config["UPLOAD_FOLDER"]
+    try:
+        items = normalize_items(data.get("items"), upload_folder)
+    except BundleError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    rules = active_rules_for_user(user_id)
+
+    def _check(caption, platform, active_rules):
+        result, _usage = check_caption(caption, platform, active_rules, refine_llm)
+        return result
+
+    items = prepare_items(items, upload_folder, rules, _check)
+    totals = summary(items)
+    story = (data.get("story") or "").strip()[:4000] or None
+    try:
+        req = create_approval_request(
+            user_id=user_id, pipeline_client_id=pipeline_client_id, platform=totals["platform"],
+            asset_type=totals["asset_type"], caption=totals["caption"], story_context=story,
+            image_urls=totals["image_urls"], reviewer_email=reviewer_email, items=items,
+        )
+    except Exception as e:  # noqa: BLE001
+        return jsonify({"success": False, "error": str(e)}), 500
+    base_url = (Config.APP_BASE_URL or request.host_url).rstrip("/")
+    approval_url = f"{base_url}/approve/{req['id']}"
+    email_result = {"success": False, "error": "SMTP not configured"}
+    try:
+        from services.email_service import EmailService
+
+        email_result = EmailService().send_approval_bundle_request(
+            approval_url=approval_url, story=story, items=items, company=_requester_company(req), to_email=reviewer_email,
+        )
+    except Exception as email_err:  # noqa: BLE001 - the request exists; the reviewer can still open it from /approve
+        email_result = {"success": False, "error": str(email_err)}
+    log_event("approval.requested", request_id=req["id"], platforms=[i["platform"] for i in items],
+              carousels=sum(1 for i in items if i["media"] == "carousel") or None, emailed=email_result.get("success"))
+    return jsonify({"success": True, "request": req, "approval_url": approval_url, "email": email_result})
+
+
 @api_bp.route("/approval-requests/<int:request_id>", methods=["GET"])
 @login_required_api
 def get_approval_request_route(request_id):
@@ -2542,7 +2655,81 @@ def get_approval_request_route(request_id):
     # Same 404 for "not yours" as for "doesn't exist" - no probing other users' request ids
     if not _can_access_approval(req, get_current_user_id()):
         return jsonify({"error": "Approval request not found"}), 404
-    return jsonify({"success": True, "request": req})
+    return jsonify({"success": True, "request": {**req, "company_name": _requester_company(req),
+                                                 "publishing": _publishing_for(req, get_current_user_id())}})
+
+
+def _publishing_for(req: dict, user_id) -> dict:
+    """What the viewer can publish from this request: only its requester, to
+    platforms whose account is connected (Instagram for now)."""
+    if not req or not req.get("items") or req.get("user_id") != user_id:
+        return {"can_publish": False}
+    from services.instagram_service import connected_account
+
+    account = connected_account(user_id)
+    return {"can_publish": True, "instagram": f"{account['username']}" if account else None}
+
+
+@api_bp.route("/approval-requests/<int:request_id>/publish", methods=["POST"])
+@login_required_api
+def publish_approved_item(request_id):
+    """Publishes one approved platform of a multi-platform request (Instagram for now)."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import update_approval_item
+    from services.instagram_service import InstagramError, publish_for_user
+
+    user_id = get_current_user_id()
+    req = get_approval_request(request_id)
+    if not req or req.get("user_id") != user_id or not req.get("items"):
+        return jsonify({"error": "Approval request not found"}), 404
+    platform = ((request.get_json(silent=True) or {}).get("platform") or "").lower()
+    index = next((i for i, item in enumerate(req["items"]) if item["platform"] == platform), None)
+    if index is None:
+        return jsonify({"error": "This request has nothing for that platform."}), 400
+    item = req["items"][index]
+    if platform != "instagram":
+        return jsonify({"error": "Publishing to this platform comes in a later update."}), 400
+    if item.get("decision") != "approved":
+        return jsonify({"error": "Only approved posts can be published."}), 409
+    if item.get("published"):
+        return jsonify({"error": "Already published.", "request": req}), 409
+    with _publish_lock(request_id):
+        if (get_approval_request(request_id)["items"][index]).get("published"):  # a second click waited here
+            return jsonify({"error": "Already published."}), 409
+        caption = item["caption"]
+        tags = [t for t in item.get("hashtags") or [] if t.lower() not in caption.lower()]
+        if tags:
+            caption = f"{caption}\n\n{' '.join(tags)}".strip()
+        try:
+            result = publish_for_user(user_id, caption, item["images"], current_app.config["UPLOAD_FOLDER"])
+        except InstagramError as err:
+            update_approval_item(request_id, index, {"publish_error": str(err)})
+            log_event("instagram.publish", request_id=request_id, status="failed", error=str(err)[:200])
+            return jsonify({"success": False, "error": str(err)}), 400
+        except requests.exceptions.RequestException as err:
+            return jsonify({"success": False, "error": f"Could not reach Instagram: {err}"}), 502
+        from datetime import datetime, timezone
+
+        updated = update_approval_item(request_id, index, {
+            "published": {"at": datetime.now(timezone.utc).isoformat(), "permalink": result["permalink"],
+                          "media_id": result["media_id"], "account": result["account"]},
+            "publish_error": None,
+        })
+    log_event("instagram.publish", request_id=request_id, status="published", media_id=result["media_id"],
+              carousel=result["carousel"])
+    return jsonify({"success": True, "result": result,
+                    "request": {**updated, "company_name": _requester_company(updated), "publishing": _publishing_for(updated, user_id)}})
+
+
+_publish_locks: dict[int, threading.Lock] = {}
+_publish_locks_guard = threading.Lock()
+
+
+def _publish_lock(request_id: int) -> threading.Lock:
+    """One publish at a time per request (a double click must not post twice)."""
+    with _publish_locks_guard:
+        return _publish_locks.setdefault(request_id, threading.Lock())
 
 
 @api_bp.route("/approval-requests/by-pipeline/<pipeline_client_id>", methods=["GET"])
@@ -2564,25 +2751,48 @@ def decide_approval_request_route(request_id):
         return jsonify({"error": "Database not available"}), 503
 
     data = request.get_json(silent=True) or {}
-    decision = (data.get("decision") or "").lower()
-    if decision not in ("approved", "rejected"):
+    decision = (data.get("decision") or "").lower() or None
+    item_decisions = data.get("items") if isinstance(data.get("items"), dict) else None
+    if decision not in ("approved", "rejected", None) or (decision is None and not item_decisions):
         return jsonify({"error": "decision must be 'approved' or 'rejected'"}), 400
 
     user_id = get_current_user_id()
-    if not _can_access_approval(get_approval_request(request_id), user_id):
+    existing = get_approval_request(request_id)
+    if not _can_access_approval(existing, user_id):
         return jsonify({"error": "Approval request not found"}), 404
+    if existing.get("status") != "pending":
+        return jsonify({"error": "This request has already been decided."}), 409
     user = get_user_by_id(user_id) if user_id else None
     decided_by = (user.name or user.email) if user else None
 
     try:
         req = decide_approval_request(
-            request_id=request_id, decision=decision, comments=data.get("comments"), decided_by=decided_by
+            request_id=request_id, decision=decision, comments=data.get("comments"), decided_by=decided_by,
+            item_decisions=item_decisions,
         )
-        if not req:
-            return jsonify({"error": "Approval request not found"}), 404
-        return jsonify({"success": True, "request": req})
+    except ValueError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
     except Exception as e:  # noqa: BLE001
         return jsonify({"success": False, "error": str(e)}), 500
+    if not req:
+        return jsonify({"error": "Approval request not found"}), 404
+    notified = False
+    if req.get("items") and req.get("user_id") and req["user_id"] != user_id:
+        requester = get_user_by_id(req["user_id"])
+        if requester and requester.email:
+            try:
+                from services.email_service import EmailService
+
+                base_url = (Config.APP_BASE_URL or request.host_url).rstrip("/")
+                EmailService().send_approval_decision_email(
+                    to_email=requester.email, name=requester.name or "there", status=req["status"], items=req["items"],
+                    comments=req.get("comments"), decided_by=decided_by, review_url=f"{base_url}/approve/{req['id']}",
+                )
+                notified = True
+            except Exception as email_err:  # noqa: BLE001 - the decision is saved either way
+                current_app.logger.warning(f"Approval decision email failed: {email_err}")
+    log_event("approval.decided", request_id=request_id, status=req["status"], requester_emailed=notified or None)
+    return jsonify({"success": True, "request": {**req, "company_name": _requester_company(req)}, "requester_notified": notified})
 
 
 # ── Editable App Settings (Content Guidelines, Products & Service) ─────────
@@ -3584,11 +3794,27 @@ def save_social_account_endpoint():
 
     if not platform or platform not in ["facebook", "instagram", "linkedin", "youtube"]:
         return jsonify({"error": "Valid platform (facebook, instagram, linkedin, youtube) is required"}), 400
-    if not account_name:
+    if not account_name and platform != "instagram":  # Instagram: the handle comes from the account itself
         return jsonify({"error": "Account Name / Handle is required"}), 400
 
     if connection_type == "mcp" and not mcp_endpoint:
         return jsonify({"error": "MCP Endpoint URL is required for MCP connection mode"}), 400
+
+    if platform == "instagram":
+        # Publishing needs the Instagram account id - find it from the id given
+        # (Instagram account or its Facebook Page) and the token
+        from services.instagram_service import InstagramError, resolve_account
+
+        if not account_id or not access_token:
+            return jsonify({"error": "Enter your Facebook Page ID (or Instagram account ID) and its Page access token"}), 400
+        try:
+            info = resolve_account(account_id, access_token)
+        except InstagramError as err:
+            return jsonify({"error": str(err)}), 400
+        except requests.exceptions.RequestException as err:
+            return jsonify({"error": f"Could not reach Instagram: {err}"}), 502
+        account_id = info["id"]
+        account_name = f"@{info['username']}" if info["username"] else (account_name or "Instagram")
 
     acc = save_social_account(
         user_id=user_id,
@@ -3602,6 +3828,36 @@ def save_social_account_endpoint():
         mcp_tool_name=mcp_tool_name,
     )
     return jsonify({"success": True, "account": acc})
+
+
+@api_bp.route("/social/instagram/from-facebook", methods=["POST"])
+@login_required_api
+def connect_instagram_from_facebook():
+    """One click: the Instagram account linked to the user's connected Facebook Page."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database unavailable"}), 503
+    from sqlalchemy.orm import Session
+
+    from db import SocialAccount, engine
+    from services.instagram_service import InstagramError, account_from_page
+
+    user_id = get_current_user_id()
+    with Session(engine) as session:
+        fb = (session.query(SocialAccount)
+              .filter(SocialAccount.user_id == user_id, SocialAccount.platform == "facebook", SocialAccount.status == "connected")
+              .first())
+        page_id, token = (fb.account_id, fb.access_token) if fb else (None, None)
+    if not page_id or not token:
+        return jsonify({"error": "Connect your Facebook Page first - its Instagram account is found from it."}), 400
+    try:
+        info = account_from_page(page_id, token)
+    except InstagramError as err:
+        return jsonify({"error": str(err)}), 400
+    except requests.exceptions.RequestException as err:
+        return jsonify({"error": f"Could not reach Instagram: {err}"}), 502
+    acc = save_social_account(user_id=user_id, platform="instagram", account_name=f"@{info['username']}" if info["username"] else "Instagram",
+                              account_id=info["id"], access_token=token)
+    return jsonify({"success": True, "account": acc, "username": info["username"]})
 
 
 @api_bp.route("/auth/youtube", methods=["GET"])
@@ -3944,6 +4200,22 @@ def verify_social_account_endpoint(platform):
     if publisher_service and platform == "facebook":
         res = publisher_service.verify_facebook_account(account_id, access_token)
         return jsonify(res)
+    if platform == "instagram":
+        from services.instagram_service import InstagramError, publishing_quota, resolve_account
+
+        try:
+            info = resolve_account(account_id, access_token)
+        except InstagramError as err:
+            return jsonify({"success": False, "verified": False, "platform": "instagram", "error": str(err)})
+        except requests.exceptions.RequestException as err:
+            return jsonify({"success": False, "verified": False, "platform": "instagram", "error": f"Could not reach Instagram: {err}"})
+        quota = publishing_quota(info["id"], access_token)
+        return jsonify({
+            "success": True, "verified": True, "platform": "instagram", "account_id": info["id"], "username": info["username"],
+            "quota": quota,
+            "message": f"Connected to @{info['username']}" + (f" - {quota['used']} of {quota['total']} posts used in the last 24 hours"
+                                                              if quota and quota["total"] else ""),
+        })
     elif platform == "youtube":
         import requests
 

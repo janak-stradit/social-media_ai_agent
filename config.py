@@ -83,6 +83,13 @@ class Config:
     APPROVAL_NOTIFY_EMAIL = os.getenv("APPROVAL_NOTIFY_EMAIL")
     # Inbox that receives "Contact Sales" leads from the Enterprise onboarding step
     SALES_EMAIL = os.getenv("SALES_EMAIL", "")
+
+    # Meta Graph API (Facebook + Instagram publishing). Meta retires each
+    # version about two years after release - keep this on a current one.
+    META_GRAPH_VERSION = os.getenv("META_GRAPH_VERSION", "v23.0")
+    # Public HTTPS address Instagram downloads post images from (Meta fetches
+    # them itself). Defaults to APP_BASE_URL; set it if images are served elsewhere.
+    PUBLIC_MEDIA_BASE_URL = os.getenv("PUBLIC_MEDIA_BASE_URL", "")
     # Optional override for absolute links in emails (e.g. approval request
     # links) when the app isn't reachable at the request's own host (behind a
     # reverse proxy, etc). Falls back to the incoming request's own host.

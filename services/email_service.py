@@ -912,6 +912,191 @@ def email_context(kind: str | None = None, details: dict | None = None, triggere
         _email_context.reset(token)
 
 
+# ── Multi-platform post approval (Studio Chat "Send for approval") ──────────
+
+_PLATFORM_NAMES = {"linkedin": "LinkedIn", "instagram": "Instagram", "facebook": "Facebook", "youtube": "YouTube"}
+_PLATFORM_COLORS = {"linkedin": "#0a66c2", "instagram": "#d62976", "facebook": "#1877f2", "youtube": "#dc2626"}
+_EMAIL_SLIDES = 6  # slides shown per carousel in the email; the review page has all of them
+
+
+def _thumbnail(path: str, max_side: int = 560) -> bytes | None:
+    """A small JPEG of an image for the email body (a 10-slide carousel at full size would be several MB)."""
+    import io
+
+    from PIL import Image
+
+    try:
+        with Image.open(path) as img:
+            img = img.convert("RGB")
+            img.thumbnail((max_side, max_side))
+            out = io.BytesIO()
+            img.save(out, format="JPEG", quality=82)
+            return out.getvalue()
+    except Exception:  # noqa: BLE001 - a broken image is left out, the rest of the email still works
+        return None
+
+
+def _bundle_media_html(item: dict, cids: dict) -> str:
+    images = [u for u in item.get("images") or [] if u in cids]
+    if not images:
+        return ""
+    if item.get("media") != "carousel":
+        return (f'<img src="cid:{cids[images[0]]}" alt="Post image" width="536" '
+                f'style="width: 100%; max-width: 536px; border-radius: 10px; border: 1px solid #e5e7eb; display: block;">')
+    shown, more = images[:_EMAIL_SLIDES], len(images) - _EMAIL_SLIDES
+    titles = item.get("slide_titles") or []
+    cells = []
+    for i, url in enumerate(shown):
+        cells.append(
+            f'<td width="33%" valign="top" style="padding: 4px;">'
+            f'<img src="cid:{cids[url]}" alt="Slide {i + 1}" width="170" style="width: 100%; border-radius: 8px; border: 1px solid #e5e7eb; display: block;">'
+            f'<div style="font-size: 11px; color: #6b7280; padding-top: 4px;"><strong style="color: #374151;">{i + 1}/{len(images)}</strong> '
+            f"{_escape(titles[i] if i < len(titles) else '')}</div></td>"
+        )
+    rows = "".join("<tr>" + "".join(cells[r:r + 3]) + "</tr>" for r in range(0, len(cells), 3))
+    note = (f'<div style="font-size: 12px; color: #6b7280; padding: 6px 4px 0;">+ {more} more slide{"s" if more != 1 else ""} '
+            "on the review page</div>") if more > 0 else ""
+    return f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0">{rows}</table>{note}'
+
+
+def _build_bundle_request_html(approval_url: str, story: str | None, items: list[dict], company: str | None) -> tuple[str, list]:
+    """(html, [(cid, jpeg bytes)]) - one section per platform."""
+    cids, inline = {}, []
+    for item in items:
+        for url in (item.get("images") or [])[: (_EMAIL_SLIDES if item.get("media") == "carousel" else 1)]:
+            if url in cids:
+                continue
+            local = _resolve_local_path(url)
+            data = _thumbnail(local) if local else None
+            if data:
+                cids[url] = f"img_{len(cids)}"
+                inline.append((cids[url], data))
+
+    sections = []
+    for item in items:
+        platform = item.get("platform") or ""
+        name = _PLATFORM_NAMES.get(platform, platform.capitalize())
+        color = _PLATFORM_COLORS.get(platform, "#374151")
+        count = len(item.get("images") or [])
+        kind = (
+            f"Carousel &middot; {count} slides" + (
+                " &middot; " + ("Document (PDF)" if item.get("linkedin_format") == "document" else "Multi-image post")
+                if platform == "linkedin" else "")
+            if item.get("media") == "carousel" else ("Single image" if count else "Text only")
+        )
+        tags = " ".join(item.get("hashtags") or [])
+        flags = (item.get("compliance") or {}).get("flags") or []
+        compliance = (
+            f'<div style="margin-top: 10px; font-size: 12px; color: #b45309; background-color: #fffbeb; border-radius: 8px; padding: 8px 10px;">'
+            f"&#9888; {len(flags)} compliance note{'s' if len(flags) != 1 else ''} to check on the review page</div>"
+        ) if flags else ""
+        pdf = ('<div style="margin-top: 8px; font-size: 12px; color: #374151;">&#128206; The PDF LinkedIn will show is attached.</div>'
+               if item.get("pdf_url") else "")
+        caption_html = _escape(item.get("caption") or "").replace("\n", "<br>") or "<em>No caption.</em>"
+        sections.append(f"""
+                    <tr>
+                        <td style="padding: 18px 32px 6px 32px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border: 1px solid #e5e7eb; border-radius: 12px;">
+                                <tr><td style="padding: 14px 16px 8px 16px;">
+                                    <span style="display: inline-block; background-color: {color}; color: #ffffff; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 999px;">{_escape(name)}</span>
+                                    <span style="font-size: 12px; color: #6b7280; padding-left: 8px;">{kind}</span>
+                                </td></tr>
+                                <tr><td style="padding: 4px 12px 8px 12px;">{_bundle_media_html(item, cids)}</td></tr>
+                                <tr><td style="padding: 4px 16px 16px 16px; font-size: 14px; line-height: 1.6; color: #1f2937;">
+                                    {caption_html}
+                                    {f'<div style="margin-top: 8px; color: #1d4ed8; font-size: 13px; font-weight: 600;">{_escape(tags)}</div>' if tags else ''}
+                                    {pdf}{compliance}
+                                </td></tr>
+                            </table>
+                        </td>
+                    </tr>""")
+
+    platforms = ", ".join(_PLATFORM_NAMES.get(i.get("platform"), i.get("platform", "")) for i in items)
+    story_html = _escape((story or "")[:600]).replace("\n", "<br>")
+    html = f"""\
+<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 0; background-color: #f3f4f6; font-family: 'Segoe UI', Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f3f4f6; padding: 32px 0;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="600" cellpadding="0" cellspacing="0"
+                       style="background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.06);">
+                    <tr>
+                        <td style="background-color: #e85a1c; background-image: linear-gradient(135deg, #ffa066 0%, #e85a1c 100%); padding: 26px 32px;">
+                            <span style="color: #ffffff; font-size: 20px; font-weight: 700;">Review requested</span>
+                            <div style="color: rgba(255,255,255,0.9); font-size: 13px; margin-top: 4px;">
+                                {_escape(company or "A post")} for {len(items)} platform{"s" if len(items) != 1 else ""}: {_escape(platforms)}
+                            </div>
+                        </td>
+                    </tr>
+                    {f'<tr><td style="padding: 20px 32px 0 32px; font-size: 13px; color: #6b7280;"><strong style="color: #374151;">Brief:</strong> {story_html}</td></tr>' if story_html else ''}
+                    {"".join(sections)}
+                    <tr>
+                        <td align="center" style="padding: 24px 32px 32px 32px;">
+                            <a href="{_escape(approval_url)}"
+                               style="display: inline-block; background-color: #c2410c; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 999px;">
+                                Review &amp; decide
+                            </a>
+                            <div style="color: #9ca3af; font-size: 12px; margin-top: 12px;">Approve every platform at once, or each one separately with comments. Sign-in required.</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 16px 32px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 12px;">
+                            Sent from AVIR AI Studio Chat's approval workflow.
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a></div>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+    return html, inline
+
+
+def _build_approval_decision_html(name: str, status: str, items: list[dict], comments: str | None,
+                                  decided_by: str | None, review_url: str) -> str:
+    headline = {"approved": "Your post was approved", "rejected": "Changes were requested",
+                "partial": "Your post was partly approved"}.get(status, "Your post was reviewed")
+    rows = "".join(
+        f"""<tr><td style="padding: 8px 0; border-bottom: 1px solid #f3f4f6; font-size: 14px;">
+                <strong>{_escape(_PLATFORM_NAMES.get(i.get("platform"), i.get("platform", "")))}</strong>
+                <span style="float: right; font-size: 12px; font-weight: 700; color: {'#047857' if i.get('decision') == 'approved' else '#b45309'};">
+                    {'&#10003; Approved' if i.get('decision') == 'approved' else '&#9998; Changes requested'}</span>
+                {f'<div style="color: #4b5563; font-size: 13px; margin-top: 4px;">&ldquo;{_escape(i["comment"])}&rdquo;</div>' if i.get("comment") else ''}
+            </td></tr>"""
+        for i in items
+    )
+    return f"""\
+<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 0; background-color: #f3f4f6; font-family: 'Segoe UI', Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f3f4f6; padding: 32px 0;">
+        <tr><td align="center">
+            <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 12px; overflow: hidden;">
+                <tr><td style="background-color: #e85a1c; background-image: linear-gradient(135deg, #ffa066 0%, #e85a1c 100%); padding: 24px 32px;">
+                    <span style="color: #ffffff; font-size: 20px; font-weight: 700;">{headline}</span>
+                    <div style="color: rgba(255,255,255,0.9); font-size: 13px; margin-top: 4px;">Hi {_escape(name)}{f", {_escape(decided_by)} reviewed it" if decided_by else ""}.</div>
+                </td></tr>
+                <tr><td style="padding: 20px 32px;"><table role="presentation" width="100%" cellpadding="0" cellspacing="0">{rows}</table>
+                    {f'<div style="margin-top: 14px; font-size: 13px; color: #374151;"><strong>Comments:</strong> {_escape(comments)}</div>' if comments else ''}
+                </td></tr>
+                <tr><td align="center" style="padding: 8px 32px 28px 32px;">
+                    <a href="{_escape(review_url)}" style="display: inline-block; background-color: #c2410c; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 12px 28px; border-radius: 999px;">Open the review</a>
+                </td></tr>
+                <tr><td style="padding: 14px 32px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 11px;">
+                    AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a></td></tr>
+            </table>
+        </td></tr>
+    </table>
+</body>
+</html>
+"""
+
+
 class EmailService:
     def __init__(self):
         self.host = Config.SMTP_HOST
@@ -1016,6 +1201,53 @@ class EmailService:
         self._deliver(msg, [recipient], "approval_request")
 
         return {"success": True, "recipient": recipient}
+
+    def send_approval_bundle_request(self, approval_url: str, story: str | None, items: list[dict],
+                                     company: str | None, to_email: str) -> dict:
+        """One review email for a whole post: a section per platform (image or
+        carousel slides, caption, hashtags); a LinkedIn document carousel's PDF attached."""
+        if not self.enabled:
+            raise RuntimeError("SMTP is not configured. Set SMTP_HOST, SMTP_USERNAME and SMTP_PASSWORD in .env.")
+        from email.mime.application import MIMEApplication
+
+        html, inline = _build_bundle_request_html(approval_url, story, items, company)
+        msg = MIMEMultipart("mixed")
+        names = ", ".join(_PLATFORM_NAMES.get(i.get("platform"), i.get("platform", "")) for i in items)
+        msg["Subject"] = f"Review requested: {company + ' - ' if company else ''}{names} post"
+        msg["From"] = self.from_email
+        msg["To"] = to_email
+        related = MIMEMultipart("related")
+        related.attach(MIMEText(html, "html"))
+        for cid, data in inline:
+            part = MIMEImage(data, _subtype="jpeg")
+            part.add_header("Content-ID", f"<{cid}>")
+            part.add_header("Content-Disposition", "inline", filename=f"{cid}.jpg")
+            related.attach(part)
+        msg.attach(related)
+        for item in items:
+            local = _resolve_local_path(item.get("pdf_url")) if item.get("pdf_url") else None
+            if local:
+                with open(local, "rb") as f:
+                    pdf = MIMEApplication(f.read(), _subtype="pdf")
+                pdf.add_header("Content-Disposition", "attachment", filename="linkedin-carousel.pdf")
+                msg.attach(pdf)
+        self._deliver(msg, [to_email], "approval_request")
+        return {"success": True, "recipient": to_email, "images": len(inline)}
+
+    def send_approval_decision_email(self, to_email: str, name: str, status: str, items: list[dict],
+                                     comments: str | None, decided_by: str | None, review_url: str) -> dict:
+        """Tells the person who asked for approval what the reviewer decided, per platform."""
+        if not self.enabled:
+            raise RuntimeError("SMTP is not configured. Set SMTP_HOST, SMTP_USERNAME and SMTP_PASSWORD in .env.")
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = {"approved": "Approved: your post is ready to publish",
+                          "rejected": "Changes requested on your post",
+                          "partial": "Your post was partly approved"}.get(status, "Your post was reviewed") + " - AVIR AI"
+        msg["From"] = self.from_email
+        msg["To"] = to_email
+        msg.attach(MIMEText(_build_approval_decision_html(name, status, items, comments, decided_by, review_url), "html"))
+        self._deliver(msg, [to_email], "approval_decision")
+        return {"success": True, "recipient": to_email}
 
     def send_welcome_verification_email(self, to_email: str, name: str, verify_url: str) -> dict:
         """Sent right after registration - see auth/routes.py's register()."""

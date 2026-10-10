@@ -16,16 +16,24 @@ from services import email_campaign_service as campaign
 from services.email_service import EmailService, email_context
 
 
-@pytest.fixture(autouse=True)
-def clean(monkeypatch):
+def _wipe():
     with Session(db.engine) as session:
         session.execute(delete(db.EmailLog))
         session.execute(delete(db.AppSetting).where(db.AppSetting.key.like("email_%")))
         session.commit()
+
+
+@pytest.fixture(autouse=True)
+def clean(monkeypatch):
+    """Before and after: the admin switches live in the shared test database,
+    and other test files expect the .env defaults."""
     from config import Config
 
+    _wipe()
     for name in ("WEEKLY_IDEAS_EMAIL", "NUDGE_EMAILS", "MONTHLY_RECAP_EMAIL"):
         monkeypatch.setattr(Config, name, False)
+    yield
+    _wipe()
 
 
 class FakeSMTP:

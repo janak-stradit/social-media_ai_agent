@@ -146,6 +146,27 @@ PRESETS = {
     },
 }
 
+# A carousel's slides come from a slide plan (services/carousel_service.py);
+# "outputs" here is only the default count shown in the "/" menu - the real
+# slides (3-10, "5 slides on ...", "4:5" for portrait) are set per run.
+PRESETS["carousel"] = {
+    "label": "Carousel",
+    "icon": "fa-images",
+    "description": "3-10 slides that tell one story, for LinkedIn and Instagram - with the caption",
+    "placeholder": "What's it about? e.g. 5 slides on our new tracking feature (add \"4:5\" for portrait)",
+    "requires_image": False,
+    "stamp_logo": True,
+    "platforms": ["linkedin", "instagram"],
+    "carousel": True,
+    "outputs": [{"key": f"slide{i}", "aspect": "1:1", "label": f"Slide {i}"} for i in range(1, 6)],
+    "scene": (
+        "Design one slide of a social media carousel: a clean, modern, bold layout with one large headline as the "
+        "focus and generous empty space, a simple supporting visual, and the same colours, typography and layout "
+        "grid on every slide so the set looks designed together. Flat, sharp and professional - no clutter, no "
+        "watermarks, no fake logos."
+    ),
+}
+
 # Occasions recognised in the user's /festive text (longest names first, so
 # "Eid al-Adha" wins over "Eid")
 KNOWN_OCCASIONS = sorted([
@@ -306,6 +327,7 @@ def list_presets() -> list[dict]:
             "sizes": [o["label"] for o in p["outputs"]],
             "all_sizes": [o["label"] for o in p.get("all_outputs") or []],
             "ad_copy": bool(p.get("ad_copy")),
+            "carousel": bool(p.get("carousel")),
         }
         for p in presets
         if p["enabled"]

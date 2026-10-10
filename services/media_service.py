@@ -634,18 +634,22 @@ class MediaGenerationService:
 
     @mirror_to_s3
     def create_preset_image(
-        self, prompt: str, image_path: str, aspect: str, logo_path: str | None = None, model: str | None = None
+        self, prompt: str, image_path: str | None, aspect: str, logo_path: str | None = None, model: str | None = None,
+        require_reference: bool = True,
     ) -> dict:
         """One image for a Studio Chat image command (/3dbillboard, /metaad, ...):
         the product photo is the reference, the result is cropped to the exact
-        size for `aspect`, then the real logo is stamped on when logo_path is set."""
+        size for `aspect`, then the real logo is stamped on when logo_path is set.
+        require_reference=False (/carousel): drawn from the prompt alone when
+        no photo is attached."""
         if getattr(Config, "USE_MOCK_LLM", False):
             return self._generate_mock_media("instagram", "image", prompt)
         references = self._resolve_image_paths(image_path)
-        if not references:
+        if not references and (require_reference or image_path):
             return {"success": False, "type": "image", "error": "The product photo could not be found - attach it again."}
         try:
-            result = self._generate_image_primary(_with_no_logo_rule(prompt), "preset", "1024x1024", references, model=model)
+            result = self._generate_image_primary(_with_no_logo_rule(prompt), "preset", "1024x1024", references or None,
+                                                  model=model)
             local = os.path.join(self.upload_folder, os.path.basename(result["url"]))
             width, height = self._fit_to_aspect(local, aspect)
         except Exception as e:  # noqa: BLE001 - reported to the user per image
