@@ -66,8 +66,14 @@ def _origin(group: str, idea: dict) -> str:
 def send_ideas_email(user_id: int, base_url: str) -> dict:
     """Write (or reuse) the user's idea feed and email them three ideas.
     {"sent": True, "ideas": n} or {"sent": False, "reason": ...}."""
-    from db import create_idea_link, get_ideas_email_settings, get_user_brand_profile, get_user_by_id, mark_ideas_email_sent
-    from services.email_service import EmailService
+    from db import (
+        create_idea_link,
+        get_ideas_email_settings,
+        get_user_brand_profile,
+        get_user_by_id,
+        mark_ideas_email_sent,
+    )
+    from services.email_service import EmailService, email_context
     from services.trend_service import generate_idea_feed
 
     user = get_user_by_id(user_id)
@@ -90,15 +96,18 @@ def send_ideas_email(user_id: int, base_url: str) -> dict:
             "makes": f"{_FORMATS.get(idea.get('format'), 'Text post')} for {_PLATFORMS.get(idea.get('platform'), 'LinkedIn')}",
             "url": f"{base}/dashboard?idea={token}",
         })
-    EmailService().send_weekly_ideas_email(
-        to_email=user.email,
-        name=user.name or "there",
-        company_name=(get_user_brand_profile(user_id) or {}).get("company_name"),
-        ideas=ideas,
-        dashboard_url=f"{base}/dashboard",
-        settings_url=f"{base}/settings#notifications",
-        unsubscribe_url=f"{base}/api/notifications/ideas-email/unsubscribe/{unsubscribe_token(user_id)}",
-    )
+    details = {"industry": feed.get("industry"), "market": feed.get("region"),
+               "trend_source": feed.get("trend_source"), "ideas": [i["title"] for i in ideas]}
+    with email_context(user_id=user_id, details=details):
+        EmailService().send_weekly_ideas_email(
+            to_email=user.email,
+            name=user.name or "there",
+            company_name=(get_user_brand_profile(user_id) or {}).get("company_name"),
+            ideas=ideas,
+            dashboard_url=f"{base}/dashboard",
+            settings_url=f"{base}/settings#notifications",
+            unsubscribe_url=f"{base}/api/notifications/ideas-email/unsubscribe/{unsubscribe_token(user_id)}",
+        )
     mark_ideas_email_sent(user_id)
     return {"sent": True, "ideas": len(ideas)}
 
@@ -113,9 +122,12 @@ def is_send_time(now: datetime | None = None) -> bool:
 
 def run_weekly_digest(now: datetime | None = None) -> dict:
     """Send this week's email to everyone who is due one. Does nothing unless
-    WEEKLY_IDEAS_EMAIL=true and it is the send day. One user's failure never
+    the weekly ideas email is switched on (Admin -> Emails, default
+    WEEKLY_IDEAS_EMAIL) and it is the send day. One user's failure never
     stops the rest; a user who was sent one is not due again for six days."""
-    if not Config.WEEKLY_IDEAS_EMAIL or not is_send_time(now):
+    from db import email_automation_enabled
+
+    if not email_automation_enabled("weekly_ideas") or not is_send_time(now):
         return {"sent": 0, "skipped": 0, "failed": 0, "ran": False}
     if not Config.APP_BASE_URL:
         logger.warning("Weekly ideas email not sent: APP_BASE_URL is not set (the email's links need it).")

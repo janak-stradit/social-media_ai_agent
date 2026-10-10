@@ -1309,6 +1309,221 @@ $(document).ready(function () {
         if (e.key === 'Enter') { e.preventDefault(); submitInvitation(); }
     });
 
+    // ── Emails: scheduled-email switches, send to a group, history ───────
+    const EMAIL_AUTOMATIONS = [
+        { id: 'weekly_ideas', name: 'Weekly ideas', icon: 'fa-lightbulb', what: 'Three post ideas from the user\'s industry trends and upcoming festivals.' },
+        { id: 'nudge_emails', name: 'Festival & trend nudges', icon: 'fa-bell', what: 'A festival a few days away, this week\'s top story, or a nudge after a quiet spell. Always shown under the bell; this switch emails them too.' },
+        { id: 'monthly_recap', name: 'Monthly recap', icon: 'fa-chart-pie', what: 'Last month\'s posts per platform, tips and ideas for next month.' },
+    ];
+    const emailState = { page: 1, pageSize: 25, kinds: {}, options: null, previewOk: false, jobTimer: null };
+
+    function fmtDateTime(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) + ' '
+            + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function renderEmailAutomation(r) {
+        $('#emailSetupStatus').html(
+            `<span class="em-pill ${r.smtp_configured ? 'ok' : 'bad'}"><i class="fas ${r.smtp_configured ? 'fa-check' : 'fa-xmark'}"></i>SMTP ${r.smtp_configured ? 'configured' : 'not configured'}</span>`
+            + `<span class="em-pill ${r.base_url_set ? 'ok' : 'bad'}"><i class="fas ${r.base_url_set ? 'fa-check' : 'fa-xmark'}"></i>APP_BASE_URL ${r.base_url_set ? 'set' : 'not set'}</span>`
+        );
+        $('#emailAutomationList').html(EMAIL_AUTOMATIONS.map(a => {
+            const st = (r.automation || {})[a.id] || {};
+            const on = !!st.enabled;
+            return `<div class="em-switch">
+                <input class="form-check-input" type="checkbox" role="switch" id="emAuto_${a.id}" data-automation="${a.id}" ${on ? 'checked' : ''}
+                    aria-describedby="emAutoHelp_${a.id}">
+                <div><label for="emAuto_${a.id}" class="mb-0"><strong><i class="fas ${a.icon} me-1" style="color:var(--brand-strong)"></i>${a.name}</strong></label>
+                    <small id="emAutoHelp_${a.id}">${escapeHtml(a.what)}<br>${escapeHtml(((r.schedule || {})[a.id]) || '')}${st.source === 'env' ? ' &middot; set by .env' : ''}</small></div>
+                <span class="em-state ${on ? 'on' : 'off'}">${on ? 'ON' : 'OFF'}</span>
+            </div>`;
+        }).join(''));
+    }
+
+    function loadEmailAutomation() {
+        $.get('/api/admin/email-automation').done(renderEmailAutomation)
+            .fail(() => $('#emailAutomationList').html('<div class="text-danger small">Could not load the email settings.</div>'));
+    }
+
+    $(document).on('change', '[data-automation]', function () {
+        const $box = $(this), id = $box.data('automation'), on = $box.is(':checked');
+        $box.prop('disabled', true);
+        $.ajax({ url: '/api/admin/email-automation', method: 'PUT', contentType: 'application/json', data: JSON.stringify({ [id]: on }) })
+            .done(function (r) {
+                renderEmailAutomation(r);
+                showToast(`${EMAIL_AUTOMATIONS.find(a => a.id === id).name} emails switched ${on ? 'on' : 'off'}`, 'success');
+            })
+            .fail(function (xhr) {
+                $box.prop('checked', !on).prop('disabled', false);
+                showToast((xhr.responseJSON || {}).error || 'Could not change the setting.', 'error');
+            });
+    });
+
+    function campaignPayload() {
+        return {
+            kind: $('input[name="emCampaignKind"]:checked').val(),
+            industry: $('#emIndustry').val(), account_type: $('#emAccountType').val(),
+            region: $('#emRegion').val(), occasion: $('#emOccasion').val(),
+        };
+    }
+
+    function resetCampaignPreview() {
+        emailState.previewOk = false;
+        $('#emSendBtn').prop('disabled', true);
+        $('#emPreview').addClass('d-none').empty();
+    }
+
+    function loadCampaignOptions() {
+        $.get('/api/admin/email-campaign/options').done(function (r) {
+            emailState.options = r;
+            const opt = (list) => list.map(o => `<option value="${escapeAttr(o.id)}">${escapeHtml(o.label)}</option>`).join('');
+            $('#emIndustry').append(opt(r.industries));
+            $('#emAccountType').append(opt(r.account_types));
+            $('#emRegion').append(opt(r.regions));
+            const regionName = { USA: 'US', India: 'India', UAE: 'UAE / GCC' };
+            $('#emOccasion').html((r.occasions || []).length
+                ? r.occasions.map(o => `<option value="${escapeAttr(o.key)}">${escapeHtml(o.name)} &middot; ${escapeHtml(o.date)} &middot; ${regionName[o.region] || o.region} (in ${o.days_until} days)</option>`).join('')
+                : '<option value="">No occasions in the next 60 days</option>');
+        });
+    }
+
+    $(document).on('change', 'input[name="emCampaignKind"]', function () {
+        $('#emOccasionWrap').toggleClass('d-none', $(this).val() !== 'festival');
+        resetCampaignPreview();
+    });
+    $(document).on('change', '#emIndustry, #emAccountType, #emRegion, #emOccasion', resetCampaignPreview);
+
+    $('#emPreviewBtn').on('click', function () {
+        const $btn = $(this).prop('disabled', true);
+        $.ajax({ url: '/api/admin/email-campaign/preview', method: 'POST', contentType: 'application/json', data: JSON.stringify(campaignPayload()) })
+            .done(function (r) {
+                const skipped = r.skipped || {};
+                const skipText = [
+                    skipped.opted_out ? `${skipped.opted_out} unsubscribed` : '',
+                    skipped.emailed_recently ? `${skipped.emailed_recently} emailed in the last 24h` : '',
+                    skipped.already_had_this_occasion ? `${skipped.already_had_this_occasion} already got this occasion` : '',
+                ].filter(Boolean).join(', ');
+                const list = (r.sample || []).map(u => `<li>${escapeHtml(u.name || u.email)} &middot; ${escapeHtml(u.company || '')} <span class="text-muted">(${escapeHtml(u.email)})</span></li>`).join('');
+                $('#emPreview').removeClass('d-none').html(
+                    `<strong>${r.count} ${r.count === 1 ? 'person' : 'people'}</strong> will get this email${skipText ? ` &middot; skipped: ${escapeHtml(skipText)}` : ''}.`
+                    + (list ? `<ul>${list}</ul>${r.count > (r.sample || []).length ? `<div class="mt-1 text-muted">and ${r.count - r.sample.length} more</div>` : ''}` : '')
+                );
+                emailState.previewOk = r.count > 0;
+                $('#emSendBtn').prop('disabled', !emailState.previewOk);
+            })
+            .fail(function (xhr) { showToast((xhr.responseJSON || {}).error || 'Could not preview the recipients.', 'error'); })
+            .always(() => $btn.prop('disabled', false));
+    });
+
+    function renderCampaignJob(job) {
+        const done = job.sent + job.skipped + job.failed, pct = job.total ? Math.round(done / job.total * 100) : 100;
+        $('#emJob').removeClass('d-none').html(
+            `<div class="em-preview"><strong>${job.status === 'done' ? 'Finished' : 'Sending...'}</strong> ${done} of ${job.total}
+             &middot; ${job.sent} sent${job.skipped ? `, ${job.skipped} skipped` : ''}${job.failed ? `, <span class="text-danger">${job.failed} failed</span>` : ''}
+             <div class="em-progress"><span style="width:${pct}%"></span></div></div>`
+        );
+    }
+
+    function pollCampaignJob(id) {
+        clearTimeout(emailState.jobTimer);
+        $.get(`/api/admin/email-campaign/jobs/${id}`).done(function (r) {
+            renderCampaignJob(r.job);
+            loadEmailHistory(1);
+            if (r.job.status !== 'done') emailState.jobTimer = setTimeout(() => pollCampaignJob(id), 4000);
+            else showToast(`Emails finished: ${r.job.sent} sent`, r.job.failed ? 'warning' : 'success');
+        });
+    }
+
+    $('#emSendBtn').on('click', function () {
+        if (!emailState.previewOk) return;
+        const p = campaignPayload();
+        const what = p.kind === 'festival' ? `the festival idea for "${$('#emOccasion option:selected').text().split(' · ')[0]}"` : '"Ideas for you"';
+        if (!window.confirm(`Send ${what} to everyone in the preview now?`)) return;
+        const $btn = $(this).prop('disabled', true);
+        $.ajax({ url: '/api/admin/email-campaign/send', method: 'POST', contentType: 'application/json', data: JSON.stringify(p) })
+            .done(function (r) { resetCampaignPreview(); renderCampaignJob(r.job); pollCampaignJob(r.job.id); })
+            .fail(function (xhr) { $btn.prop('disabled', false); showToast((xhr.responseJSON || {}).error || 'Could not send.', 'error'); });
+    });
+
+    function emailFilters() {
+        return {
+            q: ($('#emailFilterQ').val() || '').trim(), kind: $('#emailFilterKind').val(), status: $('#emailFilterStatus').val(),
+            date_from: $('#emailFilterFrom').val(), date_to: $('#emailFilterTo').val(),
+        };
+    }
+
+    function emailDetailsText(d) {
+        if (!d) return '';
+        const parts = [];
+        if (d.occasion) parts.push(`Occasion: ${d.occasion}`);
+        if (d.industry) parts.push(`Industry: ${String(d.industry).replace(/_/g, ' ')}`);
+        if (d.market) parts.push(`Market: ${d.market}`);
+        if (d.account_type) parts.push(`Account: ${d.account_type}`);
+        if (d.ideas && d.ideas.length) parts.push(`Ideas: ${d.ideas.join(' · ')}`);
+        if (d.idea) parts.push(`Idea: ${d.idea}`);
+        if (d.month) parts.push(`Month: ${d.month} (${d.posts} posts)`);
+        return parts.join(' — ');
+    }
+
+    function renderEmailPagination(r) {
+        const total = Number(r.total || 0), page = Number(r.page || 1), pages = Number(r.pages || 1), size = Number(r.page_size || emailState.pageSize);
+        const from = total ? (page - 1) * size + 1 : 0, to = Math.min(total, page * size);
+        $('#emailPageInfo').html(total ? `Showing <strong>${from.toLocaleString()}–${to.toLocaleString()}</strong> of <strong>${total.toLocaleString()}</strong>` : '');
+        if (pages <= 1) { $('#emailPages').html(''); return; }
+        const btn = (label, target, opts = {}) => `<button type="button" class="cost-page-btn${opts.active ? ' active' : ''}" data-email-page="${target}"
+            ${opts.disabled ? 'disabled' : ''} ${opts.active ? 'aria-current="page"' : ''} aria-label="${opts.aria || 'Page ' + target}">${label}</button>`;
+        $('#emailPages').html(
+            btn('<i class="fas fa-angle-left"></i>', page - 1, { disabled: page <= 1, aria: 'Previous page' })
+            + costPageNumbers(page, pages).map(n => n === 'gap' ? '<span class="cost-page-gap">…</span>' : btn(n, n, { active: n === page })).join('')
+            + btn('<i class="fas fa-angle-right"></i>', page + 1, { disabled: page >= pages, aria: 'Next page' })
+        );
+    }
+
+    function loadEmailHistory(page) {
+        if (page) emailState.page = page;
+        const params = $.param(Object.assign({ page: emailState.page, page_size: emailState.pageSize }, emailFilters()));
+        $('#emailHistoryTbody').addClass('loading');
+        $.get(`/api/admin/emails?${params}`).done(function (r) {
+            if (!Object.keys(emailState.kinds).length && r.kinds) {
+                emailState.kinds = r.kinds;
+                $('#emailFilterKind').append(Object.entries(r.kinds).map(([k, v]) => `<option value="${escapeAttr(k)}">${escapeHtml(v)}</option>`).join(''));
+            }
+            const s = r.summary || {};
+            const topKinds = Object.entries(s.by_kind || {}).sort((a, b) => b[1] - a[1]).slice(0, 3);
+            $('#emailSummary').html(
+                `<div class="em-stat"><b>${s.sent || 0}</b><span>Sent, last 7 days</span></div>`
+                + `<div class="em-stat"><b style="color:${s.failed ? '#b91c1c' : '#172033'}">${s.failed || 0}</b><span>Failed, last 7 days</span></div>`
+                + topKinds.map(([k, n]) => `<div class="em-stat"><b>${n}</b><span>${escapeHtml((r.kinds || {})[k] || k)}</span></div>`).join('')
+            );
+            const rows = r.emails || [];
+            $('#emailHistoryTbody').html(rows.length ? rows.map(e => `<tr>
+                <td style="white-space:nowrap;">${fmtDateTime(e.created_at)}</td>
+                <td><div class="fw-semibold">${escapeHtml(e.user_name || '')}</div><div class="text-muted small">${escapeHtml(e.to_email)}</div></td>
+                <td><span class="em-kind">${escapeHtml(e.kind_label)}</span></td>
+                <td><div>${escapeHtml(e.subject)}</div>${emailDetailsText(e.details) ? `<div class="em-detail">${escapeHtml(emailDetailsText(e.details))}</div>` : ''}
+                    ${e.error ? `<div class="em-error"><i class="fas fa-triangle-exclamation me-1"></i>${escapeHtml(e.error)}</div>` : ''}</td>
+                <td><span class="em-badge ${e.status === 'sent' ? 'sent' : 'failed'}">${e.status === 'sent' ? 'Sent' : 'Failed'}</span></td>
+                <td class="text-muted small">${e.triggered_by && e.triggered_by.startsWith('admin') ? 'Admin' : 'Automatic'}</td>
+            </tr>`).join('') : '<tr><td colspan="6" class="text-center py-4 text-muted">No emails match these filters yet.</td></tr>');
+            renderEmailPagination(r);
+        }).fail(function () {
+            $('#emailHistoryTbody').html('<tr><td colspan="6" class="text-center py-4 text-danger">Could not load the email history.</td></tr>');
+        }).always(() => $('#emailHistoryTbody').removeClass('loading'));
+    }
+
+    let emailSearchTimer = null;
+    $('#emailFilterQ').on('input', function () { clearTimeout(emailSearchTimer); emailSearchTimer = setTimeout(() => loadEmailHistory(1), 350); });
+    $('#emailFilterKind, #emailFilterStatus, #emailFilterFrom, #emailFilterTo').on('change', () => loadEmailHistory(1));
+    $('#emailPageSize').on('change', function () { emailState.pageSize = Number($(this).val()) || 25; loadEmailHistory(1); });
+    $(document).on('click', '[data-email-page]', function () { loadEmailHistory(Number($(this).data('email-page'))); });
+    $('#emailFilterReset').on('click', function () {
+        $('#emailFilterQ, #emailFilterFrom, #emailFilterTo').val('');
+        $('#emailFilterKind, #emailFilterStatus').val('');
+        loadEmailHistory(1);
+    });
+
     // ── Init ──
     loadAdminUsers();
     loadAdminRequests();
@@ -1316,4 +1531,7 @@ $(document).ready(function () {
     loadInvitations();
     loadImageSettings(true);
     loadAdminPresets();
+    loadEmailAutomation();
+    loadCampaignOptions();
+    loadEmailHistory(1);
 });

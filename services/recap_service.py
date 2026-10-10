@@ -109,9 +109,19 @@ def comparison(stats: dict) -> str:
 def send_recap_email(user_id: int, base_url: str, year: int, month: int) -> dict:
     """Email the user their recap for the month. {"sent": True} or
     {"sent": False, "reason": "no_posts"} when they created nothing that month."""
-    from db import create_idea_link, get_user_brand_profile, get_user_by_id, mark_recap_email_sent
-    from services.email_service import EmailService
-    from services.idea_digest_service import _FORMATS, _origin, pick_ideas, unsubscribe_token
+    from db import (
+        create_idea_link,
+        get_user_brand_profile,
+        get_user_by_id,
+        mark_recap_email_sent,
+    )
+    from services.email_service import EmailService, email_context
+    from services.idea_digest_service import (
+        _FORMATS,
+        _origin,
+        pick_ideas,
+        unsubscribe_token,
+    )
     from services.idea_digest_service import _PLATFORMS as PLATFORM_NAMES
 
     user = get_user_by_id(user_id)
@@ -139,18 +149,19 @@ def send_recap_email(user_id: int, base_url: str, year: int, month: int) -> dict
     except Exception as err:  # noqa: BLE001
         logger.warning(f"Recap for user {user_id}: no ideas ({str(err)[:150]})")
 
-    EmailService().send_monthly_recap_email(
-        to_email=user.email,
-        name=user.name or "there",
-        company_name=(get_user_brand_profile(user_id) or {}).get("company_name"),
-        stats={**stats, "platform_names": [f"{_PLATFORMS.get(k, k)} ({v})" for k, v in stats["platforms"].items()],
-               "comparison": comparison(stats)},
-        tips=tips(stats),
-        ideas=ideas,
-        calendar_url=f"{base}/calendar",
-        settings_url=f"{base}/settings#notifications",
-        unsubscribe_url=f"{base}/api/notifications/recap-email/unsubscribe/{unsubscribe_token(user_id, 'recap')}",
-    )
+    with email_context(user_id=user_id, details={"month": stats["month"], "posts": stats["posts"]}):
+        EmailService().send_monthly_recap_email(
+            to_email=user.email,
+            name=user.name or "there",
+            company_name=(get_user_brand_profile(user_id) or {}).get("company_name"),
+            stats={**stats, "platform_names": [f"{_PLATFORMS.get(k, k)} ({v})" for k, v in stats["platforms"].items()],
+                   "comparison": comparison(stats)},
+            tips=tips(stats),
+            ideas=ideas,
+            calendar_url=f"{base}/calendar",
+            settings_url=f"{base}/settings#notifications",
+            unsubscribe_url=f"{base}/api/notifications/recap-email/unsubscribe/{unsubscribe_token(user_id, 'recap')}",
+        )
     mark_recap_email_sent(user_id, stats["month"])
     return {"sent": True, "posts": stats["posts"], "ideas": len(ideas)}
 
@@ -161,7 +172,9 @@ def run_monthly_recap(now: datetime | None = None) -> dict:
     the send hour. A user with no posts that month is marked done, not retried."""
     now = now or datetime.now(timezone.utc)
     result = {"sent": 0, "skipped": 0, "failed": 0, "ran": False}
-    if not Config.MONTHLY_RECAP_EMAIL or now.day < Config.RECAP_EMAIL_DAY or \
+    from db import email_automation_enabled
+
+    if not email_automation_enabled("monthly_recap") or now.day < Config.RECAP_EMAIL_DAY or \
             (now.day == Config.RECAP_EMAIL_DAY and now.hour < Config.IDEAS_EMAIL_HOUR_UTC):
         return result
     if not Config.APP_BASE_URL:

@@ -21,8 +21,6 @@ from config import Config
 
 logger = logging.getLogger(__name__)
 
-# festival_service labels regions "USA"/"India"; it has no UAE/GCC calendar yet
-_FESTIVAL_REGIONS = {"US": "USA", "India": "India"}
 _QUIET_DAYS_AFTER_ACTIVITY = 2  # no email to someone who was just here
 _MAX_UNREAD = 5
 
@@ -31,11 +29,11 @@ def _due_nudge(user: dict, profile: dict, now: datetime) -> dict | None:
     """The one nudge this user is due right now, most timely first, or None.
     Cheap: no LLM call - the idea is attached later, only for a nudge that is sent."""
     from db import has_notification, last_activity_at
-    from services.festival_service import get_upcoming_festivals
+    from services.festival_service import PROFILE_REGION_MAP, get_upcoming_festivals
 
     user_id = user["id"]
-    markets = {_FESTIVAL_REGIONS[r] for r in profile.get("compliance_regions") or profile.get("regions_detected") or []
-               if r in _FESTIVAL_REGIONS}
+    markets = {PROFILE_REGION_MAP[r] for r in profile.get("compliance_regions") or profile.get("regions_detected") or []
+               if r in PROFILE_REGION_MAP}
     for festival in get_upcoming_festivals(days_ahead=Config.NUDGE_OCCASION_DAYS, today=now.date()):
         if festival["region"] not in markets or festival["days_until"] < 1:
             continue
@@ -92,9 +90,9 @@ def _idea_for(nudge: dict, user_id: int, profile: dict) -> dict | None:
 
 
 def _may_email(user: dict, now: datetime) -> bool:
-    from db import emails_sent_since, last_activity_at
+    from db import email_automation_enabled, emails_sent_since, last_activity_at
 
-    if not Config.NUDGE_EMAILS or not Config.APP_BASE_URL or not user.get("email_ok"):
+    if not email_automation_enabled("nudge_emails") or not Config.APP_BASE_URL or not user.get("email_ok"):
         return False
     last_active = last_activity_at(user["id"])
     if last_active and now - last_active < timedelta(days=_QUIET_DAYS_AFTER_ACTIVITY):
@@ -138,22 +136,25 @@ def nudge_user(user: dict, now: datetime | None = None) -> dict | None:
         return None
     emailed = False
     if _may_email(user, now):
-        from services.email_service import EmailService
+        from services.email_service import EmailService, email_context
         from services.idea_digest_service import _FORMATS, _PLATFORMS, unsubscribe_token
 
         base = Config.APP_BASE_URL.rstrip("/")
         try:
-            EmailService().send_nudge_email(
-                to_email=user["email"], name=user.get("name") or "there", headline=nudge["title"], intro=nudge["intro"],
-                idea={
-                    "title": idea["title"],
-                    "summary": idea.get("summary") or idea.get("why_now") or "",
-                    "makes": f"{_FORMATS.get(idea.get('format'), 'Text post')} for {_PLATFORMS.get(idea.get('platform'), 'LinkedIn')}",
-                    "url": base + path,
-                },
-                settings_url=f"{base}/settings#notifications",
-                unsubscribe_url=f"{base}/api/notifications/nudges-email/unsubscribe/{unsubscribe_token(user['id'], 'nudges')}",
-            )
+            details = {"nudge": nudge["kind"], "occasion": (nudge.get("festival") or {}).get("name"),
+                       "idea": idea["title"]}
+            with email_context(user_id=user["id"], details=details):
+                EmailService().send_nudge_email(
+                    to_email=user["email"], name=user.get("name") or "there", headline=nudge["title"], intro=nudge["intro"],
+                    idea={
+                        "title": idea["title"],
+                        "summary": idea.get("summary") or idea.get("why_now") or "",
+                        "makes": f"{_FORMATS.get(idea.get('format'), 'Text post')} for {_PLATFORMS.get(idea.get('platform'), 'LinkedIn')}",
+                        "url": base + path,
+                    },
+                    settings_url=f"{base}/settings#notifications",
+                    unsubscribe_url=f"{base}/api/notifications/nudges-email/unsubscribe/{unsubscribe_token(user['id'], 'nudges')}",
+                )
             mark_notification_emailed(notification_id, when=now)
             emailed = True
         except Exception as err:  # noqa: BLE001 - the bell still has it
