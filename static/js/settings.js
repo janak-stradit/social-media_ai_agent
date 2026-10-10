@@ -165,6 +165,9 @@ $(document).ready(function () {
 
         $('#connectPlatformInput').val(platform);
         $('#connectModalTitle').text(titles[platform] || 'Connect Account');
+        // Instagram: the account is found from the Facebook Page; the handle fills itself in
+        $('#accountIdLabel').text(platform === 'instagram' ? 'Facebook Page ID (or Instagram account ID):' : 'Page ID / Account ID / Author URN:');
+        $('#accountNameLabel').text(platform === 'instagram' ? 'Instagram handle (filled in automatically):' : 'Account Name / Handle:');
         $('#connectModalIcon').html(icons[platform] || '<i class="fas fa-plug"></i>');
 
         const existing = currentSocialAccounts.find(a => a.platform === platform) || {};
@@ -198,6 +201,15 @@ $(document).ready(function () {
         const modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('connectAccountModal'));
         modal.show();
     };
+
+    // One click: the Instagram account linked to the connected Facebook Page
+    $('#igFromFacebookBtn').on('click', function () {
+        const $btn = $(this).prop('disabled', true);
+        $.ajax({ url: '/api/social/instagram/from-facebook', type: 'POST', contentType: 'application/json', data: '{}' })
+            .done(r => { showToast(`Instagram connected: @${r.username}`, 'success'); loadUserSocialAccounts(); })
+            .fail(xhr => showToast((xhr.responseJSON || {}).error || 'Could not connect Instagram.', 'error'))
+            .always(() => $btn.prop('disabled', false));
+    });
 
     $('#testMcpConnBtn').on('click', function () {
         const endpoint = $('#mcpEndpointInput').val().trim();
@@ -247,7 +259,7 @@ $(document).ready(function () {
         const mcpToolName = $('#mcpToolNameInput').val().trim();
         const refreshToken = $('#connectRefreshTokenInput').val().trim();
 
-        if (!accountName) {
+        if (!accountName && platform !== 'instagram') {  // Instagram: filled in from the account
             showToast('Please enter an Account Name or Handle', 'error');
             return;
         }

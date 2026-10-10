@@ -7,7 +7,9 @@ class SocialPublisherService:
     """Service to handle real live publishing of text, photos, and videos to Facebook, Instagram, and LinkedIn."""
 
     def __init__(self):
-        self.fb_graph_version = "v19.0"
+        from config import Config
+
+        self.fb_graph_version = Config.META_GRAPH_VERSION
 
     def publish_to_facebook(self, page_id: str, access_token: str, message: str, image_path: str | None = None) -> dict:
         """Publish a real post or photo to a Facebook Page via Meta Graph API v19.0."""
@@ -43,6 +45,22 @@ class SocialPublisherService:
                 return {"success": False, "platform": "facebook", "error": f"Meta Graph API Error: {err_msg}"}
         except Exception as e:
             return {"success": False, "platform": "facebook", "error": f"Facebook network error: {str(e)}"}
+
+    def _publish_instagram(self, user_id: int, caption: str, image_path: str | None) -> dict:
+        """Scheduled posts: one image (Instagram needs one) to the connected account."""
+        from config import Config
+        from services.instagram_service import InstagramError, publish_for_user
+
+        if not image_path:
+            return {"success": False, "platform": "instagram", "error": "Instagram posts need an image."}
+        try:
+            result = publish_for_user(user_id, caption, [f"/static/uploads/{os.path.basename(image_path)}"],
+                                      Config.UPLOAD_FOLDER)
+        except InstagramError as e:
+            return {"success": False, "platform": "instagram", "error": str(e)}
+        except requests.exceptions.RequestException as e:
+            return {"success": False, "platform": "instagram", "error": f"Instagram network error: {e}"}
+        return {"success": True, "platform": "instagram", "post_id": result["media_id"], "post_url": result["permalink"]}
 
     def verify_facebook_account(self, page_id: str, access_token: str) -> dict:
         """Verify if a Facebook Page ID and Access Token are active and valid via Meta Graph API."""
@@ -135,6 +153,8 @@ class SocialPublisherService:
                     }
                 else:
                     results[plat] = self.publish_to_facebook(str(page_id), str(token), caption, image_path)
+            elif plat == "instagram":
+                results[plat] = self._publish_instagram(user_id, caption, image_path)
             elif plat == "youtube":
                 channel_id = acc.get("account_id")
                 token = acc.get("access_token")

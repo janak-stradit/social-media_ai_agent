@@ -454,6 +454,11 @@ def test_pipeline_publishes_research_and_caption_drafts(monkeypatch):
     monkeypatch.setattr(routes.caption_agent, "generate_caption", caption)
     monkeypatch.setattr(routes.hashtag_agent, "generate_hashtags_batch", lambda p, *a, **k: {x: {"hashtags": ["#A"], "_usage": {}} for x in p})
     monkeypatch.setattr(routes, "active_rules_for_user", lambda uid: [])
+
+    def no_rewrite(**k):  # the reviewer may ask for a rewrite: that would be a real (paid) LLM call
+        raise RuntimeError("no LLM in tests")
+
+    monkeypatch.setattr(routes.caption_agent, "refine_caption", no_rewrite)
     body = {"story": "Announce live tracking", "platforms": ["linkedin"], "selected_outputs": ["text"], "progress_id": "pipe-test-0001"}
     assert client.post("/api/generate", json=body).get_json()["success"]
 

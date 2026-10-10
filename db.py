@@ -585,6 +585,12 @@ class ApprovalRequest(Base):
     # Where the "Review & Decide" email was sent - that reviewer (signed in
     # with this email) can see and decide the request alongside its owner.
     reviewer_email: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    # A whole post for several platforms (Studio Chat "Send for approval"),
+    # JSON list - one entry per platform (services/approval_bundle_service.py):
+    # {platform, caption, hashtags, media: none|single|carousel, images,
+    #  slide_titles, linkedin_format, pdf_url, compliance, decision, comment}.
+    # Null for the older one-platform requests (the columns above).
+    items: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
@@ -719,6 +725,7 @@ def init_db():
             f"ALTER TABLE {profile_tbl} ADD COLUMN compliance_confirmed_at TIMESTAMP",
             f"ALTER TABLE {approval_tbl} ADD COLUMN compliance TEXT",
             f"ALTER TABLE {approval_tbl} ADD COLUMN reviewer_email VARCHAR(255)",
+            f"ALTER TABLE {approval_tbl} ADD COLUMN items TEXT",
             f"ALTER TABLE {invite_tbl} ADD COLUMN inviter_name VARCHAR(255)",
         ]:
             try:
@@ -3444,10 +3451,12 @@ def _approval_request_to_dict(r: "ApprovalRequest") -> dict:
         "status": r.status,
         "comments": r.comments,
         "decided_by": r.decided_by,
-        "decided_at": r.decided_at.isoformat() if r.decided_at else None,
+        "decided_at": _as_utc(r.decided_at).isoformat() if r.decided_at else None,
         "compliance": json.loads(r.compliance) if getattr(r, "compliance", None) else None,
         "reviewer_email": getattr(r, "reviewer_email", None),
-        "created_at": r.created_at.isoformat() if r.created_at else None,
+        "items": json.loads(r.items) if getattr(r, "items", None) else None,
+        # UTC with its offset, so the browser shows it in the viewer's time zone
+        "created_at": _as_utc(r.created_at).isoformat() if r.created_at else None,
     }
 
 
@@ -3462,11 +3471,13 @@ def create_approval_request(
     image_urls: list[str] | None = None,
     compliance: dict | None = None,
     reviewer_email: str | None = None,
+    items: list[dict] | None = None,
 ) -> dict:
     """Creates a new pending approval request for a pipeline's generated
     content, superseding the same user's earlier pending request for that
     pipeline (re-sending for approval after edits shouldn't leave stale
-    duplicates) - never another user's."""
+    duplicates) - never another user's. items: a whole multi-platform post
+    (services/approval_bundle_service.py)."""
     with Session(engine) as session:
         session.query(ApprovalRequest).filter(
             ApprovalRequest.pipeline_client_id == pipeline_client_id,
@@ -3485,6 +3496,7 @@ def create_approval_request(
             image_urls=json.dumps(image_urls or []),
             compliance=json.dumps(compliance) if compliance else None,
             reviewer_email=(reviewer_email or "").strip().lower() or None,
+            items=json.dumps(items) if items else None,
         )
         session.add(req)
         session.commit()
@@ -3536,20 +3548,49 @@ def list_approval_requests(
 
 
 def decide_approval_request(
-    request_id: int, decision: str, comments: str | None, decided_by: str | None
+    request_id: int, decision: str | None, comments: str | None, decided_by: str | None,
+    item_decisions: dict | None = None,
 ) -> dict | None:
-    """Records an accept/reject decision. decision must be 'approved' or 'rejected'."""
-    if decision not in ("approved", "rejected"):
+    """Records the reviewer's decision. decision 'approved'/'rejected' applies to
+    the whole request (and every platform of a multi-platform one);
+    item_decisions {index: {"decision": "approved"|"changes", "comment"}}
+    decides a multi-platform request per platform - its status becomes
+    approved, rejected (changes asked on every platform) or partial."""
+    from services.approval_bundle_service import apply_decisions
+
+    if decision not in ("approved", "rejected", None) or (decision is None and not item_decisions):
         raise ValueError("decision must be 'approved' or 'rejected'")
 
     with Session(engine) as session:
         req = session.get(ApprovalRequest, request_id)
         if not req:
             return None
+        items = json.loads(req.items) if req.items else None
+        if items:
+            items, decision = apply_decisions(items, decision, item_decisions or {})
+            req.items = json.dumps(items)  # type: ignore[assignment]
+        elif decision is None:
+            raise ValueError("decision must be 'approved' or 'rejected'")
         req.status = decision  # type: ignore[assignment]
         req.comments = comments  # type: ignore[assignment]
         req.decided_by = decided_by  # type: ignore[assignment]
         req.decided_at = _utcnow()  # type: ignore[assignment]
+        session.commit()
+        session.refresh(req)
+        return _approval_request_to_dict(req)
+
+
+def update_approval_item(request_id: int, index: int, fields: dict) -> dict | None:
+    """Merges fields into one platform item of a multi-platform request (e.g. what publishing it did)."""
+    with Session(engine) as session:
+        req = session.get(ApprovalRequest, request_id)
+        if not req or not req.items:
+            return None
+        items = json.loads(req.items)
+        if not 0 <= index < len(items):
+            return None
+        items[index] = {**items[index], **fields}
+        req.items = json.dumps(items)  # type: ignore[assignment]
         session.commit()
         session.refresh(req)
         return _approval_request_to_dict(req)
@@ -3577,7 +3618,8 @@ EMAIL_KINDS = {
     "weekly_ideas": "Weekly ideas", "nudge": "Festival / trend nudge", "festival_idea": "Festival idea (admin)",
     "ideas_campaign": "Ideas (admin)", "monthly_recap": "Monthly recap", "verification": "Email verification",
     "password_reset": "Password reset", "invitation": "Invitation", "approval_request": "Approval request",
-    "approval_notification": "Approval notification", "credit_decision": "Credit decision", "sales_lead": "Sales lead",
+    "approval_notification": "Approval notification", "approval_decision": "Approval decision",
+    "credit_decision": "Credit decision", "sales_lead": "Sales lead",
 }
 
 

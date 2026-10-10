@@ -2151,6 +2151,7 @@ $(document).ready(function () {
             ${tabsHtml}
             ${panelsHtml}
             <div class="assistant-card-footer">
+                ${approvalButtonHtml(msgId)}
                 <span class="coming-soon" title="Coming soon">
                     <button class="btn btn-sm btn-outline-success btn-schedule-post" data-msg="${msgId}" disabled>
                         <i class="fas fa-calendar-plus me-1"></i>Schedule<span class="soon-tag">Soon</span>
@@ -2167,6 +2168,8 @@ $(document).ready(function () {
         `;
 
         elem.find('.assistant-card').html(cardContent);
+
+        elem.find('.btn-send-approval').on('click', () => openApproval(msgId));
 
         // Bind Agent Pipeline toggle
         $(`#${msgId}_pipeline_btn`).on('click', function () {
@@ -2543,11 +2546,18 @@ $(document).ready(function () {
     }
 
     function presetById(id) { return imagePresets.find(p => p.id === id) || null; }
-    function presetImageCount(p, allSizes) {
+    // /carousel: "7 slides on ..." -> 7 (3-10, default 5) - same rule as services/carousel_service.slide_count
+    function carouselSlideCount(text) {
+        const m = /\b(\d{1,2})\s*(?:slides?|cards?|pages?)\b/i.exec(text || '');
+        return m ? Math.max(3, Math.min(10, Number(m[1]))) : 5;
+    }
+    function presetImageCount(p, allSizes, text) {
         if (!p) return 0;
+        if (p.carousel) return carouselSlideCount(text != null ? text : storyInput.val());
         return (allSizes ?? presetAllSizes) && p.all_sizes_images ? p.all_sizes_images : p.images;
     }
-    function presetSizeLabels(p, allSizes) {
+    function presetSizeLabels(p, allSizes, text) {
+        if (p.carousel) return Array.from({ length: carouselSlideCount(text) }, (_, i) => `slide ${i + 1}`);
         return ((allSizes && p.all_sizes && p.all_sizes.length) ? p.all_sizes : p.sizes) || [];
     }
     // The attached photo, else the last image in this chat
@@ -2596,7 +2606,7 @@ $(document).ready(function () {
                     <span class="slash-cmd">${escapeHtml(p.command)}</span><span class="slash-label">${escapeHtml(p.label)}</span>
                     <span class="slash-desc">${escapeHtml(p.description)}</span>
                 </span>
-                <span class="slash-meta">${p.images} image${p.images === 1 ? '' : 's'}${p.ad_copy ? ' + ad copy' : ''}</span>
+                <span class="slash-meta">${p.carousel ? '3-10 slides + caption' : `${p.images} image${p.images === 1 ? '' : 's'}${p.ad_copy ? ' + ad copy' : ''}`}</span>
             </button>`).join('');
         $('#slashMenu').html(`
             <div class="slash-menu-head"><span>Image commands</span><span class="slash-keys">↑↓ choose · Enter use · Esc close</span></div>
@@ -2641,7 +2651,7 @@ $(document).ready(function () {
         } else if (reason) {
             status = `<span class="preset-status bad"><i class="fas fa-hourglass-half me-1"></i>${escapeHtml(reason)}</span>`;
         } else {
-            status = `<span class="preset-status">${need} image${need === 1 ? '' : 's'}${p.ad_copy ? ' + ad copy' : ''}`
+            status = `<span class="preset-status">${p.carousel ? `${need} slides + caption (type e.g. "7 slides" to change)` : `${need} image${need === 1 ? '' : 's'}`}${p.ad_copy ? ' + ad copy' : ''}`
                 + `${q && !q.unlimited ? ` · ${q.remaining} left today` : ''}`
                 + `${!uploadedImagePath && threadActiveImagePath ? ' · uses the last image in this chat' : ''}</span>`;
         }
@@ -2653,6 +2663,7 @@ $(document).ready(function () {
     }
 
     storyInput.on('input', renderSlashMenu);
+    storyInput.on('input', () => { if (activePreset && activePreset.carousel) renderPresetBar(); });
     storyInput.on('blur', () => setTimeout(closeSlashMenu, 150));
     // Capture phase: runs before the box's Enter-to-send handler
     storyInput[0].addEventListener('keydown', function (e) {
@@ -2711,7 +2722,7 @@ $(document).ready(function () {
         const imagePath = opts.imagePath || presetProductImage();
         const allSizes = opts.allSizes != null ? opts.allSizes : presetAllSizes;
         const notes = opts.productNotes != null ? opts.productNotes : productNotesFromAnalysis();
-        const labels = presetSizeLabels(p, allSizes);
+        const labels = presetSizeLabels(p, allSizes, text);
         let msgId = opts.msgId;
         if (!msgId) {
             $('#welcomeHero').addClass('d-none');
@@ -2803,8 +2814,9 @@ $(document).ready(function () {
             const img = content[k]?.media?.image;
             if (!img) return '';
             if (img.limit_reached) return `<div class="preset-tile">${imageLimitCardHtml()}</div>`;
+            const slide = ((meta.carousel || {}).slides || []).find(sl => sl.key === k);
             const sizeLabel = { feed: 'Feed', portrait: 'Feed', story: 'Story', billboard: 'Billboard', showcase: 'Showcase', lifestyle: 'Lifestyle', catalog: 'Catalog', festive: 'Festive' }[k] || capitalize(k);
-            const name = `${sizeLabel}${img.aspect ? ' ' + img.aspect : ''}`;
+            const name = slide ? `Slide ${k.replace('slide', '')} · ${slide.title}` : `${sizeLabel}${img.aspect ? ' ' + img.aspect : ''}`;
             return `
                 <figure class="preset-tile" ${img.aspect ? `data-aspect="${escapeAttr(img.aspect)}"` : ''}>
                     <img class="media-output-img preset-img img-reveal" src="${escapeAttr(img.url)}" alt="${escapeAttr(label + ' - ' + name)}" loading="lazy">
@@ -2830,6 +2842,15 @@ $(document).ready(function () {
                     <dt>Button</dt><dd><span class="preset-cta">${escapeHtml(ad.cta)}</span></dd>
                 </dl>
             </div>` : '';
+        const car = meta.carousel;
+        const carText = car ? [car.caption, (car.hashtags || []).join(' ')].filter(Boolean).join('\n\n') : '';
+        const carHtml = car && carText ? `
+            <div class="preset-adcopy">
+                <div class="preset-adcopy-head"><span><i class="fas fa-images me-1"></i>Carousel caption</span>
+                    <button type="button" class="preset-copy" data-copy="${escapeAttr(carText)}"><i class="fas fa-copy me-1"></i>Copy</button></div>
+                <div class="post-caption-text">${escapeHtml(car.caption || '')}</div>
+                ${(car.hashtags || []).length ? `<div class="hashtags-container mt-2">${car.hashtags.map(t => `<span class="hashtag-pill">${escapeHtml(t)}</span>`).join(' ')}</div>` : ''}
+            </div>` : '';
         const usage = r.usage;
         const costHtml = usage && usage.cost_usd
             ? `<span class="badge-cost-tag me-1" id="${msgId}_cost_badge" title="Images${ad ? ' + ad copy' : ''}">${costBadgeInner(usage)}</span>` : '';
@@ -2842,8 +2863,9 @@ $(document).ready(function () {
             ${meta.text ? `<div class="preset-brief"><i class="fas fa-quote-left me-1"></i>${escapeHtml(meta.text)}</div>` : ''}
             ${meta.occasion_auto ? `<div class="preset-brief"><i class="fas fa-calendar-day me-1"></i>Made for the next festival, <strong>${escapeHtml(meta.occasion)}</strong>. For another occasion, type e.g. <em>/festive Eid</em>.</div>` : ''}
             <div class="preset-grid${h.platforms.length > 1 ? ' multi' : ''}">${tiles}</div>
-            ${adHtml}
+            ${adHtml}${carHtml}
             <div class="assistant-card-footer">
+                ${approvalButtonHtml(msgId)}
                 <button class="btn btn-sm btn-outline-primary btn-preset-regen" data-msg="${msgId}"><i class="fas fa-sync-alt me-1"></i>Regenerate</button>
                 <button class="btn btn-sm btn-outline-secondary btn-refine-base" data-msg="${msgId}" title="Your next message will edit this version">
                     <i class="fas fa-wand-magic-sparkles me-1"></i>${refineBaseMsgId === msgId ? 'Refining this version' : 'Refine this version'}</button>
@@ -2857,8 +2879,9 @@ $(document).ready(function () {
         });
         elem.find('[data-preview]').on('click', function () { window.openImagePreview($(this).data('preview')); });
         elem.find('.preset-copy').on('click', function () {
-            navigator.clipboard.writeText($(this).data('copy')).then(() => showToast('Ad copy copied', 'success'));
+            navigator.clipboard.writeText($(this).data('copy')).then(() => showToast(car ? 'Caption copied' : 'Ad copy copied', 'success'));
         });
+        elem.find('.btn-send-approval').on('click', () => openApproval(msgId));
         elem.find('.btn-refine-base').on('click', function () {
             adoptAsRefineBase(msgId);
             const imageId = h.platforms.map(k => content[k]?.media?.image?.asset_id).find(Boolean);
@@ -2873,6 +2896,53 @@ $(document).ready(function () {
             const pr = h.preset || {};
             const p = presetById(pr.id) || { id: pr.id, command: '/' + pr.id, label: label, icon: icon, sizes: [], all_sizes: [] };
             runPreset(pr.text || '', { msgId: msgId, preset: p, imagePath: pr.imagePath, allSizes: !!pr.allSizes, productNotes: pr.productNotes || '' });
+        });
+    }
+
+    // "Send for approval" (static/js/approval_send.js): after sending, the
+    // button becomes a link to the request
+    function approvalButtonHtml(msgId) {
+        const h = window.chatHistory[msgId] || {};
+        const sent = h.approval && h.approval[h.currentIndex];
+        return sent
+            ? `<a class="btn btn-sm btn-outline-success" href="/approve/${sent}" target="_blank" rel="noopener"><i class="fas fa-check me-1"></i>Sent for approval · View</a>`
+            : `<button class="btn btn-sm btn-outline-primary btn-send-approval" data-msg="${msgId}"><i class="fas fa-paper-plane me-1"></i>Send for approval</button>`;
+    }
+
+    function openApproval(msgId) {
+        const h = window.chatHistory[msgId];
+        if (!h || typeof window.openSendForApproval !== 'function') return;
+        const r = h.responses[h.currentIndex] || {};
+        const content = r.content || {};
+        const meta = content._preset;
+        let platforms;
+        if (meta) {
+            // An image command: a carousel goes to LinkedIn + Instagram as slides; other commands as one image
+            const images = h.platforms.map(k => content[k]?.media?.image?.url).filter(Boolean);
+            const car = meta.carousel;
+            const titles = car ? h.platforms.map(k => ((car.slides || []).find(sl => sl.key === k) || {}).title || '') : [];
+            const base = { caption: car ? car.caption : '', hashtags: car ? car.hashtags || [] : [] };
+            platforms = car
+                ? ['linkedin', 'instagram', 'facebook'].map(p => ({ ...base, platform: p, images, media: 'carousel', slideTitles: titles, on: p !== 'facebook' }))
+                : ['instagram', 'facebook', 'linkedin'].map(p => ({ ...base, platform: p, images: images.slice(0, 1), media: 'single', on: p !== 'linkedin' }));
+        } else {
+            platforms = h.platforms.map(p => {
+                const pData = content[p] || {};
+                const url = pData.media?.image?.url;
+                return { platform: p, caption: pData.caption?.primary_caption || '', hashtags: getTagList(pData.hashtags),
+                         images: url ? [url] : [], media: url ? 'single' : undefined };
+            });
+        }
+        window.openSendForApproval({
+            key: `studio-${r.runId || msgId}`,
+            story: (h.requestBody && h.requestBody.story) || '',
+            conversationId: currentConversationId,
+            platforms: platforms,
+            onSent: function (req) {
+                h.approval = h.approval || {};
+                h.approval[h.currentIndex] = req.id;
+                renderAssistantResponse(msgId);
+            },
         });
     }
 

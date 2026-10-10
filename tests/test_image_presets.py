@@ -67,7 +67,8 @@ def fakes(monkeypatch):
 def test_menu_lists_the_commands(app):
     _, client = _client(app)
     presets = client.get("/api/image-presets").get_json()["presets"]
-    assert [p["command"] for p in presets] == ["/3dbillboard", "/metaad", "/premiumshowcase", "/lifestyle", "/catalog", "/festive"]
+    assert [p["command"] for p in presets] == ["/3dbillboard", "/metaad", "/premiumshowcase", "/lifestyle", "/catalog", "/festive",
+                                               "/carousel"]
     meta = next(p for p in presets if p["id"] == "metaad")
     assert meta["images"] == 1 and meta["all_sizes_images"] == 3 and meta["ad_copy"]
 
@@ -250,7 +251,7 @@ def test_next_celebration_prefers_the_brands_market_and_skips_civic_days():
 
     oct1 = date(2026, 10, 1)  # Columbus Day (US, civic) is on Oct 12
     assert next_celebration(None, today=oct1)["name"] == "Dussehra / Vijayadashami"
-    assert next_celebration(["UAE/GCC"], today=oct1)["name"] == "UAE National Day"
+    assert next_celebration(["UAE/GCC"], today=oct1)["name"] == "UAE Flag Day"  # 3 Nov, before National Day
     assert next_celebration(["US"], today=oct1)["name"] == "Thanksgiving"
 
 
@@ -269,7 +270,7 @@ def admin_client(app):
 
 def test_admin_lists_commands_and_only_admins_can_change_them(app, admin_client):
     presets = admin_client.get("/api/admin/image-presets").get_json()["presets"]
-    assert [p["id"] for p in presets] == ["3dbillboard", "metaad", "premiumshowcase", "lifestyle", "catalog", "festive"]
+    assert [p["id"] for p in presets] == ["3dbillboard", "metaad", "premiumshowcase", "lifestyle", "catalog", "festive", "carousel"]
     assert all(p["enabled"] and p["customized"] == [] and p["scene"] == p["defaults"]["scene"] for p in presets)
     _, user = _client(app)
     assert user.get("/api/admin/image-presets").status_code in (401, 403)
