@@ -3400,6 +3400,156 @@ def admin_get_global_cost_history():
         return jsonify({"error": str(e), "success": False}), 500
 
 
+# ── ADMIN: EMAILS (history, automation switches, send to a segment) ─────
+
+
+@api_bp.route("/admin/emails", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_email_history():
+    """Every email the app sent or tried to send, newest first, with filters."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from datetime import datetime, timedelta
+
+    from db import EMAIL_KINDS, email_log_summary, list_email_log
+
+    args = request.args
+
+    def _day(name):
+        try:
+            return datetime.strptime(args.get(name, ""), "%Y-%m-%d") if args.get(name) else None  # noqa: DTZ007 - stored times are naive UTC
+        except ValueError:
+            return None
+
+    def _int(name, default):
+        try:
+            return int(args.get(name) or default)
+        except ValueError:
+            return default
+
+    date_to = _day("date_to")
+    result = list_email_log(
+        page=_int("page", 1), page_size=_int("page_size", 25),
+        kind=args.get("kind") or None, status=args.get("status") or None,
+        q=(args.get("q") or "").strip()[:200] or None,
+        date_from=_day("date_from"), date_to=date_to + timedelta(days=1) if date_to else None,
+    )
+    return jsonify({"success": True, **result, "summary": email_log_summary(7), "kinds": EMAIL_KINDS})
+
+
+def _email_automation_payload():
+    from db import get_email_automation
+    from services.email_service import EmailService
+
+    weekday = ["Mondays", "Tuesdays", "Wednesdays", "Thursdays", "Fridays", "Saturdays", "Sundays"][Config.IDEAS_EMAIL_WEEKDAY % 7]
+    return {
+        "success": True, "automation": get_email_automation(),
+        "smtp_configured": EmailService().enabled, "base_url_set": bool(Config.APP_BASE_URL),
+        "schedule": {
+            "weekly_ideas": f"{weekday} from {Config.IDEAS_EMAIL_HOUR_UTC:02d}:00 UTC, at most once a week per user",
+            "nudge_emails": f"Checked hourly: a festival {Config.NUDGE_OCCASION_DAYS} days ahead, this week's trend, "
+                            f"or a reminder after {Config.NUDGE_INACTIVE_DAYS} quiet days. Max {Config.IDEA_EMAILS_PER_WEEK} idea emails a week.",
+            "monthly_recap": f"From day {Config.RECAP_EMAIL_DAY} of each month, {Config.IDEAS_EMAIL_HOUR_UTC:02d}:00 UTC",
+        },
+    }
+
+
+@api_bp.route("/admin/email-automation", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_get_email_automation():
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    return jsonify(_email_automation_payload())
+
+
+@api_bp.route("/admin/email-automation", methods=["PUT"])
+@login_required_api
+@admin_required_api
+def admin_set_email_automation():
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import EMAIL_AUTOMATIONS, set_email_automation
+
+    data = request.get_json(silent=True) or {}
+    changes = {k: v for k, v in data.items() if k in EMAIL_AUTOMATIONS and isinstance(v, bool)}
+    if not changes:
+        return jsonify({"error": "Nothing to change."}), 400
+    set_email_automation(changes)
+    log_event("admin.email_automation", admin_id=get_current_user_id(), changes=changes)
+    return jsonify(_email_automation_payload())
+
+
+@api_bp.route("/admin/email-campaign/options", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_email_campaign_options():
+    from services.compliance_rules import INDUSTRIES
+    from services.email_campaign_service import KINDS, upcoming_occasions
+
+    return jsonify({
+        "success": True, "kinds": KINDS,
+        "industries": [{"id": k, "label": v} for k, v in INDUSTRIES.items()],
+        "account_types": [{"id": "individual", "label": "Individual"}, {"id": "small", "label": "Small business"},
+                          {"id": "medium", "label": "Medium business"}, {"id": "enterprise", "label": "Enterprise"}],
+        "regions": [{"id": "US", "label": "United States"}, {"id": "UAE/GCC", "label": "UAE / GCC"},
+                    {"id": "India", "label": "India"}],
+        "occasions": upcoming_occasions(60),
+    })
+
+
+def _campaign_args(data: dict) -> dict:
+    return {key: (str(data.get(key) or "").strip() or None)
+            for key in ("industry", "account_type", "region")} | {"occasion_key_": data.get("occasion") or None}
+
+
+@api_bp.route("/admin/email-campaign/preview", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_email_campaign_preview():
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from services.email_campaign_service import preview
+
+    data = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"success": True, **preview(data.get("kind") or "ideas", **_campaign_args(data))})
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+
+
+@api_bp.route("/admin/email-campaign/send", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_email_campaign_send():
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from services.email_campaign_service import start
+
+    data = request.get_json(silent=True) or {}
+    admin_id = get_current_user_id()
+    try:
+        job = start(data.get("kind") or "ideas", admin_id, **_campaign_args(data))
+    except ValueError as err:
+        return jsonify({"error": str(err)}), 400
+    log_event("admin.email_campaign", admin_id=admin_id, job=job["id"], kind=job["kind"], recipients=job["total"],
+              **{k: v for k, v in job["filters"].items() if v})
+    return jsonify({"success": True, "job": job})
+
+
+@api_bp.route("/admin/email-campaign/jobs/<job_id>", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_email_campaign_job(job_id):
+    from services.email_campaign_service import get_job
+
+    job = get_job(job_id) if job_id.isalnum() else None
+    if not job:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify({"success": True, "job": job})
+
+
 # ── SOCIAL ACCOUNTS & POST SCHEDULING ENDPOINTS ───────────────────────
 
 
@@ -4375,10 +4525,11 @@ def my_notifications():
     """Settings -> Notifications: is the weekly ideas email on for this user."""
     if not DB_AVAILABLE:
         return jsonify({"error": "Database not available"}), 503
-    from db import get_ideas_email_settings
+    from db import email_automation_enabled, get_ideas_email_settings
 
     return jsonify({"success": True, "ideas_email": get_ideas_email_settings(get_current_user_id()),
-                    "weekly_send_active": bool(Config.WEEKLY_IDEAS_EMAIL), "nudge_emails_active": bool(Config.NUDGE_EMAILS)})
+                    "weekly_send_active": email_automation_enabled("weekly_ideas"),
+                    "nudge_emails_active": email_automation_enabled("nudge_emails")})
 
 
 @api_bp.route("/me/notifications", methods=["PUT"])

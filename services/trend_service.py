@@ -6,9 +6,11 @@ Three groups, written for the user's own brand:
   dates     - upcoming occasions in their markets
 
 Trends are looked up once per industry + market and cached (db.IndustryTrend),
-so fifty users in one industry share one lookup. They come from Gemini with
-Google Search; when that call fails (no key, or the key's plan has no search
-grounding) from Google News headlines, so the panel still has something timely.
+so fifty users in one industry share one lookup. They come from our own news
+aggregator (services/news_aggregator.py: Google News + trade publications,
+grouped and ranked by how many publishers cover each story). When it finds too
+little, Gemini with Google Search is tried (if configured and not out of quota),
+then plain Google News headlines, so the panel still has something timely.
 The finished feed is cached per user (db.UserIdeaFeed) until the next day or
 until the industry's trends are refreshed.
 """
@@ -120,7 +122,15 @@ Rules:
   ("Create a post about ..."), naming the angle, the audience and the key points to cover.
 - Follow the brand's dos and don'ts and compliance context. For regulated industries never promise results,
   returns or outcomes, and never give individual advice.
+- Fit the ideas to ACCOUNT TYPE: an individual gets personal-brand ideas in the first person that one person can
+  make in minutes; a small business gets practical, low-budget ideas close to its customers; a medium business can
+  plan small campaigns; an enterprise gets thought leadership, corporate and employer-brand ideas.
 - Do not repeat ALREADY SHOWN titles or RECENTLY POSTED topics."""
+
+
+# users.account_type -> how the ideas prompt names it
+ACCOUNT_TYPES = {"individual": "individual (personal brand)", "small": "small business",
+                 "medium": "medium business", "enterprise": "enterprise"}
 
 
 # ── Industry + market of a brand profile ─────────────────────────────────────
@@ -229,6 +239,66 @@ def _trends_from_google_news(category: str, label: str, region: str) -> list[dic
     return _clean_topics(items)
 
 
+def _trends_from_news_aggregator(category: str, label: str, region: str, use_llm: bool = True) -> list[dict]:
+    """The main source: our own ranking of this week's industry news.
+    use_llm=False: the ranked headlines as they are (~3 s instead of ~1 min)."""
+    from services.news_aggregator import aggregate_trends
+
+    query = TREND_QUERIES.get(category) or label
+    region_name = REGIONS.get(region, REGIONS[DEFAULT_REGION])[0]
+    return _clean_topics(aggregate_trends(category, label, region, query, region_name, use_llm=use_llm))
+
+
+_polishing: set[str] = set()
+_polishing_guard = threading.Lock()
+
+
+def _polish_in_background(key: str, category: str, label: str, region: str) -> None:
+    """A visitor got the ranked headlines; the model's summaries replace them
+    in the background (users' feeds rebuild once the trends are newer)."""
+    with _polishing_guard:
+        if key in _polishing:
+            return
+        _polishing.add(key)
+
+    def run():
+        from db import save_industry_trends
+
+        try:
+            topics = _trends_from_news_aggregator(category, label, region, use_llm=True)
+            if len(topics) >= MIN_AGGREGATED_TOPICS:
+                save_industry_trends(key, topics, "news")
+        except Exception as err:  # noqa: BLE001 - the headlines already saved still serve users
+            logger.warning(f"Background trend summaries failed for {key}: {str(err)[:200]}")
+        finally:
+            with _polishing_guard:
+                _polishing.discard(key)
+
+    threading.Thread(target=run, daemon=True, name=f"trends-{key}").start()
+
+
+# Fewer topics than this from the aggregator and the next source is tried too
+MIN_AGGREGATED_TOPICS = 3
+
+# After a quota error (429) Gemini isn't called again until its daily quota
+# resets (midnight Pacific = 07:00-08:00 UTC): no wasted call, no log noise.
+_gemini_paused_until: datetime | None = None
+
+
+def _gemini_paused() -> bool:
+    return _gemini_paused_until is not None and datetime.now(timezone.utc) < _gemini_paused_until
+
+
+def _pause_gemini_if_quota(err: Exception) -> None:
+    global _gemini_paused_until
+    text = str(err)
+    if "429" in text or "RESOURCE_EXHAUSTED" in text:
+        now = datetime.now(timezone.utc)
+        reset = now.replace(hour=8, minute=0, second=0, microsecond=0)
+        _gemini_paused_until = reset if reset > now else reset + timedelta(days=1)
+        logger.info(f"Gemini trend lookups paused until {_gemini_paused_until:%Y-%m-%d %H:%M} UTC (quota used up)")
+
+
 def get_trends(category: str, label: str, region: str, force: bool = False) -> dict:
     """{"topics", "source", "fetched_at"} for the industry + market, from the
     cache while it is fresh, else looked up now. A failed lookup returns the
@@ -241,17 +311,36 @@ def get_trends(category: str, label: str, region: str, force: bool = False) -> d
     if cached and not force and datetime.now(timezone.utc) - cached["fetched_at"] < max_age:
         return cached
 
+    # A visitor is waiting (not a scheduled refresh): headlines now, the model's
+    # summaries in the background
+    quick = not force
+    best = None  # (topics, source) of a source that found a few topics, kept if nothing does better
     for source, lookup in (
+        ("news", lambda: _trends_from_news_aggregator(category, label, region, use_llm=not quick)),
         ("google_search", lambda: _trends_from_google_search(label, region)),
         ("google_news", lambda: _trends_from_google_news(category, label, region)),
     ):
+        if source == "google_search" and _gemini_paused():
+            continue
         try:
             topics = lookup()
-            if topics:
-                save_industry_trends(key, topics, source)
-                return get_industry_trends(key)
         except Exception as err:  # noqa: BLE001 - the next source, or the stale cache, still serves the user
             logger.warning(f"Trend lookup via {source} failed for {key}: {str(err)[:200]}")
+            if source == "google_search":
+                _pause_gemini_if_quota(err)
+            continue
+        # Gemini's answer is used as it is; ours needs a few topics; plain
+        # headlines (the last resort) only beat a thinner result
+        if topics and (source == "google_search" or (source == "news" and len(topics) >= MIN_AGGREGATED_TOPICS)):
+            save_industry_trends(key, topics, source)
+            if source == "news" and quick:
+                _polish_in_background(key, category, label, region)
+            return get_industry_trends(key)
+        if topics and (best is None or len(topics) > len(best[0])):
+            best = (topics, source)
+    if best:
+        save_industry_trends(key, *best)
+        return get_industry_trends(key)
     return cached or {"topics": [], "source": None, "fetched_at": None}
 
 
@@ -318,7 +407,8 @@ def generate_idea_feed(user_id: int, force: bool = False) -> tuple[dict | None, 
     Served from the per-user cache unless it is out of date or `force`."""
     from db import get_history, get_user_brand_profile, save_user_idea_feed
     from services.brand_profile_service import build_brand_profile_block
-    from services.festival_service import get_upcoming_festivals
+    from db import get_user_by_id
+    from services.festival_service import PROFILE_REGION_MAP, get_upcoming_festivals
     from services.llm_service import LLMService
 
     profile = get_user_brand_profile(user_id)
@@ -338,17 +428,16 @@ def generate_idea_feed(user_id: int, force: bool = False) -> tuple[dict | None, 
         topics = trends["topics"]
         post_types = PLAYBOOK.get(category, []) + _COMMON_POST_TYPES
 
-        # festival_service labels regions "USA"/"India"; it has no UAE/GCC calendar yet
-        festival_regions = {"US": "USA", "India": "India"}
-        markets = {festival_regions[r] for r in profile.get("compliance_regions") or profile.get("regions_detected") or []
-                   if r in festival_regions}
+        markets = {PROFILE_REGION_MAP[r] for r in profile.get("compliance_regions") or profile.get("regions_detected") or []
+                   if r in PROFILE_REGION_MAP}
         occasions = [f for f in get_upcoming_festivals(days_ahead=30) if f["region"] in markets][:3]
 
         previous = (cached_feed_titles(user_id) if force else [])
         recent = [r.get("story", "")[:140] for r in get_history(limit=10, user_id=user_id) if r.get("story")]
         user_prompt = (
             f"{build_brand_profile_block(user_id)}\n\n"
-            f"INDUSTRY: {label}\nMARKET: {REGIONS.get(region, REGIONS[DEFAULT_REGION])[0]}\n\n"
+            f"INDUSTRY: {label}\nMARKET: {REGIONS.get(region, REGIONS[DEFAULT_REGION])[0]}\n"
+            f"ACCOUNT TYPE: {ACCOUNT_TYPES.get(getattr(get_user_by_id(user_id), 'account_type', None), 'not set')}\n\n"
             "TRENDING TOPICS THIS WEEK:\n"
             + ("\n".join(
                 f"{i}. {t['topic']}" + (f" - {t['summary']}" if t["summary"] else "")

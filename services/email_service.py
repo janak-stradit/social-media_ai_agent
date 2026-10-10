@@ -2,6 +2,8 @@
 with the story/strategy context and the generated image attached. Plain
 smtplib/email (stdlib) over STARTTLS - no new dependency needed."""
 
+import contextlib
+import contextvars
 import mimetypes
 import os
 import smtplib
@@ -891,6 +893,25 @@ def _build_sales_lead_html(user_name: str, user_email: str, company_name: str, p
 """
 
 
+# What the email being sent was built from, for the email history (Admin ->
+# Emails). Set by the code that triggers an email, read by EmailService._deliver:
+#   with email_context(kind="festival_idea", details={...}, triggered_by="admin:3"):
+#       EmailService().send_nudge_email(...)
+_email_context: contextvars.ContextVar[dict | None] = contextvars.ContextVar("email_context", default=None)
+
+
+@contextlib.contextmanager
+def email_context(kind: str | None = None, details: dict | None = None, triggered_by: str | None = None,
+                  user_id: int | None = None):
+    previous = _email_context.get() or {}
+    token = _email_context.set({**previous, **{k: v for k, v in {
+        "kind": kind, "details": details, "triggered_by": triggered_by, "user_id": user_id}.items() if v is not None}})
+    try:
+        yield
+    finally:
+        _email_context.reset(token)
+
+
 class EmailService:
     def __init__(self):
         self.host = Config.SMTP_HOST
@@ -899,6 +920,23 @@ class EmailService:
         self.password = Config.SMTP_PASSWORD
         self.from_email = Config.SMTP_FROM_EMAIL
         self.enabled = bool(self.host and self.username and self.password)
+
+    def _deliver(self, msg, recipients: list[str], kind: str) -> None:
+        """Sends over SMTP and records the attempt (sent / failed + error) in
+        the email history. Failures are re-raised for the caller to handle."""
+        context = _email_context.get() or {}
+        entry = {"kind": context.get("kind") or kind, "subject": str(msg["Subject"] or ""),
+                 "details": context.get("details"), "triggered_by": context.get("triggered_by"),
+                 "user_id": context.get("user_id")}
+        try:
+            with smtplib.SMTP(self.host, self.port, timeout=30) as server:
+                server.starttls()
+                server.login(self.username, self.password)
+                server.sendmail(self.from_email, recipients, msg.as_string())
+        except Exception as err:
+            _log_attempt(recipients, entry, "failed", str(err))
+            raise
+        _log_attempt(recipients, entry, "sent")
 
     def send_approval_notification(
         self,
@@ -938,10 +976,7 @@ class EmailService:
         html = _build_html(story, platform, competitors, caption, asset_type, len(slides), slide_titles)
         _attach_slides(msg, html, slides)
 
-        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
-            server.starttls()
-            server.login(self.username, self.password)
-            server.sendmail(self.from_email, [recipient], msg.as_string())
+        self._deliver(msg, [recipient], "approval_notification")
 
         return {"success": True, "recipient": recipient, "image_attached": len(slides) > 0, "slide_count": len(slides)}
 
@@ -978,10 +1013,7 @@ class EmailService:
         html = _build_request_html(approval_url, story, platform, competitors, caption, asset_type, len(slides))
         _attach_slides(msg, html, slides)
 
-        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
-            server.starttls()
-            server.login(self.username, self.password)
-            server.sendmail(self.from_email, [recipient], msg.as_string())
+        self._deliver(msg, [recipient], "approval_request")
 
         return {"success": True, "recipient": recipient}
 
@@ -998,10 +1030,7 @@ class EmailService:
         msg["To"] = to_email
         msg.attach(MIMEText(_build_verification_html(name, verify_url), "html"))
 
-        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
-            server.starttls()
-            server.login(self.username, self.password)
-            server.sendmail(self.from_email, [to_email], msg.as_string())
+        self._deliver(msg, [to_email], "verification")
 
         return {"success": True, "recipient": to_email}
 
@@ -1018,10 +1047,7 @@ class EmailService:
         msg["To"] = to_email
         msg.attach(MIMEText(_build_password_reset_html(name, reset_url, ttl_minutes), "html"))
 
-        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
-            server.starttls()
-            server.login(self.username, self.password)
-            server.sendmail(self.from_email, [to_email], msg.as_string())
+        self._deliver(msg, [to_email], "password_reset")
 
         return {"success": True, "recipient": to_email}
 
@@ -1046,10 +1072,7 @@ class EmailService:
             _build_credit_decision_html(name, approved, requested_amount, credit_limit, dashboard_url), "html"
         ))
 
-        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
-            server.starttls()
-            server.login(self.username, self.password)
-            server.sendmail(self.from_email, [to_email], msg.as_string())
+        self._deliver(msg, [to_email], "credit_decision")
 
         return {"success": True, "recipient": to_email}
 
@@ -1074,10 +1097,7 @@ class EmailService:
             _build_weekly_ideas_html(name, company_name, ideas, dashboard_url, settings_url, unsubscribe_url), "html"
         ))
 
-        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
-            server.starttls()
-            server.login(self.username, self.password)
-            server.sendmail(self.from_email, [to_email], msg.as_string())
+        self._deliver(msg, [to_email], "weekly_ideas")
 
         return {"success": True, "recipient": to_email}
 
@@ -1098,10 +1118,7 @@ class EmailService:
         msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
         msg.attach(MIMEText(_build_nudge_html(name, headline, intro, idea, settings_url, unsubscribe_url), "html"))
 
-        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
-            server.starttls()
-            server.login(self.username, self.password)
-            server.sendmail(self.from_email, [to_email], msg.as_string())
+        self._deliver(msg, [to_email], "nudge")
 
         return {"success": True, "recipient": to_email}
 
@@ -1126,10 +1143,7 @@ class EmailService:
             "html",
         ))
 
-        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
-            server.starttls()
-            server.login(self.username, self.password)
-            server.sendmail(self.from_email, [to_email], msg.as_string())
+        self._deliver(msg, [to_email], "monthly_recap")
 
         return {"success": True, "recipient": to_email}
 
@@ -1161,10 +1175,7 @@ class EmailService:
             MIMEText(_build_invitation_html(name, inviter_name, accept_url, message, expires_days), "html")
         )
 
-        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
-            server.starttls()
-            server.login(self.username, self.password)
-            server.sendmail(self.from_email, [to_email], msg.as_string())
+        self._deliver(msg, [to_email], "invitation")
 
         return {"success": True, "recipient": to_email}
 
@@ -1189,9 +1200,17 @@ class EmailService:
         )
         msg.attach(MIMEText(html, "html"))
 
-        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
-            server.starttls()
-            server.login(self.username, self.password)
-            server.sendmail(self.from_email, [recipient], msg.as_string())
+        self._deliver(msg, [recipient], "sales_lead")
 
         return {"success": True, "recipient": recipient}
+
+
+def _log_attempt(recipients: list[str], entry: dict, status: str, error: str | None = None) -> None:
+    try:
+        from db import log_email
+
+        for to_email in recipients:
+            log_email(to_email, entry["kind"], entry["subject"], status, error=error, details=entry["details"],
+                      triggered_by=entry["triggered_by"], user_id=entry["user_id"])
+    except Exception:  # noqa: BLE001, S110 - no database (tests, CLI): the email itself still counts
+        pass

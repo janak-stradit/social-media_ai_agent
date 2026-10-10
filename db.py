@@ -500,6 +500,27 @@ class Notification(Base):
     emailed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class EmailLog(Base):
+    """Every email the app tried to send (services/email_service.py logs it in
+    one place), for Admin -> Emails. status: sent / failed. details: JSON with
+    what the email was built from (industry, market, occasion, idea titles).
+    triggered_by: "system" (scheduler, sign-up, approvals) or "admin:<id>"."""
+
+    __tablename__ = "email_log"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    to_email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    subject: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    status: Mapped[str] = mapped_column(String(12), nullable=False, index=True)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)
+    triggered_by: Mapped[str] = mapped_column(String(40), nullable=False, default="system")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
+
+
 class AppSetting(Base):
     """Generic editable-text settings the user can update from the dashboard
     (e.g. Content Guidelines, Products & Service overview) - stored here
@@ -3548,3 +3569,185 @@ def update_scheduled_post_status(user_id: int, post_id: int, status: str) -> boo
             session.commit()
             return True
         return False
+
+
+# ── Email history + email automation (Admin -> Emails) ───────────────────────
+
+EMAIL_KINDS = {
+    "weekly_ideas": "Weekly ideas", "nudge": "Festival / trend nudge", "festival_idea": "Festival idea (admin)",
+    "ideas_campaign": "Ideas (admin)", "monthly_recap": "Monthly recap", "verification": "Email verification",
+    "password_reset": "Password reset", "invitation": "Invitation", "approval_request": "Approval request",
+    "approval_notification": "Approval notification", "credit_decision": "Credit decision", "sales_lead": "Sales lead",
+}
+
+
+def log_email(to_email: str, kind: str, subject: str, status: str, error: str | None = None,
+              details: dict | None = None, triggered_by: str | None = None, user_id: int | None = None) -> None:
+    """Records one send attempt. Never raises - logging must not break an email."""
+    try:
+        with Session(engine) as session:
+            if user_id is None and to_email:
+                user = session.query(User.id).filter(func.lower(User.email) == to_email.strip().lower()).first()
+                user_id = user[0] if user else None
+            session.add(EmailLog(
+                user_id=user_id, to_email=(to_email or "")[:320], kind=(kind or "other")[:32],
+                subject=(subject or "")[:300], status=status[:12], error=error[:500] if error else None,
+                details=json.dumps(details, default=str)[:4000] if details else None,
+                triggered_by=(triggered_by or "system")[:40],
+            ))
+            session.commit()
+    except Exception as err:  # noqa: BLE001
+        logger.warning(f"Could not log email to {to_email}: {err}")
+
+
+def _email_row(row: "EmailLog", names: dict) -> dict:
+    try:
+        details = json.loads(row.details) if row.details else {}
+    except ValueError:
+        details = {}
+    return {
+        "id": row.id, "user_id": row.user_id, "user_name": names.get(row.user_id), "to_email": row.to_email,
+        "kind": row.kind, "kind_label": EMAIL_KINDS.get(row.kind, row.kind.replace("_", " ").capitalize()),
+        "subject": row.subject, "status": row.status, "error": row.error, "details": details,
+        "triggered_by": row.triggered_by, "created_at": _as_utc(row.created_at).isoformat(),
+    }
+
+
+def list_email_log(page: int = 1, page_size: int = 25, kind: str | None = None, status: str | None = None,
+                   q: str | None = None, date_from: datetime | None = None, date_to: datetime | None = None) -> dict:
+    """Newest first, with filters. date_to is exclusive."""
+    page_size = max(5, min(int(page_size or 25), 100))
+    with Session(engine) as session:
+        query = session.query(EmailLog)
+        if kind:
+            query = query.filter(EmailLog.kind == kind)
+        if status:
+            query = query.filter(EmailLog.status == status)
+        if q:
+            like = f"%{q.strip().lower()}%"
+            query = query.filter(func.lower(EmailLog.to_email).like(like) | func.lower(EmailLog.subject).like(like))
+        if date_from:
+            query = query.filter(EmailLog.created_at >= date_from)
+        if date_to:
+            query = query.filter(EmailLog.created_at < date_to)
+        total = query.count()
+        pages = max(1, -(-total // page_size))
+        page = max(1, min(int(page or 1), pages))
+        rows = (query.order_by(EmailLog.created_at.desc(), EmailLog.id.desc())
+                .offset((page - 1) * page_size).limit(page_size).all())
+        ids = {r.user_id for r in rows if r.user_id}
+        names = dict(session.query(User.id, User.name).filter(User.id.in_(ids)).all()) if ids else {}
+        return {"emails": [_email_row(r, names) for r in rows], "total": total, "page": page,
+                "pages": pages, "page_size": page_size}
+
+
+def email_log_summary(days: int = 7) -> dict:
+    """Totals for the last `days` days: sent, failed and sent per kind."""
+    since = (_utcnow() - timedelta(days=days)).replace(tzinfo=None)
+    with Session(engine) as session:
+        rows = (session.query(EmailLog.kind, EmailLog.status, func.count(EmailLog.id))
+                .filter(EmailLog.created_at >= since).group_by(EmailLog.kind, EmailLog.status).all())
+    summary = {"days": days, "sent": 0, "failed": 0, "by_kind": {}}
+    for kind, status, count in rows:
+        summary["sent" if status == "sent" else "failed"] += count
+        if status == "sent":
+            summary["by_kind"][kind] = summary["by_kind"].get(kind, 0) + count
+    return summary
+
+
+def emailed_recently(user_id: int, kinds: tuple[str, ...], hours: int = 24) -> bool:
+    """Whether the user was successfully sent one of `kinds` in the last `hours`."""
+    since = (_utcnow() - timedelta(hours=hours)).replace(tzinfo=None)
+    with Session(engine) as session:
+        return session.query(EmailLog.id).filter(
+            EmailLog.user_id == user_id, EmailLog.kind.in_(kinds), EmailLog.status == "sent",
+            EmailLog.created_at >= since,
+        ).first() is not None
+
+
+# Scheduled emails an admin can switch on/off without a redeploy. The .env
+# values (WEEKLY_IDEAS_EMAIL, NUDGE_EMAILS, MONTHLY_RECAP_EMAIL) are the
+# defaults until an admin changes a switch.
+EMAIL_AUTOMATIONS = {"weekly_ideas": "WEEKLY_IDEAS_EMAIL", "nudge_emails": "NUDGE_EMAILS",
+                     "monthly_recap": "MONTHLY_RECAP_EMAIL"}
+
+
+def get_email_automation() -> dict:
+    """{name: {"enabled", "source"}}; source is "admin" (switched in Admin) or "env"."""
+    from config import Config
+
+    try:
+        saved = json.loads(get_setting("email_automation", "") or "{}")
+    except Exception:  # noqa: BLE001 - no database / bad value: the .env defaults
+        saved = {}
+    return {
+        name: {"enabled": saved[name], "source": "admin"} if isinstance(saved.get(name), bool)
+        else {"enabled": bool(getattr(Config, env_name, False)), "source": "env"}
+        for name, env_name in EMAIL_AUTOMATIONS.items()
+    }
+
+
+def email_automation_enabled(name: str) -> bool:
+    return get_email_automation()[name]["enabled"]
+
+
+def set_email_automation(changes: dict) -> dict:
+    try:
+        saved = json.loads(get_setting("email_automation", "") or "{}")
+    except ValueError:
+        saved = {}
+    for name, value in changes.items():
+        if name in EMAIL_AUTOMATIONS and isinstance(value, bool):
+            saved[name] = value
+    save_setting("email_automation", json.dumps(saved))
+    return get_email_automation()
+
+
+def users_in_segment(industry_category: str | None = None, account_type: str | None = None,
+                     region: str | None = None) -> list[dict]:
+    """Active, verified users with a brand profile matching the filters (None = any),
+    each with the opt-outs an email type has to respect."""
+    with Session(engine) as session:
+        rows = (session.query(User, UserBrandProfile)
+                .join(UserBrandProfile, UserBrandProfile.user_id == User.id)
+                .filter(User.is_active.isnot(False), User.email_verified.is_(True)).all())
+        users = []
+        for user, profile in rows:
+            regions = []
+            for raw in (profile.compliance_regions, getattr(profile, "regions_detected", None)):
+                try:
+                    regions = json.loads(raw) if raw else []
+                except (ValueError, TypeError):
+                    regions = []
+                if regions:
+                    break
+            category = profile.industry_category or getattr(profile, "industry_category_detected", None) or "general"
+            if industry_category and category != industry_category:
+                continue
+            if account_type and (user.account_type or "") != account_type:
+                continue
+            if region and region not in regions:
+                continue
+            users.append({
+                "id": user.id, "name": user.name, "email": user.email, "account_type": user.account_type,
+                "industry_category": category, "regions": regions, "company_name": profile.company_name,
+                "ideas_ok": user.ideas_email_enabled is not False, "nudges_ok": user.nudge_email_enabled is not False,
+            })
+    return users
+
+
+def occasion_emailed(user_id: int, occasion_name: str) -> bool:
+    """Whether the user was already emailed about this occasion (nudge or admin send)."""
+    needle = json.dumps(occasion_name)  # matches '"occasion": "Diwali"' in the JSON details
+    with Session(engine) as session:
+        rows = session.query(EmailLog.details).filter(
+            EmailLog.user_id == user_id, EmailLog.status == "sent", EmailLog.kind.in_(("nudge", "festival_idea")),
+            EmailLog.details.like(f"%{needle}%"),
+        ).all()
+    for (details,) in rows:
+        try:
+            if json.loads(details or "{}").get("occasion") == occasion_name:
+                return True
+        except ValueError:
+            continue
+    return False

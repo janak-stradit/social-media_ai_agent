@@ -452,6 +452,51 @@
             .img-models td:first-child { grid-column: 1 / -1; }
         }
 
+        /* Emails: automation switches, send to a segment, history */
+        .em-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; margin-bottom: 1.25rem; }
+        .em-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 1.1rem 1.25rem; }
+        .em-card h6 { font-weight: 700; font-size: 0.95rem; color: #172033; margin: 0 0 0.2rem; }
+        .em-card > p { font-size: 0.8rem; color: #6b7280; margin-bottom: 0.9rem; }
+        .em-status { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-bottom: 0.75rem; }
+        .em-pill { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.72rem; font-weight: 700; border-radius: 999px; padding: 3px 10px; }
+        .em-pill.ok { background: #ecfdf5; color: #047857; }
+        .em-pill.bad { background: #fef2f2; color: #b91c1c; }
+        .em-switch { display: flex; align-items: flex-start; gap: 0.75rem; padding: 0.7rem 0; border-top: 1px solid #f1f2f5; }
+        .em-switch:first-of-type { border-top: none; }
+        .em-switch .form-check-input { width: 2.4em; height: 1.3em; margin-top: 0.15rem; cursor: pointer; flex-shrink: 0; }
+        .em-switch .form-check-input:checked { background-color: var(--brand-strong); border-color: var(--brand-strong); }
+        .em-switch strong { display: block; font-size: 0.86rem; color: #172033; }
+        .em-switch small { display: block; font-size: 0.75rem; color: #6b7280; line-height: 1.45; }
+        .em-switch .em-state { margin-left: auto; font-size: 0.7rem; font-weight: 700; padding: 2px 8px; border-radius: 6px; white-space: nowrap; }
+        .em-state.on { background: #ecfdf5; color: #047857; }
+        .em-state.off { background: #f3f4f6; color: #6b7280; }
+        .em-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.6rem; }
+        .em-form label { display: block; font-size: 0.68rem; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.25rem; }
+        .em-form .em-full { grid-column: 1 / -1; }
+        .em-kinds { display: flex; gap: 0.5rem; }
+        .em-kinds label { flex: 1; display: flex; align-items: center; gap: 0.5rem; padding: 0.55rem 0.7rem; margin: 0; border: 1px solid #e5e7eb; border-radius: 10px;
+            font-size: 0.84rem; font-weight: 600; color: #1f2937; text-transform: none; letter-spacing: 0; cursor: pointer; }
+        .em-kinds label:has(input:checked) { border-color: var(--brand); background: var(--brand-bg); }
+        .em-preview { margin-top: 0.8rem; font-size: 0.8rem; color: #4b5563; background: #f8fafc; border: 1px solid #eef0f4; border-radius: 10px; padding: 0.7rem 0.8rem; }
+        .em-preview strong { color: #172033; }
+        .em-preview ul { margin: 0.4rem 0 0; padding-left: 1.1rem; }
+        .em-actions { display: flex; gap: 0.5rem; margin-top: 0.8rem; flex-wrap: wrap; }
+        .em-progress { height: 6px; border-radius: 999px; background: #eef0f4; overflow: hidden; margin-top: 0.5rem; }
+        .em-progress span { display: block; height: 100%; background: var(--brand-strong); transition: width 0.3s ease; }
+        .em-summary { display: flex; gap: 0.6rem; flex-wrap: wrap; margin-bottom: 0.8rem; }
+        .em-stat { background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; padding: 0.55rem 0.85rem; min-width: 120px; }
+        .em-stat b { display: block; font-size: 1.2rem; color: #172033; }
+        .em-stat span { font-size: 0.72rem; color: #6b7280; font-weight: 600; }
+        .em-badge { display: inline-block; font-size: 0.7rem; font-weight: 700; border-radius: 6px; padding: 2px 8px; }
+        .em-badge.sent { background: #ecfdf5; color: #047857; }
+        .em-badge.failed { background: #fef2f2; color: #b91c1c; }
+        .em-kind { display: inline-block; font-size: 0.72rem; font-weight: 600; color: #374151; background: #f3f4f6; border-radius: 6px; padding: 2px 8px; }
+        .em-detail { font-size: 0.74rem; color: #6b7280; max-width: 320px; }
+        .em-error { font-size: 0.72rem; color: #b91c1c; max-width: 320px; }
+        #emailHistoryTbody.loading { opacity: 0.55; }
+        @media (max-width: 992px) { .em-grid { grid-template-columns: 1fr; } }
+        @media (max-width: 640px) { .em-form { grid-template-columns: 1fr; } .em-kinds { flex-direction: column; } }
+
         /* Global Cost History: filters + pagination */
         .cost-filters {
             display: grid; grid-template-columns: minmax(220px, 2fr) repeat(3, minmax(130px, 1fr));
@@ -579,7 +624,7 @@
                 <i class="fas fa-user-shield"></i>
                 <div>
                     <div style="font-weight:700; font-size:0.95rem;">Admin Control Center</div>
-                    <div style="font-size:0.75rem; color:#6b7280;">Users, requests, images &amp; cost history</div>
+                    <div style="font-size:0.75rem; color:#6b7280;">Users, requests, emails, images &amp; cost history</div>
                 </div>
             </div>
             <nav class="bc-nav">
@@ -596,6 +641,9 @@
                 <button type="button" class="bc-nav-item" data-admin-tab="invites" onclick="switchAdminTab('invites')">
                     <i class="fas fa-envelope-open-text"></i> Invitations
                     <span class="bc-nav-badge d-none" id="adminInvitesBadge">0</span>
+                </button>
+                <button type="button" class="bc-nav-item" data-admin-tab="emails" onclick="switchAdminTab('emails')">
+                    <i class="fas fa-paper-plane"></i> Emails
                 </button>
                 <button type="button" class="bc-nav-item" data-admin-tab="images" onclick="switchAdminTab('images')">
                     <i class="fas fa-image"></i> Image Settings
@@ -836,6 +884,114 @@
                                 <tr><td colspan="6" class="text-center py-4 text-muted">Loading invitations...</td></tr>
                             </tbody>
                         </table>
+                    </div>
+                </div>
+            </div>
+            <!-- PANE: EMAILS (automation switches, send to a segment, history) -->
+            <div class="admin-pane d-none" id="adminPaneEmails">
+                <div class="bc-pane-header">
+                    <div>
+                        <h5><i class="fas fa-paper-plane text-primary me-2"></i>Emails</h5>
+                        <p>Which scheduled emails are on, send ideas to a group of users, and every email the app has sent.</p>
+                    </div>
+                </div>
+
+                <div class="em-grid">
+                    <div class="em-card">
+                        <h6>Scheduled emails</h6>
+                        <p>Switch the automatic emails on or off. Each one is written for the user's own brand, industry and market.</p>
+                        <div class="em-status" id="emailSetupStatus"></div>
+                        <div id="emailAutomationList"><div class="text-muted small">Loading...</div></div>
+                    </div>
+
+                    <div class="em-card">
+                        <h6>Send now to a group</h6>
+                        <p>Pick who gets it. Every email is still written for that user's brand. People who unsubscribed, or got an idea email in the last 24 hours, are skipped.</p>
+                        <div class="em-form">
+                            <div class="em-full">
+                                <label>Email</label>
+                                <div class="em-kinds">
+                                    <label><input type="radio" name="emCampaignKind" value="ideas" checked> <span><i class="fas fa-lightbulb me-1"></i>Ideas for you</span></label>
+                                    <label><input type="radio" name="emCampaignKind" value="festival"> <span><i class="fas fa-gift me-1"></i>Festival idea</span></label>
+                                </div>
+                            </div>
+                            <div class="em-full d-none" id="emOccasionWrap">
+                                <label for="emOccasion">Occasion</label>
+                                <select id="emOccasion" class="form-select form-select-sm"></select>
+                            </div>
+                            <div>
+                                <label for="emIndustry">Industry</label>
+                                <select id="emIndustry" class="form-select form-select-sm"><option value="">All industries</option></select>
+                            </div>
+                            <div>
+                                <label for="emAccountType">Account type</label>
+                                <select id="emAccountType" class="form-select form-select-sm"><option value="">All account types</option></select>
+                            </div>
+                            <div class="em-full">
+                                <label for="emRegion">Market</label>
+                                <select id="emRegion" class="form-select form-select-sm"><option value="">All markets</option></select>
+                            </div>
+                        </div>
+                        <div class="em-preview d-none" id="emPreview" aria-live="polite"></div>
+                        <div class="em-actions">
+                            <button type="button" class="btn-xs btn-xs-outline-neutral" id="emPreviewBtn"><i class="fas fa-users me-1"></i>Preview recipients</button>
+                            <button type="button" class="btn-xs btn-xs-solid-success" id="emSendBtn" disabled><i class="fas fa-paper-plane me-1"></i>Send</button>
+                        </div>
+                        <div class="d-none" id="emJob"></div>
+                    </div>
+                </div>
+
+                <h6 style="font-weight:700; font-size:0.95rem; color:#172033; margin: 0 0 0.6rem;">Email history</h6>
+                <div class="em-summary" id="emailSummary"></div>
+                <div class="cost-filters">
+                    <div>
+                        <label for="emailFilterQ">Search</label>
+                        <input type="search" id="emailFilterQ" class="form-control form-control-sm" placeholder="Email or subject">
+                    </div>
+                    <div>
+                        <label for="emailFilterKind">Type</label>
+                        <select id="emailFilterKind" class="form-select form-select-sm"><option value="">All types</option></select>
+                    </div>
+                    <div>
+                        <label for="emailFilterStatus">Status</label>
+                        <select id="emailFilterStatus" class="form-select form-select-sm">
+                            <option value="">Sent and failed</option>
+                            <option value="sent">Sent</option>
+                            <option value="failed">Failed</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label for="emailFilterFrom">Date (UTC)</label>
+                        <div class="cost-filter-dates">
+                            <input type="date" id="emailFilterFrom" class="form-control form-control-sm" aria-label="From date">
+                            <span>to</span>
+                            <input type="date" id="emailFilterTo" class="form-control form-control-sm" aria-label="To date">
+                        </div>
+                    </div>
+                    <div class="cost-filter-actions">
+                        <button type="button" class="btn-xs btn-xs-outline-neutral w-100" id="emailFilterReset"><i class="fas fa-rotate-left me-1"></i>Reset filters</button>
+                    </div>
+                </div>
+                <div class="admin-table-wrap">
+                    <div class="admin-table-scroll">
+                        <table class="admin-table-light">
+                            <thead>
+                                <tr><th>Sent</th><th>To</th><th>Type</th><th>Subject &amp; details</th><th>Status</th><th>By</th></tr>
+                            </thead>
+                            <tbody id="emailHistoryTbody">
+                                <tr><td colspan="6" class="text-center py-4 text-muted">Loading email history...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="cost-pagination">
+                    <div id="emailPageInfo"></div>
+                    <div class="cost-pages" id="emailPages"></div>
+                    <div class="cost-page-size">
+                        <label for="emailPageSize" class="mb-0">Rows</label>
+                        <select id="emailPageSize" class="form-select form-select-sm">
+                            <option value="25">25</option><option value="50">50</option><option value="100">100</option>
+                        </select>
                     </div>
                 </div>
             </div>
@@ -1149,7 +1305,7 @@
             document.querySelectorAll('.admin-pane').forEach(function (pane) {
                 pane.classList.add('d-none');
             });
-            var paneMap = { users: 'adminPaneUsers', requests: 'adminPaneRequests', cost: 'adminPaneCost', invites: 'adminPaneInvites', images: 'adminPaneImages' };
+            var paneMap = { users: 'adminPaneUsers', requests: 'adminPaneRequests', cost: 'adminPaneCost', invites: 'adminPaneInvites', emails: 'adminPaneEmails', images: 'adminPaneImages' };
             var pane = document.getElementById(paneMap[tab]);
             if (pane) pane.classList.remove('d-none');
         }

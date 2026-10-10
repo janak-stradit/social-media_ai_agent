@@ -1,6 +1,6 @@
 """Studio Chat "Ideas for you" (services/trend_service.py): trends are looked
-up once per industry, turned into briefs per user, and cached. Google and the
-LLM are faked - nothing is called or billed."""
+up once per industry, turned into briefs per user, and cached. The news
+aggregator, Google and the LLM are faked - nothing is called or billed."""
 
 import json
 import uuid
@@ -16,6 +16,8 @@ TOPICS = [
      "source_title": "Mint", "source_url": "https://example.com/sebi"},
     {"topic": "Record SIP inflows", "summary": "Monthly SIPs crossed a new high.", "why_now": "Data out this week.",
      "source_title": "ET", "source_url": "https://example.com/sip"},
+    {"topic": "Gold ETFs see inflows", "summary": "Investors added to gold funds.", "why_now": "Festive buying.",
+     "source_title": "Mint", "source_url": "https://example.com/gold"},
 ]
 
 
@@ -49,7 +51,7 @@ def user():
 @pytest.fixture
 def fakes(monkeypatch):
     """Counts the lookups and LLM calls; the market key is unique per test so caches don't leak."""
-    calls = {"search": 0, "news": 0, "llm": 0}
+    calls = {"aggregator": 0, "search": 0, "news": 0, "llm": 0, "polish": [], "use_llm": []}
     region = f"India-{uuid.uuid4().hex[:6]}"
     monkeypatch.setitem(trend_service.REGIONS, region, ("India", "hl=en-IN"))
     monkeypatch.setattr(trend_service, "profile_market", lambda profile: ("investment_wealth", "Investment education", region))
@@ -65,6 +67,15 @@ def fakes(monkeypatch):
                  "playbook": [_idea(post_type="Explainer", format="hologram", platform="tiktok")],
                  "dates": []}, {"total_tokens": 10})
 
+    def aggregator(category, label, region, use_llm=True):
+        calls["aggregator"] += 1
+        calls["use_llm"].append(use_llm)
+        return TOPICS
+
+    monkeypatch.setattr(trend_service, "_trends_from_news_aggregator", aggregator)
+    # the background summaries would save new trends mid-test: just record the request
+    monkeypatch.setattr(trend_service, "_polish_in_background", lambda key, *a: calls["polish"].append(key))
+    monkeypatch.setattr(trend_service, "_gemini_paused_until", None)
     monkeypatch.setattr(trend_service, "_trends_from_google_search", search)
     monkeypatch.setattr(trend_service, "_trends_from_google_news",
                         lambda c, l, r: calls.__setitem__("news", calls["news"] + 1) or TOPICS[:1])
@@ -80,7 +91,7 @@ def test_feed_links_each_trending_idea_to_its_source(user, fakes):
     trending = feed["groups"]["trending"]
     assert len(trending) == 1  # one idea per topic; an unknown topic number is dropped
     assert trending[0]["topic"] == "Record SIP inflows" and trending[0]["source_url"] == "https://example.com/sip"
-    assert feed["trend_source"] == "google_search" and "Record SIP inflows" in fakes["prompt"]
+    assert feed["trend_source"] == "news" and "Record SIP inflows" in fakes["prompt"]
     # values the page can't show fall back to safe ones
     assert feed["groups"]["playbook"][0]["format"] == "text" and feed["groups"]["playbook"][0]["platform"] == "linkedin"
 
@@ -88,21 +99,66 @@ def test_feed_links_each_trending_idea_to_its_source(user, fakes):
 def test_feed_and_trends_are_cached(user, fakes):
     first, _ = trend_service.generate_idea_feed(user["id"])
     second, _ = trend_service.generate_idea_feed(user["id"])
-    assert first == second and fakes["llm"] == 1 and fakes["search"] == 1
+    assert first == second and fakes["llm"] == 1 and fakes["aggregator"] == 1 and fakes["search"] == 0
 
     trend_service.generate_idea_feed(user["id"], force=True)  # refresh: new ideas, same day's trends
-    assert fakes["llm"] == 2 and fakes["search"] == 1
+    assert fakes["llm"] == 2 and fakes["aggregator"] == 1
 
 
-def test_news_headlines_are_used_when_search_fails(user, fakes, monkeypatch):
-    def no_grounding(label, region):
-        raise RuntimeError("429 RESOURCE_EXHAUSTED")
+def test_news_headlines_are_used_when_every_other_source_fails(user, fakes, monkeypatch):
+    def broken(*a, **kw):
+        raise RuntimeError("down")
 
-    monkeypatch.setattr(trend_service, "_trends_from_google_search", no_grounding)
+    monkeypatch.setattr(trend_service, "_trends_from_news_aggregator", broken)
+    monkeypatch.setattr(trend_service, "_trends_from_google_search", broken)
 
     feed, _ = trend_service.generate_idea_feed(user["id"])
 
     assert feed["trend_source"] == "google_news" and fakes["news"] == 1
+
+
+def _key():
+    return f"retail_ecommerce|test-{uuid.uuid4().hex[:6]}"
+
+
+def test_a_visitor_gets_headlines_now_and_summaries_in_the_background(fakes):
+    key = _key()
+    category, _, region = key.partition("|")
+    trends = trend_service.get_trends(category, "Retail", region)
+    assert trends["source"] == "news" and fakes["use_llm"] == [False] and fakes["polish"] == [key]
+
+    trend_service.get_trends(category, "Retail", region, force=True)  # the scheduler writes summaries itself
+    assert fakes["use_llm"] == [False, True] and fakes["polish"] == [key]
+
+
+def test_thin_aggregator_results_try_gemini_then_keep_the_best(fakes, monkeypatch):
+    monkeypatch.setattr(trend_service, "_trends_from_news_aggregator", lambda *a, **kw: TOPICS[:2])
+    category, _, region = _key().partition("|")
+    assert trend_service.get_trends(category, "Retail", region)["source"] == "google_search"
+
+    def no_search(label, region):
+        raise RuntimeError("no grounding on this plan")
+
+    monkeypatch.setattr(trend_service, "_trends_from_google_search", no_search)
+    category, _, region = _key().partition("|")
+    trends = trend_service.get_trends(category, "Retail", region)
+    # 2 ranked topics beat Google News' single headline
+    assert trends["source"] == "news" and len(trends["topics"]) == 2
+
+
+def test_gemini_is_paused_after_a_quota_error(fakes, monkeypatch):
+    monkeypatch.setattr(trend_service, "_trends_from_news_aggregator", lambda *a, **kw: [])
+
+    def quota(label, region):
+        fakes["search"] += 1
+        raise RuntimeError("429 RESOURCE_EXHAUSTED. You exceeded your current quota")
+
+    monkeypatch.setattr(trend_service, "_trends_from_google_search", quota)
+    for _ in range(3):
+        category, _, region = _key().partition("|")
+        assert trend_service.get_trends(category, "Retail", region)["source"] == "google_news"
+    assert fakes["search"] == 1  # not called again until the quota resets
+    assert trend_service._gemini_paused_until.hour == 8
 
 
 def test_endpoint_returns_the_feed_and_nothing_without_a_profile(app, user, fakes):

@@ -34,12 +34,24 @@ US_FIXED_HOLIDAYS = [
 # are deliberately not listed: their dates depend on moon sighting, so they're
 # only used when the user names them (e.g. "/festive Eid").
 UAE_FIXED_HOLIDAYS = [
+    ("UAE Flag Day", 11, 3),
+    ("Commemoration Day", 11, 30),
     ("UAE National Day", 12, 2),
+]
+
+# Islamic festivals follow the lunar Hijri calendar: these are the expected
+# dates (astronomical estimates); the actual day can move by one with the moon
+# sighting. Public holidays in the UAE/GCC and in India. Add each new year's dates.
+ISLAMIC_FESTIVALS = [
+    ("Ramadan begins", date(2027, 2, 8)),
+    ("Eid al-Fitr", date(2027, 3, 10)),
+    ("Eid al-Adha", date(2027, 5, 17)),
+    ("Islamic New Year", date(2027, 6, 6)),
 ]
 
 # Solemn / civic days that make poor product celebrations (still listed as
 # storyline ideas, but never picked automatically for a /festive image)
-NOT_CELEBRATIONS = {"Columbus Day", "Veterans Day"}
+NOT_CELEBRATIONS = {"Columbus Day", "Veterans Day", "Commemoration Day"}
 
 # Brand profile regions (compliance_regions / regions_detected) -> calendar regions
 PROFILE_REGION_MAP = {"US": "USA", "India": "India", "UAE/GCC": "UAE"}
@@ -85,6 +97,10 @@ def get_upcoming_festivals(days_ahead: int = 60, today: date | None = None) -> l
     for name, month, day in UAE_FIXED_HOLIDAYS:
         for year in (today.year, today.year + 1):
             candidates.append((name, date(year, month, day), "UAE"))
+
+    for name, d in ISLAMIC_FESTIVALS:
+        candidates.append((name, d, "UAE"))
+        candidates.append((name, d, "India"))
 
     upcoming = [
         {
