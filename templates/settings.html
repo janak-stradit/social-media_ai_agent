@@ -57,6 +57,9 @@
             <button class="bc-nav-item" id="scheduled-posts-tab" data-bs-toggle="tab" data-bs-target="#scheduled-posts-pane" type="button" role="tab" aria-controls="scheduled-posts-pane" aria-selected="false">
                 <i class="fas fa-calendar-days"></i>Scheduled Posts
             </button>
+            <button class="bc-nav-item" id="notifications-tab" data-bs-toggle="tab" data-bs-target="#notifications-pane" type="button" role="tab" aria-controls="notifications-pane" aria-selected="false">
+                <i class="fas fa-bell"></i>Notifications
+            </button>
         </nav>
     </aside>
 
@@ -415,6 +418,52 @@
                                 </tr>
                             </tbody>
                         </table>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- ── TAB 4: NOTIFICATIONS (weekly ideas email) ── -->
+                <div class="tab-pane fade" id="notifications-pane" role="tabpanel" aria-labelledby="notifications-tab">
+                  <div class="brand-config-card settings-pane-card">
+                    <h6><div class="card-icon-circle"><i class="fas fa-bell"></i></div> Notifications</h6>
+                    <div class="brand-config-card-desc">Choose what we email you about.</div>
+
+                    <div class="d-flex align-items-start justify-content-between gap-3 py-3 border-top">
+                        <div>
+                            <label class="fw-bold text-navy mb-1 d-block" for="ideasEmailSwitch">Weekly post ideas</label>
+                            <div class="small text-slate-500">Once a week: three ideas for your industry, each ready to turn into a post in one click.</div>
+                            <div class="small text-slate-500 mt-1" id="ideasEmailMeta"></div>
+                        </div>
+                        <div class="form-check form-switch m-0">
+                            <input class="form-check-input" type="checkbox" role="switch" id="ideasEmailSwitch" aria-label="Weekly post ideas email" disabled>
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-start justify-content-between gap-3 py-3 border-top">
+                        <div>
+                            <label class="fw-bold text-navy mb-1 d-block" for="nudgesEmailSwitch">Timely reminders</label>
+                            <div class="small text-slate-500">Now and then: a festival coming up, a big story in your industry, or a nudge after a quiet spell. Each comes with one ready idea. You'll still see them under the bell when this is off.</div>
+                        </div>
+                        <div class="form-check form-switch m-0">
+                            <input class="form-check-input" type="checkbox" role="switch" id="nudgesEmailSwitch" aria-label="Timely reminder emails" disabled>
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-start justify-content-between gap-3 py-3 border-top">
+                        <div>
+                            <label class="fw-bold text-navy mb-1 d-block" for="recapEmailSwitch">Monthly recap</label>
+                            <div class="small text-slate-500">At the start of each month: what you created last month, how it compares with the month before, and what to try next. Only sent for months you posted in.</div>
+                        </div>
+                        <div class="form-check form-switch m-0">
+                            <input class="form-check-input" type="checkbox" role="switch" id="recapEmailSwitch" aria-label="Monthly recap email" disabled>
+                        </div>
+                    </div>
+                    <div class="border-top pt-3">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="sendIdeasEmailNowBtn">
+                            <i class="fas fa-paper-plane me-1"></i>Send me this week's ideas now
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary ms-1" id="sendRecapEmailNowBtn">
+                            <i class="fas fa-chart-simple me-1"></i>Send me last month's recap now
+                        </button>
+                        <div class="small text-slate-500 mt-2">Sends the email to your own address so you can see what it looks like. It can take a minute or two.</div>
                     </div>
                   </div>
                 </div>

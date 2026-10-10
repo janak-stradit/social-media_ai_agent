@@ -999,7 +999,9 @@
                                             <label class="btn btn-outline-primary btn-sm fw-bold" for="typeImage">
                                                 <i class="fas fa-image me-1"></i>Image
                                             </label>
-                                            <span class="coming-soon flex-fill" title="Coming soon">
+                                            <!-- "Soon" until an admin switches video on for the user
+                                                 (applyVideoAccess in dashboard.js opens it) -->
+                                            <span class="coming-soon video-gate flex-fill" title="Coming soon">
                                                 <input type="radio" class="btn-check" name="mediaType" id="typeVideo"
                                                     value="video" autocomplete="off" disabled>
                                                 <label class="btn btn-outline-primary btn-sm fw-bold w-100" for="typeVideo">

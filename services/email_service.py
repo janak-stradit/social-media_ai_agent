@@ -432,6 +432,321 @@ def _build_password_reset_html(name: str, reset_url: str, ttl_minutes: int) -> s
 """
 
 
+def _build_credit_decision_html(
+    name: str, approved: bool, requested_amount: float, credit_limit: float | None, dashboard_url: str
+) -> str:
+    """The user's answer to a credit extension request (Admin -> Credit
+    Extension Requests -> approve / reject)."""
+    if approved:
+        heading = "Your credit request was approved"
+        body = (
+            f"Good news: your request for <strong>${requested_amount:,.2f}</strong> of extra credit has been approved. "
+            + (f"Your credit limit is now <strong>${credit_limit:,.2f}</strong>." if credit_limit is not None else "")
+            + " You can carry on creating content right away."
+        )
+        button = "Open AVIR AI"
+        note = "Credit is used as you generate posts, images and videos."
+    else:
+        heading = "Your credit request was not approved"
+        body = (
+            f"Your request for <strong>${requested_amount:,.2f}</strong> of extra credit was not approved this time. "
+            + (f"Your credit limit stays at <strong>${credit_limit:,.2f}</strong>. " if credit_limit is not None else "")
+            + "If you need more, you can send a new request with a little more detail about what you plan to create."
+        )
+        button = "Go to AVIR AI"
+        note = "Questions about this decision? Reply to this email or contact your account admin."
+    return f"""<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 0; background-color: #f8f9fc; font-family: 'Segoe UI', Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fc; padding: 32px 0;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="560" cellpadding="0" cellspacing="0"
+                       style="background-color: #ffffff; border: 1px solid #e6e8ef; border-radius: 16px; overflow: hidden;">
+                    <tr>
+                        <td style="background-color: #e85a1c; background-image: linear-gradient(135deg, #ffa066 0%, #e85a1c 100%); padding: 32px; text-align: center;">
+                            <span style="color: #ffffff; font-size: 22px; font-weight: 700;">{heading}</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 32px 32px 8px 32px; color: #172033; font-size: 15px; line-height: 1.6;">
+                            Hi {_escape(name)},<br><br>
+                            {body}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td align="center" style="padding: 24px 32px 32px 32px;">
+                            <a href="{_escape(dashboard_url)}"
+                               style="display: inline-block; background-color: #c2410c; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 6px;">
+                                {button}
+                            </a>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 16px 32px; background-color: #f8f9fc; border-top: 1px solid #e6e8ef; color: #667085; font-size: 12px;">
+                            {note}
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a>.</div>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+
+
+def _build_weekly_ideas_html(
+    name: str, company_name: str | None, ideas: list[dict], dashboard_url: str, settings_url: str, unsubscribe_url: str
+) -> str:
+    """The weekly ideas email. ideas: [{title, summary, origin, makes, url}] -
+    each button opens Studio Chat with that idea's brief filled in."""
+    cards = "".join(
+        f"""
+                    <tr>
+                        <td style="padding: 0 32px 16px 32px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                                   style="border: 1px solid #e6e8ef; border-radius: 12px;">
+                                <tr>
+                                    <td style="padding: 18px 20px;">
+                                        <div style="color: #c2410c; font-size: 12px; font-weight: 700;">{_escape(idea.get("origin"))}</div>
+                                        <div style="color: #172033; font-size: 17px; font-weight: 700; line-height: 1.35; margin-top: 6px;">{_escape(idea.get("title"))}</div>
+                                        <div style="color: #475569; font-size: 14px; line-height: 1.55; margin-top: 6px;">{_escape(idea.get("summary"))}</div>
+                                        <div style="color: #667085; font-size: 12px; margin-top: 10px;">{_escape(idea.get("makes"))}</div>
+                                        <div style="margin-top: 14px;">
+                                            <a href="{_escape(idea.get("url"))}"
+                                               style="display: inline-block; background-color: #c2410c; color: #ffffff; font-size: 14px; font-weight: 700; text-decoration: none; padding: 10px 20px; border-radius: 6px;">
+                                                Create this post
+                                            </a>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
+        for idea in ideas
+    )
+    brand = f" for {_escape(company_name)}" if company_name else ""
+    return f"""<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 0; background-color: #f8f9fc; font-family: 'Segoe UI', Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fc; padding: 32px 0;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="560" cellpadding="0" cellspacing="0"
+                       style="background-color: #ffffff; border: 1px solid #e6e8ef; border-radius: 16px; overflow: hidden;">
+                    <tr>
+                        <td style="background-color: #e85a1c; background-image: linear-gradient(135deg, #ffa066 0%, #e85a1c 100%); padding: 32px; text-align: center;">
+                            <span style="color: #ffffff; font-size: 22px; font-weight: 700;">{len(ideas)} post ideas{brand} this week</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 28px 32px 20px 32px; color: #172033; font-size: 15px; line-height: 1.6;">
+                            Hi {_escape(name)},<br><br>
+                            Here is what's worth posting about this week, picked for your industry and written for your brand.
+                            Choose one and the brief is ready to go.
+                        </td>
+                    </tr>{cards}
+                    <tr>
+                        <td align="center" style="padding: 8px 32px 28px 32px;">
+                            <a href="{_escape(dashboard_url)}" style="color: #c2410c; font-size: 14px; font-weight: 700; text-decoration: none;">See all your ideas in AVIR AI &rarr;</a>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 16px 32px; background-color: #f8f9fc; border-top: 1px solid #e6e8ef; color: #667085; font-size: 12px; line-height: 1.6;">
+                            You get this email once a week because you have an AVIR AI account.
+                            <a href="{_escape(settings_url)}" style="color: #c2410c; text-decoration: none;">Email settings</a> &middot;
+                            <a href="{_escape(unsubscribe_url)}" style="color: #c2410c; text-decoration: none;">Unsubscribe</a>
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a>.</div>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+
+
+def _build_nudge_html(name: str, headline: str, intro: str, idea: dict, settings_url: str, unsubscribe_url: str) -> str:
+    """A timely nudge (services/nudge_service.py): one idea {title, summary,
+    makes, url} whose button opens Studio Chat with the brief filled in."""
+    return f"""<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 0; background-color: #f8f9fc; font-family: 'Segoe UI', Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fc; padding: 32px 0;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="560" cellpadding="0" cellspacing="0"
+                       style="background-color: #ffffff; border: 1px solid #e6e8ef; border-radius: 16px; overflow: hidden;">
+                    <tr>
+                        <td style="background-color: #e85a1c; background-image: linear-gradient(135deg, #ffa066 0%, #e85a1c 100%); padding: 32px; text-align: center;">
+                            <span style="color: #ffffff; font-size: 22px; font-weight: 700;">{_escape(headline)}</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 28px 32px 20px 32px; color: #172033; font-size: 15px; line-height: 1.6;">
+                            Hi {_escape(name)},<br><br>
+                            {_escape(intro)}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 0 32px 28px 32px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                                   style="border: 1px solid #e6e8ef; border-radius: 12px;">
+                                <tr>
+                                    <td style="padding: 18px 20px;">
+                                        <div style="color: #172033; font-size: 17px; font-weight: 700; line-height: 1.35;">{_escape(idea.get("title"))}</div>
+                                        <div style="color: #475569; font-size: 14px; line-height: 1.55; margin-top: 6px;">{_escape(idea.get("summary"))}</div>
+                                        <div style="color: #667085; font-size: 12px; margin-top: 10px;">{_escape(idea.get("makes"))}</div>
+                                        <div style="margin-top: 14px;">
+                                            <a href="{_escape(idea.get("url"))}"
+                                               style="display: inline-block; background-color: #c2410c; color: #ffffff; font-size: 14px; font-weight: 700; text-decoration: none; padding: 10px 20px; border-radius: 6px;">
+                                                Create this post
+                                            </a>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 16px 32px; background-color: #f8f9fc; border-top: 1px solid #e6e8ef; color: #667085; font-size: 12px; line-height: 1.6;">
+                            You get occasional reminders like this because you have an AVIR AI account.
+                            <a href="{_escape(settings_url)}" style="color: #c2410c; text-decoration: none;">Email settings</a> &middot;
+                            <a href="{_escape(unsubscribe_url)}" style="color: #c2410c; text-decoration: none;">Unsubscribe</a>
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a>.</div>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+
+
+def _build_monthly_recap_html(
+    name: str, company_name: str | None, stats: dict, tips: list[str], ideas: list[dict],
+    calendar_url: str, settings_url: str, unsubscribe_url: str,
+) -> str:
+    """The monthly recap (services/recap_service.py). stats: posts, images,
+    videos, published, platform_names, comparison, weeks, weeks_goal_met,
+    month_name. ideas: [{title, summary, origin, makes, url}] like the weekly email."""
+    def tile(value, label):
+        return f"""
+                                    <td width="25%" align="center" style="padding: 14px 4px; border: 1px solid #e6e8ef; border-radius: 10px;">
+                                        <div style="color: #172033; font-size: 24px; font-weight: 700;">{value}</div>
+                                        <div style="color: #667085; font-size: 12px; margin-top: 2px;">{label}</div>
+                                    </td>"""
+
+    tiles = "".join([
+        tile(stats.get("posts", 0), "posts created"), tile(stats.get("images", 0), "with an image"),
+        tile(stats.get("videos", 0), "with a video"), tile(stats.get("published", 0), "published"),
+    ])
+    platforms = ", ".join(_escape(p) for p in stats.get("platform_names") or [])
+    goal_line = (
+        f"You reached your weekly goal in <strong>{stats['weeks_goal_met']} of {stats['weeks']}</strong> weeks."
+        if stats.get("weeks") else ""
+    )
+    tips_html = "".join(
+        f'<div style="color: #475569; font-size: 14px; line-height: 1.55; margin-top: 8px;">&bull; {_escape(tip)}</div>'
+        for tip in tips
+    )
+    ideas_html = "".join(
+        f"""
+                    <tr>
+                        <td style="padding: 0 32px 14px 32px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                                   style="border: 1px solid #e6e8ef; border-radius: 12px;">
+                                <tr>
+                                    <td style="padding: 16px 20px;">
+                                        <div style="color: #c2410c; font-size: 12px; font-weight: 700;">{_escape(idea.get("origin"))}</div>
+                                        <div style="color: #172033; font-size: 16px; font-weight: 700; line-height: 1.35; margin-top: 5px;">{_escape(idea.get("title"))}</div>
+                                        <div style="color: #475569; font-size: 14px; line-height: 1.55; margin-top: 5px;">{_escape(idea.get("summary"))}</div>
+                                        <div style="color: #667085; font-size: 12px; margin-top: 8px;">{_escape(idea.get("makes"))}</div>
+                                        <div style="margin-top: 12px;">
+                                            <a href="{_escape(idea.get("url"))}"
+                                               style="display: inline-block; background-color: #c2410c; color: #ffffff; font-size: 14px; font-weight: 700; text-decoration: none; padding: 10px 20px; border-radius: 6px;">
+                                                Create this post
+                                            </a>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
+        for idea in ideas
+    )
+    next_heading = (
+        """
+                    <tr>
+                        <td style="padding: 8px 32px 12px 32px; color: #172033; font-size: 16px; font-weight: 700;">What to try next</td>
+                    </tr>"""
+        if ideas or tips else ""
+    )
+    tips_row = (
+        f"""
+                    <tr>
+                        <td style="padding: 0 32px 18px 32px;">{tips_html}</td>
+                    </tr>"""
+        if tips else ""
+    )
+    brand = f" at {_escape(company_name)}" if company_name else ""
+    return f"""<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 0; background-color: #f8f9fc; font-family: 'Segoe UI', Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fc; padding: 32px 0;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="560" cellpadding="0" cellspacing="0"
+                       style="background-color: #ffffff; border: 1px solid #e6e8ef; border-radius: 16px; overflow: hidden;">
+                    <tr>
+                        <td style="background-color: #e85a1c; background-image: linear-gradient(135deg, #ffa066 0%, #e85a1c 100%); padding: 32px; text-align: center;">
+                            <span style="color: #ffffff; font-size: 22px; font-weight: 700;">Your {_escape(stats.get("month_name"))}{brand}</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 28px 32px 18px 32px; color: #172033; font-size: 15px; line-height: 1.6;">
+                            Hi {_escape(name)},<br><br>
+                            You created <strong>{stats.get("posts", 0)} {"post" if stats.get("posts") == 1 else "posts"}</strong> in {_escape(stats.get("month_name"))}.
+                            {_escape(stats.get("comparison"))}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 0 32px 16px 32px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="8" style="border-collapse: separate; margin: 0 -8px; width: calc(100% + 16px);">
+                                <tr>{tiles}
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 0 32px 22px 32px; color: #475569; font-size: 14px; line-height: 1.6;">
+                            {("Written for " + platforms + ". ") if platforms else ""}{goal_line}
+                            <a href="{_escape(calendar_url)}" style="color: #c2410c; font-weight: 700; text-decoration: none;">Open your calendar &rarr;</a>
+                        </td>
+                    </tr>{next_heading}{tips_row}{ideas_html}
+                    <tr>
+                        <td style="padding: 16px 32px; background-color: #f8f9fc; border-top: 1px solid #e6e8ef; color: #667085; font-size: 12px; line-height: 1.6;">
+                            You get this recap once a month because you have an AVIR AI account.
+                            <a href="{_escape(settings_url)}" style="color: #c2410c; text-decoration: none;">Email settings</a> &middot;
+                            <a href="{_escape(unsubscribe_url)}" style="color: #c2410c; text-decoration: none;">Unsubscribe</a>
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a>.</div>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
+
+
 def _build_invitation_html(
     name: str | None, inviter_name: str | None, accept_url: str, message: str | None, expires_days: int
 ) -> str:
@@ -702,6 +1017,114 @@ class EmailService:
         msg["From"] = self.from_email
         msg["To"] = to_email
         msg.attach(MIMEText(_build_password_reset_html(name, reset_url, ttl_minutes), "html"))
+
+        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
+            server.starttls()
+            server.login(self.username, self.password)
+            server.sendmail(self.from_email, [to_email], msg.as_string())
+
+        return {"success": True, "recipient": to_email}
+
+    def send_credit_decision_email(
+        self, to_email: str, name: str, approved: bool, requested_amount: float,
+        credit_limit: float | None, dashboard_url: str,
+    ) -> dict:
+        """Sent when an admin approves or rejects a credit extension request
+        (api/routes.py admin_approve_request / admin_reject_request)."""
+        if not self.enabled:
+            raise RuntimeError(
+                "SMTP is not configured. Set SMTP_HOST, SMTP_USERNAME and SMTP_PASSWORD in .env."
+            )
+
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = (
+            "Your credit request was approved - AVIR AI" if approved else "Update on your credit request - AVIR AI"
+        )
+        msg["From"] = self.from_email
+        msg["To"] = to_email
+        msg.attach(MIMEText(
+            _build_credit_decision_html(name, approved, requested_amount, credit_limit, dashboard_url), "html"
+        ))
+
+        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
+            server.starttls()
+            server.login(self.username, self.password)
+            server.sendmail(self.from_email, [to_email], msg.as_string())
+
+        return {"success": True, "recipient": to_email}
+
+    def send_weekly_ideas_email(
+        self, to_email: str, name: str, company_name: str | None, ideas: list[dict],
+        dashboard_url: str, settings_url: str, unsubscribe_url: str,
+    ) -> dict:
+        """The weekly ideas email (services/idea_digest_service.py)."""
+        if not self.enabled:
+            raise RuntimeError(
+                "SMTP is not configured. Set SMTP_HOST, SMTP_USERNAME and SMTP_PASSWORD in .env."
+            )
+
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = f"{len(ideas)} post ideas for this week - AVIR AI"
+        msg["From"] = self.from_email
+        msg["To"] = to_email
+        # Lets mail apps show their own one-click unsubscribe button
+        msg["List-Unsubscribe"] = f"<{unsubscribe_url}>"
+        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+        msg.attach(MIMEText(
+            _build_weekly_ideas_html(name, company_name, ideas, dashboard_url, settings_url, unsubscribe_url), "html"
+        ))
+
+        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
+            server.starttls()
+            server.login(self.username, self.password)
+            server.sendmail(self.from_email, [to_email], msg.as_string())
+
+        return {"success": True, "recipient": to_email}
+
+    def send_nudge_email(
+        self, to_email: str, name: str, headline: str, intro: str, idea: dict, settings_url: str, unsubscribe_url: str
+    ) -> dict:
+        """A timely nudge with one idea (services/nudge_service.py)."""
+        if not self.enabled:
+            raise RuntimeError(
+                "SMTP is not configured. Set SMTP_HOST, SMTP_USERNAME and SMTP_PASSWORD in .env."
+            )
+
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = f"{headline} - AVIR AI"
+        msg["From"] = self.from_email
+        msg["To"] = to_email
+        msg["List-Unsubscribe"] = f"<{unsubscribe_url}>"
+        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+        msg.attach(MIMEText(_build_nudge_html(name, headline, intro, idea, settings_url, unsubscribe_url), "html"))
+
+        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
+            server.starttls()
+            server.login(self.username, self.password)
+            server.sendmail(self.from_email, [to_email], msg.as_string())
+
+        return {"success": True, "recipient": to_email}
+
+    def send_monthly_recap_email(
+        self, to_email: str, name: str, company_name: str | None, stats: dict, tips: list[str], ideas: list[dict],
+        calendar_url: str, settings_url: str, unsubscribe_url: str,
+    ) -> dict:
+        """The monthly recap (services/recap_service.py)."""
+        if not self.enabled:
+            raise RuntimeError(
+                "SMTP is not configured. Set SMTP_HOST, SMTP_USERNAME and SMTP_PASSWORD in .env."
+            )
+
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = f"Your {stats.get('month_name')} recap - AVIR AI"
+        msg["From"] = self.from_email
+        msg["To"] = to_email
+        msg["List-Unsubscribe"] = f"<{unsubscribe_url}>"
+        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+        msg.attach(MIMEText(
+            _build_monthly_recap_html(name, company_name, stats, tips, ideas, calendar_url, settings_url, unsubscribe_url),
+            "html",
+        ))
 
         with smtplib.SMTP(self.host, self.port, timeout=30) as server:
             server.starttls()

@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import (
@@ -112,6 +113,24 @@ class User(Base):
     # (None = the default model).
     image_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     image_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    # Video is "coming soon" for everyone until an admin switches it on for
+    # the user (Admin -> Users -> Image access -> Video). Admins always have it.
+    video_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # Weekly "ideas for you" email (services/idea_digest_service.py). None = on:
+    # users get it until they switch it off (Settings -> Notifications, or the
+    # email's unsubscribe link).
+    ideas_email_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    ideas_email_last_sent_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Timely nudges by email (services/nudge_service.py): an occasion coming
+    # up, a trending topic, a reminder after a quiet spell. None = on. The
+    # same nudges always show under the header bell, whatever this is.
+    nudge_email_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    # Monthly recap email (services/recap_service.py). None = on.
+    # recap_email_last_month: the month ("2026-09") the last recap covered, so each month is sent once.
+    recap_email_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    recap_email_last_month: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    # Posts the user aims to create each week (Content Calendar). None = WEEKLY_POST_GOAL_DEFAULT.
+    weekly_post_goal: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class SalesContactRequest(Base):
@@ -416,6 +435,71 @@ class SuggestedStorylineSeen(Base):
     first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
+class IndustryTrend(Base):
+    """This week's talked-about topics for one industry in one market (see
+    services/trend_service.py). Shared by every user in that industry, so
+    trends are looked up once a day per industry, not once per user."""
+
+    __tablename__ = "industry_trends"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    key: Mapped[str] = mapped_column(String(160), primary_key=True)  # "<industry_category>|<region>"
+    payload: Mapped[str] = mapped_column(Text, nullable=False)  # JSON list of {topic, summary, why_now, source_title, source_url}
+    source: Mapped[str | None] = mapped_column(String(32), nullable=True)  # google_search / google_news
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class UserIdeaFeed(Base):
+    """Studio Chat's "Ideas for you" for one user: the industry's trends,
+    post types and upcoming dates turned into briefs for their brand."""
+
+    __tablename__ = "user_idea_feeds"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)  # JSON, see trend_service.generate_idea_feed
+    generated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class IdeaLink(Base):
+    """One idea sent in a weekly ideas email. The email's button opens
+    /dashboard?idea=<token>, which loads this brief into the composer - the
+    user's feed has usually moved on by the time they click."""
+
+    __tablename__ = "idea_links"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)  # JSON idea: title, prompt, platform, format, ...
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    opened_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # first click
+
+
+class Notification(Base):
+    """One item under the header bell (services/nudge_service.py): an
+    occasion coming up, a trending topic or a reminder, with a link that
+    opens Studio Chat with an idea loaded. dedupe_key stops the same nudge
+    being created twice for a user."""
+
+    __tablename__ = "notifications"
+    __table_args__ = (
+        UniqueConstraint("user_id", "dedupe_key", name="uq_notification_user_dedupe"),
+        {"schema": SCHEMA} if not IS_SQLITE else {},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(24), nullable=False)  # occasion / trend / inactive
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    url: Mapped[str | None] = mapped_column(String(500), nullable=True)  # path, e.g. /dashboard?idea=<token>
+    dedupe_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    emailed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class AppSetting(Base):
     """Generic editable-text settings the user can update from the dashboard
     (e.g. Content Guidelines, Products & Service overview) - stored here
@@ -575,6 +659,13 @@ def init_db():
             f"ALTER TABLE {usr_tbl} ADD COLUMN approval_reviewer_email VARCHAR(255)",
             f"ALTER TABLE {usr_tbl} ADD COLUMN image_limit INTEGER",
             f"ALTER TABLE {usr_tbl} ADD COLUMN image_model VARCHAR(128)",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN video_enabled BOOLEAN DEFAULT FALSE",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN ideas_email_enabled BOOLEAN",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN ideas_email_last_sent_at TIMESTAMP",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN nudge_email_enabled BOOLEAN",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN weekly_post_goal INTEGER",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN recap_email_enabled BOOLEAN",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN recap_email_last_month VARCHAR(7)",
         ]:
             try:
                 with engine.begin() as sub_conn:
@@ -1034,6 +1125,358 @@ def set_approval_reviewer_email(user_id: int, email: str | None) -> None:
         if user is not None:
             user.approval_reviewer_email = (email or "").strip().lower() or None
             session.commit()
+
+
+def get_industry_trends(key: str) -> dict | None:
+    """{"topics": [...], "source": ..., "fetched_at": aware datetime} or None."""
+    with Session(engine) as session:
+        row = session.get(IndustryTrend, key)
+        if not row:
+            return None
+        return {"topics": json.loads(row.payload or "[]"), "source": row.source, "fetched_at": _as_utc(row.fetched_at)}
+
+
+def save_industry_trends(key: str, topics: list[dict], source: str) -> None:
+    with Session(engine) as session:
+        row = session.get(IndustryTrend, key)
+        if row is None:
+            row = IndustryTrend(key=key)
+            session.add(row)
+        row.payload = json.dumps(topics)
+        row.source = source
+        row.fetched_at = _utcnow()
+        session.commit()
+
+
+def list_industry_trend_keys() -> list[tuple[str, datetime]]:
+    """(key, fetched_at) of every cached industry - for the scheduler's daily refresh."""
+    with Session(engine) as session:
+        return [(r.key, _as_utc(r.fetched_at)) for r in session.query(IndustryTrend).all()]
+
+
+def get_user_idea_feed(user_id: int) -> dict | None:
+    """{"feed": {...}, "generated_at": aware datetime} or None."""
+    with Session(engine) as session:
+        row = session.get(UserIdeaFeed, user_id)
+        if not row:
+            return None
+        return {"feed": json.loads(row.payload or "{}"), "generated_at": _as_utc(row.generated_at)}
+
+
+def save_user_idea_feed(user_id: int, feed: dict) -> None:
+    with Session(engine) as session:
+        row = session.get(UserIdeaFeed, user_id)
+        if row is None:
+            row = UserIdeaFeed(user_id=user_id)
+            session.add(row)
+        row.payload = json.dumps(feed)
+        row.generated_at = _utcnow()
+        session.commit()
+
+
+def create_idea_link(user_id: int, idea: dict) -> str:
+    token = secrets.token_urlsafe(24)
+    with Session(engine) as session:
+        session.add(IdeaLink(token=token, user_id=user_id, payload=json.dumps(idea)))
+        session.commit()
+    return token
+
+
+def open_idea_link(token: str, user_id: int) -> dict | None:
+    """The idea behind an emailed link - only for the user it was sent to."""
+    with Session(engine) as session:
+        row = session.get(IdeaLink, token)
+        if not row or row.user_id != user_id:
+            return None
+        if row.opened_at is None:
+            row.opened_at = _utcnow()
+            session.commit()
+        return json.loads(row.payload or "{}")
+
+
+# ── Content Calendar: weekly goal + what was created / scheduled ──────────
+
+WEEKLY_POST_GOAL_DEFAULT = 3
+
+
+def get_weekly_post_goal(user_id: int) -> int:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        return int(user.weekly_post_goal) if user and user.weekly_post_goal else WEEKLY_POST_GOAL_DEFAULT
+
+
+def set_weekly_post_goal(user_id: int, goal: int) -> bool:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if not user:
+            return False
+        user.weekly_post_goal = max(1, min(7, int(goal)))
+        session.commit()
+        return True
+
+
+def posts_created_between(user_id: int, start: datetime, end: datetime) -> list[dict]:
+    """The posts the user created in [start, end): one per brief. Refinements
+    and regenerated versions of a post are the same post, so they don't count."""
+    lo = start.astimezone(timezone.utc).replace(tzinfo=None)
+    hi = end.astimezone(timezone.utc).replace(tzinfo=None)
+    with Session(engine) as session:
+        rows = (
+            session.query(RunHistory)
+            .filter(RunHistory.user_id == user_id, RunHistory.created_at >= lo, RunHistory.created_at < hi)
+            .order_by(RunHistory.created_at.asc())
+            .all()
+        )
+        posts = []
+        for row in rows:
+            try:
+                content = json.loads(row.content or "{}")
+                platforms = json.loads(row.platforms or "[]")
+            except (TypeError, ValueError):
+                content, platforms = {}, []
+            meta = content.get("_meta") if isinstance(content, dict) else None
+            if isinstance(meta, dict) and (meta.get("refined_from_run_id") or meta.get("version_of")):
+                continue
+            media = [(v.get("media") or {}) for k, v in content.items() if isinstance(v, dict) and not str(k).startswith("_")]
+            posts.append({
+                "id": row.id,
+                "created_at": _as_utc(row.created_at),
+                "title": " ".join((row.story or "").split())[:90],
+                "platforms": platforms if isinstance(platforms, list) else [],
+                "conversation_id": row.conversation_id,
+                "has_image": any(m.get("image") for m in media),
+                "has_video": any(m.get("video") for m in media),
+            })
+        return posts
+
+
+def scheduled_posts_between(user_id: int, start: datetime, end: datetime) -> list[dict]:
+    lo = start.astimezone(timezone.utc).replace(tzinfo=None)
+    hi = end.astimezone(timezone.utc).replace(tzinfo=None)
+    with Session(engine) as session:
+        rows = (
+            session.query(ScheduledPost)
+            .filter(ScheduledPost.user_id == user_id, ScheduledPost.scheduled_at >= lo, ScheduledPost.scheduled_at < hi,
+                    ScheduledPost.status.in_(("pending", "published")))
+            .order_by(ScheduledPost.scheduled_at.asc())
+            .all()
+        )
+        out = []
+        for row in rows:
+            try:
+                platforms = json.loads(row.platforms)
+            except (TypeError, ValueError):
+                platforms = [p.strip() for p in (row.platforms or "").split(",") if p.strip()]
+            out.append({"id": row.id, "scheduled_at": _as_utc(row.scheduled_at), "status": row.status,
+                        "platforms": platforms if isinstance(platforms, list) else []})
+        return out
+
+
+# ── Header bell (Notification) ────────────────────────────────────────────
+
+
+def _serialize_notification(row: "Notification") -> dict:
+    return {
+        "id": row.id,
+        "kind": row.kind,
+        "title": row.title,
+        "body": row.body,
+        "url": row.url,
+        "created_at": _as_utc(row.created_at).isoformat(),
+        "read": row.read_at is not None,
+    }
+
+
+def has_notification(user_id: int, dedupe_key: str) -> bool:
+    with Session(engine) as session:
+        return session.query(Notification.id).filter(
+            Notification.user_id == user_id, Notification.dedupe_key == dedupe_key
+        ).first() is not None
+
+
+def create_notification(
+    user_id: int, kind: str, title: str, body: str, url: str, dedupe_key: str, when: datetime | None = None
+) -> int | None:
+    """The new notification's id, or None when this nudge already exists for the user."""
+    with Session(engine) as session:
+        if session.query(Notification.id).filter(
+            Notification.user_id == user_id, Notification.dedupe_key == dedupe_key
+        ).first():
+            return None
+        row = Notification(user_id=user_id, kind=kind, title=title[:200], body=body, url=url, dedupe_key=dedupe_key[:160],
+                           created_at=(when or _utcnow()).astimezone(timezone.utc).replace(tzinfo=None))
+        session.add(row)
+        session.commit()
+        return row.id
+
+
+def list_notifications(user_id: int, limit: int = 15) -> dict:
+    """{"unread": n, "items": newest first} for the header bell."""
+    with Session(engine) as session:
+        base = session.query(Notification).filter(Notification.user_id == user_id)
+        unread = base.filter(Notification.read_at.is_(None)).count()
+        rows = base.order_by(Notification.created_at.desc(), Notification.id.desc()).limit(limit).all()
+        return {"unread": unread, "items": [_serialize_notification(r) for r in rows]}
+
+
+def mark_notifications_read(user_id: int, ids: list[int] | None = None) -> int:
+    """Mark the given notifications (or, with ids=None, all of them) read. Returns how many changed."""
+    with Session(engine) as session:
+        query = session.query(Notification).filter(Notification.user_id == user_id, Notification.read_at.is_(None))
+        if ids is not None:
+            query = query.filter(Notification.id.in_([int(i) for i in ids] or [0]))
+        changed = query.update({"read_at": _utcnow()}, synchronize_session=False)
+        session.commit()
+        return int(changed)
+
+
+def mark_notification_emailed(notification_id: int, when: datetime | None = None) -> None:
+    with Session(engine) as session:
+        session.query(Notification).filter(Notification.id == notification_id).update(
+            {"emailed_at": (when or _utcnow()).astimezone(timezone.utc).replace(tzinfo=None)})
+        session.commit()
+
+
+def last_notification_at(user_id: int, kind: str | None = None) -> datetime | None:
+    with Session(engine) as session:
+        query = session.query(func.max(Notification.created_at)).filter(Notification.user_id == user_id)
+        if kind:
+            query = query.filter(Notification.kind == kind)
+        return _as_utc(query.scalar())
+
+
+def emails_sent_since(user_id: int, since: datetime) -> int:
+    """Idea emails (the weekly one + emailed nudges) sent to the user since `since` - for the weekly cap."""
+    cutoff = since.astimezone(timezone.utc).replace(tzinfo=None)
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        weekly = 1 if user and user.ideas_email_last_sent_at and user.ideas_email_last_sent_at >= cutoff else 0
+        nudges = session.query(func.count(Notification.id)).filter(
+            Notification.user_id == user_id, Notification.emailed_at >= cutoff
+        ).scalar() or 0
+        return weekly + int(nudges)
+
+
+def last_activity_at(user_id: int) -> datetime | None:
+    """When the user last generated something."""
+    with Session(engine) as session:
+        return _as_utc(session.query(func.max(RunHistory.created_at)).filter(RunHistory.user_id == user_id).scalar())
+
+
+def users_for_nudges() -> list[dict]:
+    """Active users with a brand profile - the ones nudges can be written for."""
+    with Session(engine) as session:
+        rows = (
+            session.query(User)
+            .join(UserBrandProfile, UserBrandProfile.user_id == User.id)
+            .filter(User.is_active.isnot(False))
+            .all()
+        )
+        return [
+            {"id": u.id, "name": u.name, "email": u.email, "created_at": _as_utc(u.created_at),
+             "email_ok": bool(u.email_verified) and u.nudge_email_enabled is not False}
+            for u in rows
+        ]
+
+
+def set_recap_email_enabled(user_id: int, enabled: bool) -> bool:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if not user:
+            return False
+        user.recap_email_enabled = bool(enabled)
+        session.commit()
+        return True
+
+
+def mark_recap_email_sent(user_id: int, month_key: str) -> None:
+    with Session(engine) as session:
+        session.query(User).filter(User.id == user_id).update({"recap_email_last_month": month_key})
+        session.commit()
+
+
+def users_due_recap(month_key: str) -> list[dict]:
+    """Active, verified users who haven't switched the monthly recap off and
+    haven't been sent the one for `month_key` ("2026-09") yet."""
+    with Session(engine) as session:
+        rows = (
+            session.query(User)
+            .filter(
+                User.is_active.isnot(False),
+                User.email_verified.is_(True),
+                User.recap_email_enabled.isnot(False),
+                (User.recap_email_last_month.is_(None)) | (User.recap_email_last_month != month_key),
+            )
+            .all()
+        )
+        return [{"id": u.id, "name": u.name, "email": u.email} for u in rows]
+
+
+def set_nudge_email_enabled(user_id: int, enabled: bool) -> bool:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if not user:
+            return False
+        user.nudge_email_enabled = bool(enabled)
+        session.commit()
+        return True
+
+
+def get_ideas_email_settings(user_id: int) -> dict | None:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if not user:
+            return None
+        return {
+            "enabled": user.ideas_email_enabled is not False,
+            "nudges_enabled": user.nudge_email_enabled is not False,
+            "recap_enabled": user.recap_email_enabled is not False,
+            "recap_last_month": user.recap_email_last_month,
+            "email": user.email,
+            "last_sent_at": _as_utc(user.ideas_email_last_sent_at).isoformat() if user.ideas_email_last_sent_at else None,
+        }
+
+
+def set_ideas_email_enabled(user_id: int, enabled: bool) -> bool:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if not user:
+            return False
+        user.ideas_email_enabled = bool(enabled)
+        session.commit()
+        return True
+
+
+def mark_ideas_email_sent(user_id: int) -> None:
+    with Session(engine) as session:
+        session.query(User).filter(User.id == user_id).update({"ideas_email_last_sent_at": _utcnow()})
+        session.commit()
+
+
+def users_due_ideas_email(min_days_between: int = 6, quiet_days_after_activity: int = 2) -> list[dict]:
+    """Who gets this week's ideas email: active, verified users with a brand
+    profile who haven't switched it off, weren't sent one in the last
+    `min_days_between` days, and haven't created anything in the last
+    `quiet_days_after_activity` days (they're already here - no nudge needed)."""
+    now = _utcnow()
+    sent_cutoff = (now - timedelta(days=min_days_between)).replace(tzinfo=None)
+    active_cutoff = (now - timedelta(days=quiet_days_after_activity)).replace(tzinfo=None)
+    with Session(engine) as session:
+        recently_active = {
+            uid for (uid,) in session.query(RunHistory.user_id).filter(RunHistory.created_at >= active_cutoff).distinct()
+        }
+        rows = (
+            session.query(User)
+            .join(UserBrandProfile, UserBrandProfile.user_id == User.id)
+            .filter(
+                User.is_active.isnot(False),
+                User.email_verified.is_(True),
+                User.ideas_email_enabled.isnot(False),
+                (User.ideas_email_last_sent_at.is_(None)) | (User.ideas_email_last_sent_at < sent_cutoff),
+            )
+            .all()
+        )
+        return [{"id": u.id, "name": u.name, "email": u.email} for u in rows if u.id not in recently_active]
 
 
 def set_brand_post_ideas(user_id: int, ideas: list[dict]) -> None:
@@ -1627,6 +2070,45 @@ def get_image_quota(user_id: int) -> dict:
         }
 
 
+VIDEO_LIMIT_DEFAULT = 3  # videos per day per user, unless "video_limit_default" is set in app_settings
+
+
+def get_video_quota(user_id: int) -> dict:
+    """Today's video usage (resets at midnight UTC) and the daily limit.
+    Admins are unlimited. Same shape as get_image_quota, without a model."""
+    try:
+        default_limit = int(get_setting("video_limit_default", "") or VIDEO_LIMIT_DEFAULT)
+    except ValueError:
+        default_limit = VIDEO_LIMIT_DEFAULT
+    now = datetime.now(timezone.utc)
+    day_start = _day_start_utc(now)
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        used = (
+            session.query(func.count(ImageGeneration.id))
+            .filter(
+                ImageGeneration.user_id == user_id,
+                ImageGeneration.kind == "video",
+                ImageGeneration.created_at >= day_start.replace(tzinfo=None),
+            )
+            .scalar()
+            or 0
+        )
+        unlimited = bool(user and user.is_admin)
+        limit = default_limit if user else 0
+        resets_at = day_start + timedelta(days=1)
+        return {
+            # False = video is still "coming soon" for this user
+            "enabled": bool(user and (user.is_admin or user.video_enabled)),
+            "used": int(used),
+            "limit": None if unlimited else int(limit),
+            "unlimited": unlimited,
+            "remaining": None if unlimited else max(0, int(limit) - int(used)),
+            "resets_at": resets_at.isoformat(),
+            "resets_in_seconds": int((resets_at - now).total_seconds()),
+        }
+
+
 def _user_image_model(user: "User", settings: dict) -> str:
     """The user's own model while it's still offered in Image Settings, else the default."""
     if user.image_model and any(m["id"] == user.image_model for m in settings["models"]):
@@ -1641,6 +2123,16 @@ def set_user_image_access(user_id: int, limit: int | None, model: str | None) ->
             return False
         user.image_limit = limit
         user.image_model = model or None
+        session.commit()
+        return True
+
+
+def set_user_video_access(user_id: int, enabled: bool) -> bool:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if not user:
+            return False
+        user.video_enabled = bool(enabled)
         session.commit()
         return True
 
@@ -1974,6 +2466,8 @@ def approve_credit_request(request_id: int) -> dict | None:
             "request_id": req.id,
             "user_id": user.id,
             "user_email": user.email,
+            "user_name": user.name,
+            "requested_amount": round(req.requested_amount, 2),
             "new_credit_limit": round(user.credit_limit, 2),
             "status": "approved",
         }
@@ -1987,8 +2481,17 @@ def reject_credit_request(request_id: int) -> dict | None:
             return None
 
         req.status = "rejected"
+        user = session.get(User, req.user_id)
         session.commit()
-        return {"request_id": req.id, "status": "rejected"}
+        return {
+            "request_id": req.id,
+            "user_id": req.user_id,
+            "user_email": user.email if user else None,
+            "user_name": user.name if user else None,
+            "requested_amount": round(req.requested_amount, 2),
+            "credit_limit": round(user.credit_limit or 10.0, 2) if user else None,
+            "status": "rejected",
+        }
 
 
 def update_user_credit_limit(
@@ -2052,6 +2555,7 @@ def _image_access_summary(user: "User", used_today: int, settings: dict) -> dict
         "custom_limit": user.image_limit,  # None = default
         "model": _user_image_model(user, settings),
         "custom_model": user.image_model,  # None = default
+        "video_enabled": bool(user.is_admin or user.video_enabled),
     }
 
 

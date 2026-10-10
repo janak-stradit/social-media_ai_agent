@@ -1,6 +1,6 @@
 from functools import wraps
 
-from flask import jsonify, redirect, session, url_for
+from flask import jsonify, redirect, request, session, url_for
 
 from db import get_user_by_id
 
@@ -39,6 +39,10 @@ def login_required_page(view):
     def wrapped(*args, **kwargs):
         user_id = get_current_user_id()
         if not user_id:
+            # The weekly ideas email's button (/dashboard?idea=<token>): keep the
+            # idea so it opens after they log in (app.py index())
+            if request.args.get("idea"):
+                session["pending_idea"] = request.args["idea"][:80]
             return redirect(url_for("landing_page"))
 
         # Post-signup onboarding gate: verify email -> pick account type

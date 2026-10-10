@@ -1,6 +1,21 @@
 /* global showToast, renderCarousel */
 $(document).ready(function () {
 
+    // Video is "coming soon" unless an admin switched it on for this user
+    // (Admin -> Users -> Image access -> Video); admins always have it.
+    window.applyVideoAccess = function (enabled) {
+        window.__videoEnabled = !!enabled;
+        $('.video-gate').each(function () {
+            const $input = $(this).find('input');
+            $(this).toggleClass('coming-soon', !enabled).attr('title', enabled ? null : 'Coming soon');
+            $(this).find('.soon-tag').toggleClass('d-none', !!enabled);
+            $input.prop('disabled', !enabled);
+        });
+    };
+    $.getJSON('/api/me/image-quota').done(function (r) {
+        window.applyVideoAccess(!!(r && r.video_quota && r.video_quota.enabled));
+    });
+
     $('input[name="mediaType"]').on('change', function () {
         if ($(this).val() === 'image') {
             $('#imageContextContainer').removeClass('d-none');
@@ -2416,7 +2431,7 @@ $(document).ready(function () {
                         function runPipelineMediaGeneration() {
                         // Generate Media (N variations, per the Number of Images field)
                         let generatedCount = 0;
-                        const totalToGenerate = mediaType === 'image' ? (parseInt($('#pipelineImageCount').val(), 10) || 1) : 3;
+                        const totalToGenerate = mediaType === 'image' ? (parseInt($('#pipelineImageCount').val(), 10) || 1) : 1;  // one video: billed per second
                         $('#pipelineOutputContent').html(mediaGenSkeletonHtml(`Rendering media variation 1 of ${totalToGenerate}...`));
 
                         function generateNextMedia() {
@@ -2986,8 +3001,10 @@ $(document).ready(function () {
                         <label class="btn btn-outline-primary btn-sm fw-bold" for="modalTypeText"><i class="fas fa-align-left me-1"></i>Caption</label>
                         <input type="radio" class="btn-check" name="modalMediaType" id="modalTypeImage" value="image" autocomplete="off">
                         <label class="btn btn-outline-primary btn-sm fw-bold" for="modalTypeImage"><i class="fas fa-image me-1"></i>Image</label>
-                        <input type="radio" class="btn-check" name="modalMediaType" id="modalTypeVideo" value="video" autocomplete="off">
-                        <label class="btn btn-outline-primary btn-sm fw-bold" for="modalTypeVideo"><i class="fas fa-video me-1"></i>Video</label>
+                        <span class="video-gate flex-fill${window.__videoEnabled ? '' : ' coming-soon'}"${window.__videoEnabled ? '' : ' title="Coming soon"'}>
+                            <input type="radio" class="btn-check" name="modalMediaType" id="modalTypeVideo" value="video" autocomplete="off"${window.__videoEnabled ? '' : ' disabled'}>
+                            <label class="btn btn-outline-primary btn-sm fw-bold w-100" for="modalTypeVideo"><i class="fas fa-video me-1"></i>Video<span class="soon-tag${window.__videoEnabled ? ' d-none' : ''}">Soon</span></label>
+                        </span>
                     </div>
                 </div>
                 <div id="modalImageContextContainer" class="d-none d-flex flex-column gap-1">
@@ -3085,7 +3102,7 @@ $(document).ready(function () {
                         function runModalPipelineMediaGeneration() {
                         // For image/video, just simulate or trigger generation like in main workflow
                         let generatedCount = 0;
-                        const totalToGenerate = mediaType === 'image' ? (parseInt($('#modalPipelineImageCount').val(), 10) || 1) : 3;
+                        const totalToGenerate = mediaType === 'image' ? (parseInt($('#modalPipelineImageCount').val(), 10) || 1) : 1;  // one video: billed per second
                         $('#modalPipelineOutputContent').html(mediaGenSkeletonHtml(`Rendering media variation 1 of ${totalToGenerate}...`));
 
                         function generateNextMedia() {

@@ -97,6 +97,118 @@
         })
         .catch(function () { /* leave placeholders */ });
 
+    // ── Header bell: timely nudges ─────────────────────────────────────
+    // Each item opens Studio Chat with an idea loaded (its url) and is
+    // marked read on click. Opening the panel does not mark anything read.
+    (function () {
+        const bell = $('notifBell');
+        if (!bell) return;
+        const btn = $('notifBellBtn');
+        const bellPanel = $('notifBellPanel');
+        const list = $('notifBellList');
+        const count = $('notifBellCount');
+        const readAll = $('notifBellReadAll');
+        const ICONS = { occasion: 'fa-calendar-day', trend: 'fa-arrow-trend-up', inactive: 'fa-lightbulb' };
+
+        function ago(iso) {
+            const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+            if (mins < 60) return mins <= 1 ? 'Just now' : mins + ' min ago';
+            if (mins < 1440) return Math.round(mins / 60) + ' h ago';
+            const days = Math.round(mins / 1440);
+            return days === 1 ? 'Yesterday' : days + ' days ago';
+        }
+
+        function setUnread(n) {
+            count.hidden = !n;
+            count.textContent = n > 9 ? '9+' : String(n);
+            btn.setAttribute('aria-label', n ? 'Notifications, ' + n + ' unread' : 'Notifications');
+            readAll.hidden = !n;
+        }
+
+        function render(items) {
+            list.textContent = '';
+            if (!items.length) {
+                const empty = document.createElement('div');
+                empty.className = 'nb-empty';
+                empty.textContent = 'Nothing yet. Ideas for upcoming dates and trending topics will show up here.';
+                list.appendChild(empty);
+                return;
+            }
+            items.forEach(function (item) {
+                const row = document.createElement('a');
+                row.className = 'nb-item' + (item.read ? '' : ' unread');
+                row.href = item.url || '/dashboard';
+                const icon = document.createElement('span');
+                icon.className = 'nb-icon';
+                icon.innerHTML = '<i class="fas ' + (ICONS[item.kind] || 'fa-bell') + '" aria-hidden="true"></i>';
+                const text = document.createElement('span');
+                text.className = 'nb-text';
+                const title = document.createElement('strong');
+                title.textContent = item.title;
+                const body = document.createElement('span');
+                body.textContent = item.body || '';
+                const when = document.createElement('small');
+                when.textContent = ago(item.created_at);
+                text.append(title, body, when);
+                row.append(icon, text);
+                row.addEventListener('click', function () {
+                    if (item.read) return;
+                    // keepalive: the page is about to navigate to the idea
+                    fetch('/api/me/bell/read', {
+                        method: 'POST', credentials: 'same-origin', keepalive: true,
+                        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [item.id] }),
+                    }).catch(function () { /* it stays unread */ });
+                });
+                list.appendChild(row);
+            });
+        }
+
+        function load() {
+            fetch('/api/me/bell', { credentials: 'same-origin' })
+                .then((r) => (r.ok ? r.json() : null))
+                .then(function (r) {
+                    if (!r || !r.success) return;
+                    setUnread(r.unread || 0);
+                    render(r.items || []);
+                })
+                .catch(function () { /* the bell stays empty */ });
+        }
+
+        function closeBell() {
+            bellPanel.hidden = true;
+            bell.classList.remove('open');
+            btn.setAttribute('aria-expanded', 'false');
+        }
+
+        btn.addEventListener('click', function (e) {
+            e.stopPropagation();
+            if (!bellPanel.hidden) return closeBell();
+            closeMenu();
+            bellPanel.hidden = false;
+            bell.classList.add('open');
+            btn.setAttribute('aria-expanded', 'true');
+            load();
+        });
+        trigger.addEventListener('click', closeBell);  // only one of the two panels open at a time
+        document.addEventListener('click', function (e) {
+            if (!bell.contains(e.target)) closeBell();
+        });
+        document.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape' && !bellPanel.hidden) {
+                closeBell();
+                btn.focus();
+            }
+        });
+        readAll.addEventListener('click', function () {
+            fetch('/api/me/bell/read', {
+                method: 'POST', credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' }, body: '{}',
+            }).then(load).catch(function () { /* leave as is */ });
+        });
+
+        load();
+    })();
+
     // ── Actions that need a modal only some pages have ────────────────
     // Studio Chat (index.html) has both modals and app_v2.js opens them;
     // settings.html has the AI Models one. Anywhere else, go to Studio Chat

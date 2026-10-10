@@ -220,7 +220,7 @@ $(document).ready(function () {
                                 <ul class="dropdown-menu dropdown-menu-end admin-menu" aria-labelledby="${menuId}">
                                     <li><button type="button" class="dropdown-item" onclick="adminSetCustomCredit(${u.id}, ${limit})"><i class="fas fa-sliders"></i>Set credit limit</button></li>
                                     <li><button type="button" class="dropdown-item" onclick="adminEditUserProfile(${u.id})"><i class="fas fa-user-pen"></i>Edit profile</button></li>
-                                    <li><button type="button" class="dropdown-item" onclick="openImageAccessPanel(${u.id})"><i class="fas fa-image"></i>Image access…</button></li>
+                                    <li><button type="button" class="dropdown-item" onclick="openImageAccessPanel(${u.id})"><i class="fas fa-image"></i>Image &amp; video access…</button></li>
                                     <li><button type="button" class="dropdown-item" onclick="adminSetUserActive(${u.id}, ${!isActive})">
                                         <i class="fas ${isActive ? 'fa-user-slash' : 'fa-user-check'}"></i>${isActive ? 'Deactivate account' : 'Activate account'}</button></li>
                                     ${u.is_admin ? '' : `<li><hr class="dropdown-divider"></li>
@@ -523,7 +523,9 @@ $(document).ready(function () {
             type: 'POST',
             success: function (r) {
                 if (r.success) {
-                    showToast('Request approved! User credit limit increased.', 'success');
+                    showToast('Request approved! User credit limit increased. '
+                        + (r.email_sent ? 'The user has been emailed.' : 'The email to the user could not be sent.'),
+                        r.email_sent ? 'success' : 'warning');
                     loadAdminRequests();
                     loadAdminUsers();
                 }
@@ -540,7 +542,9 @@ $(document).ready(function () {
             type: 'POST',
             success: function (r) {
                 if (r.success) {
-                    showToast('Request rejected.', 'info');
+                    showToast('Request rejected. '
+                        + (r.email_sent ? 'The user has been emailed.' : 'The email to the user could not be sent.'),
+                        r.email_sent ? 'info' : 'warning');
                     loadAdminRequests();
                 }
             },
@@ -851,10 +855,11 @@ $(document).ready(function () {
         const count = im.unlimited ? `${im.used_today} today · ∞` : `${im.used_today} / ${im.limit} today`;
         const custom = (im.custom_limit !== null && im.custom_limit !== undefined) || im.custom_model
             ? '<span class="tag">custom</span>' : '';
+        const video = im.video_enabled ? '<span class="tag"><i class="fas fa-video"></i> video</span>' : '';
         const title = `Images today: ${im.unlimited ? `${im.used_today} (unlimited)` : `${im.used_today} of ${im.limit}`}`
-            + ` · model ${im.model}. Click to change.`;
+            + ` · model ${im.model} · video ${im.video_enabled ? 'on' : 'off'}. Click to change.`;
         return `<div><span class="admin-images-line${full ? ' full' : ''}" role="button" tabindex="0" title="${escapeAttr(title)}"
-                    onclick="openImageAccessPanel(${u.id})"><i class="fas fa-image"></i>${count}${custom}</span></div>`;
+                    onclick="openImageAccessPanel(${u.id})"><i class="fas fa-image"></i>${count}${custom}${video}</span></div>`;
     }
 
     window.loadImageSettings = function (render) {
@@ -980,6 +985,11 @@ $(document).ready(function () {
                 options.push(`<option value="${escapeAttr(im.custom_model)}">${escapeHtml(im.custom_model)} (removed from Image Settings)</option>`);
             }
             $('#imageAccessModelSelect').html(options.join('')).val(im.custom_model || '');
+            // Admins always have video, so their switch is on and locked
+            $('#videoAccessSwitch').prop('checked', !!im.video_enabled).prop('disabled', !!u.is_admin);
+            $('#videoAccessHint').text(u.is_admin
+                ? 'Admins always have video.'
+                : 'Off: the Video option shows "Soon" for this user. Videos are billed per second, so switch it on only for users who should have it.');
             $('#imageAccessError').addClass('d-none');
             $('#imageAccessBackdrop, #imageAccessPanel').addClass('open');
         };
@@ -1010,10 +1020,14 @@ $(document).ready(function () {
             url: `/api/admin/users/${window._imageAccessUserId}/image-access`,
             type: 'PUT',
             contentType: 'application/json',
-            data: JSON.stringify({ limit: limit, model: $('#imageAccessModelSelect').val() || null }),
+            data: JSON.stringify({
+                limit: limit,
+                model: $('#imageAccessModelSelect').val() || null,
+                video_enabled: $('#videoAccessSwitch').prop('checked')
+            }),
             success: function () {
                 closeImageAccessPanel();
-                showToast('Image access updated.', 'success');
+                showToast('Image and video access updated.', 'success');
                 loadAdminUsers();
             },
             error: function (xhr) {
