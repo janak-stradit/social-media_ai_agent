@@ -215,6 +215,13 @@ def create_app(config_name="development"):
         scheduled and suggested on each day (services/calendar_service.py)."""
         return render_template("calendar.html")
 
+    @app.route("/library")
+    @login_required_page
+    def library_page():
+        """Image library: every image the user has made, to find, download,
+        reuse in a new post or turn into a carousel (static/js/library.js)."""
+        return render_template("library.html")
+
     @app.route("/brand-profile")
     @login_required_page
     @self_serve_required_page
@@ -335,6 +342,22 @@ def create_app(config_name="development"):
         register()). Also rendered directly (with an error/email context) by
         auth/routes.py's verify_email() on an invalid/expired token."""
         return render_template("verify_pending.html", email=request.args.get("email"))
+
+    @app.route("/help")
+    @app.route("/help/<slug>")
+    @login_required_page
+    def help_page(slug=None):
+        """Help Center: the user guide. Articles are the Markdown files in
+        help/ (services/help_center.py)."""
+        from flask import abort
+
+        from services import help_center
+
+        current = help_center.article(slug) if slug else None
+        if slug and not current:
+            abort(404)
+        return render_template("help.html", articles=help_center.articles(), article=current,
+                               search_index=help_center.search_index())
 
     @app.route("/onboarding")
     @login_required_page

@@ -75,6 +75,7 @@
             <div class="cal-legend" aria-hidden="true">
                 <span><i class="cal-dot is-post"></i>Created</span>
                 <span><i class="cal-dot is-scheduled"></i>Scheduled</span>
+                <span><i class="cal-dot is-published"></i>Published</span>
                 <span><i class="cal-dot is-slot"></i>Suggested</span>
                 <span><i class="cal-dot is-occasion"></i>Occasion</span>
             </div>
@@ -86,6 +87,12 @@
         <p class="cal-note" id="calNote"></p>
     </section>
 </main>
+
+<!-- A scheduled post: details, move, cancel, retry (calendar.js: openScheduled) -->
+<dialog class="cal-dialog" id="calDialog" aria-labelledby="calDialogTitle">
+    <form method="dialog"><button class="cal-dialog-close" aria-label="Close"><i class="fas fa-xmark" aria-hidden="true"></i></button></form>
+    <div id="calDialogBody"></div>
+</dialog>
 
 <div class="toast-container position-fixed bottom-0 end-0 p-3">
     <div id="toast" class="ent-toast" role="alert">

@@ -1,5 +1,6 @@
 $(document).ready(function () {
     let uploadedImagePath = null;
+    let draftOwner = null;            // who is signed in, for the draft of the brief (see restoreDraft)
     // Image commands (/3dbillboard, /metaad, ...) - declared up here because the
     // Generate button's state reads them from code that can run during start-up
     let imagePresets = [];
@@ -236,6 +237,7 @@ $(document).ready(function () {
                 $('#headerUserLabel').text(user.name || 'User');
                 $('#headerUserEmail').text(user.email || '');
                 $('#headerUserAvatar').text(user.initials || 'U');
+                draftOwner = user.id || user.email || null;
 
                 // "My Brand Configuration" (-> /brand-profile, the per-user
                 // UserBrandProfile edit page) only makes sense for
@@ -356,7 +358,8 @@ $(document).ready(function () {
         loadImageQuota();
         loadImagePresets();
         openModalFromHash();
-        if (!openEmailedIdea()) restoreConversation();
+        if (takePendingImage() || openEmailedIdea()) restoreDraft(draftOwner);  // a new post: nothing to reopen
+        else restoreConversation();
     });
 
     function openModalFromHash() {
@@ -533,6 +536,7 @@ $(document).ready(function () {
             type: 'GET',
             success: function (r) {
                 if (r && r.needs_brand_profile) showBrandProfileNudge();
+                if (r && r.company_name) _brandProfileCompanyName = r.company_name;  // also names the brand in Preview
                 const ideas = (r && r.post_ideas) || [];
                 if (!ideas.length) return;
 
@@ -682,6 +686,176 @@ $(document).ready(function () {
         }
     });
 
+    // ── Saved briefs ─────────────────────────────────────────────────────
+    // A brief starred under a sent message is kept on the account (/api/briefs)
+    // and listed behind the star next to the paperclip, to load again.
+    let savedBriefs = [];
+    const sameBrief = (a, b) => String(a).trim().toLowerCase() === String(b).trim().toLowerCase();
+    const savedBriefFor = text => savedBriefs.find(b => sameBrief(b.text, text));
+
+    function briefActionsHtml(text, platforms) {
+        const saved = !!savedBriefFor(text);
+        return `
+                <div class="chat-user-actions">
+                    <button type="button" class="chat-user-action btn-save-brief${saved ? ' is-saved' : ''}" data-brief="${escapeAttr(text)}"
+                        data-platforms="${escapeAttr((platforms || []).join(','))}" aria-pressed="${saved}"
+                        title="${saved ? 'Saved. Click to remove it from your saved briefs.' : 'Keep this brief to use again'}">
+                        <i class="${saved ? 'fas' : 'far'} fa-star"></i><span>${saved ? 'Saved' : 'Save brief'}</span></button>
+                    <button type="button" class="chat-user-action btn-reuse-brief" data-brief="${escapeAttr(text)}" data-platforms="${escapeAttr((platforms || []).join(','))}"
+                        title="Start a new post from this brief, for another platform or another day">
+                        <i class="fas fa-rotate-right"></i><span>Use again</span></button>
+                </div>`;
+    }
+
+    function refreshBriefStars() {
+        $('.btn-save-brief').each(function () {
+            const saved = !!savedBriefFor($(this).attr('data-brief'));
+            $(this).toggleClass('is-saved', saved).attr('aria-pressed', saved)
+                .attr('title', saved ? 'Saved. Click to remove it from your saved briefs.' : 'Keep this brief to use again')
+                .html(`<i class="${saved ? 'fas' : 'far'} fa-star"></i><span>${saved ? 'Saved' : 'Save brief'}</span>`);
+        });
+        $('#savedBriefsCount').text(savedBriefs.length || '').toggleClass('d-none', !savedBriefs.length);
+    }
+
+    function renderSavedBriefs() {
+        $('#savedBriefsList').html(savedBriefs.length ? savedBriefs.map(b => `
+            <li class="saved-brief">
+                <button type="button" class="saved-brief-use" data-brief-id="${b.id}">
+                    <span class="saved-brief-text">${escapeHtml(b.text)}</span>
+                    ${b.platforms.length ? `<span class="saved-brief-meta">${escapeHtml(b.platforms.map(p => window.PostPreview.platformName(p)).join(', '))}</span>` : ''}
+                </button>
+                <button type="button" class="saved-brief-remove" data-brief-remove="${b.id}" aria-label="Remove this saved brief" title="Remove"><i class="fas fa-xmark"></i></button>
+            </li>`).join('')
+            : '<li class="saved-brief-empty">No saved briefs yet. Click <strong><i class="far fa-star"></i> Save brief</strong> under a message you sent to keep it here.</li>');
+    }
+
+    function setSavedBriefs(list) {
+        savedBriefs = list || [];
+        renderSavedBriefs();
+        refreshBriefStars();
+    }
+
+    function setSavedBriefsOpen(open) {
+        $('#savedBriefsPanel').prop('hidden', !open);
+        $('#savedBriefsBtn').attr('aria-expanded', open);
+    }
+
+    // The brief goes into the box of a new conversation, with its platforms ticked
+    function loadBriefIntoComposer(text, platforms) {
+        if ($('#chatThread').children().length) startNewChat(true);
+        storyInput.val(text).trigger('input').trigger('focus');
+        closeSlashMenu();
+        if (platforms && platforms.length) {
+            $('.platform-chips-inline input[type="checkbox"]').each(function () {
+                $(this).prop('checked', platforms.includes($(this).val())).trigger('change');
+            });
+        }
+        showToast('Brief loaded. Choose the platforms and press Generate.', 'info');
+    }
+
+    $.get('/api/briefs').done(r => setSavedBriefs(r.briefs));
+
+    $(document).on('click', '.btn-save-brief', function () {
+        const text = $(this).attr('data-brief');
+        const existing = savedBriefFor(text);
+        const request = existing
+            ? $.ajax({ url: `/api/briefs/${existing.id}`, type: 'DELETE' })
+            : $.ajax({ url: '/api/briefs', type: 'POST', contentType: 'application/json',
+                       data: JSON.stringify({ text: text, platforms: ($(this).attr('data-platforms') || '').split(',').filter(Boolean) }) });
+        request.done(r => {
+            setSavedBriefs(r.briefs);
+            showToast(existing ? 'Removed from your saved briefs.' : 'Saved. Find it under the star next to the paperclip.', 'success');
+        }).fail(xhr => showToast((xhr.responseJSON || {}).error || 'Could not save the brief.', 'error'));
+    });
+    $(document).on('click', '.btn-reuse-brief', function () {
+        loadBriefIntoComposer($(this).attr('data-brief'), ($(this).attr('data-platforms') || '').split(',').filter(Boolean));
+    });
+    $(document).on('click', '#savedBriefsBtn', function (e) {
+        e.stopPropagation();
+        setSavedBriefsOpen($('#savedBriefsPanel').prop('hidden'));
+    });
+    $(document).on('click', '.saved-brief-use', function () {
+        const brief = savedBriefs.find(b => b.id === Number($(this).data('brief-id')));
+        if (!brief) return;
+        setSavedBriefsOpen(false);
+        loadBriefIntoComposer(brief.text, brief.platforms);
+        $.ajax({ url: `/api/briefs/${brief.id}/use`, type: 'POST' });
+    });
+    $(document).on('click', '[data-brief-remove]', function (e) {
+        e.stopPropagation();
+        $.ajax({ url: `/api/briefs/${$(this).data('brief-remove')}`, type: 'DELETE' }).done(r => setSavedBriefs(r.briefs));
+    });
+    $(document).on('click', function (e) {
+        if (!e.target.closest('#savedBriefsPanel, #savedBriefsBtn')) setSavedBriefsOpen(false);
+    });
+    $(document).on('keydown', function (e) {
+        if (e.key === 'Escape' && !$('#savedBriefsPanel').prop('hidden')) {
+            setSavedBriefsOpen(false);
+            $('#savedBriefsBtn').trigger('focus');
+        }
+    });
+
+    // ── An image picked in the Image Library ("Use in a new post") ─────────
+    // arrives attached to a new conversation (static/js/library.js)
+    function takePendingImage() {
+        let url = null;
+        try {
+            url = sessionStorage.getItem('avir_pending_image');
+            sessionStorage.removeItem('avir_pending_image');
+        } catch (e) { return false; }
+        if (!url || !/^\/static\/uploads\/[^/\\]+$/.test(url)) return false;
+        const path = 'static/uploads/' + url.split('/').pop();  // the form an upload is known by
+        uploadedImagePath = path;
+        threadActiveImagePath = path;
+        uploadedImageAnalysis = null;
+        $('#previewImg').attr('src', url);
+        $('#imagePreview').removeClass('d-none');
+        setAnalysisBadge('badge-ok', '<i class="fas fa-check me-1"></i>From your library');
+        updateGenerateGate();
+        showToast('Image attached. Describe the post you want to make with it.', 'info');
+        return true;
+    }
+
+    // ── Draft of the brief ──────────────────────────────────────────────
+    // What is typed and not yet sent is kept in this browser, so a refresh or
+    // a closed tab doesn't lose it. Sending (or clearing) the box removes it.
+    const DRAFT_KEY = 'avir.studio.draft';
+    const DRAFT_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+    const openedWithLink = /[?&](idea|do)=/.test(window.location.search);  // those fill the box themselves
+    let draftUser = null, draftTimer = null;  // draftUser stays empty until restoreDraft: nothing is saved or removed before
+
+    function saveDraft() {
+        if (!draftUser) return;
+        const text = storyInput.val();
+        try {
+            if (text.trim()) localStorage.setItem(DRAFT_KEY, JSON.stringify({ user: draftUser, text: text, at: Date.now() }));
+            else localStorage.removeItem(DRAFT_KEY);
+        } catch (e) { /* storage unavailable (private window): no draft */ }
+    }
+
+    function restoreDraft(userId) {
+        if (draftUser) return;  // once per page
+        draftUser = userId;
+        if (!userId || openedWithLink) return;
+        let draft = null;
+        try { draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || 'null'); } catch (e) { return; }
+        if (!draft || !draft.text) return;
+        if (draft.user !== userId || Date.now() - draft.at > DRAFT_MAX_AGE_MS) {  // someone else's, or stale
+            try { localStorage.removeItem(DRAFT_KEY); } catch (e) { /* nothing to remove */ }
+            return;
+        }
+        if (storyInput.val().trim()) return;
+        storyInput.val(draft.text).trigger('input');
+        closeSlashMenu();
+        showToast('Your unsent draft is back in the message box.', 'info');
+    }
+
+    storyInput.on('input', function () {
+        clearTimeout(draftTimer);
+        draftTimer = setTimeout(saveDraft, 400);
+    });
+    window.addEventListener('pagehide', saveDraft);
+
     // ── Quick Prompt Templates ─────────────────────────────────────────
     $(document).on('click', '.quick-prompt-card, .idea-card:not(.is-loading)', function () {
         const promptText = $(this).attr('data-prompt');
@@ -812,6 +986,23 @@ $(document).ready(function () {
 
     $('#imageInput').on('change', function () {
         if (this.files.length) handleImageUpload(this.files[0]);
+    });
+
+    // Paste an image (a screenshot, or "Copy image" from anywhere) to attach it.
+    // Copied text is left alone - spreadsheets and documents put a picture of
+    // the cells on the clipboard next to the text, and the text is what is meant.
+    $(document).on('paste', function (e) {
+        const clip = e.originalEvent && e.originalEvent.clipboardData;
+        if (!clip || Array.from(clip.types || []).includes('text/plain')) return;
+        const el = e.target;
+        const elsewhere = el && el !== storyInput[0] && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable);
+        if (elsewhere || $('.modal.show').length || dropZone.hasClass('dock-disabled')) return;
+        const item = Array.from(clip.items || []).find(it => it.kind === 'file' && /^image\//.test(it.type));
+        const file = item && item.getAsFile();
+        if (!file) return;
+        e.preventDefault();
+        handleImageUpload(file);
+        showToast('Image pasted and attached to your message.', 'info');
     });
 
     $('#removeImgBtn').on('click', function () {
@@ -1269,7 +1460,8 @@ $(document).ready(function () {
         const attachedImage = uploadedImagePath;
 
         // 1. Append User Chat Message Bubble
-        appendUserMessage(story, uploadedImagePath, baseIsPreset ? [] : (refinePlatforms || platforms), tone, mediaType, brandVoice);
+        appendUserMessage(story, uploadedImagePath, baseIsPreset ? [] : (refinePlatforms || platforms), tone, mediaType, brandVoice,
+            { followUp: canRefine });
 
         // Clear input area
         storyInput.val('').trigger('input');
@@ -1319,7 +1511,8 @@ $(document).ready(function () {
 
     // ── Chat Bubble Render Helpers ─────────────────────────────────────
 
-    function appendUserMessage(text, imagePath, platforms, tone, mediaType, brandVoice) {
+    function appendUserMessage(text, imagePath, platforms, tone, mediaType, brandVoice, opts) {
+        const isBrief = !(opts && opts.followUp);
         const platformBadges = platforms.map(p => {
             const icons = { facebook: 'fab fa-facebook color-fb', instagram: 'fab fa-instagram color-ig', linkedin: 'fab fa-linkedin color-li', youtube: 'fab fa-youtube color-yt' };
             return `<span class="chat-badge"><i class="${icons[p] || 'fas fa-share'} me-1"></i>${p.toUpperCase()}</span>`;
@@ -1347,6 +1540,7 @@ $(document).ready(function () {
                     ${toneBadge}
                     ${mediaBadge}
                 </div>
+                ${isBrief ? briefActionsHtml(text, platforms) : ''}
             </div>
         `;
 
@@ -1374,12 +1568,13 @@ $(document).ready(function () {
         const disclaimersHtml = (compliance.disclaimers_added || []).map(d =>
             `<li class="mb-1"><span class="badge bg-primary-subtle text-primary me-1">Disclaimer added</span>${escapeHtml(d)}</li>`).join('');
         return `
-            <div class="post-box-card">
+            <div class="post-box-card compliance-card">
                 <div class="post-box-header">
                     <span class="post-box-title"><i class="fas ${headerIcon} me-1"></i>${headerText}</span>
                     <span class="text-muted small">${compliance.rules_checked} rules checked</span>
                 </div>
                 ${flagsHtml || disclaimersHtml ? `<ul class="list-unstyled small mb-1">${flagsHtml}${disclaimersHtml}</ul>` : ''}
+                ${compliance.stale ? '<div class="compliance-stale"><i class="fas fa-clock-rotate-left me-1"></i>Checked before your edit. The caption is checked again when you send it for approval.</div>' : ''}
                 <div class="text-muted" style="font-size: 0.7rem;">Guidance only, not legal advice.</div>
             </div>`;
     }
@@ -1403,7 +1598,7 @@ $(document).ready(function () {
                 </div>
             `;
         }
-        // "New image": Regenerate keeps the image, so this is how a post gets a fresh one
+        // "New image": "Rewrite caption" keeps the image, so this is how a post gets a fresh one
         const newImageBtn = msgId && platform ? `
                         <button type="button" class="btn-copy-sm" onclick="regenerateImage('${msgId}', '${platform}')"
                                 title="Create a new image for this post (uses 1 of today's images); the caption stays"><i class="fas fa-rotate me-1"></i>New image</button>` : '';
@@ -1412,7 +1607,7 @@ $(document).ready(function () {
                 <div class="media-output-header">
                     <span><i class="fas fa-image text-primary me-2"></i>Generated Image (${media.resolution || '1024x1024'})</span>
                     <div class="media-output-actions">
-                        <button type="button" class="btn-copy-sm" onclick="openImagePreview('${media.url}')" title="View the image larger"><i class="fas fa-expand me-1"></i>Preview</button>
+                        <button type="button" class="btn-copy-sm" onclick="openImagePreview('${media.url}')" title="View the image larger"><i class="fas fa-expand me-1"></i>Enlarge</button>
                         <button type="button" class="btn-copy-sm" onclick="downloadAsZip('${media.url}', this)"><i class="fas fa-file-zipper me-1"></i>Download</button>${newImageBtn}
                     </div>
                 </div>
@@ -1740,12 +1935,21 @@ $(document).ready(function () {
                 }
                 const res = xhr.responseJSON || {};
                 const errText = res.error || 'Refinement failed';
-                assistantElem.find('.assistant-card').html(`
-                    <div class="alert alert-${res.credit_limit_exceeded ? 'warning' : 'danger'} mb-0">
-                        <i class="fas fa-exclamation-triangle me-2"></i><strong>Error:</strong> ${escapeHtml(errText)}
-                    </div>
-                `);
-                if (res.credit_limit_exceeded) openCreditRequestModal();
+                if (res.credit_limit_exceeded) {
+                    assistantElem.find('.assistant-card').html(`
+                        <div class="alert alert-warning mb-0">
+                            <i class="fas fa-exclamation-triangle me-2"></i><strong>Error:</strong> ${escapeHtml(errText)}
+                        </div>
+                    `);
+                    openCreditRequestModal();
+                } else {
+                    assistantElem.find('.assistant-card').html(errorCardHtml("Your change couldn't be made", xhr, errText));
+                    assistantElem.find('.gen-retry-btn').on('click', function () {
+                        // The same instruction on the same version, in the same chat bubble
+                        assistantElem.replaceWith(appendRefineThinking(msgId, opts.selectedOutputs));
+                        runRefine(msgId, opts, $(`#${msgId}`));
+                    });
+                }
                 showToast('Refinement error: ' + errText, 'error');
             }
         });
@@ -1877,11 +2081,11 @@ $(document).ready(function () {
             },
             error: function (xhr) {
                 const errText = xhr.responseJSON?.error || 'Research failed';
-                assistantElem.find('.assistant-card').html(`
-                    <div class="alert alert-danger mb-0">
-                        <i class="fas fa-exclamation-triangle me-2"></i><strong>Error:</strong> ${escapeHtml(errText)}
-                    </div>
-                `);
+                assistantElem.find('.assistant-card').html(errorCardHtml("The research couldn't be finished", xhr, errText));
+                assistantElem.find('.gen-retry-btn').on('click', function () {
+                    assistantElem.remove();
+                    runResearchThenAsk(msgId, story, targetCompany, activeImgPath, tone, brandVoice);
+                });
                 showToast('Research failed: ' + errText, 'error');
             }
         });
@@ -1985,6 +2189,363 @@ $(document).ready(function () {
         });
     }
 
+    // ── Editing a post by hand ("Edit") ──────────────────────────────────
+    // The caption and hashtags of one platform (or of a carousel: target
+    // 'carousel') are changed in place and saved to the run - no generation,
+    // no cost (POST /api/history/<run>/edit, services/post_edit_service.py).
+    // The AI's text is kept, so "Restore original" brings it back.
+    const textLength = text => Array.from(text).length;  // as the server counts: an emoji is one character
+
+    function postTextOf(msgId, target) {
+        const h = window.chatHistory[msgId];
+        const r = h && h.responses[h.currentIndex];
+        if (!r) return null;
+        const content = r.content || {};
+        if (target === 'carousel') {
+            const car = (content._preset || h.presetRun || {}).carousel;
+            return car ? { node: car, caption: car.caption || '', tags: car.hashtags || [], runId: r.runId } : null;
+        }
+        const node = content[target] || {};
+        return { node: node, caption: node.caption?.primary_caption || '', tags: getTagList(node.hashtags), runId: r.runId };
+    }
+
+    function setPostNode(msgId, target, node) {
+        const h = window.chatHistory[msgId];
+        const content = h.responses[h.currentIndex].content;
+        if (target === 'carousel') (content._preset || h.presetRun).carousel = node;
+        else content[target] = node;
+    }
+
+    // Nothing to save an edit to when the post wasn't saved (no run id)
+    function editActionsHtml(msgId, target, post, focus) {
+        if (!post.runId) return '';
+        return `${post.node.edited && !focus ? `<button type="button" class="btn-copy-sm btn-restore-post" data-msg="${msgId}" data-target="${target}" title="Go back to the text AVIR AI wrote"><i class="fas fa-rotate-left me-1"></i>Restore original</button>` : ''}
+                <button type="button" class="btn-copy-sm btn-edit-post" data-msg="${msgId}" data-target="${target}"${focus ? ` data-focus="${focus}"` : ''}><i class="fas fa-pen me-1"></i>Edit</button>`;
+    }
+
+    const editedBadgeHtml = post => post.node.edited
+        ? '<span class="badge-edited" title="Changed by hand after it was generated">Edited</span>' : '';
+
+    // One platform's caption, compliance notes and hashtags
+    function postTextBlockHtml(msgId, p) {
+        const post = postTextOf(msgId, p);
+        const pData = post.node;
+        const primaryCap = post.caption || 'No caption generated.';
+        const isRefined = pData.caption?.refined_by_critic || pData.quality?.self_corrected;
+        const tagsHtml = post.tags.map(t => `<span class="hashtag-pill">${escapeHtml(t)}</span>`).join(' ') || '<em>No hashtags</em>';
+        const cardId = `${msgId}_caption_target_${p}`;
+        const tagsCardId = `${msgId}_hashtags_target_${p}`;
+        return `
+                    <div class="post-text-block post-text-flat" id="${msgId}_text_${p}">
+                    <!-- Post Caption Card -->
+                    <div class="post-box-card">
+                        <div class="post-box-header">
+                            <span class="post-box-title">
+                                <i class="fas fa-pen-nib me-1"></i>Post Caption
+                                ${isRefined ? '<span class="badge bg-success ms-2"><i class="fas fa-shield-check me-1"></i>Critic Refined</span>' : ''}
+                                ${editedBadgeHtml(post)}
+                            </span>
+                            <span class="post-box-actions">
+                                ${editActionsHtml(msgId, p, post)}
+                                <button class="btn-copy-sm btn-copy-text" id="${cardId}_copy" data-text="${escapeAttr(primaryCap)}">
+                                    <i class="fas fa-copy me-1"></i>Copy
+                                </button>
+                            </span>
+                        </div>
+
+                        <div class="post-caption-text" id="${cardId}">${escapeHtml(primaryCap)}</div>
+                    </div>
+
+                    ${buildComplianceHtml(pData.compliance)}
+
+                    <!-- Hashtags Card -->
+                    <div class="post-box-card">
+                        <div class="post-box-header">
+                            <span class="post-box-title"><i class="fas fa-hashtag me-1"></i>Curated Hashtags</span>
+                            <span class="post-box-actions">
+                                ${editActionsHtml(msgId, p, post, 'tags')}
+                                <button class="btn-copy-sm btn-copy-text" id="${tagsCardId}_copy" data-text="${escapeAttr(post.tags.join(' '))}">
+                                    <i class="fas fa-copy me-1"></i>Copy Tags
+                                </button>
+                            </span>
+                        </div>
+
+                        <div class="hashtags-container" id="${tagsCardId}">${tagsHtml}</div>
+                    </div>
+                    </div>`;
+    }
+
+    // A /carousel's caption (shared by its slides)
+    function carouselTextBlockHtml(msgId) {
+        const post = postTextOf(msgId, 'carousel');
+        const text = post ? window.PostPreview.postText(post.caption, post.tags) : '';
+        if (!text) return '';
+        return `
+            <div class="preset-adcopy post-text-block" id="${msgId}_text_carousel">
+                <div class="preset-adcopy-head"><span><i class="fas fa-images me-1"></i>Carousel caption${editedBadgeHtml(post)}</span>
+                    <span class="post-box-actions">${editActionsHtml(msgId, 'carousel', post)}
+                    <button type="button" class="preset-copy" data-copy="${escapeAttr(text)}"><i class="fas fa-copy me-1"></i>Copy</button></span></div>
+                <div class="post-caption-text">${escapeHtml(post.caption)}</div>
+                ${post.tags.length ? `<div class="hashtags-container mt-2">${post.tags.map(t => `<span class="hashtag-pill">${escapeHtml(t)}</span>`).join(' ')}</div>` : ''}
+            </div>`;
+    }
+
+    function refreshTextBlock(msgId, target) {
+        // An image command's card has nothing still loading, so it is simply drawn again
+        if (target === 'carousel') { renderAssistantResponse(msgId); return; }
+        $(`#${msgId}_text_${target}`).replaceWith(postTextBlockHtml(msgId, target));
+    }
+
+    function postEditorHtml(msgId, target, post) {
+        const id = `${msgId}_edit_${target}`;
+        const name = target === 'carousel' ? 'carousel' : window.PostPreview.platformName(target);
+        return `
+            <div class="post-text-block post-text-flat" id="${msgId}_text_${target}">
+            <div class="post-box-card post-editor" data-msg="${msgId}" data-target="${target}">
+                <div class="post-box-header">
+                    <span class="post-box-title"><i class="fas fa-pen me-1"></i>Edit ${escapeHtml(name)} post</span>
+                    <span class="post-editor-hint">Your changes are saved to this post. Nothing is regenerated.</span>
+                </div>
+                <label class="post-editor-label" for="${id}_caption">Caption</label>
+                <textarea class="post-editor-input post-editor-caption" id="${id}_caption" rows="6">${escapeHtml(post.caption)}</textarea>
+                <label class="post-editor-label" for="${id}_tags">Hashtags <span>separated by spaces</span></label>
+                <textarea class="post-editor-input post-editor-tags" id="${id}_tags" rows="2">${escapeHtml(post.tags.join(' '))}</textarea>
+                <div class="post-editor-error" role="alert" hidden></div>
+                <div class="post-editor-bar">
+                    <span class="post-editor-count" aria-live="polite"></span>
+                    <span class="post-editor-buttons">
+                        <button type="button" class="btn btn-sm btn-outline-secondary btn-edit-cancel">Cancel</button>
+                        <button type="button" class="btn btn-sm btn-outline-primary btn-edit-save"><i class="fas fa-check me-1"></i>Save</button>
+                    </span>
+                </div>
+            </div>
+            </div>`;
+    }
+
+    function growEditorInput(el) {
+        el.style.height = 'auto';
+        el.style.height = Math.min(el.scrollHeight + 2, 480) + 'px';
+    }
+
+    // Live count against the platform's limit (caption and hashtags are posted together)
+    function updateEditorCount($ed) {
+        const PP = window.PostPreview;
+        const caption = $ed.find('.post-editor-caption').val();
+        const tags = PP.cleanHashtags($ed.find('.post-editor-tags').val());
+        const length = textLength(PP.postText(caption, tags)), limit = PP.limitFor($ed.data('target'));
+        const over = length > limit, tooMany = tags.length > PP.MAX_HASHTAGS;
+        $ed.find('.post-editor-count').toggleClass('is-over', over || tooMany).text(
+            `${length.toLocaleString()} / ${limit.toLocaleString()} characters · ${tags.length} hashtag${tags.length === 1 ? '' : 's'}`
+            + (over ? ` · ${(length - limit).toLocaleString()} over the limit` : tooMany ? ` · at most ${PP.MAX_HASHTAGS}` : ''));
+        $ed.find('.btn-edit-save').prop('disabled', over || tooMany || !caption.trim());
+    }
+
+    function openPostEditor(msgId, target, focus) {
+        const post = postTextOf(msgId, target);
+        if (!post || !post.runId) return;
+        $(`#${msgId}_text_${target}`).replaceWith(postEditorHtml(msgId, target, post));
+        const $ed = $(`#${msgId}_text_${target} .post-editor`);
+        $ed.find('.post-editor-input').each(function () { growEditorInput(this); });
+        updateEditorCount($ed);
+        const field = $ed.find(focus === 'tags' ? '.post-editor-tags' : '.post-editor-caption')[0];
+        field.focus();
+        field.setSelectionRange(field.value.length, field.value.length);
+    }
+
+    // "Send for approval" again after an edit: the request already sent holds the old text
+    function refreshApprovalButton(msgId) {
+        const $footer = $(`#${msgId} .assistant-card-footer`);
+        $footer.find('.btn-send-approval, a[href^="/approve/"]').first().replaceWith(approvalButtonHtml(msgId));
+        $footer.find('.btn-send-approval').off('click').on('click', () => openApproval(msgId));
+    }
+
+    function savePostEdit(msgId, target, body, $ed) {
+        const post = postTextOf(msgId, target);
+        const $busy = $ed ? $ed.find('.btn-edit-save, .btn-edit-cancel') : $();
+        $busy.prop('disabled', true);
+        $.ajax({
+            url: `/api/history/${post.runId}/edit`, type: 'POST', contentType: 'application/json',
+            data: JSON.stringify(Object.assign({ target: target }, body)),
+        }).done(function (r) {
+            setPostNode(msgId, target, r.node);
+            const h = window.chatHistory[msgId];
+            const wasSent = h.approval && h.approval[h.currentIndex];
+            if (wasSent) delete h.approval[h.currentIndex];
+            refreshTextBlock(msgId, target);
+            if (wasSent && target !== 'carousel') refreshApprovalButton(msgId);
+            if (refineBaseMsgId === msgId) adoptAsRefineBase(msgId);  // the next message edits this text
+            showToast(body.restore ? 'Back to the original text.' : (wasSent ? 'Saved. Send it for approval again to share the new text.' : 'Saved.'), 'success');
+        }).fail(function (xhr) {
+            const message = (xhr.responseJSON && xhr.responseJSON.error) || 'Could not save your changes. Please try again.';
+            if ($ed) {
+                $ed.find('.post-editor-error').text(message).prop('hidden', false);
+                $busy.prop('disabled', false);
+                updateEditorCount($ed);
+            } else {
+                showToast(message, 'error');
+            }
+        });
+    }
+
+    $(document).on('click', '.btn-edit-post', function () {
+        openPostEditor($(this).data('msg'), $(this).data('target'), $(this).data('focus'));
+    });
+    $(document).on('input', '.post-editor-input', function () {
+        growEditorInput(this);
+        const $ed = $(this).closest('.post-editor');
+        $ed.find('.post-editor-error').prop('hidden', true);
+        updateEditorCount($ed);
+    });
+    $(document).on('click', '.btn-edit-cancel', function () {
+        const $ed = $(this).closest('.post-editor');
+        refreshTextBlock($ed.data('msg'), $ed.data('target'));
+    });
+    $(document).on('click', '.btn-edit-save', function () {
+        const $ed = $(this).closest('.post-editor');
+        savePostEdit($ed.data('msg'), $ed.data('target'),
+            { caption: $ed.find('.post-editor-caption').val(), hashtags: $ed.find('.post-editor-tags').val() }, $ed);
+    });
+    $(document).on('keydown', '.post-editor-input', function (e) {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {  // Ctrl/Cmd + Enter saves
+            e.preventDefault();
+            $(this).closest('.post-editor').find('.btn-edit-save:not(:disabled)').trigger('click');
+        }
+    });
+    $(document).on('click', '.btn-restore-post', function () {
+        savePostEdit($(this).data('msg'), $(this).data('target'), { restore: true }, null);
+    });
+
+    // ── "Preview": the post as each platform shows it ─────────────────────
+    // (the cards of the approval review page: static/js/post_preview.js)
+    const PREVIEW_ICONS = { facebook: 'fab fa-facebook', instagram: 'fab fa-instagram', linkedin: 'fab fa-linkedin', youtube: 'fab fa-youtube' };
+    const previewState = { posts: [], active: 0, slide: 0 };
+
+    // What a message would post, per platform: {platform, caption, hashtags, images, media, slideTitles, on}.
+    // An image command has no platform of its own: a carousel goes to LinkedIn
+    // and Instagram as slides, other commands to Instagram and Facebook as one image.
+    function postsForMessage(msgId) {
+        const h = window.chatHistory[msgId];
+        const content = (h.responses[h.currentIndex] || {}).content || {};
+        const meta = content._preset;
+        if (meta) {
+            const images = h.platforms.map(k => content[k]?.media?.image?.url).filter(Boolean);
+            const car = meta.carousel;
+            const titles = car ? h.platforms.map(k => ((car.slides || []).find(sl => sl.key === k) || {}).title || '') : [];
+            const base = { caption: car ? car.caption : '', hashtags: car ? car.hashtags || [] : [] };
+            return car
+                ? ['linkedin', 'instagram', 'facebook'].map(p => ({ ...base, platform: p, images, media: 'carousel', slideTitles: titles, on: p !== 'facebook' }))
+                : ['instagram', 'facebook', 'linkedin'].map(p => ({ ...base, platform: p, images: images.slice(0, 1), media: 'single', on: p !== 'linkedin' }));
+        }
+        return h.platforms.map(p => {
+            const pData = content[p] || {};
+            const url = pData.media?.image?.url;
+            return { platform: p, caption: pData.caption?.primary_caption || '', hashtags: getTagList(pData.hashtags),
+                     images: url ? [url] : [], media: url ? 'single' : undefined };
+        });
+    }
+
+    function previewMediaHtml(post) {
+        const images = post.images || [];
+        const square = post.platform === 'instagram';
+        if (!images.length) return '';
+        if (post.media !== 'carousel' || images.length < 2) return window.PostPreview.imageHtml(images[0], square);
+        const i = Math.min(previewState.slide, images.length - 1);
+        return `
+            <div class="ap-carousel">
+                ${window.PostPreview.imageHtml(images[i], square)}
+                <span class="ap-carousel-count">${i + 1} / ${images.length}</span>
+                <button type="button" class="ap-carousel-nav prev pp-slide" data-step="-1" ${i === 0 ? 'disabled' : ''} aria-label="Previous slide"><i class="fas fa-chevron-left"></i></button>
+                <button type="button" class="ap-carousel-nav next pp-slide" data-step="1" ${i === images.length - 1 ? 'disabled' : ''} aria-label="Next slide"><i class="fas fa-chevron-right"></i></button>
+            </div>`;
+    }
+
+    function renderPostPreview() {
+        const PP = window.PostPreview;
+        const posts = previewState.posts, post = posts[previewState.active];
+        const text = PP.postText(post.caption, post.hashtags);
+        const length = textLength(text), limit = PP.limitFor(post.platform);
+        $('#ppTabs').html(posts.length > 1 ? posts.map((p, i) => `
+            <button type="button" role="tab" class="pp-tab${i === previewState.active ? ' active' : ''}" data-index="${i}" aria-selected="${i === previewState.active}">
+                <i class="${PREVIEW_ICONS[p.platform] || 'fas fa-share'} me-1"></i>${PP.platformName(p.platform)}</button>`).join('') : '');
+        $('#ppStage').html(PP.cardHtml(post.platform, {
+            text: text, mediaHtml: previewMediaHtml(post), brand: _brandProfileCompanyName || 'Your brand', fold: true,
+        }));
+        const notes = [`<span class="${length > limit ? 'is-over' : ''}">${length.toLocaleString()} / ${limit.toLocaleString()} characters</span>`];
+        if (post.hashtags.length) notes.push(`${post.hashtags.length} hashtag${post.hashtags.length === 1 ? '' : 's'}`);
+        if (post.media === 'carousel') notes.push(`${post.images.length} slides`);
+        if (post.platform === 'instagram' && !post.images.length) notes.push('<span class="is-over"><i class="fas fa-triangle-exclamation me-1"></i>Instagram posts need an image</span>');
+        $('#ppMeta').html(notes.join(' &middot; '));
+    }
+
+    function openPostPreview(msgId) {
+        if (!window.chatHistory[msgId] || !window.PostPreview) return;
+        const h = window.chatHistory[msgId];
+        const meta = ((h.responses[h.currentIndex] || {}).content || {})._preset;
+        previewState.posts = postsForMessage(msgId).map(post =>
+            // an ad's own text stands in for a caption it doesn't have
+            (!post.caption && meta && meta.ad_copy) ? { ...post, caption: meta.ad_copy.primary_text || '' } : post);
+        if (!previewState.posts.length) return;
+        // Open on the platform tab being looked at in the chat
+        const shown = ($(`#${msgId} .platform-tab-chat.active`).attr('data-target') || '').replace(`${msgId}_tab_`, '');
+        previewState.active = Math.max(0, previewState.posts.findIndex(p => p.platform === shown));
+        previewState.slide = 0;
+        if (!document.getElementById('postPreviewModal')) {
+            $('body').append(`
+                <div class="modal fade" id="postPreviewModal" tabindex="-1" aria-labelledby="postPreviewTitle" aria-hidden="true">
+                    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable pp-dialog">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h5 class="modal-title" id="postPreviewTitle"><i class="fas fa-eye me-2"></i>Post preview</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                            </div>
+                            <div class="modal-body">
+                                <div class="pp-tabs" id="ppTabs" role="tablist"></div>
+                                <div class="pp-stage" id="ppStage"></div>
+                                <div class="pp-meta" id="ppMeta"></div>
+                                <p class="pp-note">This is roughly how the post looks in the feed. The likes and comments are placeholders, and where "more" cuts the caption varies by device.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>`);
+        }
+        renderPostPreview();
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('postPreviewModal')).show();
+    }
+
+    $(document).on('click', '.btn-preview-post', function () { openPostPreview($(this).data('msg')); });
+    // Drawing the preview again replaces the button that was clicked: focus goes
+    // back to its replacement, so the keyboard (Tab, Esc) keeps working in the dialog
+    $(document).on('click', '#ppTabs .pp-tab', function () {
+        previewState.active = Number($(this).data('index'));
+        previewState.slide = 0;
+        renderPostPreview();
+        $('#ppTabs .pp-tab.active').trigger('focus');
+    });
+    $(document).on('click', '#ppStage .pp-slide', function () {
+        const step = Number($(this).data('step'));
+        previewState.slide += step;
+        renderPostPreview();
+        const $same = $(`#ppStage .pp-slide.${step > 0 ? 'next' : 'prev'}:not(:disabled)`);
+        ($same.length ? $same : $('#ppStage .pp-slide:not(:disabled)')).first().trigger('focus');
+    });
+
+    // An error with "Try again" when trying again can help (no connection,
+    // the AI service timed out or is busy); otherwise the server's own message.
+    function errorCardHtml(title, xhr, errText, note) {
+        const retry = xhr.status === 0 || xhr.status >= 500 || xhr.status === 429 || xhr.status === 408;
+        return `
+            <div class="gen-error-card" role="alert">
+                <div class="gen-error-title"><i class="fas fa-circle-exclamation me-2"></i>${escapeHtml(title)}</div>
+                <p class="gen-error-text">${escapeHtml(retry ? friendlyGenerationError(xhr, errText) : errText)}</p>
+                ${retry ? `
+                <div class="gen-error-actions">
+                    <button type="button" class="btn-chat-send gen-retry-btn"><i class="fas fa-rotate-right me-2"></i>Try again</button>
+                </div>
+                ${note ? `<p class="gen-error-note">${escapeHtml(note)}</p>` : ''}
+                <details class="gen-error-details"><summary>Technical details</summary><code>${escapeHtml(errText)}</code></details>` : ''}
+            </div>`;
+    }
+
     function renderAssistantResponse(msgId) {
         const historyObj = window.chatHistory[msgId];
         if (historyObj.preset || (historyObj.responses[historyObj.currentIndex]?.content || {})._preset) {
@@ -2053,47 +2614,10 @@ $(document).ready(function () {
             const pData = content[p] || {};
             const displayStyle = idx === 0 ? 'block' : 'none';
 
-            const primaryCap = pData.caption?.primary_caption || 'No caption generated.';
-            const isRefined = pData.caption?.refined_by_critic || pData.quality?.self_corrected;
-
-            const tagList = getTagList(pData.hashtags);
-            const tagsHtml = tagList.map(t => `<span class="hashtag-pill">${escapeHtml(t)}</span>`).join(' ') || '<em>No hashtags</em>';
-            const tagsStr = tagList.join(' ');
-
-            const cardId = `${msgId}_caption_target_${p}`;
-            const tagsCardId = `${msgId}_hashtags_target_${p}`;
-
             panelsHtml += `
                 <div class="platform-panel-item" id="${msgId}_tab_${p}" style="display: ${displayStyle}">
 
-                    <!-- Post Caption Card -->
-                    <div class="post-box-card">
-                        <div class="post-box-header">
-                            <span class="post-box-title">
-                                <i class="fas fa-pen-nib me-1"></i>Post Caption
-                                ${isRefined ? '<span class="badge bg-success ms-2"><i class="fas fa-shield-check me-1"></i>Critic Refined</span>' : ''}
-                            </span>
-                            <button class="btn-copy-sm btn-copy-text" id="${cardId}_copy" data-text="${escapeAttr(primaryCap)}">
-                                <i class="fas fa-copy me-1"></i>Copy
-                            </button>
-                        </div>
-
-                        <div class="post-caption-text" id="${cardId}">${escapeHtml(primaryCap)}</div>
-                    </div>
-
-                    ${buildComplianceHtml(pData.compliance)}
-
-                    <!-- Hashtags Card -->
-                    <div class="post-box-card">
-                        <div class="post-box-header">
-                            <span class="post-box-title"><i class="fas fa-hashtag me-1"></i>Curated Hashtags</span>
-                            <button class="btn-copy-sm btn-copy-text" id="${tagsCardId}_copy" data-text="${escapeAttr(tagsStr)}">
-                                <i class="fas fa-copy me-1"></i>Copy Tags
-                            </button>
-                        </div>
-
-                        <div class="hashtags-container" id="${tagsCardId}">${tagsHtml}</div>
-                    </div>
+                    ${postTextBlockHtml(msgId, p)}
 
                     <!-- Media Output - a run reloaded from history already has
                          its generated media saved (see db.append_run_media,
@@ -2152,13 +2676,13 @@ $(document).ready(function () {
             ${panelsHtml}
             <div class="assistant-card-footer">
                 ${approvalButtonHtml(msgId)}
-                <span class="coming-soon" title="Coming soon">
-                    <button class="btn btn-sm btn-outline-success btn-schedule-post" data-msg="${msgId}" disabled>
-                        <i class="fas fa-calendar-plus me-1"></i>Schedule<span class="soon-tag">Soon</span>
-                    </button>
-                </span>
-                <button class="btn btn-sm btn-outline-primary btn-regenerate" data-msg="${msgId}">
-                    <i class="fas fa-sync-alt me-1"></i>Regenerate
+                <button class="btn btn-sm btn-outline-secondary btn-preview-post" data-msg="${msgId}" title="See it as it will look on each platform">
+                    <i class="fas fa-eye me-1"></i>Preview post
+                </button>
+                ${scheduleButtonHtml(msgId)}
+                <button class="btn btn-sm btn-outline-primary btn-regenerate" data-msg="${msgId}"
+                    title="${historyObj.refine ? 'Apply the same change again, as a new version' : 'Write the caption again, as a new version. Your image is kept.'}">
+                    <i class="fas fa-sync-alt me-1"></i>${historyObj.refine ? 'Redo this change' : 'Rewrite caption'}
                 </button>
                 <button class="btn btn-sm btn-outline-secondary btn-refine-base" data-msg="${msgId}"
                     title="Your next message will edit this version">
@@ -2247,29 +2771,6 @@ $(document).ready(function () {
                 const body = viewed.runId ? Object.assign({}, h.requestBody, { keep_media_from_run_id: viewed.runId }) : h.requestBody;
                 executeGeneration(mId, body, $(`#${mId}`), h.platforms, h.activeImgPath, h.mediaType, h.selectedOutputs);
             }
-        });
-
-        // Bind Schedule - opens the schedulePostModal (see
-        // $('#confirmSchedulePostBtn') below) for this chat message's
-        // run/story. Currently disabled in the UI ("Coming soon"). Also always
-        // pre-fills the date/time field with a sensible default (tomorrow),
-        // since the field only shows a value once something sets it - opening
-        // the modal any other way left it blank.
-        elem.find('.btn-schedule-post').on('click', function () {
-            const mId = $(this).attr('data-msg');
-            const h = window.chatHistory[mId];
-            if (!h) return;
-            const rDataForSchedule = h.responses[h.currentIndex];
-
-            lastRunId = rDataForSchedule.runId;
-            $('#modalStory').text(h.requestBody.story || 'Campaign Post');
-
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            $('#schedDateTimeInput').val(tomorrow.toISOString().slice(0, 16));
-
-            const schedModal = bootstrap.Modal.getOrCreateInstance(document.getElementById('schedulePostModal'));
-            schedModal.show();
         });
 
         // Trigger Media Generation asynchronously if mediaType requested -
@@ -2786,10 +3287,14 @@ $(document).ready(function () {
                     inner = `<div class="image-limit-card" role="status"><div class="image-limit-icon"><i class="fas fa-hourglass-half"></i></div>
                         <div><div class="image-limit-title">Not enough images left today</div><div class="image-limit-text">${escapeHtml(body.error || '')}</div></div></div>`;
                 } else {
-                    inner = `<div class="alert alert-warning mb-0"><i class="fas fa-triangle-exclamation me-2"></i>${escapeHtml(body.error || 'The images could not be created. Please try again.')}</div>`;
+                    inner = errorCardHtml("The images couldn't be created", xhr, body.error || 'The images could not be created.',
+                        'Images already made before the error may still count towards today\'s limit.');
                 }
                 $(`#${msgId} .assistant-card`).html(`
                     <div class="assistant-header"><div class="assistant-title"><i class="fas ${escapeAttr(p.icon)}"></i>${escapeHtml(p.label)}</div></div>${inner}`);
+                $(`#${msgId} .gen-retry-btn`).on('click', function () {
+                    runPreset(text, { msgId: msgId, preset: p, imagePath: imagePath, allSizes: allSizes, productNotes: notes });
+                });
             }
         });
     }
@@ -2823,7 +3328,7 @@ $(document).ready(function () {
                     <figcaption>
                         <span>${escapeHtml(name)}${img.width ? ` · ${img.width}×${img.height}` : ''}</span>
                         <span class="preset-tile-actions">
-                            <button type="button" class="preset-mini" data-preview="${escapeAttr(img.url)}" title="Preview"><i class="fas fa-expand"></i></button>
+                            <button type="button" class="preset-mini" data-preview="${escapeAttr(img.url)}" title="Enlarge" aria-label="Enlarge"><i class="fas fa-expand"></i></button>
                             <a class="preset-mini" href="${escapeAttr(img.url)}" download title="Download"><i class="fas fa-download"></i></a>
                         </span>
                     </figcaption>
@@ -2843,14 +3348,7 @@ $(document).ready(function () {
                 </dl>
             </div>` : '';
         const car = meta.carousel;
-        const carText = car ? [car.caption, (car.hashtags || []).join(' ')].filter(Boolean).join('\n\n') : '';
-        const carHtml = car && carText ? `
-            <div class="preset-adcopy">
-                <div class="preset-adcopy-head"><span><i class="fas fa-images me-1"></i>Carousel caption</span>
-                    <button type="button" class="preset-copy" data-copy="${escapeAttr(carText)}"><i class="fas fa-copy me-1"></i>Copy</button></div>
-                <div class="post-caption-text">${escapeHtml(car.caption || '')}</div>
-                ${(car.hashtags || []).length ? `<div class="hashtags-container mt-2">${car.hashtags.map(t => `<span class="hashtag-pill">${escapeHtml(t)}</span>`).join(' ')}</div>` : ''}
-            </div>` : '';
+        const carHtml = carouselTextBlockHtml(msgId);
         const usage = r.usage;
         const costHtml = usage && usage.cost_usd
             ? `<span class="badge-cost-tag me-1" id="${msgId}_cost_badge" title="Images${ad ? ' + ad copy' : ''}">${costBadgeInner(usage)}</span>` : '';
@@ -2866,7 +3364,11 @@ $(document).ready(function () {
             ${adHtml}${carHtml}
             <div class="assistant-card-footer">
                 ${approvalButtonHtml(msgId)}
-                <button class="btn btn-sm btn-outline-primary btn-preset-regen" data-msg="${msgId}"><i class="fas fa-sync-alt me-1"></i>Regenerate</button>
+                <button class="btn btn-sm btn-outline-secondary btn-preview-post" data-msg="${msgId}" title="See it as it will look on each platform">
+                    <i class="fas fa-eye me-1"></i>Preview post
+                </button>
+                ${scheduleButtonHtml(msgId)}
+                <button class="btn btn-sm btn-outline-primary btn-preset-regen" data-msg="${msgId}" title="Create these images again, as a new version (uses today's images)"><i class="fas fa-sync-alt me-1"></i>New images</button>
                 <button class="btn btn-sm btn-outline-secondary btn-refine-base" data-msg="${msgId}" title="Your next message will edit this version">
                     <i class="fas fa-wand-magic-sparkles me-1"></i>${refineBaseMsgId === msgId ? 'Refining this version' : 'Refine this version'}</button>
             </div>
@@ -2913,26 +3415,7 @@ $(document).ready(function () {
         const h = window.chatHistory[msgId];
         if (!h || typeof window.openSendForApproval !== 'function') return;
         const r = h.responses[h.currentIndex] || {};
-        const content = r.content || {};
-        const meta = content._preset;
-        let platforms;
-        if (meta) {
-            // An image command: a carousel goes to LinkedIn + Instagram as slides; other commands as one image
-            const images = h.platforms.map(k => content[k]?.media?.image?.url).filter(Boolean);
-            const car = meta.carousel;
-            const titles = car ? h.platforms.map(k => ((car.slides || []).find(sl => sl.key === k) || {}).title || '') : [];
-            const base = { caption: car ? car.caption : '', hashtags: car ? car.hashtags || [] : [] };
-            platforms = car
-                ? ['linkedin', 'instagram', 'facebook'].map(p => ({ ...base, platform: p, images, media: 'carousel', slideTitles: titles, on: p !== 'facebook' }))
-                : ['instagram', 'facebook', 'linkedin'].map(p => ({ ...base, platform: p, images: images.slice(0, 1), media: 'single', on: p !== 'linkedin' }));
-        } else {
-            platforms = h.platforms.map(p => {
-                const pData = content[p] || {};
-                const url = pData.media?.image?.url;
-                return { platform: p, caption: pData.caption?.primary_caption || '', hashtags: getTagList(pData.hashtags),
-                         images: url ? [url] : [], media: url ? 'single' : undefined };
-            });
-        }
+        const platforms = postsForMessage(msgId);
         window.openSendForApproval({
             key: `studio-${r.runId || msgId}`,
             story: (h.requestBody && h.requestBody.story) || '',
@@ -2943,6 +3426,67 @@ $(document).ready(function () {
                 h.approval[h.currentIndex] = req.id;
                 renderAssistantResponse(msgId);
             },
+        });
+    }
+
+    // "Schedule" (static/js/approval_send.js): each platform's caption and media
+    // are published by themselves at the chosen time. After scheduling, the
+    // button shows when it goes out and opens the calendar.
+    function scheduleButtonHtml(msgId) {
+        const h = window.chatHistory[msgId] || {};
+        const planned = h.scheduled && h.scheduled[h.currentIndex];
+        if (planned) {
+            const when = new Date(planned.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+            return `<a class="btn btn-sm btn-outline-success btn-scheduled" href="/calendar" title="Open the calendar to move or cancel it"><i class="fas fa-calendar-check me-1"></i>Scheduled · ${escapeHtml(when)}</a>`;
+        }
+        if (!window.SCHEDULING_ENABLED) {  // switched on with STUDIO_SCHEDULING=true (config.py)
+            return `<span class="coming-soon btn-schedule-soon" title="Coming soon">
+                    <button class="btn btn-sm btn-outline-success" disabled>
+                        <i class="fas fa-calendar-plus me-1"></i>Schedule<span class="soon-tag">Soon</span>
+                    </button>
+                </span>`;
+        }
+        return `<button class="btn btn-sm btn-outline-success btn-schedule-post" data-msg="${msgId}" title="Publish it by itself at a time you choose"><i class="fas fa-calendar-plus me-1"></i>Schedule</button>`;
+    }
+
+    function refreshScheduleButton(msgId) {
+        $(`#${msgId} .assistant-card-footer`).find('.btn-schedule-post, .btn-scheduled, .btn-schedule-soon').first().replaceWith(scheduleButtonHtml(msgId));
+    }
+
+    function openSchedule(msgId) {
+        const h = window.chatHistory[msgId];
+        if (!h || !window.SCHEDULING_ENABLED || typeof window.openSchedulePost !== 'function') return;
+        const r = h.responses[h.currentIndex] || {};
+        window.openSchedulePost({
+            key: `studio-${r.runId || msgId}`,
+            story: (h.requestBody && h.requestBody.story) || '',
+            conversationId: currentConversationId,
+            runId: r.runId || null,
+            platforms: postsForMessage(msgId),
+            onScheduled: function (post) {
+                h.scheduled = h.scheduled || {};
+                h.scheduled[h.currentIndex] = { id: post.id, at: post.scheduled_at_iso };
+                refreshScheduleButton(msgId);
+            },
+        });
+    }
+    $(document).on('click', '.btn-schedule-post', function () { openSchedule($(this).data('msg')); });
+
+    // After a conversation is loaded: which of its posts are waiting to go out
+    function loadScheduledMarks() {
+        $.get('/api/social/scheduled').done(function (r) {
+            const waiting = (r.scheduled_posts || []).filter(p => p.status === 'pending' && p.run_id);
+            if (!waiting.length) return;
+            Object.keys(window.chatHistory).forEach(function (msgId) {
+                const h = window.chatHistory[msgId];
+                (h.responses || []).forEach(function (response, index) {
+                    const post = waiting.find(p => p.run_id === response.runId);
+                    if (!post) return;
+                    h.scheduled = h.scheduled || {};
+                    h.scheduled[index] = { id: post.id, at: post.scheduled_at_iso };
+                });
+                if (h.scheduled) refreshScheduleButton(msgId);
+            });
         });
     }
 
@@ -3264,6 +3808,8 @@ $(document).ready(function () {
         $.ajax({
             url: `/api/conversations/${convId}`,
             type: 'GET',
+            // On page load the unsent draft goes back in the box once the thread is there
+            complete: function () { if (opts.restoring) restoreDraft(draftOwner); },
             success: function (r) {
                 const runs = r.runs || [];
                 if (!runs.length) return;
@@ -3302,7 +3848,8 @@ $(document).ready(function () {
                     if (presetMeta) {
                         appendUserMessage(run.story, presetMeta.source_image_url || null, [], null, presetMeta.label, 'Standard Enterprise');
                     } else {
-                        appendUserMessage(run.story, meta.image_url || null, platforms, run.tone, 'Text (Caption)', 'Standard Enterprise');
+                        appendUserMessage(run.story, meta.image_url || null, platforms, run.tone, 'Text (Caption)', 'Standard Enterprise',
+                            { followUp: !!meta.refined_from_run_id });
                     }
                     appendAssistantThinking(msgId, false);
 
@@ -3363,6 +3910,7 @@ $(document).ready(function () {
                 lastRunId = runs[runs.length - 1].id;
                 adoptAsRefineBase(baseMsgId);
                 scrollToBottom();
+                loadScheduledMarks();
                 if (!opts.quiet) showToast('Conversation loaded - send a message to continue it.', 'info');
             },
             error: function (xhr) {
@@ -3376,7 +3924,8 @@ $(document).ready(function () {
     function restoreConversation() {
         let saved = null;
         try { saved = sessionStorage.getItem(CONVERSATION_KEY); } catch (e) { /* storage blocked */ }
-        if (saved && !$('#chatThread').children().length && !storyInput.val()) loadConversation(saved, { quiet: true });
+        if (saved && !$('#chatThread').children().length && !storyInput.val()) loadConversation(saved, { quiet: true, restoring: true });
+        else restoreDraft(draftOwner);
     }
 
     // ── Utilities ──────────────────────────────────────────────────────

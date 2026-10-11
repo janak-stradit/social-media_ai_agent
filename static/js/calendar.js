@@ -107,12 +107,172 @@
         return chip;
     }
 
+    // ── Scheduled posts: open, move, cancel, retry ────────────────────
+    const STATUS_TEXT = { pending: 'Scheduled', publishing: 'Publishing', published: 'Published', partial: 'Partly published', failed: 'Not published' };
+    const STATUS_ICONS = { pending: 'fa-clock', publishing: 'fa-spinner', published: 'fa-circle-check', partial: 'fa-circle-exclamation', failed: 'fa-triangle-exclamation' };
+    const PLATFORM_NAMES = { linkedin: 'LinkedIn', instagram: 'Instagram', facebook: 'Facebook', youtube: 'YouTube' };
+    let dragged = null;  // the scheduled post being dragged to another day
+
+    function api(method, url, body) {
+        return fetch(url, { method: method, credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+                            body: body ? JSON.stringify(body) : undefined })
+            .then(function (r) { return r.json().then(function (data) { return { ok: r.ok, data: data }; }); })
+            .then(function (r) {
+                if (!r.ok || r.data.success === false) throw new Error(r.data.error || 'Something went wrong. Please try again.');
+                return r.data;
+            });
+    }
+
+    function localInputValue(date) {
+        const pad = (n) => String(n).padStart(2, '0');
+        return date.getFullYear() + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) + 'T' + pad(date.getHours()) + ':' + pad(date.getMinutes());
+    }
+    function timeText(date) {
+        return date.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function movePost(item, when) {
+        return api('PATCH', '/api/social/scheduled/' + item.id, { scheduled_at: when.toISOString() })
+            .then(function () {
+                toast('Moved to ' + when.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }) + ' at ' + timeText(when) + '.');
+                load(shownMonth);
+            })
+            .catch(function (err) { toast(err.message); });
+    }
+
+    // Dropped on a day: the same time of day, on that day
+    function moveToDay(item, dayIso) {
+        const old = new Date(item.scheduled_at), day = parseDay(dayIso);
+        const when = new Date(day.getFullYear(), day.getMonth(), day.getDate(), old.getHours(), old.getMinutes());
+        if (when.getTime() === old.getTime()) return;
+        movePost(item, when);
+    }
+
+    function openScheduled(item) {
+        const dialog = $('calDialog'), body = $('calDialogBody');
+        const when = new Date(item.scheduled_at);
+        body.textContent = '';
+
+        const pill = el('span', 'cal-pill is-' + item.status);
+        pill.append(icon('fas ' + (STATUS_ICONS[item.status] || 'fa-clock')), document.createTextNode(STATUS_TEXT[item.status] || 'Scheduled'));
+        const title = el('h3', '', when.toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' }) + ' at ' + timeText(when));
+        title.id = 'calDialogTitle';
+        body.append(pill, title);
+
+        const post = el('div', 'cal-dialog-post');
+        if (item.thumb) {
+            const img = el('img');
+            img.src = item.thumb;
+            img.alt = '';
+            post.appendChild(img);
+        }
+        const text = el('div');
+        text.append(el('p', 'cal-dialog-caption', item.title),
+            el('small', '', item.media === 'carousel' ? 'Carousel' : item.media === 'image' ? 'With an image' : 'Text post'));
+        post.appendChild(text);
+        body.appendChild(post);
+
+        const list = el('ul', 'cal-dialog-platforms');
+        item.platforms.forEach(function (platform) {
+            const result = (item.results || {})[platform];
+            const row = el('li');
+            row.append(icon('fab ' + (PLATFORM_ICONS[platform] || 'fa-share-nodes')), el('strong', '', PLATFORM_NAMES[platform] || platform));
+            if (result && result.ok) {
+                row.appendChild(el('span', 'is-ok', 'Published' + (result.account ? ' to ' + result.account : '')));
+                if (result.permalink) {
+                    const link = el('a', '', 'View post');
+                    link.href = result.permalink;
+                    link.target = '_blank';
+                    link.rel = 'noopener';
+                    row.appendChild(link);
+                }
+            } else if (result) {
+                row.appendChild(el('span', 'is-error', result.error || 'Could not be published.'));
+            } else {
+                row.appendChild(el('span', '', item.status === 'pending' ? 'Waiting' : item.status === 'publishing' ? 'Publishing...' : 'Not sent'));
+            }
+            list.appendChild(row);
+        });
+        body.appendChild(list);
+
+        const actions = el('div', 'cal-dialog-actions');
+        const done = function (message) {
+            return function () { dialog.close(); toast(message); load(shownMonth); };
+        };
+        const fail = function (err) { toast(err.message); };
+        if (item.movable) {
+            const row = el('div', 'cal-dialog-move');
+            const label = el('label', '', 'Move to');
+            const input = el('input');
+            input.type = 'datetime-local';
+            input.id = 'calMoveInput';
+            input.value = localInputValue(when);
+            input.min = localInputValue(new Date());
+            label.htmlFor = input.id;
+            const move = el('button', 'cal-btn is-primary', 'Move');
+            move.type = 'button';
+            move.addEventListener('click', function () {
+                const next = new Date(input.value);
+                if (!input.value || isNaN(next)) { toast('Choose a date and time.'); return; }
+                dialog.close();
+                movePost(item, next);
+            });
+            row.append(label, input, move);
+            const cancel = el('button', 'cal-btn is-danger', 'Cancel this post');
+            cancel.type = 'button';
+            cancel.addEventListener('click', function () {
+                if (cancel.dataset.sure !== '1') {  // a second click confirms
+                    cancel.dataset.sure = '1';
+                    cancel.textContent = 'Click again to cancel it';
+                    return;
+                }
+                api('POST', '/api/social/scheduled/' + item.id + '/cancel').then(done('The post was cancelled.')).catch(fail);
+            });
+            actions.append(row, cancel);
+        } else if (item.status === 'failed' || item.status === 'partial' || item.status === 'publishing') {
+            const retry = el('button', 'cal-btn is-primary', item.status === 'partial' ? 'Send the rest now' : 'Try again now');
+            retry.type = 'button';
+            retry.addEventListener('click', function () {
+                api('POST', '/api/social/scheduled/' + item.id + '/retry').then(done('Trying again - it goes out within a minute.')).catch(fail);
+            });
+            actions.append(retry, el('small', '', item.status === 'publishing'
+                ? 'This post started publishing and did not finish. Check your accounts before sending it again.'
+                : 'Platforms that were already published are not sent again.'));
+        }
+        if (item.conversation_id) {
+            const studio = el('button', 'cal-btn', 'Open in Studio Chat');
+            studio.type = 'button';
+            studio.addEventListener('click', function () {
+                try { sessionStorage.setItem(CONVERSATION_KEY, String(item.conversation_id)); } catch (e) { /* storage blocked */ }
+                window.location.href = '/dashboard';
+            });
+            actions.appendChild(studio);
+        }
+        body.appendChild(actions);
+        if (dialog.showModal) dialog.showModal(); else dialog.setAttribute('open', '');
+    }
+
     function scheduledChip(item) {
-        const chip = el('a', 'cal-chip is-scheduled');
-        chip.href = '/settings';
-        chip.title = (item.status === 'published' ? 'Published' : 'Scheduled') + ' at ' + item.time;
-        chip.append(icon('fas ' + (item.status === 'published' ? 'fa-circle-check' : 'fa-clock')),
-            el('span', '', item.time + ' · ' + (item.platforms.join(', ') || 'post')));
+        const chip = el('button', 'cal-chip is-scheduled is-' + item.status);
+        chip.type = 'button';
+        chip.title = (STATUS_TEXT[item.status] || 'Scheduled') + ' at ' + item.time + ': ' + item.title
+            + (item.movable ? ' (drag to another day to move it, or click for more)' : '');
+        chip.append(icon('fas ' + (STATUS_ICONS[item.status] || 'fa-clock')), el('span', '', item.time + ' · ' + item.title));
+        chip.addEventListener('click', function () { openScheduled(item); });
+        if (item.movable) {
+            chip.draggable = true;
+            chip.addEventListener('dragstart', function (e) {
+                dragged = item;
+                e.dataTransfer.effectAllowed = 'move';
+                e.dataTransfer.setData('text/plain', String(item.id));
+                grid.classList.add('is-dragging');
+            });
+            chip.addEventListener('dragend', function () {
+                dragged = null;
+                grid.classList.remove('is-dragging');
+                grid.querySelectorAll('.is-drop').forEach(function (cell) { cell.classList.remove('is-drop'); });
+            });
+        }
         return chip;
     }
 
@@ -158,6 +318,20 @@
             day.posts.forEach(function (post) { cell.appendChild(postChip(post)); });
             day.scheduled.forEach(function (item) { cell.appendChild(scheduledChip(item)); });
             if (day.suggestion) cell.appendChild(slotChip(day));
+            if (day.date >= data.today) {  // a scheduled post can be dropped on today or a later day
+                cell.addEventListener('dragover', function (e) {
+                    if (!dragged) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    cell.classList.add('is-drop');
+                });
+                cell.addEventListener('dragleave', function () { cell.classList.remove('is-drop'); });
+                cell.addEventListener('drop', function (e) {
+                    e.preventDefault();
+                    cell.classList.remove('is-drop');
+                    if (dragged) moveToDay(dragged, day.date);
+                });
+            }
             grid.appendChild(cell);
         });
     }

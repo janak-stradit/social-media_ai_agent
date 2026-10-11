@@ -19,18 +19,8 @@ $(document).ready(function () {
         return names[p] || (p ? p.charAt(0).toUpperCase() + p.slice(1) : 'Social');
     }
 
-    function styleHashtagsHtml(text) {
-        return escapeHtml(text || '')
-            .replace(/#(\w+)/g, '<span style="color:#0a66c2;font-weight:600;">#$1</span>')
-            .replace(/\n/g, '<br>');
-    }
-
     // The requester's company (from the request), shown in every preview
     function brandName() { return (currentReq && currentReq.company_name) || 'Your brand'; }
-    function brandHandle() { return brandName().toLowerCase().replace(/[^a-z0-9]+/g, '').slice(0, 24) || 'yourbrand'; }
-    function brandInitials() {
-        return brandName().split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase() || 'YB';
-    }
 
     function previewMediaBlockHtml(item, squareAspect) {
         if (item && item.mediaHtml) return item.mediaHtml;
@@ -41,95 +31,17 @@ $(document).ready(function () {
         return `<img src="${item.content}" class="d-block w-100" style="${squareAspect ? 'aspect-ratio: 1/1; object-fit: cover;' : 'max-height: 420px; object-fit: cover;'} background:#f3f4f6;">`;
     }
 
-    function buildLinkedInPreviewHtml(item) {
-        return `
-            <div style="background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,0.12); font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;">
-                <div style="display:flex; align-items:flex-start; gap:10px; padding:12px 14px 8px;">
-                    <div style="width:44px;height:44px;flex-shrink:0;border-radius:50%;background:linear-gradient(135deg,#0a66c2,#004182);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:1rem;">${escapeHtml(brandInitials())}</div>
-                    <div style="flex:1; min-width:0;">
-                        <div style="font-weight:600; font-size:0.9rem; color:#000;">${escapeHtml(brandName())}</div>
-                        <div style="font-size:0.72rem; color:#666;">Just now &middot; <i class="fas fa-earth-americas"></i></div>
-                    </div>
-                    <i class="fas fa-ellipsis" style="color:#666;"></i>
-                </div>
-                <div style="padding:0 14px 12px; font-size:0.85rem; color:#000; line-height:1.45;">${styleHashtagsHtml(item.caption || item.content)}</div>
-                ${previewMediaBlockHtml(item, false)}
-                <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 14px; font-size:0.72rem; color:#666; border-bottom:1px solid #eee;">
-                    <span><i class="fas fa-thumbs-up" style="color:#0a66c2;"></i> 128</span>
-                    <span>24 comments &middot; 6 reposts</span>
-                </div>
-                <div style="display:flex; padding:2px 4px;">
-                    <div style="flex:1;text-align:center;padding:8px 4px;color:#666;font-weight:600;font-size:0.78rem;"><i class="far fa-thumbs-up me-1"></i>Like</div>
-                    <div style="flex:1;text-align:center;padding:8px 4px;color:#666;font-weight:600;font-size:0.78rem;"><i class="far fa-comment me-1"></i>Comment</div>
-                    <div style="flex:1;text-align:center;padding:8px 4px;color:#666;font-weight:600;font-size:0.78rem;"><i class="fas fa-retweet me-1"></i>Repost</div>
-                    <div style="flex:1;text-align:center;padding:8px 4px;color:#666;font-weight:600;font-size:0.78rem;"><i class="far fa-paper-plane me-1"></i>Send</div>
-                </div>
-            </div>
-        `;
+    // The platform cards are shared with Studio Chat (static/js/post_preview.js)
+    function previewCard(platform, item) {
+        return PostPreview.cardHtml(platform, {
+            text: item.caption || item.content, brand: brandName(),
+            mediaHtml: previewMediaBlockHtml(item, platform === 'instagram'),
+        });
     }
-
-    function buildInstagramPreviewHtml(item) {
-        return `
-            <div style="background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,0.12); font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;">
-                <div style="display:flex; align-items:center; gap:10px; padding:10px 12px;">
-                    <div style="width:34px;height:34px;border-radius:50%;background:linear-gradient(45deg,#f58529,#dd2a7b,#8134af,#515bd4);padding:2px;flex-shrink:0;">
-                        <div style="width:100%;height:100%;border-radius:50%;background:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:0.65rem;">${escapeHtml(brandInitials())}</div>
-                    </div>
-                    <div style="font-weight:600; font-size:0.85rem;">${escapeHtml(brandHandle())}</div>
-                    <i class="fas fa-ellipsis ms-auto" style="color:#000;"></i>
-                </div>
-                ${previewMediaBlockHtml(item, true)}
-                <div style="padding:10px 12px 4px; display:flex; gap:14px; font-size:1.25rem; color:#000;">
-                    <i class="far fa-heart"></i><i class="far fa-comment"></i><i class="far fa-paper-plane"></i>
-                    <i class="far fa-bookmark ms-auto"></i>
-                </div>
-                <div style="padding:4px 12px 2px; font-size:0.78rem; font-weight:600;">248 likes</div>
-                <div style="padding:0 12px 12px; font-size:0.82rem; line-height:1.4;"><strong>${escapeHtml(brandHandle())}</strong> ${styleHashtagsHtml(item.caption || item.content)}</div>
-            </div>
-        `;
-    }
-
-    function buildFacebookPreviewHtml(item) {
-        return `
-            <div style="background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,0.12); font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;">
-                <div style="display:flex; align-items:flex-start; gap:10px; padding:12px 14px 8px;">
-                    <div style="width:44px;height:44px;flex-shrink:0;border-radius:50%;background:linear-gradient(135deg,#1877f2,#0d5cc9);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:1rem;">${escapeHtml(brandInitials())}</div>
-                    <div style="flex:1; min-width:0;">
-                        <div style="font-weight:600; font-size:0.9rem; color:#050505;">${escapeHtml(brandName())}</div>
-                        <div style="font-size:0.72rem; color:#65676b;">Just now &middot; <i class="fas fa-earth-americas"></i></div>
-                    </div>
-                    <i class="fas fa-ellipsis" style="color:#65676b;"></i>
-                </div>
-                <div style="padding:0 14px 12px; font-size:0.85rem; color:#050505; line-height:1.45;">${styleHashtagsHtml(item.caption || item.content)}</div>
-                ${previewMediaBlockHtml(item, false)}
-                <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 14px; font-size:0.72rem; color:#65676b; border-bottom:1px solid #eee;">
-                    <span><i class="fas fa-thumbs-up" style="color:#1877f2;"></i> 96 &middot; <i class="fas fa-heart" style="color:#f33e58;"></i></span>
-                    <span>18 comments &middot; 4 shares</span>
-                </div>
-                <div style="display:flex; padding:2px 4px;">
-                    <div style="flex:1;text-align:center;padding:8px 4px;color:#65676b;font-weight:600;font-size:0.78rem;"><i class="far fa-thumbs-up me-1"></i>Like</div>
-                    <div style="flex:1;text-align:center;padding:8px 4px;color:#65676b;font-weight:600;font-size:0.78rem;"><i class="far fa-comment me-1"></i>Comment</div>
-                    <div style="flex:1;text-align:center;padding:8px 4px;color:#65676b;font-weight:600;font-size:0.78rem;"><i class="fas fa-share me-1"></i>Share</div>
-                </div>
-            </div>
-        `;
-    }
-
-    function buildGenericPreviewHtml(item, platform) {
-        return `
-            <div style="background:#fff; border-radius:10px; overflow:hidden; box-shadow:0 1px 2px rgba(0,0,0,0.12); font-family:-apple-system,'Segoe UI',Roboto,Arial,sans-serif;">
-                <div style="display:flex; align-items:center; gap:10px; padding:12px 14px;">
-                    <div style="width:40px;height:40px;border-radius:50%;background:#c2410c;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;">${escapeHtml(brandInitials())}</div>
-                    <div>
-                        <div style="font-weight:600; font-size:0.9rem;">${escapeHtml(brandName())}</div>
-                        <div style="font-size:0.72rem; color:#666;">${platformDisplayName(platform)} &middot; Just now</div>
-                    </div>
-                </div>
-                ${previewMediaBlockHtml(item, false)}
-                <div style="padding:12px 14px; font-size:0.85rem; line-height:1.45;">${styleHashtagsHtml(item.caption || item.content)}</div>
-            </div>
-        `;
-    }
+    function buildLinkedInPreviewHtml(item) { return previewCard('linkedin', item); }
+    function buildInstagramPreviewHtml(item) { return previewCard('instagram', item); }
+    function buildFacebookPreviewHtml(item) { return previewCard('facebook', item); }
+    function buildGenericPreviewHtml(item, platform) { return previewCard(platform, item); }
 
     function showToast(message, type) {
         const bgClass = type === 'success' ? 'bg-success' : type === 'danger' ? 'bg-danger' : type === 'warning' ? 'bg-warning' : 'bg-primary';
@@ -391,23 +303,32 @@ $(document).ready(function () {
     }
 
     // Publishing an approved platform (Instagram for now) - only the requester sees the button
+    // An approved platform can be published by the requester, to the account connected in Settings
+    const PUBLISH_ICONS = { instagram: 'fab fa-instagram', facebook: 'fab fa-facebook', linkedin: 'fab fa-linkedin' };
+
     function publishHtml(req, item) {
+        const name = platformDisplayName(item.platform), icon = PUBLISH_ICONS[item.platform];
         if (item.published) {
             const p = item.published;
-            return `<div class="ap-published"><i class="fab fa-instagram me-1"></i>Published${p.account ? ' to ' + escapeHtml(p.account) : ''}
+            return `<div class="ap-published"><i class="${icon || 'fas fa-check'} me-1"></i>Published${p.account ? ' to ' + escapeHtml(p.account) : ''}
                 ${p.at ? ' · ' + new Date(p.at).toLocaleString() : ''}
                 ${p.permalink ? ` · <a href="${escapeHtml(p.permalink)}" target="_blank" rel="noopener">View post</a>` : ''}</div>`;
         }
         const pub = req.publishing || {};
-        if (item.platform !== 'instagram' || item.decision !== 'approved' || !pub.can_publish) return '';
+        if (!icon || item.decision !== 'approved' || !pub.can_publish) return '';
         const error = item.publish_error ? `<div class="ap-publish-error"><i class="fas fa-triangle-exclamation me-1"></i>${escapeHtml(item.publish_error)}</div>` : '';
-        if (!pub.instagram) {
-            return `<div class="ap-publish-row"><a class="btn-xs-outline-info text-decoration-none" href="/settings"><i class="fab fa-instagram me-1"></i>Connect Instagram to publish</a></div>${error}`;
+        const account = (pub.accounts || {})[item.platform] || (item.platform === 'instagram' ? pub.instagram : null);
+        if (!account) {
+            return `<div class="ap-publish-row"><a class="btn-xs-outline-info text-decoration-none" href="/settings"><i class="${icon} me-1"></i>Connect ${name} to publish</a></div>${error}`;
         }
+        const slides = (item.images || []).length;
+        const what = item.media === 'carousel'
+            ? (item.platform === 'linkedin' && item.linkedin_format === 'document' ? `Document carousel (PDF) of ${slides} slides` : `Carousel of ${slides} slides`)
+            : slides ? 'One image' : 'Text post';
         return `<div class="ap-publish-row">
-                <button type="button" class="ap-btn ap-btn-accept ap-publish" data-platform="instagram">
-                    <i class="fab fa-instagram"></i>Publish to ${escapeHtml(pub.instagram)}</button>
-                <small>${item.media === 'carousel' ? `Carousel of ${item.images.length} slides` : 'One image'} · posts immediately</small>
+                <button type="button" class="ap-btn ap-btn-accept ap-publish" data-platform="${item.platform}">
+                    <i class="${icon}"></i>Publish to ${escapeHtml(account)}</button>
+                <small>${what} · posts immediately</small>
             </div>${error}`;
     }
 
@@ -418,7 +339,7 @@ $(document).ready(function () {
         $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i>Publishing...');
         $.ajax({ url: `/api/approval-requests/${window.APPROVAL_REQUEST_ID}/publish`, type: 'POST', contentType: 'application/json',
                  data: JSON.stringify({ platform: platform }) })
-            .done(r => { showToast('Published to Instagram.', 'success'); renderBundle(r.request); })
+            .done(r => { showToast(`Published to ${platformDisplayName(platform)}.`, 'success'); renderBundle(r.request); })
             .fail(xhr => {
                 const body = xhr.responseJSON || {};
                 showToast(body.error || 'Could not publish.', 'danger');
@@ -453,6 +374,7 @@ $(document).ready(function () {
                         <div class="ap-row-meta mb-3">${bundleStatusPill(req.status)}
                             ${req.items.map(i => `<span class="ap-tag">${platformDisplayName(i.platform)}</span>`).join('')}</div>
                         ${req.story_context ? `<label class="guideline-field-label">Brief</label><div class="ap-context">${escapeHtml(req.story_context)}</div>` : ''}
+                        ${req.status === 'pending' && req.reminder_count && req.last_reminder_at ? `<div class="ap-reminder-note"><i class="fas fa-clock me-1"></i>A reminder was emailed to the reviewer on ${new Date(req.last_reminder_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}.</div>` : ''}
                     </div>
                     ${complianceCardHtml(item.compliance)}
                     <div class="brand-config-card">

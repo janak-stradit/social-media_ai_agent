@@ -53,7 +53,24 @@ $(document).ready(function () {
     function renderList(requests) {
         const body = $('#approvalListBody');
         if (!requests.length) {
-            body.html(stateHtml('fa-inbox', 'Nothing here yet', 'No approval requests match this filter.'));
+            // Nothing at all yet: say how a request gets here, not just that the list is empty
+            if (!currentStatus) {
+                body.html(`<div class="ap-empty"><div class="card-icon-circle"><i class="fas fa-paper-plane"></i></div>
+                    <h6>No approval requests yet</h6>
+                    <p>Create a post in Studio Chat and click <strong>Send for approval</strong>. It appears here with its status, and so do posts other people send you to review.</p>
+                    <div class="ap-empty-actions">
+                        <a class="btn-primary-save text-decoration-none" href="/dashboard"><i class="fas fa-comments me-2"></i>Open Studio Chat</a>
+                        <a class="btn-xs-outline-info text-decoration-none" href="/help/approvals"><i class="fas fa-circle-question me-2"></i>How approvals work</a>
+                    </div></div>`);
+                return;
+            }
+            const none = {
+                pending: 'Nothing is waiting for a decision right now.',
+                approved: 'No post has been approved on every platform yet.',
+                partial: 'No post is partly approved. That is when some platforms are approved and changes are asked on others.',
+                rejected: 'No post has had changes requested on every platform.',
+            };
+            body.html(stateHtml('fa-inbox', 'Nothing here', none[currentStatus] || 'No approval requests match this filter.'));
             return;
         }
 

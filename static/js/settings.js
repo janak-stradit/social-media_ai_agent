@@ -10,6 +10,90 @@ $(document).ready(function () {
     loadUserSocialAccounts();
     loadScheduledPosts();
 
+    // ── One-click connect (services/social_oauth_service.py) ───────────
+    // A "Connect with ..." button is shown for each platform whose app is set
+    // up; entering the details by hand stays available next to it. After the
+    // platform sends the user back, the outcome is read once from the server.
+    const OAUTH_NAMES = { facebook: 'Facebook', linkedin: 'LinkedIn' };
+    let oauthPending = null;  // { id, provider } while the user chooses between several accounts
+
+    function showOAuthResult(ok, message) {
+        if (!message) return;
+        $('#oauthBanner').removeClass('d-none is-ok is-error').addClass(ok ? 'is-ok' : 'is-error')
+            .html(`<i class="fas ${ok ? 'fa-circle-check' : 'fa-circle-exclamation'} me-2"></i><span></span>
+                   <button type="button" class="oauth-banner-close" aria-label="Dismiss"><i class="fas fa-xmark"></i></button>`)
+            .find('span').text(message);
+    }
+    $(document).on('click', '.oauth-banner-close', function () { $('#oauthBanner').addClass('d-none'); });
+
+    function openOAuthChooser(result) {
+        oauthPending = { id: result.choose, provider: result.provider };
+        const name = OAUTH_NAMES[result.provider] || 'this platform';
+        $('#oauthChooseHint').text(result.provider === 'facebook'
+            ? 'You manage more than one Facebook Page. Its linked Instagram account is connected with it.'
+            : `Post as yourself or as a company page you manage on ${name}.`);
+        $('#oauthChooseList').html(result.options.map((o, i) => `
+            <label class="oauth-option">
+                <input type="radio" name="oauthChoice" value="${escapeHtml(o.id)}" ${i === 0 ? 'checked' : ''}>
+                <span><strong>${escapeHtml(o.name)}</strong><small>${escapeHtml(o.detail || '')}</small></span>
+            </label>`).join(''));
+        $('#oauthChooseBtn').prop('disabled', false);
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('oauthChooseModal')).show();
+    }
+
+    $('#oauthChooseBtn').on('click', function () {
+        const choice = $('input[name="oauthChoice"]:checked').val();
+        if (!oauthPending || !choice) return;
+        const $btn = $(this).prop('disabled', true);
+        $.ajax({ url: `/api/social/oauth/pending/${encodeURIComponent(oauthPending.id)}`, type: 'POST', contentType: 'application/json',
+                 data: JSON.stringify({ choice: choice }) })
+            .done(function (r) {
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('oauthChooseModal')).hide();
+                oauthPending = null;
+                showOAuthResult(true, r.message);
+                loadUserSocialAccounts();
+            })
+            .fail(function (xhr) {
+                bootstrap.Modal.getOrCreateInstance(document.getElementById('oauthChooseModal')).hide();
+                showOAuthResult(false, (xhr.responseJSON || {}).error || 'Could not connect that account. Please click Connect again.');
+            })
+            .always(function () { $btn.prop('disabled', false); });
+    });
+
+    function setupOAuth() {
+        $.getJSON('/api/social/oauth/providers').done(function (r) {
+            const on = r.providers || {};
+            Object.keys(on).filter(p => on[p]).forEach(function (provider) {
+                $(`[data-oauth="${provider}"]`).removeClass('d-none');
+                $(`[data-manual="${provider}"]`).text('Enter details by hand');
+            });
+            if (Object.values(on).some(Boolean)) {
+                $('#accountsIntro').text('Click Connect on a platform and sign in there. You come back connected, with nothing to copy.');
+            }
+        });
+        $.getJSON('/api/social/oauth/result').done(function (r) {
+            const result = r.result;
+            if (!result) return;
+            if (result.choose) openOAuthChooser(result);
+            else showOAuthResult(result.ok, result.message);
+        });
+    }
+    setupOAuth();
+
+    // LinkedIn sign-ins last 60 days: say until when, and when it has run out
+    function renderExpiry(accounts) {
+        const li = accounts.find(a => a.platform === 'linkedin' && a.status === 'connected');
+        const $note = $('#liExpiryNote').addClass('d-none').removeClass('text-rose text-slate-500');
+        if (!li || !li.token_expires_at) return;
+        const until = new Date(li.token_expires_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+        if (li.expired) {
+            $('#liStatusBadge').removeClass('badge-connected').addClass('badge-disconnected').html('<i class="fas fa-clock me-1"></i>Expired');
+            $note.removeClass('d-none').addClass('text-rose').text(`The sign-in ran out on ${until}. Connect again to keep publishing.`);
+        } else {
+            $note.removeClass('d-none').addClass('text-slate-500').text(`Signed in until ${until}. You get a reminder a week before.`);
+        }
+    }
+
     // ── Notifications tab: weekly ideas email on/off + "send me one now" ──
     function ideasEmailMeta(s) {
         const last = s.last_sent_at
@@ -134,6 +218,7 @@ $(document).ready(function () {
                         }
                     }
                 });
+                renderExpiry(currentSocialAccounts);
             }
         });
     }
@@ -307,7 +392,7 @@ $(document).ready(function () {
                 if (!posts.length) {
                     $('#scheduledPostsTbody').html(`
                         <tr>
-                            <td colspan="6" class="text-center py-4 text-slate-400">No scheduled posts found. Click "+ Create Manual Post" above to schedule a post manually!</td>
+                            <td colspan="6" class="text-center py-4 text-slate-400">No scheduled posts yet. Click "Create Manual Post" above to schedule one - it will be listed here with its status. <a href="/help/social-accounts">How publishing works</a></td>
                         </tr>
                     `);
                     return;
@@ -327,21 +412,34 @@ $(document).ready(function () {
                         cJson = p.content_json || {};
                     }
 
-                    const mediaUrl = cJson.image_url || cJson.media_url || p.media_url;
-                    const mediaTag = mediaUrl ? `<img src="${mediaUrl}" class="sp-thumb" alt="">` : '<div class="sp-thumb sp-thumb-empty"><i class="fas fa-align-left"></i></div>';
+                    const mediaUrl = p.thumb || cJson.image_url || cJson.media_url || p.media_url;
+                    const mediaTag = mediaUrl ? `<img src="${escapeHtml(mediaUrl)}" class="sp-thumb" alt="">` : '<div class="sp-thumb sp-thumb-empty"><i class="fas fa-align-left"></i></div>';
 
-                    const storyText = cJson.caption || cJson.story || p.story || 'Custom Manual Post';
+                    const storyText = p.title || cJson.caption || cJson.story || p.story || 'Custom Manual Post';
+                    // Times are stored in UTC and shown in the viewer's own time zone
+                    const when = p.scheduled_at_iso
+                        ? new Date(p.scheduled_at_iso).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                        : p.scheduled_at;
+                    // What happened on each platform (posts scheduled from Studio Chat)
+                    const names = { facebook: 'Facebook', instagram: 'Instagram', linkedin: 'LinkedIn', youtube: 'YouTube' };
+                    const resultLines = Object.entries(p.results || {}).map(([pl, res]) => res.ok
+                        ? (res.permalink ? `<div class="sp-result ok"><i class="fas fa-check me-1"></i>${names[pl] || escapeHtml(pl)}: <a href="${escapeHtml(res.permalink)}" target="_blank" rel="noopener">view post</a></div>` : '')
+                        : `<div class="sp-result bad"><i class="fas fa-triangle-exclamation me-1"></i>${names[pl] || escapeHtml(pl)}: ${escapeHtml(res.error || 'not published')}</div>`).join('');
                     const manualBadge = cJson.is_manual ? '<span class="ap-tag ap-tag-primary ms-1">Manual</span>' : '';
 
                     const statusBadges = {
                         pending: '<span class="ap-status ap-status-pending"><i class="fas fa-clock"></i>Pending</span>',
                         published: '<span class="ap-status ap-status-approved"><i class="fas fa-check-circle"></i>Published</span>',
                         failed: '<span class="ap-status ap-status-rejected"><i class="fas fa-triangle-exclamation"></i>Failed</span>',
+                        partial: '<span class="ap-status ap-status-pending"><i class="fas fa-circle-exclamation"></i>Partly published</span>',
+                        publishing: '<span class="ap-status ap-status-pending"><i class="fas fa-spinner"></i>Publishing</span>',
                         cancelled: '<span class="ap-status ap-status-neutral"><i class="fas fa-ban"></i>Cancelled</span>'
                     };
 
+                    const canRetry = ['failed', 'partial', 'publishing'].includes(p.status) && (p.items || []).length;
                     const cancelBtn = p.status === 'pending'
                         ? `<button type="button" class="sp-cancel-btn" onclick="cancelScheduledPostItem(${p.id})"><i class="fas fa-ban"></i>Cancel</button>`
+                        : canRetry ? `<button type="button" class="sp-cancel-btn" onclick="retryScheduledPostItem(${p.id})" title="Send again the platforms that did not go out"><i class="fas fa-rotate-right"></i>Try again</button>`
                         : '—';
 
                     html += `
@@ -353,11 +451,12 @@ $(document).ready(function () {
                                     <div class="text-truncate">
                                         <span class="fw-semibold text-slate-800" title="${escapeHtml(storyText)}">${escapeHtml(storyText)}</span>
                                         ${manualBadge}
+                                        ${resultLines}
                                     </div>
                                 </div>
                             </td>
                             <td>${platforms}</td>
-                            <td class="font-monospace text-navy font-semibold">${p.scheduled_at}</td>
+                            <td class="text-navy font-semibold">${escapeHtml(when)}</td>
                             <td>${statusBadges[p.status] || p.status}</td>
                             <td class="text-end">${cancelBtn}</td>
                         </tr>
@@ -447,7 +546,7 @@ $(document).ready(function () {
 
         const formData = new FormData();
         formData.append('caption', caption);
-        formData.append('scheduled_at', scheduledAt);
+        formData.append('scheduled_at', scheduledAt && !isNaN(new Date(scheduledAt)) ? new Date(scheduledAt).toISOString() : '');
         formData.append('publish_now', publishNow ? 'true' : 'false');
 
         selectedPlatforms.forEach(p => formData.append('platforms', p));
@@ -486,6 +585,16 @@ $(document).ready(function () {
 
     $('#saveManualScheduleBtn').on('click', function () { submitManualPost(false); });
     $('#publishManualNowBtn').on('click', function () { submitManualPost(true); });
+
+    // Sends again, now, the platforms of a post that did not go out
+    window.retryScheduledPostItem = function (postId) {
+        $.ajax({ url: `/api/social/scheduled/${postId}/retry`, type: 'POST' })
+            .done(function () {
+                showToast('Trying again - it goes out within a minute.', 'info');
+                loadScheduledPosts();
+            })
+            .fail(function (xhr) { showToast((xhr.responseJSON || {}).error || 'Could not try again.', 'error'); });
+    };
 
     window.cancelScheduledPostItem = function (postId) {
         if (!confirm('Are you sure you want to cancel this scheduled post?')) return;

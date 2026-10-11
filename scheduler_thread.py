@@ -2,7 +2,7 @@ import json
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from threading import Thread
 
 from sqlalchemy.orm import Session
@@ -15,8 +15,19 @@ logger = logging.getLogger(__name__)
 
 def process_due_posts(app_root_path):
     """Query the DB for pending posts that are due, and publish them."""
+    # Posts with their own caption and media per platform (Studio Chat "Schedule")
+    try:
+        from services.schedule_service import publish_due
+
+        done = publish_due(os.path.join(app_root_path, "static", "uploads"))
+        if any(done.values()):
+            logger.info(f"Scheduled posts: {done}")
+    except Exception as e:
+        logger.warning(f"Error publishing scheduled posts: {e}")
+
+    # Older posts: one caption (and image) for every platform. Times are UTC.
     with Session(engine) as session:
-        now = datetime.now()
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         due_posts = (
             session.query(ScheduledPost)
             .filter(ScheduledPost.status == "pending", ScheduledPost.scheduled_at <= now)
@@ -29,6 +40,11 @@ def process_due_posts(app_root_path):
         publisher = SocialPublisherService()
 
         for post in due_posts:
+            try:
+                if (json.loads(post.content_json) or {}).get("items"):
+                    continue  # a per-platform post that became due just now: the next pass takes it
+            except (TypeError, ValueError, AttributeError):
+                pass
             logger.info(f"Processing Scheduled Post #{post.id} for user {post.user_id}...")
 
             try:
@@ -167,6 +183,20 @@ def run_scheduler(app_root_path):
                 run_nudges()
             except Exception as e:
                 logger.warning(f"Error running nudges: {e}")
+            # A bell notification a week before a social connection expires (LinkedIn's last 60 days)
+            try:
+                from services.social_oauth_service import notify_expiring
+
+                notify_expiring()
+            except Exception as e:
+                logger.warning(f"Error checking expiring social connections: {e}")
+            # Reminders for approval requests still pending after a day (APPROVAL_REMINDER_EMAILS=true)
+            try:
+                from services.approval_reminder_service import run_approval_reminders
+
+                run_approval_reminders()
+            except Exception as e:
+                logger.warning(f"Error running approval reminders: {e}")
 
         # Check every 20 seconds
         time.sleep(20)

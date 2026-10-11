@@ -1,0 +1,6 @@
+{#- In-app guide (static/js/guide.js): "Get started" checklist, a first-visit
+    tour per page, and "?" tips. Include once near the end of <body>, after
+    jQuery. Tours use Driver.js; without it the rest still works. -#}
+<link href="https://cdn.jsdelivr.net/npm/driver.js@1.3.1/dist/driver.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/driver.js@1.3.1/dist/driver.js.iife.js"></script>
+<script src="{{ url_for('static', filename='js/guide.js') }}"></script>

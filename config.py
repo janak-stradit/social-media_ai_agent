@@ -87,6 +87,27 @@ class Config:
     # Meta Graph API (Facebook + Instagram publishing). Meta retires each
     # version about two years after release - keep this on a current one.
     META_GRAPH_VERSION = os.getenv("META_GRAPH_VERSION", "v23.0")
+    # LinkedIn's versioned API (services/linkedin_service.py), YYYYMM. LinkedIn
+    # retires a version about a year after its release - bump it then.
+    LINKEDIN_API_VERSION = os.getenv("LINKEDIN_API_VERSION", "202609")
+    # The "Schedule" button in Studio Chat and the Image Library. Off: the
+    # button is shown as "Soon" and can't be clicked. The scheduling itself
+    # (calendar, Settings > Scheduled posts, the scheduler) is unaffected.
+    STUDIO_SCHEDULING = os.getenv("STUDIO_SCHEDULING", "false").lower() == "true"
+    # One-click "Connect with Facebook / LinkedIn" in Settings
+    # (services/social_oauth_service.py, docs/social-connect-setup.md). Each
+    # button appears once its app's ID and secret are set; until then accounts
+    # are connected by entering their details by hand.
+    META_APP_ID = os.getenv("META_APP_ID", "")
+    META_APP_SECRET = os.getenv("META_APP_SECRET", "")
+    # Facebook Login for Business: the configuration that holds the permissions (replaces the scope list)
+    META_LOGIN_CONFIG_ID = os.getenv("META_LOGIN_CONFIG_ID", "")
+    META_OAUTH_SCOPES = os.getenv(
+        "META_OAUTH_SCOPES", "pages_show_list,pages_manage_posts,pages_read_engagement,instagram_basic,instagram_content_publish")
+    LINKEDIN_CLIENT_ID = os.getenv("LINKEDIN_CLIENT_ID", "")
+    LINKEDIN_CLIENT_SECRET = os.getenv("LINKEDIN_CLIENT_SECRET", "")
+    # Add "w_organization_social r_organization_admin" once LinkedIn has approved the app for company pages
+    LINKEDIN_OAUTH_SCOPES = os.getenv("LINKEDIN_OAUTH_SCOPES", "openid profile w_member_social")
     # Public HTTPS address Instagram downloads post images from (Meta fetches
     # them itself). Defaults to APP_BASE_URL; set it if images are served elsewhere.
     PUBLIC_MEDIA_BASE_URL = os.getenv("PUBLIC_MEDIA_BASE_URL", "")
@@ -125,6 +146,10 @@ class Config:
     # only to users who created at least one post that month.
     MONTHLY_RECAP_EMAIL = os.getenv("MONTHLY_RECAP_EMAIL", "false").lower() == "true"
     RECAP_EMAIL_DAY = int(os.getenv("RECAP_EMAIL_DAY", "1"))
+    # Reminder to a reviewer whose approval request is still pending after a
+    # day, and once more after three (services/approval_reminder_service.py).
+    # Off until APPROVAL_REMINDER_EMAILS=true or switched on in Admin > Emails.
+    APPROVAL_REMINDER_EMAILS = os.getenv("APPROVAL_REMINDER_EMAILS", "false").lower() == "true"
     TRENDS_MAX_AGE_HOURS = int(os.getenv("TRENDS_MAX_AGE_HOURS", "24"))
     GEMINI_VIDEO_MODEL = os.getenv("GEMINI_VIDEO_MODEL", "veo-3.1-generate-preview")
     # Veo 3.1 accepts only 4, 6 or 8 seconds (8 when a reference image is

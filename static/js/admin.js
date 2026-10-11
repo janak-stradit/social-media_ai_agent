@@ -1314,6 +1314,7 @@ $(document).ready(function () {
         { id: 'weekly_ideas', name: 'Weekly ideas', icon: 'fa-lightbulb', what: 'Three post ideas from the user\'s industry trends and upcoming festivals.' },
         { id: 'nudge_emails', name: 'Festival & trend nudges', icon: 'fa-bell', what: 'A festival a few days away, this week\'s top story, or a nudge after a quiet spell. Always shown under the bell; this switch emails them too.' },
         { id: 'monthly_recap', name: 'Monthly recap', icon: 'fa-chart-pie', what: 'Last month\'s posts per platform, tips and ideas for next month.' },
+        { id: 'approval_reminders', name: 'Approval reminders', icon: 'fa-clock', what: 'Reminds a reviewer whose approval request is still waiting for a decision.' },
     ];
     const emailState = { page: 1, pageSize: 25, kinds: {}, options: null, previewOk: false, jobTimer: null };
 
