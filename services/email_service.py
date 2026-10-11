@@ -1097,6 +1097,41 @@ def _build_approval_decision_html(name: str, status: str, items: list[dict], com
 """
 
 
+def _build_approval_reminder_html(approval_url: str, requester: str, company: str | None, platforms: list[str],
+                                  waiting: str, last: bool) -> str:
+    names = ", ".join(_PLATFORM_NAMES.get(p, p.title()) for p in platforms) or "social media"
+    sender = f"{_escape(requester)} ({_escape(company)})" if company else _escape(requester)
+    return f"""\
+<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 0; background-color: #f3f4f6; font-family: 'Segoe UI', Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f3f4f6; padding: 32px 0;">
+        <tr><td align="center">
+            <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 12px; overflow: hidden;">
+                <tr><td style="background-color: #e85a1c; background-image: linear-gradient(135deg, #ffa066 0%, #e85a1c 100%); padding: 24px 32px;">
+                    <span style="color: #ffffff; font-size: 20px; font-weight: 700;">A post is waiting for your review</span>
+                    <div style="color: rgba(255,255,255,0.9); font-size: 13px; margin-top: 4px;">Sent {_escape(waiting)} ago</div>
+                </td></tr>
+                <tr><td style="padding: 22px 32px 6px 32px; font-size: 14px; color: #374151; line-height: 1.6;">
+                    {sender} asked you to review a <strong>{_escape(names)}</strong> post and is still waiting for your decision.
+                    It takes a minute: open the post, then approve it or ask for changes.
+                </td></tr>
+                <tr><td align="center" style="padding: 16px 32px 24px 32px;">
+                    <a href="{_escape(approval_url)}" style="display: inline-block; background-color: #c2410c; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 12px 28px; border-radius: 999px;">Review &amp; decide</a>
+                </td></tr>
+                <tr><td style="padding: 0 32px 22px 32px; font-size: 12px; color: #6b7280;">
+                    {"This is the last reminder about this post." if last else "You will get one more reminder if it is still waiting in two days."}
+                </td></tr>
+                <tr><td style="padding: 14px 32px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 11px;">
+                    AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a></td></tr>
+            </table>
+        </td></tr>
+    </table>
+</body>
+</html>
+"""
+
+
 class EmailService:
     def __init__(self):
         self.host = Config.SMTP_HOST
@@ -1247,6 +1282,19 @@ class EmailService:
         msg["To"] = to_email
         msg.attach(MIMEText(_build_approval_decision_html(name, status, items, comments, decided_by, review_url), "html"))
         self._deliver(msg, [to_email], "approval_decision")
+        return {"success": True, "recipient": to_email}
+
+    def send_approval_reminder(self, to_email: str, approval_url: str, requester: str, company: str | None,
+                               platforms: list[str], waiting: str, last: bool = False) -> dict:
+        """Reminds a reviewer about a request still pending (services/approval_reminder_service.py)."""
+        if not self.enabled:
+            raise RuntimeError("SMTP is not configured. Set SMTP_HOST, SMTP_USERNAME and SMTP_PASSWORD in .env.")
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = f"Reminder: {company or requester} is waiting for your review"
+        msg["From"] = self.from_email
+        msg["To"] = to_email
+        msg.attach(MIMEText(_build_approval_reminder_html(approval_url, requester, company, platforms, waiting, last), "html"))
+        self._deliver(msg, [to_email], "approval_reminder")
         return {"success": True, "recipient": to_email}
 
     def send_welcome_verification_email(self, to_email: str, name: str, verify_url: str) -> dict:

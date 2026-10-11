@@ -131,6 +131,10 @@ class User(Base):
     recap_email_last_month: Mapped[str | None] = mapped_column(String(7), nullable=True)
     # Posts the user aims to create each week (Content Calendar). None = WEEKLY_POST_GOAL_DEFAULT.
     weekly_post_goal: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # In-app guide (services/guide_service.py): JSON {"tours": [...seen],
+    # "checklist_dismissed": bool, "events": [...]} - so tours don't repeat
+    # on another device.
+    guide_state: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class SalesContactRequest(Base):
@@ -334,11 +338,33 @@ class SocialAccount(Base):
     mcp_endpoint: Mapped[str | None] = mapped_column(Text, nullable=True)
     mcp_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     mcp_tool_name: Mapped[str | None] = mapped_column(String(120), default="linkedin_publish_post", nullable=True)
+    # How it was connected: "manual" (details typed in Settings) or "oauth"
+    # (one-click sign-in, services/social_oauth_service.py), and when the
+    # sign-in runs out (UTC; LinkedIn's last 60 days, a Page token doesn't).
+    connected_via: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    token_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     status: Mapped[str] = mapped_column(
         String(32), default="connected", nullable=False
     )  # connected, disconnected, expired
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+
+
+class OAuthPending(Base):
+    """Accounts found by a one-click sign-in when there are several to choose
+    from (services/social_oauth_service.py). Holds their tokens for a few
+    minutes, on the server, until the user picks one."""
+
+    __tablename__ = "oauth_pending"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload: Mapped[str] = mapped_column(Text, nullable=False)  # JSON list of options
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
 class ApprovedAsset(Base):
@@ -591,6 +617,11 @@ class ApprovalRequest(Base):
     #  slide_titles, linkedin_format, pdf_url, compliance, decision, comment}.
     # Null for the older one-platform requests (the columns above).
     items: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Reminder emails to the reviewer while it stays pending
+    # (services/approval_reminder_service.py): how many were sent, and when
+    # the last one was tried.
+    reminder_count: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    last_reminder_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
@@ -607,8 +638,26 @@ class ScheduledPost(Base):
     scheduled_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     status: Mapped[str] = mapped_column(
         String(32), default="pending", nullable=False
-    )  # pending, published, failed, cancelled
+    )  # pending, publishing, published, partial, failed, cancelled (services/schedule_service.py)
     content_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class SavedBrief(Base):
+    """A brief the user starred in Studio Chat to use again (the text they
+    typed, and the platforms it was for)."""
+
+    __tablename__ = "saved_briefs"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True
+    )
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    platforms: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list
+    use_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
@@ -691,6 +740,7 @@ def init_db():
             f"ALTER TABLE {usr_tbl} ADD COLUMN ideas_email_last_sent_at TIMESTAMP",
             f"ALTER TABLE {usr_tbl} ADD COLUMN nudge_email_enabled BOOLEAN",
             f"ALTER TABLE {usr_tbl} ADD COLUMN weekly_post_goal INTEGER",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN guide_state TEXT",
             f"ALTER TABLE {usr_tbl} ADD COLUMN recap_email_enabled BOOLEAN",
             f"ALTER TABLE {usr_tbl} ADD COLUMN recap_email_last_month VARCHAR(7)",
         ]:
@@ -726,6 +776,8 @@ def init_db():
             f"ALTER TABLE {approval_tbl} ADD COLUMN compliance TEXT",
             f"ALTER TABLE {approval_tbl} ADD COLUMN reviewer_email VARCHAR(255)",
             f"ALTER TABLE {approval_tbl} ADD COLUMN items TEXT",
+            f"ALTER TABLE {approval_tbl} ADD COLUMN reminder_count INTEGER DEFAULT 0",
+            f"ALTER TABLE {approval_tbl} ADD COLUMN last_reminder_at TIMESTAMP",
             f"ALTER TABLE {invite_tbl} ADD COLUMN inviter_name VARCHAR(255)",
         ]:
             try:
@@ -741,6 +793,8 @@ def init_db():
             ("mcp_token", "TEXT"),
             ("mcp_tool_name", "VARCHAR(120) DEFAULT 'linkedin_publish_post'"),
             ("refresh_token", "TEXT"),
+            ("connected_via", "VARCHAR(16)"),
+            ("token_expires_at", "TIMESTAMP"),
         ]:
             try:
                 with engine.begin() as sub_conn:
@@ -1279,24 +1333,22 @@ def posts_created_between(user_id: int, start: datetime, end: datetime) -> list[
 
 
 def scheduled_posts_between(user_id: int, start: datetime, end: datetime) -> list[dict]:
+    """The calendar's scheduled posts (not the cancelled ones), with scheduled_at as an aware UTC datetime."""
     lo = start.astimezone(timezone.utc).replace(tzinfo=None)
     hi = end.astimezone(timezone.utc).replace(tzinfo=None)
     with Session(engine) as session:
         rows = (
             session.query(ScheduledPost)
             .filter(ScheduledPost.user_id == user_id, ScheduledPost.scheduled_at >= lo, ScheduledPost.scheduled_at < hi,
-                    ScheduledPost.status.in_(("pending", "published")))
+                    ScheduledPost.status != "cancelled")
             .order_by(ScheduledPost.scheduled_at.asc())
             .all()
         )
         out = []
         for row in rows:
-            try:
-                platforms = json.loads(row.platforms)
-            except (TypeError, ValueError):
-                platforms = [p.strip() for p in (row.platforms or "").split(",") if p.strip()]
-            out.append({"id": row.id, "scheduled_at": _as_utc(row.scheduled_at), "status": row.status,
-                        "platforms": platforms if isinstance(platforms, list) else []})
+            post = _scheduled_post_dict(row)
+            out.append({**{k: post[k] for k in ("id", "status", "platforms", "title", "thumb", "results", "media", "conversation_id")},
+                        "scheduled_at": _as_utc(row.scheduled_at), "movable": row.status == "pending"})
         return out
 
 
@@ -1766,6 +1818,86 @@ def _asset_dict(r: "ImageGeneration") -> dict:
         "height": r.height,
         "created_at": r.created_at.isoformat() if r.created_at else None,
     }
+
+
+def list_user_images(user_id: int, limit: int = 60, offset: int = 0, query: str | None = None) -> tuple[list[dict], int]:
+    """The image library: every image the user has made (edits included),
+    newest first, optionally only those whose description matches. -> (images, total)"""
+    with Session(engine) as session:
+        rows = session.query(ImageGeneration).filter(
+            ImageGeneration.user_id == user_id, ImageGeneration.kind.in_(("image", "edit")),
+            ImageGeneration.media_url.isnot(None), ImageGeneration.media_url != "",
+        )
+        words = [w for w in (query or "").lower().split() if w][:6]
+        for word in words:
+            # % and _ typed by the user are searched for as themselves
+            like = "%" + word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+            rows = rows.filter(or_(func.lower(func.coalesce(ImageGeneration.prompt, "")).like(like, escape="\\"),
+                                   func.lower(func.coalesce(ImageGeneration.description, "")).like(like, escape="\\"),
+                                   func.lower(func.coalesce(ImageGeneration.edit_instruction, "")).like(like, escape="\\")))
+        total = rows.count()
+        page = rows.order_by(ImageGeneration.id.desc()).offset(max(0, offset)).limit(max(1, min(limit, 200))).all()
+        return [_asset_dict(r) for r in page], total
+
+
+# ── Saved briefs (Studio Chat: the star on a message) ──────────────────────
+MAX_SAVED_BRIEFS = 50
+
+
+def _saved_brief_dict(row: "SavedBrief") -> dict:
+    try:
+        platforms = json.loads(row.platforms) if row.platforms else []
+    except (TypeError, ValueError):
+        platforms = []
+    return {"id": row.id, "text": row.text, "platforms": platforms if isinstance(platforms, list) else [],
+            "use_count": row.use_count or 0, "created_at": _as_utc(row.created_at).isoformat()}
+
+
+def list_saved_briefs(user_id: int) -> list[dict]:
+    """Most recently used (or saved) first."""
+    with Session(engine) as session:
+        rows = session.query(SavedBrief).filter(SavedBrief.user_id == user_id).all()
+        rows.sort(key=lambda r: r.last_used_at or r.created_at, reverse=True)
+        return [_saved_brief_dict(r) for r in rows]
+
+
+def save_brief(user_id: int, text: str, platforms: list | None = None) -> tuple[dict | None, bool]:
+    """(the saved brief, True when it is new). The same text is saved once.
+    (None, False) when the user already has MAX_SAVED_BRIEFS."""
+    text = (text or "").strip()[:4000]
+    with Session(engine) as session:
+        rows = session.query(SavedBrief).filter(SavedBrief.user_id == user_id).all()
+        same = next((r for r in rows if r.text.strip().lower() == text.lower()), None)
+        if same:
+            return _saved_brief_dict(same), False
+        if len(rows) >= MAX_SAVED_BRIEFS:
+            return None, False
+        row = SavedBrief(user_id=user_id, text=text, platforms=json.dumps([str(p) for p in (platforms or [])][:6]))
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return _saved_brief_dict(row), True
+
+
+def delete_saved_brief(user_id: int, brief_id: int) -> bool:
+    with Session(engine) as session:
+        row = session.query(SavedBrief).filter(SavedBrief.id == brief_id, SavedBrief.user_id == user_id).first()
+        if not row:
+            return False
+        session.delete(row)
+        session.commit()
+        return True
+
+
+def mark_brief_used(user_id: int, brief_id: int) -> bool:
+    with Session(engine) as session:
+        row = session.query(SavedBrief).filter(SavedBrief.id == brief_id, SavedBrief.user_id == user_id).first()
+        if not row:
+            return False
+        row.use_count = (row.use_count or 0) + 1
+        row.last_used_at = _utcnow().replace(tzinfo=None)
+        session.commit()
+        return True
 
 
 def get_image_asset(asset_id: int | None, user_id: int) -> dict | None:
@@ -2861,6 +2993,9 @@ def get_user_social_accounts(user_id: int) -> list[dict]:
                     "mcp_endpoint": getattr(acc, "mcp_endpoint", None),
                     "mcp_tool_name": getattr(acc, "mcp_tool_name", "linkedin_publish_post") or "linkedin_publish_post",
                     "status": acc.status,
+                    "connected_via": getattr(acc, "connected_via", None) or "manual",
+                    "token_expires_at": _as_utc(acc.token_expires_at).isoformat() if getattr(acc, "token_expires_at", None) else None,
+                    "expired": bool(getattr(acc, "token_expires_at", None) and acc.token_expires_at <= _utcnow().replace(tzinfo=None)),
                     "updated_at": acc.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
                 }
             )
@@ -2878,8 +3013,11 @@ def save_social_account(
     mcp_endpoint: str | None = None,
     mcp_token: str | None = None,
     mcp_tool_name: str | None = None,
+    connected_via: str = "manual",
+    token_expires_at: datetime | None = None,
 ) -> dict:
-    """Create or update a connected social media account with optional MCP support."""
+    """Create or update a connected social media account with optional MCP support.
+    connected_via / token_expires_at describe the access token being saved."""
     with Session(engine) as session:
         acc = (
             session.query(SocialAccount)
@@ -2899,6 +3037,8 @@ def save_social_account(
                 mcp_endpoint=mcp_endpoint,
                 mcp_token=mcp_token,
                 mcp_tool_name=mcp_tool_name or "linkedin_publish_post",
+                connected_via=connected_via,
+                token_expires_at=token_expires_at,
                 status="connected",
             )
             session.add(acc)
@@ -2908,6 +3048,8 @@ def save_social_account(
                 acc.account_id = account_id
             if access_token:
                 acc.access_token = access_token
+                acc.connected_via = connected_via  # a new token: how it came, and when it runs out
+                acc.token_expires_at = token_expires_at
             if refresh_token:
                 acc.refresh_token = refresh_token
             if connection_type:
@@ -2932,6 +3074,50 @@ def save_social_account(
             "mcp_tool_name": getattr(acc, "mcp_tool_name", "linkedin_publish_post"),
             "status": acc.status,
         }
+
+
+def expiring_social_accounts(before: datetime) -> list[dict]:
+    """Connected accounts whose sign-in runs out by `before` (naive UTC) - or already has."""
+    with Session(engine) as session:
+        rows = (
+            session.query(SocialAccount)
+            .filter(SocialAccount.status == "connected", SocialAccount.token_expires_at.isnot(None),
+                    SocialAccount.token_expires_at <= before)
+            .all()
+        )
+        return [{"id": r.id, "user_id": r.user_id, "platform": r.platform, "account_name": r.account_name,
+                 "token_expires_at": r.token_expires_at} for r in rows]
+
+
+# ── One-click connect: accounts waiting for the user's choice ───────────────
+
+
+def create_oauth_pending(user_id: int, provider: str, options: list[dict], ttl_minutes: int) -> str:
+    """Stores the options (with their tokens) and returns the id the page asks with. Older ones are cleared."""
+    pending_id = secrets.token_urlsafe(32)
+    with Session(engine) as session:
+        cutoff = _utcnow().replace(tzinfo=None) - timedelta(minutes=ttl_minutes)
+        session.query(OAuthPending).filter(or_(OAuthPending.created_at < cutoff, OAuthPending.user_id == user_id)).delete(synchronize_session=False)
+        session.add(OAuthPending(id=pending_id, user_id=user_id, provider=provider, payload=json.dumps(options),
+                                 created_at=_utcnow().replace(tzinfo=None)))
+        session.commit()
+    return pending_id
+
+
+def get_oauth_pending(user_id: int, pending_id: str, ttl_minutes: int) -> dict | None:
+    with Session(engine) as session:
+        row = session.get(OAuthPending, str(pending_id or "")[:64])
+        if not row or row.user_id != user_id:
+            return None
+        if row.created_at < _utcnow().replace(tzinfo=None) - timedelta(minutes=ttl_minutes):
+            return None
+        return {"provider": row.provider, "options": json.loads(row.payload)}
+
+
+def delete_oauth_pending(pending_id: str) -> None:
+    with Session(engine) as session:
+        session.query(OAuthPending).filter(OAuthPending.id == str(pending_id or "")[:64]).delete(synchronize_session=False)
+        session.commit()
 
 
 def disconnect_social_account(user_id: int, platform: str) -> bool:
@@ -2969,8 +3155,47 @@ def create_scheduled_post(
             "id": post.id,
             "platforms": platforms,
             "scheduled_at": post.scheduled_at.strftime("%Y-%m-%d %H:%M:%S"),
+            "scheduled_at_iso": _as_utc(post.scheduled_at).isoformat(),
             "status": post.status,
         }
+
+
+def _scheduled_post_dict(row: "ScheduledPost") -> dict:
+    """A scheduled post for the pages. Older posts hold one caption for every
+    platform; newer ones (services/schedule_service.py) an item per platform."""
+    try:
+        platforms = json.loads(row.platforms)
+    except (TypeError, ValueError):
+        platforms = [p.strip() for p in (row.platforms or "").split(",") if p.strip()]
+    try:
+        content = json.loads(row.content_json)
+    except (TypeError, ValueError):
+        content = {}
+    content = content if isinstance(content, dict) else {}
+    items = content.get("items") if isinstance(content.get("items"), list) else []
+    first = items[0] if items else {}
+    title = first.get("caption") or content.get("caption") or content.get("story") or "Post"
+    images = first.get("images") or ([content["image_url"]] if content.get("image_url") else [])
+    return {
+        "id": row.id,
+        "user_id": row.user_id,
+        "run_id": row.run_id,
+        "platforms": platforms if isinstance(platforms, list) else [],
+        # kept as it was for older pages; scheduled_at_iso is the one to show (UTC with its offset)
+        "scheduled_at": row.scheduled_at.strftime("%Y-%m-%d %H:%M:%S"),
+        "scheduled_at_iso": _as_utc(row.scheduled_at).isoformat(),
+        "status": row.status,
+        "content_json": content,
+        "content": content,
+        "items": items,
+        "results": content.get("results") if isinstance(content.get("results"), dict) else {},
+        "story": content.get("story") or content.get("caption") or "Campaign Post",
+        "title": " ".join(str(title).split())[:140],
+        "thumb": images[0] if images else None,
+        "media": "carousel" if any(i.get("media") == "carousel" for i in items) else ("image" if images else "text"),
+        "conversation_id": (content.get("source") or {}).get("conversation_id") if isinstance(content.get("source"), dict) else None,
+        "created_at": row.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+    }
 
 
 def get_user_scheduled_posts(user_id: int) -> list[dict]:
@@ -2982,31 +3207,71 @@ def get_user_scheduled_posts(user_id: int) -> list[dict]:
             .order_by(ScheduledPost.scheduled_at.asc())
             .all()
         )
+        return [_scheduled_post_dict(p) for p in posts]
 
-        results = []
-        for p in posts:
-            try:
-                platforms = json.loads(p.platforms)
-            except Exception:
-                platforms = [p.platforms]
-            try:
-                content = json.loads(p.content_json)
-            except Exception:
-                content = {}
 
-            results.append(
-                {
-                    "id": p.id,
-                    "run_id": p.run_id,
-                    "platforms": platforms,
-                    "scheduled_at": p.scheduled_at.strftime("%Y-%m-%d %H:%M:%S"),
-                    "status": p.status,
-                    "content_json": content,
-                    "story": content.get("story") or content.get("caption") or "Campaign Post",
-                    "created_at": p.created_at.strftime("%Y-%m-%d %H:%M:%S"),
-                }
-            )
-        return results
+def get_scheduled_post(user_id: int, post_id: int) -> dict | None:
+    with Session(engine) as session:
+        row = session.query(ScheduledPost).filter(ScheduledPost.id == post_id, ScheduledPost.user_id == user_id).first()
+        return _scheduled_post_dict(row) if row else None
+
+
+def move_scheduled_post(user_id: int, post_id: int, scheduled_at: datetime) -> bool:
+    """A new time (naive UTC) for a post that is still waiting."""
+    with Session(engine) as session:
+        changed = (
+            session.query(ScheduledPost)
+            .filter(ScheduledPost.id == post_id, ScheduledPost.user_id == user_id, ScheduledPost.status == "pending")
+            .update({ScheduledPost.scheduled_at: scheduled_at}, synchronize_session=False)
+        )
+        session.commit()
+        return bool(changed)
+
+
+def due_scheduled_posts(now: datetime) -> list[dict]:
+    """Waiting posts whose time (naive UTC) has come and that hold an item per platform."""
+    with Session(engine) as session:
+        rows = (
+            session.query(ScheduledPost)
+            .filter(ScheduledPost.status == "pending", ScheduledPost.scheduled_at <= now)
+            .order_by(ScheduledPost.scheduled_at.asc())
+            .all()
+        )
+        return [post for post in (_scheduled_post_dict(r) for r in rows) if post["items"]]
+
+
+def claim_scheduled_post(post_id: int) -> bool:
+    """pending -> publishing, in one statement: True for the one caller that gets to publish it."""
+    with Session(engine) as session:
+        changed = (
+            session.query(ScheduledPost)
+            .filter(ScheduledPost.id == post_id, ScheduledPost.status == "pending")
+            .update({ScheduledPost.status: "publishing"}, synchronize_session=False)
+        )
+        session.commit()
+        return bool(changed)
+
+
+def finish_scheduled_post(post_id: int, status: str, content: dict) -> None:
+    with Session(engine) as session:
+        row = session.get(ScheduledPost, post_id)
+        if row:
+            row.status = status
+            row.content_json = json.dumps(content)
+            session.commit()
+
+
+def requeue_scheduled_post(user_id: int, post_id: int, now: datetime) -> bool:
+    """A post that didn't (all) go out becomes due again, now."""
+    with Session(engine) as session:
+        changed = (
+            session.query(ScheduledPost)
+            .filter(ScheduledPost.id == post_id, ScheduledPost.user_id == user_id,
+                    ScheduledPost.status.in_(("failed", "partial", "publishing")))
+            .update({ScheduledPost.status: "pending", ScheduledPost.scheduled_at: now}, synchronize_session=False)
+        )
+        session.commit()
+        return bool(changed)
 
 
 def cancel_scheduled_post(user_id: int, post_id: int) -> bool:
@@ -3455,6 +3720,8 @@ def _approval_request_to_dict(r: "ApprovalRequest") -> dict:
         "compliance": json.loads(r.compliance) if getattr(r, "compliance", None) else None,
         "reviewer_email": getattr(r, "reviewer_email", None),
         "items": json.loads(r.items) if getattr(r, "items", None) else None,
+        "reminder_count": getattr(r, "reminder_count", None) or 0,
+        "last_reminder_at": _as_utc(r.last_reminder_at).isoformat() if getattr(r, "last_reminder_at", None) else None,
         # UTC with its offset, so the browser shows it in the viewer's time zone
         "created_at": _as_utc(r.created_at).isoformat() if r.created_at else None,
     }
@@ -3508,6 +3775,41 @@ def get_approval_request(request_id: int) -> dict | None:
     with Session(engine) as session:
         req = session.get(ApprovalRequest, request_id)
         return _approval_request_to_dict(req) if req else None
+
+
+def approvals_awaiting_reminder(now: datetime, after_hours: tuple, max_age_days: int, retry_hours: int = 12) -> list[dict]:
+    """Pending requests due their next reminder: reminder n goes out once the
+    request is after_hours[n] old. Older than max_age_days: left alone. One
+    tried in the last retry_hours (sent or failed) waits."""
+    with Session(engine) as session:
+        rows = (
+            session.query(ApprovalRequest)
+            .filter(ApprovalRequest.status == "pending", ApprovalRequest.reviewer_email.isnot(None),
+                    ApprovalRequest.created_at >= now - timedelta(days=max_age_days))
+            .order_by(ApprovalRequest.created_at.asc())
+            .all()
+        )
+        due = []
+        for row in rows:
+            sent = row.reminder_count or 0
+            if sent >= len(after_hours) or _as_utc(row.created_at) > now - timedelta(hours=after_hours[sent]):
+                continue
+            if row.last_reminder_at and _as_utc(row.last_reminder_at) > now - timedelta(hours=retry_hours):
+                continue
+            due.append(_approval_request_to_dict(row))
+        return due
+
+
+def mark_approval_reminder(request_id: int, now: datetime, sent: bool) -> None:
+    """Records a reminder attempt; only a sent one counts towards the total."""
+    with Session(engine) as session:
+        row = session.get(ApprovalRequest, request_id)
+        if not row:
+            return
+        row.last_reminder_at = now
+        if sent:
+            row.reminder_count = (row.reminder_count or 0) + 1
+        session.commit()
 
 
 def _visible_to(query, user_id: int | None, email: str | None):
@@ -3619,7 +3921,7 @@ EMAIL_KINDS = {
     "ideas_campaign": "Ideas (admin)", "monthly_recap": "Monthly recap", "verification": "Email verification",
     "password_reset": "Password reset", "invitation": "Invitation", "approval_request": "Approval request",
     "approval_notification": "Approval notification", "approval_decision": "Approval decision",
-    "credit_decision": "Credit decision", "sales_lead": "Sales lead",
+    "credit_decision": "Credit decision", "sales_lead": "Sales lead", "approval_reminder": "Approval reminder",
 }
 
 
@@ -3711,7 +4013,7 @@ def emailed_recently(user_id: int, kinds: tuple[str, ...], hours: int = 24) -> b
 # values (WEEKLY_IDEAS_EMAIL, NUDGE_EMAILS, MONTHLY_RECAP_EMAIL) are the
 # defaults until an admin changes a switch.
 EMAIL_AUTOMATIONS = {"weekly_ideas": "WEEKLY_IDEAS_EMAIL", "nudge_emails": "NUDGE_EMAILS",
-                     "monthly_recap": "MONTHLY_RECAP_EMAIL"}
+                     "monthly_recap": "MONTHLY_RECAP_EMAIL", "approval_reminders": "APPROVAL_REMINDER_EMAILS"}
 
 
 def get_email_automation() -> dict:
@@ -3793,3 +4095,47 @@ def occasion_emailed(user_id: int, occasion_name: str) -> bool:
         except ValueError:
             continue
     return False
+
+
+# ── In-app guide (getting-started checklist + tours) ─────────────────────────
+
+
+def get_guide_state(user_id: int) -> dict:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        try:
+            state = json.loads(user.guide_state) if user and user.guide_state else {}
+        except ValueError:
+            state = {}
+    return {"tours": list(state.get("tours") or []), "checklist_dismissed": bool(state.get("checklist_dismissed")),
+            "events": list(state.get("events") or [])}
+
+
+def save_guide_state(user_id: int, state: dict) -> dict:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if user:
+            user.guide_state = json.dumps(state)
+            session.commit()
+    return state
+
+
+def guide_progress_facts(user_id: int) -> dict:
+    """What the user has done so far, for the getting-started checklist - one cheap query each."""
+    with Session(engine) as session:
+        def exists(query) -> bool:
+            return session.query(query.exists()).scalar()
+
+        profile = session.query(UserBrandProfile).filter(UserBrandProfile.user_id == user_id).first()
+        return {
+            "brand_profile": bool(profile and (profile.company_name or profile.website)),
+            "post": exists(session.query(RunHistory.id).filter(RunHistory.user_id == user_id)),
+            "image": exists(session.query(ImageGeneration.id).filter(ImageGeneration.user_id == user_id)),
+            "idea_link": exists(session.query(IdeaLink.token).filter(IdeaLink.user_id == user_id, IdeaLink.opened_at.isnot(None))),
+            "approval": exists(session.query(ApprovalRequest.id).filter(ApprovalRequest.user_id == user_id)),
+            "social": exists(session.query(SocialAccount.id).filter(SocialAccount.user_id == user_id,
+                                                                     SocialAccount.status == "connected")),
+            "published": exists(session.query(ScheduledPost.id).filter(ScheduledPost.user_id == user_id))
+            or exists(session.query(ApprovalRequest.id).filter(ApprovalRequest.user_id == user_id,
+                                                               ApprovalRequest.items.like('%"published": {%'))),
+        }

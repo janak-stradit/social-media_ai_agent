@@ -275,7 +275,8 @@ def test_only_an_approved_item_can_be_published_and_only_once(app, graph, approv
     _decide(app, approved, {"0": {"decision": "approved"}, "1": {"decision": "changes", "comment": "x"}})
 
     view = owner.get(f"/api/approval-requests/{rid}").get_json()["request"]
-    assert view["publishing"] == {"can_publish": True, "instagram": "@acme.logistics"}
+    assert view["publishing"] == {"can_publish": True, "instagram": "@acme.logistics",
+                                  "accounts": {"linkedin": None, "instagram": "@acme.logistics", "facebook": None}}
     reviewer_view = _login(app, approved["reviewer"]).get(f"/api/approval-requests/{rid}").get_json()["request"]
     assert reviewer_view["publishing"] == {"can_publish": False}
     assert _login(app, approved["reviewer"]).post(f"/api/approval-requests/{rid}/publish",
@@ -289,7 +290,10 @@ def test_only_an_approved_item_can_be_published_and_only_once(app, graph, approv
     carousel = next(c for c in graph.calls if c[2].get("media_type") == "CAROUSEL")
     assert carousel[2]["caption"] == "Track every truck\n\n#logistics"
     assert owner.post(f"/api/approval-requests/{rid}/publish", json={"platform": "instagram"}).status_code == 409
-    assert owner.post(f"/api/approval-requests/{rid}/publish", json={"platform": "facebook"}).status_code == 400
+    # Facebook was sent back for changes: nothing to publish there
+    facebook = owner.post(f"/api/approval-requests/{rid}/publish", json={"platform": "facebook"})
+    assert facebook.status_code == 409 and "approved" in facebook.get_json()["error"]
+    assert owner.post(f"/api/approval-requests/{rid}/publish", json={"platform": "youtube"}).status_code == 400
 
 
 def test_a_failed_publish_is_shown_on_the_item(app, graph, approved):

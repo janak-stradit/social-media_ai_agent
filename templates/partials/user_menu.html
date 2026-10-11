@@ -6,6 +6,10 @@
 {%- set p = request.path -%}
 {#- Header bell: timely nudges (services/nudge_service.py), each opening
     Studio Chat with an idea loaded. Filled in by static/js/user_menu.js. -#}
+{#- "?" - the Help Center (/help); also the last stop of the Studio Chat tour -#}
+<a class="nb-trigger help-trigger" id="helpCenterBtn" href="/help" aria-label="Help Center" title="Help Center">
+    <i class="fas fa-circle-question" aria-hidden="true"></i>
+</a>
 <div class="nb" id="notifBell">
     <button type="button" class="nb-trigger" id="notifBellBtn" aria-haspopup="true" aria-expanded="false" aria-controls="notifBellPanel" aria-label="Notifications" title="Notifications">
         <i class="fas fa-bell" aria-hidden="true"></i>
@@ -76,6 +80,9 @@
             <a class="um-link{{ ' active' if p.startswith('/calendar') }}" href="/calendar" role="menuitem">
                 <i class="fas fa-calendar-days" aria-hidden="true"></i>Content Calendar
             </a>
+            <a class="um-link{{ ' active' if p.startswith('/library') }}" href="/library" role="menuitem">
+                <i class="fas fa-images" aria-hidden="true"></i>Image Library
+            </a>
             <a class="um-link{{ ' active' if p.startswith('/competitor-dashboard') }}" href="/competitor-dashboard" role="menuitem">
                 <i class="fas fa-chart-line" aria-hidden="true"></i>Analysis Dashboard
                 <span class="um-tag d-none" id="umAnalysisTag">Enterprise</span>
@@ -97,6 +104,17 @@
             </button>
             <a class="um-link d-none{{ ' active' if p.startswith('/admin') }}" id="dropAdminPortalLi" href="/admin" role="menuitem">
                 <i class="fas fa-user-shield" aria-hidden="true"></i>Admin Control Center
+            </a>
+        </nav>
+
+        <!-- Help -->
+        <div class="um-section-label">Help</div>
+        <nav class="um-links">
+            <a class="um-link{{ ' active' if p.startswith('/help') }}" href="/help" role="menuitem">
+                <i class="fas fa-circle-question" aria-hidden="true"></i>Help Center
+            </a>
+            <a class="um-link" href="/dashboard?tour=studio" role="menuitem" id="umTakeTour">
+                <i class="fas fa-route" aria-hidden="true"></i>Take the tour again
             </a>
         </nav>
 

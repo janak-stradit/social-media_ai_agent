@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ article.title + ' - ' if article }}Help Center - AVIR AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+    <style>
+        /* Help Center. Layout mirrors /approve (side panel + content);
+           articles are Markdown files in help/ (services/help_center.py). */
+        body { overflow: hidden; }
+        .help-search { position: relative; margin: 0 0 0.9rem; }
+        .help-search i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #9ca3af; font-size: 0.85rem; }
+        .help-search input { width: 100%; height: 40px; padding: 0 12px 0 34px; border: 1px solid var(--bp-border); border-radius: 10px; font-size: 0.88rem; background: #fff; }
+        .help-search input:focus { outline: none; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.12); }
+        .help-nav a { text-decoration: none; }
+        .help-results { display: flex; flex-direction: column; gap: 0.6rem; }
+        .help-result { display: block; text-decoration: none; border: 1px solid var(--bp-border); border-radius: 12px; padding: 0.85rem 1rem; background: #fff; color: inherit; }
+        .help-result:hover { border-color: var(--brand); }
+        .help-result strong { color: var(--bp-text); }
+        .help-result small { display: block; color: var(--bp-text-sub); margin-top: 2px; }
+        .help-result mark { background: #fff1e6; color: inherit; padding: 0 2px; border-radius: 3px; }
+        .help-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 1rem; }
+        .help-card { display: flex; gap: 0.85rem; text-decoration: none; color: inherit; background: #fff; border: 1px solid var(--bp-border); border-radius: 14px; padding: 1.1rem; transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s; }
+        .help-card:hover { border-color: var(--brand); transform: translateY(-2px); box-shadow: var(--bp-shadow-sm); }
+        .help-card .card-icon-circle { flex-shrink: 0; }
+        .help-card strong { display: block; color: var(--bp-text); font-size: 0.98rem; }
+        .help-card span { display: block; color: var(--bp-text-sub); font-size: 0.84rem; line-height: 1.45; margin-top: 3px; }
+        .help-start { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1.25rem; }
+        .help-article-wrap { display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 2rem; align-items: start; }
+        .help-article { background: #fff; border: 1px solid var(--bp-border); border-radius: 16px; padding: 2rem 2.25rem; max-width: 820px; }
+        .help-article .help-crumb { font-size: 0.8rem; color: var(--bp-text-sub); margin-bottom: 0.6rem; }
+        .help-article .help-crumb a { color: var(--brand-strong); text-decoration: none; font-weight: 600; }
+        .help-article h1 { font-size: 1.7rem; font-weight: 700; color: var(--bp-text); letter-spacing: -0.01em; margin-bottom: 0.4rem; }
+        .help-article .help-lead { color: var(--bp-text-sub); font-size: 1rem; margin-bottom: 1.4rem; }
+        .help-body { font-size: 0.95rem; line-height: 1.7; color: #374151; }
+        .help-body h3 { font-size: 1.2rem; font-weight: 700; color: var(--bp-text); margin: 1.9rem 0 0.6rem; scroll-margin-top: 1rem; }
+        .help-body h4 { font-size: 1rem; font-weight: 700; color: var(--bp-text); margin: 1.3rem 0 0.4rem; scroll-margin-top: 1rem; }
+        .help-body p { margin-bottom: 0.85rem; }
+        .help-body ul, .help-body ol { padding-left: 1.3rem; margin-bottom: 0.9rem; }
+        .help-body li { margin-bottom: 0.35rem; }
+        .help-body a { color: var(--brand-strong); font-weight: 600; }
+        .help-body code { background: #f3f4f6; color: #111827; border-radius: 5px; padding: 1px 6px; font-size: 0.86em; }
+        .help-callout { border-radius: 10px; padding: 0.75rem 1rem; margin: 1rem 0; font-size: 0.9rem; border-left: 3px solid; }
+        .help-tip { background: #fff7ed; border-color: var(--brand); }
+        .help-note { background: #eff6ff; border-color: #2563eb; }
+        .help-table { overflow-x: auto; margin: 0.9rem 0 1.1rem; }
+        .help-table table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+        .help-table th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #6b7280; padding: 8px 10px; border-bottom: 2px solid var(--bp-border); }
+        .help-table td { padding: 8px 10px; border-bottom: 1px solid #f1f2f5; vertical-align: top; }
+        .help-toc { position: sticky; top: 1rem; font-size: 0.83rem; }
+        .help-toc-title { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #6b7280; margin-bottom: 0.5rem; }
+        .help-toc a { display: block; color: var(--bp-text-sub); text-decoration: none; padding: 3px 0 3px 10px; border-left: 2px solid var(--bp-border); }
+        .help-toc a:hover { color: var(--brand-strong); border-left-color: var(--brand); }
+        .help-toc a.sub { padding-left: 20px; }
+        .help-pager { display: flex; justify-content: space-between; gap: 1rem; margin-top: 2rem; padding-top: 1.25rem; border-top: 1px solid var(--bp-border); }
+        .help-pager a { text-decoration: none; color: var(--brand-strong); font-weight: 600; font-size: 0.9rem; }
+        .help-pager small { display: block; color: var(--bp-text-sub); font-weight: 500; }
+        @media (max-width: 1100px) { .help-article-wrap { grid-template-columns: 1fr; } .help-toc { display: none; } }
+        @media (max-width: 640px) { .help-article { padding: 1.25rem; } }
+    </style>
+</head>
+
+<body>
+    <header class="app-header">
+        <div class="header-brand">
+            <div class="brand-logo">
+                <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                    <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                    <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+                </svg>
+            </div>
+            <div class="brand-text">
+                <span class="brand-name">AVIR AI <span class="beta-badge">Beta</span></span>
+                <span class="brand-tagline">Help Center</span>
+            </div>
+        </div>
+        <nav class="header-nav">
+            <a href="/dashboard" class="header-nav-item"><i class="fas fa-comments me-2"></i>Studio Chat</a>
+            <a href="/help" class="header-nav-item active"><i class="fas fa-circle-question me-2"></i>Help Center</a>
+        </nav>
+        <div class="header-actions">
+            {% include 'partials/user_menu.html' %}
+        </div>
+    </header>
+
+    <div class="bc-main">
+        <aside class="bc-sidebar">
+            <div class="bc-sidebar-header">
+                <i class="fas fa-circle-question"></i>
+                <div>
+                    <div style="font-weight: 700; font-size: 1rem; color: var(--bp-text);">Help Center</div>
+                    <div style="font-size: 0.75rem; color: var(--bp-text-sub);">Guides for every feature</div>
+                </div>
+            </div>
+            <label class="help-search">
+                <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                <input type="search" id="helpSearch" placeholder="Search the guides..." aria-label="Search the guides" autocomplete="off">
+            </label>
+            <nav class="bc-nav help-nav" aria-label="Guides">
+                {% for a in articles %}
+                <a class="bc-nav-item{{ ' active' if article and article.slug == a.slug }}" href="/help/{{ a.slug }}">
+                    <i class="fas {{ a.icon }}"></i> {{ a.title }}
+                </a>
+                {% endfor %}
+            </nav>
+        </aside>
+
+        <main class="bc-content">
+            <div class="bc-content-inner">
+
+                <!-- Search results (filled by the script below; replaces the page content while searching) -->
+                <div id="helpResultsWrap" class="d-none">
+                    <div class="brand-config-card">
+                        <h6><div class="card-icon-circle"><i class="fas fa-magnifying-glass"></i></div> <span id="helpResultsTitle">Results</span></h6>
+                        <div class="help-results" id="helpResults"></div>
+                    </div>
+                </div>
+
+                <div id="helpPage">
+                {% if article %}
+                    <div class="help-article-wrap">
+                        <article class="help-article">
+                            <div class="help-crumb"><a href="/help">Help Center</a> / {{ article.title }}</div>
+                            <h1>{{ article.title }}</h1>
+                            <p class="help-lead">{{ article.summary }}</p>
+                            <div class="help-body">{{ article.html | safe }}</div>
+                            {% set idx = articles | map(attribute='slug') | list %}
+                            {% set i = idx.index(article.slug) %}
+                            <div class="help-pager">
+                                <span>{% if i > 0 %}<a href="/help/{{ articles[i - 1].slug }}"><small>Previous</small><i class="fas fa-arrow-left me-1"></i>{{ articles[i - 1].title }}</a>{% endif %}</span>
+                                <span class="text-end">{% if i < articles | length - 1 %}<a href="/help/{{ articles[i + 1].slug }}"><small>Next</small>{{ articles[i + 1].title }}<i class="fas fa-arrow-right ms-1"></i></a>{% endif %}</span>
+                            </div>
+                        </article>
+                        {% if article.toc %}
+                        <nav class="help-toc" aria-label="On this page">
+                            <div class="help-toc-title">On this page</div>
+                            {% for t in article.toc %}<a href="#{{ t.id }}"{{ ' class="sub"' | safe if t.level > 2 }}>{{ t.title }}</a>{% endfor %}
+                        </nav>
+                        {% endif %}
+                    </div>
+                {% else %}
+                    <div class="bp-hero">
+                        <div class="bp-hero-copy">
+                            <div class="bp-hero-eyebrow">Help Center</div>
+                            <h1 class="bp-hero-title">How can we help?</h1>
+                            <p class="bp-hero-desc">Short guides for every part of AVIR AI: creating posts, images and carousels, getting them approved, and publishing.</p>
+                        </div>
+                        <div class="bp-hero-graphic" aria-hidden="true">
+                            <div class="bp-hero-caption">From first brief<br><strong>to published post</strong></div>
+                            <div class="bp-hero-mock">
+                                <div style="display: flex; gap: 12px; align-items: center; margin-bottom: 1rem;">
+                                    <div class="bp-hero-mock-icon"><i class="fas fa-circle-question"></i></div>
+                                    <div class="bp-mock-bar" style="width: 80px; height: 12px; margin: 0;"></div>
+                                </div>
+                                <div class="bp-mock-bar" style="width: 100%;"></div>
+                                <div class="bp-mock-bar" style="width: 85%;"></div>
+                                <div class="bp-mock-bar" style="width: 60%; margin-bottom: 0;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="help-start">
+                        <a class="btn-primary-save text-decoration-none" href="/dashboard?tour=studio"><i class="fas fa-route me-2"></i>Take the Studio Chat tour</a>
+                        <a class="btn-xs-outline-info text-decoration-none" href="/help/getting-started"><i class="fas fa-rocket me-2"></i>Read "Getting started"</a>
+                    </div>
+
+                    <div class="help-grid">
+                        {% for a in articles %}
+                        <a class="help-card" href="/help/{{ a.slug }}">
+                            <div class="card-icon-circle"><i class="fas {{ a.icon }}"></i></div>
+                            <div><strong>{{ a.title }}</strong><span>{{ a.summary }}</span></div>
+                        </a>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+                </div>
+
+            </div>
+        </main>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script>
+        // Search across every guide (title, summary, headings and text), in the browser
+        (function () {
+            const index = {{ search_index | tojson }};
+            const esc = s => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+            const input = document.getElementById('helpSearch');
+            const wrap = document.getElementById('helpResultsWrap'), page = document.getElementById('helpPage');
+
+            function snippet(text, word) {
+                const at = text.toLowerCase().indexOf(word);
+                if (at < 0) return '';
+                const start = Math.max(0, at - 60), piece = text.slice(start, at + 110);
+                const safe = esc(piece), re = new RegExp('(' + word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig');
+                return (start ? '…' : '') + safe.replace(re, '<mark>$1</mark>') + '…';
+            }
+
+            function search() {
+                const words = input.value.toLowerCase().split(/\s+/).filter(w => w.length > 1);
+                if (!words.length) { wrap.classList.add('d-none'); page.classList.remove('d-none'); return; }
+                const hits = index.map(a => {
+                    const title = a.title.toLowerCase(), heads = a.headings.join(' ').toLowerCase(),
+                          body = (a.summary + ' ' + a.text).toLowerCase();
+                    let score = 0;
+                    for (const w of words) {
+                        if (!title.includes(w) && !heads.includes(w) && !body.includes(w)) return null;  // every word must match
+                        score += (title.includes(w) ? 6 : 0) + (heads.includes(w) ? 3 : 0) + (body.includes(w) ? 1 : 0);
+                    }
+                    return { a, score };
+                }).filter(Boolean).sort((x, y) => y.score - x.score);
+                document.getElementById('helpResultsTitle').textContent =
+                    hits.length ? `${hits.length} guide${hits.length === 1 ? '' : 's'} for "${input.value.trim()}"` : `Nothing found for "${input.value.trim()}"`;
+                document.getElementById('helpResults').innerHTML = hits.length ? hits.map(({ a }) => `
+                    <a class="help-result" href="/help/${esc(a.slug)}">
+                        <strong><i class="fas ${esc(a.icon)} me-2" style="color: var(--brand-strong)"></i>${esc(a.title)}</strong>
+                        <small>${snippet(a.text, words[0]) || esc(a.summary)}</small>
+                    </a>`).join('')
+                    : '<div class="ap-empty"><div class="card-icon-circle"><i class="fas fa-magnifying-glass"></i></div><p>Try other words, or browse the guides on the left.</p></div>';
+                wrap.classList.remove('d-none');
+                page.classList.add('d-none');
+            }
+            input.addEventListener('input', search);
+            const q = new URLSearchParams(location.search).get('q');
+            if (q) { input.value = q; search(); }
+        })();
+    </script>
+    <script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
+</body>
+
+</html>

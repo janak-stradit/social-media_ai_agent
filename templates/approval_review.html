@@ -81,7 +81,9 @@
 
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script>window.APPROVAL_REQUEST_ID = "{{ request_id }}";</script>
+    <script src="{{ url_for('static', filename='js/post_preview.js') }}"></script>
     <script src="{{ url_for('static', filename='js/approval_review.js') }}"></script>
+{% include 'partials/guide_assets.html' %}
 <script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
 </body>
 

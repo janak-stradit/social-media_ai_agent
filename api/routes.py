@@ -1956,6 +1956,75 @@ def conversation_detail(conversation_id):
     return jsonify({"success": True, **data})
 
 
+@api_bp.route("/library/images", methods=["GET"])
+@login_required_api
+def library_images_route():
+    """The image library: every image the user has made, newest first.
+    ?q= searches what the image was asked to show; ?limit= & ?offset= page it."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import list_user_images
+
+    try:
+        limit = max(1, min(int(request.args.get("limit", 60)), 200))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except ValueError:
+        return jsonify({"success": False, "error": "limit and offset must be numbers"}), 400
+    rows, total = list_user_images(get_current_user_id(), limit=limit, offset=offset, query=request.args.get("q"))
+    images = [{"id": i["id"], "url": i["url"], "description": (i.get("edit_instruction") or i.get("prompt") or "")[:200],
+               "width": i["width"], "height": i["height"], "created_at": i["created_at"], "kind": i["kind"],
+               "conversation_id": i["conversation_id"], "version": i["version"]} for i in rows]
+    return jsonify({"success": True, "images": images, "total": total, "has_more": offset + len(images) < total})
+
+
+@api_bp.route("/briefs", methods=["GET", "POST"])
+@login_required_api
+def saved_briefs_route():
+    """Briefs the user starred to use again. POST {text, platforms} saves one."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import MAX_SAVED_BRIEFS, list_saved_briefs, save_brief
+
+    user_id = get_current_user_id()
+    if request.method == "GET":
+        return jsonify({"success": True, "briefs": list_saved_briefs(user_id)})
+    data = request.get_json(silent=True) or {}
+    text = str(data.get("text") or "").strip()
+    if len(text) < 3:
+        return jsonify({"success": False, "error": "There is nothing to save."}), 400
+    platforms = data.get("platforms") if isinstance(data.get("platforms"), list) else []
+    brief, created = save_brief(user_id, text, platforms)
+    if not brief:
+        return jsonify({"success": False, "error": f"You can keep up to {MAX_SAVED_BRIEFS} saved briefs - remove one first."}), 400
+    return jsonify({"success": True, "brief": brief, "created": created, "briefs": list_saved_briefs(user_id)})
+
+
+@api_bp.route("/briefs/<int:brief_id>", methods=["DELETE"])
+@login_required_api
+def delete_saved_brief_route(brief_id):
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import delete_saved_brief, list_saved_briefs
+
+    user_id = get_current_user_id()
+    if not delete_saved_brief(user_id, brief_id):
+        return jsonify({"error": "Saved brief not found"}), 404
+    return jsonify({"success": True, "briefs": list_saved_briefs(user_id)})
+
+
+@api_bp.route("/briefs/<int:brief_id>/use", methods=["POST"])
+@login_required_api
+def use_saved_brief_route(brief_id):
+    """Counts a use, so the briefs used most recently come first."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import mark_brief_used
+
+    if not mark_brief_used(get_current_user_id(), brief_id):
+        return jsonify({"error": "Saved brief not found"}), 404
+    return jsonify({"success": True})
+
+
 @api_bp.route("/conversations/<int:conversation_id>/images", methods=["GET"])
 @login_required_api
 def conversation_images_route(conversation_id):
@@ -2067,6 +2136,35 @@ def unarchive_history_run(run_id):
         return jsonify({"success": True, "run_id": run_id, "is_archived": False})
     except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/history/<int:run_id>/edit", methods=["POST"])
+@login_required_api
+def edit_history_run(run_id):
+    """A hand edit of a post's caption / hashtags (Studio Chat "Edit") - no
+    generation, no cost. Body: {target: <platform> | "carousel", caption?,
+    hashtags?} or {target, restore: true} to go back to the AI's text."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import update_run_content
+    from services.post_edit_service import EditError, apply_edit
+
+    data = request.get_json(silent=True) or {}
+    target = str(data.get("target") or "").strip().lower()
+    user_id = get_current_user_id()
+    run = get_run_by_id(run_id, user_id=user_id)
+    if not run:
+        return jsonify({"error": "Post not found"}), 404
+    content = run["content"]
+    try:
+        node = apply_edit(content, target, caption=data.get("caption"), hashtags=data.get("hashtags"),
+                          restore=bool(data.get("restore")))
+    except EditError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    update_run_content(run_id, content, user_id=user_id)
+    log_event("post.edit", run_id=run_id, target=target, restored=bool(data.get("restore")),
+              fields=[k for k in ("caption", "hashtags") if data.get(k) is not None])
+    return jsonify({"success": True, "run_id": run_id, "target": target, "node": node})
 
 
 @api_bp.route("/history/<int:run_id>", methods=["GET"])
@@ -2661,23 +2759,23 @@ def get_approval_request_route(request_id):
 
 def _publishing_for(req: dict, user_id) -> dict:
     """What the viewer can publish from this request: only its requester, to
-    platforms whose account is connected (Instagram for now)."""
+    the platforms whose account is connected. accounts: {platform: name or None}."""
     if not req or not req.get("items") or req.get("user_id") != user_id:
         return {"can_publish": False}
-    from services.instagram_service import connected_account
+    from services.publish_service import connections
 
-    account = connected_account(user_id)
-    return {"can_publish": True, "instagram": f"{account['username']}" if account else None}
+    accounts = connections(user_id)
+    return {"can_publish": True, "instagram": accounts.get("instagram"), "accounts": accounts}
 
 
 @api_bp.route("/approval-requests/<int:request_id>/publish", methods=["POST"])
 @login_required_api
 def publish_approved_item(request_id):
-    """Publishes one approved platform of a multi-platform request (Instagram for now)."""
+    """Publishes one approved platform of a multi-platform request, now."""
     if not DB_AVAILABLE:
         return jsonify({"error": "Database not available"}), 503
     from db import update_approval_item
-    from services.instagram_service import InstagramError, publish_for_user
+    from services.publish_service import NAMES, PLATFORMS, PublishError, publish_item
 
     user_id = get_current_user_id()
     req = get_approval_request(request_id)
@@ -2688,8 +2786,8 @@ def publish_approved_item(request_id):
     if index is None:
         return jsonify({"error": "This request has nothing for that platform."}), 400
     item = req["items"][index]
-    if platform != "instagram":
-        return jsonify({"error": "Publishing to this platform comes in a later update."}), 400
+    if platform not in PLATFORMS:
+        return jsonify({"error": f"Publishing to {NAMES.get(platform, platform)} isn't available yet."}), 400
     if item.get("decision") != "approved":
         return jsonify({"error": "Only approved posts can be published."}), 409
     if item.get("published"):
@@ -2697,28 +2795,25 @@ def publish_approved_item(request_id):
     with _publish_lock(request_id):
         if (get_approval_request(request_id)["items"][index]).get("published"):  # a second click waited here
             return jsonify({"error": "Already published."}), 409
-        caption = item["caption"]
-        tags = [t for t in item.get("hashtags") or [] if t.lower() not in caption.lower()]
-        if tags:
-            caption = f"{caption}\n\n{' '.join(tags)}".strip()
         try:
-            result = publish_for_user(user_id, caption, item["images"], current_app.config["UPLOAD_FOLDER"])
-        except InstagramError as err:
+            result = publish_item(user_id, item, current_app.config["UPLOAD_FOLDER"])
+        except PublishError as err:
+            if err.unreachable:  # nothing was decided by the platform: not a failure of this post
+                return jsonify({"success": False, "error": str(err)}), 502
             update_approval_item(request_id, index, {"publish_error": str(err)})
-            log_event("instagram.publish", request_id=request_id, status="failed", error=str(err)[:200])
+            log_event(f"{platform}.publish", request_id=request_id, status="failed", error=str(err)[:200])
             return jsonify({"success": False, "error": str(err)}), 400
-        except requests.exceptions.RequestException as err:
-            return jsonify({"success": False, "error": f"Could not reach Instagram: {err}"}), 502
         from datetime import datetime, timezone
 
         updated = update_approval_item(request_id, index, {
-            "published": {"at": datetime.now(timezone.utc).isoformat(), "permalink": result["permalink"],
-                          "media_id": result["media_id"], "account": result["account"]},
+            "published": {"at": datetime.now(timezone.utc).isoformat(), "permalink": result.get("permalink"),
+                          "media_id": result.get("post_id"), "post_id": result.get("post_id"), "account": result.get("account"),
+                          "format": result.get("format")},
             "publish_error": None,
         })
-    log_event("instagram.publish", request_id=request_id, status="published", media_id=result["media_id"],
-              carousel=result["carousel"])
-    return jsonify({"success": True, "result": result,
+    log_event(f"{platform}.publish", request_id=request_id, status="published", media_id=result.get("post_id"),
+              carousel=item.get("media") == "carousel", format=result.get("format"))
+    return jsonify({"success": True, "result": {**result, "carousel": item.get("media") == "carousel"},
                     "request": {**updated, "company_name": _requester_company(updated), "publishing": _publishing_for(updated, user_id)}})
 
 
@@ -3661,6 +3756,8 @@ def _email_automation_payload():
             "nudge_emails": f"Checked hourly: a festival {Config.NUDGE_OCCASION_DAYS} days ahead, this week's trend, "
                             f"or a reminder after {Config.NUDGE_INACTIVE_DAYS} quiet days. Max {Config.IDEA_EMAILS_PER_WEEK} idea emails a week.",
             "monthly_recap": f"From day {Config.RECAP_EMAIL_DAY} of each month, {Config.IDEAS_EMAIL_HOUR_UTC:02d}:00 UTC",
+            "approval_reminders": "Checked hourly: one reminder after 24 hours and a last one after 3 days. "
+                                  "Requests older than 14 days are left alone.",
         },
     }
 
@@ -3863,6 +3960,10 @@ def connect_instagram_from_facebook():
 @api_bp.route("/auth/youtube", methods=["GET"])
 @login_required_api
 def youtube_auth_redirect():
+    from flask import session
+
+    from services import social_oauth_service as oauth
+
     client_id = os.getenv("YOUTUBE_CLIENT_ID")
     if not client_id:
         return jsonify({"error": "YOUTUBE_CLIENT_ID not configured"}), 500
@@ -3870,9 +3971,10 @@ def youtube_auth_redirect():
     redirect_uri = urllib.parse.urljoin(request.host_url, "api/auth/youtube/callback")
     scope = "https://www.googleapis.com/auth/youtube.upload https://www.googleapis.com/auth/youtube.readonly"
 
-    # Store user_id in state to retrieve in callback
-    user_id = get_current_user_id()
-    state = str(user_id)
+    # A random, single-use value ties Google's answer to this browser and this
+    # user (it used to be the user's id, which anyone could put in the address)
+    state = oauth.new_state()
+    session["oauth_state"] = {"provider": "youtube", "state": state, "at": time.time(), "user_id": get_current_user_id()}
 
     params = {
         "client_id": client_id,
@@ -3890,15 +3992,23 @@ def youtube_auth_redirect():
 
 @api_bp.route("/auth/youtube/callback", methods=["GET"])
 def youtube_auth_callback():
+    """Google sends the user back here. The channel is saved for the signed-in
+    user who started the sign-in; the outcome is shown in Settings."""
+    from flask import redirect, session
+
+    saved = session.pop("oauth_state", None)  # one use
+    user_id = get_current_user_id()
+    if not user_id:
+        return redirect("/")
+    if not _oauth_state_genuine(saved, "youtube", user_id):
+        log_event("social.oauth", provider="youtube", status="rejected_state")
+        return _oauth_done("youtube", False, "The YouTube sign-in could not be verified. Please connect again.")
+    if request.args.get("error"):
+        log_event("social.oauth", provider="youtube", status="cancelled", error=request.args["error"][:80])
+        return _oauth_done("youtube", False, "The YouTube sign-in was cancelled, so nothing was connected.")
     code = request.args.get("code")
-    state = request.args.get("state")  # This is the user_id
-    error = request.args.get("error")
-
-    if error:
-        return f"Error connecting YouTube: {error}", 400
-
-    if not code or not state:
-        return "Missing code or state parameter", 400
+    if not code:
+        return _oauth_done("youtube", False, "Google did not complete the sign-in. Please try again.")
 
     client_id = os.getenv("YOUTUBE_CLIENT_ID")
     client_secret = os.getenv("YOUTUBE_CLIENT_SECRET")
@@ -3929,31 +4039,34 @@ def youtube_auth_callback():
         channel_data = channel_res.json()
 
         if not channel_data.get("items"):
-            return "No YouTube channel found for this account", 400
+            return _oauth_done("youtube", False, "No YouTube channel was found for that Google account.")
 
         channel = channel_data["items"][0]
         channel_id = channel["id"]
         channel_name = channel["snippet"]["title"]
 
-        # Save to DB
+        # Save to DB - for the user who is signed in, never one named in the address
         save_social_account(
-            user_id=int(state),
+            user_id=user_id,
             platform="youtube",
             account_name=channel_name,
             account_id=channel_id,
             access_token=access_token,
             refresh_token=refresh_token,
             connection_type="direct",
+            connected_via="oauth",
         )
+        log_event("social.oauth", provider="youtube", status="connected")
+        return _oauth_done("youtube", True, f"Connected YouTube ({channel_name}).")
 
-        # Redirect back to settings with success parameter
-        return '<script>window.location.href="/settings?youtube_connected=true";</script>'
-
-    except requests.exceptions.HTTPError as e:
-        error_details = e.response.text if hasattr(e, "response") else str(e)
-        return f"Error exchanging token (HTTP Error): {error_details}", 500
+    except requests.exceptions.RequestException as e:
+        # Google's answer can hold details of the request: it goes to the log, not to the page
+        current_app.logger.warning(f"YouTube connect failed: {str(e)[:300]}")
+        log_event("social.oauth", provider="youtube", status="failed")
+        return _oauth_done("youtube", False, "Google did not complete the sign-in. Please try again.")
     except Exception as e:  # noqa: BLE001
-        return f"Error exchanging token: {str(e)}", 500
+        current_app.logger.warning(f"YouTube connect failed: {str(e)[:300]}")
+        return _oauth_done("youtube", False, "The YouTube channel could not be connected. Please try again.")
 
 
 @api_bp.route("/social/mcp/test", methods=["POST"])
@@ -4014,28 +4127,40 @@ def disconnect_social_account_endpoint(platform):
 @api_bp.route("/social/schedule", methods=["POST"])
 @login_required_api
 def schedule_post_endpoint():
-    """Schedule a post for future publishing"""
+    """Schedule a post. Body: {scheduled_at (ISO, with its UTC offset), items:
+    [{platform, caption, hashtags, media, images, ...}], story, run_id,
+    conversation_id} - an item per platform, published as scheduled
+    (services/schedule_service.py). Without items: the older shape, one
+    caption for every platform ({platforms, content_json})."""
     user_id = get_current_user_id()
     if not DB_AVAILABLE or not user_id:
         return jsonify({"error": "Database unavailable"}), 503
+    from services import schedule_service
 
-    data = request.get_json() or {}
+    data = request.get_json(silent=True) or {}
+    if data.get("items") is not None:
+        try:
+            post = schedule_service.create(
+                user_id, data.get("items"), data.get("scheduled_at"), current_app.config["UPLOAD_FOLDER"],
+                story=data.get("story"), run_id=data.get("run_id") if isinstance(data.get("run_id"), int) else None,
+                conversation_id=data.get("conversation_id") if isinstance(data.get("conversation_id"), int) else None,
+            )
+        except schedule_service.ScheduleError as err:
+            return jsonify({"success": False, "error": str(err)}), 400
+        log_event("scheduled.create", post_id=post["id"], platforms=post["platforms"], media=post["media"])
+        return jsonify({"success": True, "scheduled_post": post})
+
     platforms = data.get("platforms") or []
-    scheduled_at_str = data.get("scheduled_at")
     content_json = data.get("content_json") or {}
     run_id = data.get("run_id")
-
     if not platforms or not isinstance(platforms, list):
         return jsonify({"error": "At least one target platform must be selected"}), 400
-    if not scheduled_at_str:
+    if not data.get("scheduled_at"):
         return jsonify({"error": "Scheduled date and time is required"}), 400
-
     try:
-        from datetime import datetime
-
-        scheduled_at = datetime.fromisoformat(scheduled_at_str.replace("Z", "+00:00"))
-    except Exception:
-        return jsonify({"error": "Invalid scheduled date/time format"}), 400
+        scheduled_at = schedule_service.parse_when(data.get("scheduled_at"))
+    except schedule_service.ScheduleError as err:
+        return jsonify({"error": str(err)}), 400
 
     if run_id is not None:
         post = create_scheduled_post(
@@ -4045,6 +4170,202 @@ def schedule_post_endpoint():
         post = create_scheduled_post(
             user_id=user_id, platforms=platforms, scheduled_at=scheduled_at, content_json=content_json
         )
+    return jsonify({"success": True, "scheduled_post": post})
+
+
+@api_bp.route("/social/connections", methods=["GET"])
+@login_required_api
+def social_connections_endpoint():
+    """Which platforms the user can publish to: {platform: account name or null}. No tokens."""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({"error": "Database unavailable"}), 503
+    from services.publish_service import connections
+
+    return jsonify({"success": True, "connections": connections(user_id)})
+
+
+# ── One-click connect (services/social_oauth_service.py) ──────────────────────
+# start -> the platform's sign-in -> callback. The outcome is left in the
+# session for the Settings page to pick up (never put in the address, so a
+# crafted link can't make the app show someone else's words).
+
+
+def _oauth_base_url() -> str:
+    return (Config.APP_BASE_URL or request.host_url).rstrip("/")
+
+
+def _oauth_state_genuine(saved, provider: str, user_id) -> bool:
+    """The answer belongs to the sign-in this browser started for this user, a few minutes ago at most."""
+    import hmac
+
+    from services.social_oauth_service import STATE_TTL_SECONDS
+
+    return bool(
+        isinstance(saved, dict) and saved.get("provider") == provider and saved.get("user_id") == user_id
+        and time.time() - float(saved.get("at") or 0) <= STATE_TTL_SECONDS
+        and hmac.compare_digest(str(saved.get("state") or ""), request.args.get("state") or "")
+    )
+
+
+def _oauth_done(provider: str, ok: bool, message: str | None = None, choose: str | None = None):
+    from flask import redirect, session
+
+    session["oauth_result"] = {"ok": ok, "provider": provider, "message": message, "choose": choose}
+    return redirect("/settings")
+
+
+@api_bp.route("/social/oauth/providers", methods=["GET"])
+@login_required_api
+def social_oauth_providers():
+    """Which one-click connections are set up. Admins also get the return
+    addresses to register in each platform's app."""
+    from services import social_oauth_service as oauth
+
+    out = {"success": True, "providers": oauth.providers()}
+    user = get_user_by_id(get_current_user_id()) if DB_AVAILABLE else None
+    if user and user.is_admin:
+        out["redirect_uris"] = {p: oauth.redirect_uri(p, _oauth_base_url()) for p in oauth.PROVIDERS}
+    return jsonify(out)
+
+
+@api_bp.route("/social/oauth/<provider>/start", methods=["GET"])
+def social_oauth_start(provider):
+    """Sends the signed-in user to the platform's sign-in page."""
+    from flask import redirect, session
+
+    from services import social_oauth_service as oauth
+
+    user_id = get_current_user_id()
+    if not user_id:
+        return redirect("/")
+    if provider not in oauth.PROVIDERS or not oauth.enabled(provider):
+        return _oauth_done(provider, False, "One-click connect isn't set up for this platform yet. Enter the account's details instead.")
+    state = oauth.new_state()
+    session["oauth_state"] = {"provider": provider, "state": state, "at": time.time(), "user_id": user_id}
+    log_event("social.oauth", provider=provider, status="started")
+    return redirect(oauth.authorize_url(provider, state, _oauth_base_url()))
+
+
+@api_bp.route("/social/oauth/<provider>/callback", methods=["GET"])
+def social_oauth_callback(provider):
+    """The platform sends the user back here with a one-time code."""
+    from flask import redirect, session
+
+    from services import social_oauth_service as oauth
+
+    saved = session.pop("oauth_state", None)  # one use
+    user_id = get_current_user_id()
+    if not user_id:
+        return redirect("/")
+    name = oauth.NAMES.get(provider, "that platform")
+    if provider not in oauth.PROVIDERS or not oauth.enabled(provider) or not DB_AVAILABLE:
+        return _oauth_done(provider, False, "One-click connect isn't set up for this platform yet.")
+    if not _oauth_state_genuine(saved, provider, user_id):
+        log_event("social.oauth", provider=provider, status="rejected_state")
+        return _oauth_done(provider, False, f"The {name} sign-in could not be verified. Please click Connect again.")
+    error = request.args.get("error")
+    if error:
+        log_event("social.oauth", provider=provider, status="cancelled" if oauth.cancelled(provider, error) else "refused", error=error[:80])
+        if oauth.cancelled(provider, error):
+            return _oauth_done(provider, False, f"You cancelled the {name} sign-in, so nothing was connected.")
+        detail = (request.args.get("error_description") or error)[:200]
+        return _oauth_done(provider, False, f"{name} did not complete the sign-in: {detail}")
+    code = request.args.get("code")
+    if not code:
+        return _oauth_done(provider, False, f"{name} did not complete the sign-in. Please try again.")
+    try:
+        result = oauth.finish(user_id, provider, code, _oauth_base_url())
+    except oauth.OAuthError as err:
+        log_event("social.oauth", provider=provider, status="failed", error=str(err)[:200])
+        return _oauth_done(provider, False, str(err))
+    except requests.exceptions.RequestException:
+        log_event("social.oauth", provider=provider, status="unreachable")
+        return _oauth_done(provider, False, f"Could not reach {name}. Please try again.")
+    if result.get("choose"):
+        log_event("social.oauth", provider=provider, status="choosing")
+        return _oauth_done(provider, True, choose=result["choose"])
+    log_event("social.oauth", provider=provider, status="connected", platforms=[c["platform"] for c in result["connected"]])
+    return _oauth_done(provider, True, oauth.connected_text(result["connected"]))
+
+
+@api_bp.route("/social/oauth/result", methods=["GET"])
+@login_required_api
+def social_oauth_result():
+    """What the last sign-in did, once: {ok, provider, message} or the accounts to choose from."""
+    from flask import session
+
+    from services import social_oauth_service as oauth
+
+    result = session.pop("oauth_result", None)
+    if not isinstance(result, dict):
+        return jsonify({"success": True, "result": None})
+    if result.get("choose"):
+        pending = oauth.pending_options(get_current_user_id(), result["choose"])
+        if not pending:
+            return jsonify({"success": True, "result": {"ok": False, "provider": result.get("provider"),
+                                                         "message": "That sign-in has expired. Click Connect again."}})
+        return jsonify({"success": True, "result": {"ok": True, "provider": pending["provider"], "choose": result["choose"],
+                                                     "options": pending["options"]}})
+    return jsonify({"success": True, "result": {k: result.get(k) for k in ("ok", "provider", "message")}})
+
+
+@api_bp.route("/social/oauth/pending/<pending_id>", methods=["POST"])
+@login_required_api
+def social_oauth_choose(pending_id):
+    """Connects the account the user picked: {choice: <id>}."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database unavailable"}), 503
+    from services import social_oauth_service as oauth
+
+    choice = str((request.get_json(silent=True) or {}).get("choice") or "")
+    try:
+        connected = oauth.choose(get_current_user_id(), pending_id, choice)
+    except oauth.OAuthError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    log_event("social.oauth", status="connected", platforms=[c["platform"] for c in connected], chosen=True)
+    return jsonify({"success": True, "connected": connected, "message": oauth.connected_text(connected)})
+
+
+@api_bp.route("/social/scheduled/<int:post_id>", methods=["GET", "PATCH"])
+@login_required_api
+def scheduled_post_endpoint(post_id):
+    """One scheduled post; PATCH {scheduled_at} moves a post that is still waiting."""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({"error": "Database unavailable"}), 503
+    from db import get_scheduled_post
+    from services import schedule_service
+
+    if request.method == "GET":
+        post = get_scheduled_post(user_id, post_id)
+        return (jsonify({"success": True, "scheduled_post": post}), 200) if post else (jsonify({"error": "Scheduled post not found"}), 404)
+    try:
+        post = schedule_service.reschedule(user_id, post_id, (request.get_json(silent=True) or {}).get("scheduled_at"))
+    except LookupError as err:
+        return jsonify({"error": str(err)}), 404
+    except schedule_service.ScheduleError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    log_event("scheduled.move", post_id=post_id, scheduled_at=post["scheduled_at_iso"])
+    return jsonify({"success": True, "scheduled_post": post})
+
+
+@api_bp.route("/social/scheduled/<int:post_id>/retry", methods=["POST"])
+@login_required_api
+def retry_scheduled_post_endpoint(post_id):
+    """Sends again, now, the platforms of a post that didn't go out."""
+    user_id = get_current_user_id()
+    if not DB_AVAILABLE or not user_id:
+        return jsonify({"error": "Database unavailable"}), 503
+    from services import schedule_service
+
+    try:
+        post = schedule_service.retry(user_id, post_id)
+    except LookupError as err:
+        return jsonify({"error": str(err)}), 404
+    except schedule_service.ScheduleError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    log_event("scheduled.retry", post_id=post_id)
     return jsonify({"success": True, "scheduled_post": post})
 
 
@@ -4118,13 +4439,15 @@ def create_manual_scheduled_post_endpoint():
 
     from datetime import datetime, timezone
 
-    if publish_now or not scheduled_at_str:
-        scheduled_at = datetime.now(timezone.utc)
-    else:
+    from services import schedule_service
+
+    # Stored in UTC (the scheduler compares in UTC); the page sends the moment with its offset
+    scheduled_at = datetime.now(timezone.utc).replace(tzinfo=None)
+    if not publish_now and scheduled_at_str:
         try:
-            scheduled_at = datetime.fromisoformat(scheduled_at_str.replace("Z", "+00:00"))
-        except Exception:
-            scheduled_at = datetime.now(timezone.utc)
+            scheduled_at = schedule_service.parse_when(scheduled_at_str)
+        except schedule_service.ScheduleError as err:
+            return jsonify({"error": str(err)}), 400
 
     content_json = {
         "caption": caption,
@@ -4149,8 +4472,9 @@ def create_manual_scheduled_post_endpoint():
         pub_results = publisher_service.publish_post_to_connected_accounts(
             user_id=user_id, platforms=platforms, caption=caption, image_path=abs_image_path
         )
-        update_scheduled_post_status(user_id, post["id"], "published")
-        post["status"] = "published"
+        # "published" only when at least one platform took it
+        post["status"] = "published" if any(r.get("success") for r in pub_results.values()) else "failed"
+        update_scheduled_post_status(user_id, post["id"], post["status"])
     elif publish_now:
         update_scheduled_post_status(user_id, post["id"], "published")
         post["status"] = "published"
@@ -4158,7 +4482,9 @@ def create_manual_scheduled_post_endpoint():
     return jsonify(
         {
             "success": True,
-            "message": "Post published to social platforms!" if publish_now else "Manual post scheduled successfully!",
+            "message": ("Post published to social platforms!" if post["status"] == "published"
+                        else "The post could not be published - see the reason for each platform.") if publish_now
+            else "Manual post scheduled successfully!",
             "scheduled_post": post,
             "publish_results": pub_results,
         }
@@ -4740,6 +5066,42 @@ def brand_profile_quick_prompts():
             ),
         }
     )
+
+
+# ── In-app guide: getting-started checklist + tours (services/guide_service.py) ──
+
+
+@api_bp.route("/guide", methods=["GET"])
+@login_required_api
+def guide_status():
+    """The "Get started" checklist (each step ticked from what the user has
+    really done) and which tours they have already seen."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from services.guide_service import checklist
+
+    return jsonify({"success": True, **checklist(get_current_user_id())})
+
+
+@api_bp.route("/guide/state", methods=["POST"])
+@login_required_api
+def guide_update_state():
+    """Remembers a finished tour, a dismissed checklist, or an event the
+    server can't see for itself (an idea picked in the Ideas panel)."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from services.guide_service import checklist, update_state
+
+    data = request.get_json(silent=True) or {}
+    user_id = get_current_user_id()
+    dismiss = data.get("dismiss_checklist")
+    update_state(
+        user_id, tour_seen=data.get("tour_seen"), event=data.get("event"), reset_tours=bool(data.get("reset_tours")),
+        dismiss_checklist=dismiss if isinstance(dismiss, bool) else None,
+    )
+    if data.get("tour_seen") or data.get("event"):
+        log_event("guide.progress", tour=data.get("tour_seen"), guide_event=data.get("event"))
+    return jsonify({"success": True, **checklist(user_id)})
 
 
 @api_bp.route("/ideas/feed", methods=["GET"])
