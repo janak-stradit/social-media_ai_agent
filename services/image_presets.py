@@ -167,6 +167,31 @@ PRESETS["carousel"] = {
     ),
 }
 
+PRESETS["hiring"] = {
+    "label": "Hiring",
+    "icon": "fa-user-plus",
+    "description": "A job post: images with the role on them, plus the caption - a new design every time",
+    "placeholder": "The role, where, and how to apply, e.g. Delivery drivers in Pune, paid training, apply by 30 Nov",
+    "requires_image": False,  # a team or workplace photo is used when one is attached
+    "stamp_logo": True,
+    "platforms": ["linkedin", "instagram", "facebook"],
+    "hiring": True,  # services/hiring_service.py plans the job and the design
+    "outputs": [
+        {"key": "feed", "aspect": "1:1", "label": "Feed 1:1"},
+        {"key": "portrait", "aspect": "4:5", "label": "Portrait 4:5"},
+    ],
+    "all_outputs": [
+        {"key": "feed", "aspect": "1:1", "label": "Feed 1:1"},
+        {"key": "portrait", "aspect": "4:5", "label": "Portrait 4:5"},
+        {"key": "story", "aspect": "9:16", "label": "Story 9:16"},
+    ],
+    "scene": (
+        "Design a professional, eye-catching recruitment post for social media that makes the right people want to "
+        "apply. Modern graphic design with clear visual hierarchy, real typography and a polished, trustworthy look - "
+        "no clutter, no stock-photo cliches, no fake logos."
+    ),
+}
+
 # Occasions recognised in the user's /festive text (longest names first, so
 # "Eid al-Adha" wins over "Eid")
 KNOWN_OCCASIONS = sorted([
@@ -328,6 +353,7 @@ def list_presets() -> list[dict]:
             "all_sizes": [o["label"] for o in p.get("all_outputs") or []],
             "ad_copy": bool(p.get("ad_copy")),
             "carousel": bool(p.get("carousel")),
+            "hiring": bool(p.get("hiring")),
         }
         for p in presets
         if p["enabled"]

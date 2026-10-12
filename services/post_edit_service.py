@@ -62,7 +62,8 @@ def tag_list(raw) -> list[str]:
 
 def _node(content: dict, target: str) -> dict:
     if target == CAROUSEL:
-        carousel = (content.get("_preset") or {}).get("carousel") if isinstance(content.get("_preset"), dict) else None
+        meta = content.get("_preset") if isinstance(content.get("_preset"), dict) else {}
+        carousel = meta.get("carousel") or meta.get("hiring")  # /carousel or /hiring: the command's own caption
         if not isinstance(carousel, dict):
             raise EditError("This post has no carousel caption to edit.")
         return carousel

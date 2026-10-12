@@ -1642,6 +1642,30 @@ def _uploaded_image(path_or_url) -> str | None:
     return storage_service.ensure_local(storage_service.UPLOAD_URL_PREFIX + name)
 
 
+def _hiring_compliance(user_id, caption: str) -> tuple[dict | None, dict]:
+    """A /hiring caption checked against the job-advertising rules of the
+    brand's markets plus the brand's own rules. (None, {}) without markets."""
+    try:
+        from services.compliance_rules import applicable_rules
+
+        brand = {}
+        if DB_AVAILABLE and user_id is not None:
+            from db import get_user_brand_profile
+
+            brand = get_user_brand_profile(user_id) or {}
+        regions = brand.get("compliance_regions") or brand.get("regions_detected") or []
+        rules = {r["id"]: r for r in applicable_rules("employment_recruiting", regions) if not r["excluded"]}
+        for rule in active_rules_for_user(user_id):
+            rules.setdefault(rule["id"], rule)
+        if not rules or not caption:
+            return None, {}
+        result, usage = check_caption(caption, "linkedin", list(rules.values()), refine_llm)
+        return result, usage or {}
+    except Exception as err:  # noqa: BLE001 - the check is guidance; the post is still made
+        logging.getLogger(__name__).warning(f"Hiring compliance check failed: {err}")  # runs in a worker thread: no app context
+        return None, {}
+
+
 def _fit_chars(text, limit: int) -> str:
     """Shortens to the limit at a word boundary (Meta truncates longer ad text)."""
     text = " ".join(str(text or "").split())
@@ -1771,6 +1795,9 @@ def run_image_preset():
 
         carousel_aspect = carousel_service.carousel_aspect(user_text)
         outputs = carousel_service.placeholder_outputs(carousel_service.slide_count(user_text), carousel_aspect)
+    elif preset.get("hiring") and not user_text:
+        return jsonify({"success": False, "code": "text_required",
+                        "error": "Describe the job after /hiring, e.g. /hiring Delivery drivers in Pune, apply by 30 Nov."}), 400
     else:
         outputs = preset_outputs(preset, bool(data.get("all_sizes")))
     product_notes = (data.get("product_notes") or "").strip()[:600]
@@ -1833,17 +1860,42 @@ def run_image_preset():
         prompts = {o["key"]: carousel_service.slide_prompt(preset["scene"], plan, i, brand, product_notes, bool(product),
                                                            carousel_aspect)
                    for i, o in enumerate(outputs, start=1)}
+    elif preset.get("hiring"):
+        # One text call reads the job and writes the caption; the design is new each time (services/hiring_service.py)
+        from services import hiring_service
+        from services.brand_profile_service import build_brand_profile_block
+
+        brand_block = build_brand_profile_block(user_id) if DB_AVAILABLE and user_id is not None else ""
+        try:
+            job, plan_usage = hiring_service.plan_job(user_text, brand_block)
+        except hiring_service.HiringError as err:
+            return jsonify({"success": False, "code": "text_required", "error": str(err)}), 400
+        except Exception as plan_err:  # noqa: BLE001
+            current_app.logger.warning(f"Hiring plan failed: {plan_err}")
+            return jsonify({"success": False, "error": "The job post could not be written. Please try again."}), 502
+        recent = []
+        if DB_AVAILABLE and user_id is not None:
+            from db import recent_hiring_designs
+
+            recent = recent_hiring_designs(user_id)
+        design = hiring_service.pick_design(recent, has_location=bool(job["location"]))
+        plan = {"job": job, "design": design}
+        prompts = {o["key"]: hiring_service.image_prompt(preset["scene"], job, design, o["aspect"], brand, bool(product))
+                   for o in outputs}
     else:
         prompts = {o["key"]: build_preset_prompt(preset, o, product_notes, brand, user_text, occasion) for o in outputs}
 
     # At most 5 images at once: a 10-slide carousel shouldn't flood the image gateway
     with ThreadPoolExecutor(max_workers=min(len(outputs), 5) + 1, thread_name_prefix="preset") as pool:
-        no_photo_needed = {"require_reference": False} if preset.get("carousel") else {}
+        no_photo_needed = {"require_reference": False} if preset.get("carousel") or preset.get("hiring") else {}
         jobs = {o["key"]: pool.submit(media_service.create_preset_image, prompts[o["key"]], product, o["aspect"], logo_path,
                                       model, **no_photo_needed)
                 for o in outputs}
         ad_job = pool.submit(_meta_ad_copy, user_id, product_notes, user_text) if preset.get("ad_copy") else None
+        # /hiring: the caption is checked against fair-hiring and the brand's own rules while the images are drawn
+        rules_job = pool.submit(_hiring_compliance, user_id, plan["job"]["caption"]) if preset.get("hiring") else None
         results = {key: job.result() for key, job in jobs.items()}
+        hiring_check, check_usage = rules_job.result() if rules_job else (None, {})
         ad_copy, ad_usage = ad_job.result() if ad_job else (None, {"total_tokens": 0, "cost_usd": 0.0})
 
     conversation_id = _conversation_for(user_id, data, f"{preset['label']}: {user_text or 'product photo'}") \
@@ -1882,7 +1934,20 @@ def run_image_preset():
         meta["occasion"], meta["occasion_auto"] = occasion, occasion_auto
     if ad_copy:
         meta["ad_copy"] = ad_copy
-    if plan:
+    if plan and preset.get("hiring"):
+        from services.hiring_service import design_names
+
+        job = dict(plan["job"])
+        if hiring_check and hiring_check.get("caption"):
+            job["caption"] = hiring_check.pop("caption")  # with any fix the check made
+        meta["hiring"] = {"caption": job.pop("caption"), "hashtags": job.pop("hashtags"), "job": job,
+                          "design": plan["design"], "design_names": design_names(plan["design"]),
+                          "compliance": hiring_check}
+        ad_usage = {"total_tokens": int(ad_usage.get("total_tokens") or 0) + int(plan_usage.get("total_tokens") or 0)
+                    + int((check_usage or {}).get("total_tokens") or 0),
+                    "cost_usd": float(ad_usage.get("cost_usd") or 0) + float(plan_usage.get("cost_usd") or 0)
+                    + float((check_usage or {}).get("cost_usd") or 0)}
+    elif plan:
         made = set(meta["keys"])
         meta["carousel"] = {
             "aspect": carousel_aspect, "caption": plan["caption"], "hashtags": plan["hashtags"], "style": plan["style"],

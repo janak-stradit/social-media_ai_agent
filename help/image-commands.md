@@ -18,10 +18,11 @@ Image commands make a specific kind of picture. Type `/` in Studio Chat to see t
 | `/catalog` | A clean white-background shot for online shops | 1:1 |
 | `/festive` | Your product dressed up for a festival | 1:1 |
 | `/carousel` | 3 to 10 slides that tell one story, with the caption | 1:1 or 4:5 |
+| `/hiring` | A job post: images with the role on them, plus the caption, in a new design each time | 1:1 and 4:5, or add 9:16 |
 
 ## How to use one
 
-1. **Attach a product photo** with the paperclip. Every command except `/carousel` needs one.
+1. **Attach a product photo** with the paperclip. Every command except `/carousel` and `/hiring` needs one.
 2. Type `/` and pick the command.
 3. Add any direction you like, for example `/festive Diwali` or `/lifestyle on a kitchen counter in morning light`.
 4. Press **Generate**.
@@ -37,6 +38,19 @@ Your real logo is placed on the finished image. The AI never redraws it, so it a
 - A product photo is optional.
 
 You can also build a carousel from images you already made: in **Send for approval**, choose **Carousel** and pick the slides in order.
+
+## Hiring posts
+
+`/hiring` turns a job into a recruitment post. Say the role, where, and how to apply:
+
+`/hiring Delivery drivers in Pune, fixed routes, paid training, apply by 30 Nov`
+
+- You get a square image for LinkedIn and Facebook and a portrait one for Instagram, with the role, the place and a call to action on them, plus the job post caption and hashtags.
+- **Every post gets a different design**: a new layout, picture style and use of your colours. A layout you used in your last three hiring posts isn't repeated. **New images** gives another design.
+- Attach a photo of your team or workplace and it is used as the picture.
+- The caption is checked for fair-hiring rules in your markets, such as no age or gender preferences.
+
+> Tip: the AI draws the words on the image itself, so check the spelling of the role and date before posting. If a word comes out wrong, click **New images**.
 
 ## Changing an image
 
