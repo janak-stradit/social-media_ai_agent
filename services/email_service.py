@@ -1132,6 +1132,37 @@ def _build_approval_reminder_html(approval_url: str, requester: str, company: st
 """
 
 
+def _build_brand_ready_html(name: str | None, company: str | None, brand_url: str) -> str:
+    hello = f"Hi {_escape(name.split()[0])}," if name and name.strip() else "Hi,"
+    whose = f"<strong>{_escape(company)}</strong>'s website" if company else "your website"
+    return f"""\
+<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 0; background-color: #f3f4f6; font-family: 'Segoe UI', Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f3f4f6; padding: 32px 0;">
+        <tr><td align="center">
+            <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 12px; overflow: hidden;">
+                <tr><td style="background-color: #e85a1c; background-image: linear-gradient(135deg, #ffa066 0%, #e85a1c 100%); padding: 24px 32px;">
+                    <span style="color: #ffffff; font-size: 20px; font-weight: 700;">Your brand profile is ready</span>
+                </td></tr>
+                <tr><td style="padding: 22px 32px 6px 32px; font-size: 14px; color: #374151; line-height: 1.6;">
+                    {hello}<br><br>
+                    We've analyzed {whose}. AVIR AI now knows your brand's voice, colors and key themes, so the posts and
+                    images you create follow them. Have a quick look and change anything that isn't quite right.
+                </td></tr>
+                <tr><td align="center" style="padding: 16px 32px 24px 32px;">
+                    <a href="{_escape(brand_url)}" style="display: inline-block; background-color: #c2410c; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 12px 28px; border-radius: 999px;">See my brand profile</a>
+                </td></tr>
+                <tr><td style="padding: 14px 32px; background-color: #f9fafb; border-top: 1px solid #e5e7eb; color: #9ca3af; font-size: 11px;">
+                    AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a></td></tr>
+            </table>
+        </td></tr>
+    </table>
+</body>
+</html>
+"""
+
+
 class EmailService:
     def __init__(self):
         self.host = Config.SMTP_HOST
@@ -1295,6 +1326,18 @@ class EmailService:
         msg["To"] = to_email
         msg.attach(MIMEText(_build_approval_reminder_html(approval_url, requester, company, platforms, waiting, last), "html"))
         self._deliver(msg, [to_email], "approval_reminder")
+        return {"success": True, "recipient": to_email}
+
+    def send_brand_ready_email(self, to_email: str, name: str | None, company: str | None, brand_url: str) -> dict:
+        """After an admin rescanned the user's website (services/brand_profile_service.notify_brand_ready)."""
+        if not self.enabled:
+            raise RuntimeError("SMTP is not configured. Set SMTP_HOST, SMTP_USERNAME and SMTP_PASSWORD in .env.")
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = "Your brand profile is ready - AVIR AI"
+        msg["From"] = self.from_email
+        msg["To"] = to_email
+        msg.attach(MIMEText(_build_brand_ready_html(name, company, brand_url), "html"))
+        self._deliver(msg, [to_email], "brand_ready")
         return {"success": True, "recipient": to_email}
 
     def send_welcome_verification_email(self, to_email: str, name: str, verify_url: str) -> dict:

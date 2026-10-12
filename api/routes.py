@@ -3627,6 +3627,33 @@ def admin_set_user_active(target_user_id):
     return jsonify({"success": True, "user": res})
 
 
+@api_bp.route("/admin/users/<int:target_user_id>/brand-rescan", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_rescan_user_brand(target_user_id):
+    """Admin only: scans the user's website again in the background (their
+    brand profile). When it's ready the user gets a bell notification and an
+    email (brand_profile_service.notify_brand_ready). Uses the website on
+    file - the admin changes it with Edit profile first if it was wrong."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    user = get_user_by_id(target_user_id)
+    if not user:
+        return jsonify({"error": "User not found"}), 404
+    if user.account_type not in VALID_SELF_SERVE_ACCOUNT_TYPES:
+        return jsonify({"error": "Only Individual, Small and Medium accounts have their own brand profile."}), 400
+    website = (user.company_website or "").strip()
+    if not website:
+        return jsonify({"error": "This user has no website on file. Add one with Edit profile, then rescan."}), 400
+    from services.brand_profile_service import start_brand_analysis_async
+
+    base = (Config.APP_BASE_URL or request.host_url).rstrip("/")
+    if not start_brand_analysis_async(target_user_id, website, notify_base_url=base):
+        return jsonify({"error": "A scan is already running for this user."}), 409
+    log_event("admin.brand_rescan", admin_id=get_current_user_id(), user_id=target_user_id)
+    return jsonify({"success": True, "brand": {"status": "analyzing", "website": website}})
+
+
 @api_bp.route("/admin/users/<int:target_user_id>", methods=["DELETE"])
 @login_required_api
 @admin_required_api

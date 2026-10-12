@@ -147,7 +147,13 @@ $(document).ready(function () {
         const href = /^https?:\/\//.test(url) ? url : `https://${url}`;
         return `<a href="${escapeAttr(href)}" target="_blank" rel="noopener" title="${escapeAttr(url)}">${escapeHtml(label)}</a>`;
     }
-    function brandStatusCell(b) {
+    // Statuses an admin can rescan from (a self-serve account with a website on file)
+    function canRescanBrand(u) {
+        const b = u.brand || {};
+        return ['individual', 'small', 'medium'].includes(u.account_type) && !!b.website
+            && ['configured', 'failed', 'not_set_up'].includes(b.status);
+    }
+    function brandStatusCell(b, u) {
         b = b || { status: 'not_onboarded' };
         const cell = (badge, detail) => `<div class="admin-brand">${badge}${detail ? `<div class="admin-brand-detail">${detail}</div>` : ''}</div>`;
         switch (b.status) {
@@ -158,7 +164,9 @@ $(document).ready(function () {
             case 'analyzing':
                 return cell('<span class="admin-brand-badge busy"><i class="fas fa-spinner fa-spin"></i>Analyzing website</span>', brandSite(b.website));
             case 'failed':
-                return cell('<span class="admin-brand-badge fail"><i class="fas fa-circle-exclamation"></i>Scan failed</span>',
+                return cell('<span class="admin-brand-badge fail"><i class="fas fa-circle-exclamation"></i>Scan failed</span>'
+                    + (u && canRescanBrand(u) ? `<button type="button" class="admin-brand-rescan" onclick="adminRescanBrand(${u.id})"
+                        title="Scan ${escapeAttr(b.website)} again. ${escapeAttr(u.name)} is notified when the brand profile is ready."><i class="fas fa-rotate-right"></i>Rescan</button>` : ''),
                     [escapeHtml(BRAND_SCAN_ERRORS[b.error] || (b.error || '').replace(/_/g, ' ')), brandSite(b.website)].filter(Boolean).join(' · '));
             case 'not_set_up':
                 return cell('<span class="admin-brand-badge todo"><i class="fas fa-hourglass-half"></i>Not set up</span>',
@@ -198,7 +206,7 @@ $(document).ready(function () {
                         </div>
                     </td>
                     <td>${accountTypeBadge(u)}</td>
-                    <td>${brandStatusCell(u.brand)}</td>
+                    <td>${brandStatusCell(u.brand, u)}</td>
                     <td>
                         <div class="admin-credit">
                             <div class="admin-credit-top"><span><strong>${money(used)}</strong> of ${money(limit)}</span><span>${Math.round(pct)}%</span></div>
@@ -221,6 +229,7 @@ $(document).ready(function () {
                                     <li><button type="button" class="dropdown-item" onclick="adminSetCustomCredit(${u.id}, ${limit})"><i class="fas fa-sliders"></i>Set credit limit</button></li>
                                     <li><button type="button" class="dropdown-item" onclick="adminEditUserProfile(${u.id})"><i class="fas fa-user-pen"></i>Edit profile</button></li>
                                     <li><button type="button" class="dropdown-item" onclick="openImageAccessPanel(${u.id})"><i class="fas fa-image"></i>Image &amp; video access…</button></li>
+                                    ${canRescanBrand(u) ? `<li><button type="button" class="dropdown-item" onclick="adminRescanBrand(${u.id})"><i class="fas fa-rotate-right"></i>Rescan website</button></li>` : ''}
                                     <li><button type="button" class="dropdown-item" onclick="adminSetUserActive(${u.id}, ${!isActive})">
                                         <i class="fas ${isActive ? 'fa-user-slash' : 'fa-user-check'}"></i>${isActive ? 'Deactivate account' : 'Activate account'}</button></li>
                                     ${u.is_admin ? '' : `<li><hr class="dropdown-divider"></li>
@@ -232,6 +241,52 @@ $(document).ready(function () {
                 </tr>`;
         }).join(''));
     }
+
+    // Rescan a user's website (admin only). The scan runs in the background; the
+    // list refreshes until it finishes, and the user is notified when it's ready.
+    let brandPoll = null;
+    function pollBrandScans(tries) {
+        clearTimeout(brandPoll);
+        const busy = (window._allAdminUsers || []).some(u => u.brand && u.brand.status === 'analyzing');
+        if (!busy || tries <= 0) return;
+        brandPoll = setTimeout(function () {
+            if ($('.admin-menu.show').length) return pollBrandScans(tries);  // don't close an open menu
+            $.get('/api/admin/users', function (r) {
+                if (!r.success) return;
+                const before = {};
+                (window._allAdminUsers || []).forEach(u => { before[u.id] = u.brand && u.brand.status; });
+                window._allAdminUsers = r.users || [];
+                renderAdminUserKpis(window._allAdminUsers);
+                applyAdminUserFilters();
+                window._allAdminUsers.forEach(u => {
+                    if (before[u.id] !== 'analyzing' || !u.brand || u.brand.status === 'analyzing') return;
+                    if (u.brand.status === 'configured') showToast(`${u.name}'s brand profile is ready. They've been notified.`, 'success');
+                    else showToast(`The scan for ${u.name} failed: ${BRAND_SCAN_ERRORS[u.brand.error] || 'unknown error'}.`, 'error');
+                });
+                pollBrandScans(tries - 1);
+            });
+        }, 5000);
+    }
+
+    window.adminRescanBrand = function (userId) {
+        const user = (window._allAdminUsers || []).find(u => u.id === userId);
+        $.ajax({
+            url: `/api/admin/users/${userId}/brand-rescan`,
+            type: 'POST',
+            contentType: 'application/json',
+            data: '{}',
+            success: function (r) {
+                if (!r.success) return;
+                if (user) user.brand = r.brand;
+                applyAdminUserFilters();
+                showToast(`Scanning ${r.brand.website}. ${user ? user.name : 'The user'} will be notified when the brand profile is ready.`, 'info');
+                pollBrandScans(60);  // up to 5 minutes
+            },
+            error: function (xhr) {
+                showToast((xhr.responseJSON && xhr.responseJSON.error) || 'Could not start the scan.', 'error');
+            }
+        });
+    };
 
     window.adminSetUserActive = function (userId, isActive) {
         $.ajax({

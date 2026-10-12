@@ -42,11 +42,12 @@ def failure_message(reason: str | None) -> str:
     return SCRAPE_FAILURE_MESSAGES.get(reason or "", SCRAPE_FAILURE_MESSAGES["analysis_failed"])
 
 
-def start_brand_analysis_async(user_id: int, website: str) -> bool:
+def start_brand_analysis_async(user_id: int, website: str, notify_base_url: str | None = None) -> bool:
     """Runs run_brand_analysis in a background thread, so onboarding doesn't
     wait on the crawl + LLM analysis. Progress/outcome is readable via
     db.get_brand_scan_status. Returns False if a scan for this user is
-    already running."""
+    already running. notify_base_url (an admin's rescan): when the profile
+    is ready the user is told - see notify_brand_ready."""
     with _running_scans_lock:
         if user_id in _running_scans:
             return False
@@ -58,7 +59,9 @@ def start_brand_analysis_async(user_id: int, website: str) -> bool:
 
     def _worker():
         try:
-            run_brand_analysis(user_id, website, _already_claimed=True)
+            ok, _reason = run_brand_analysis(user_id, website, _already_claimed=True)
+            if ok and notify_base_url:
+                notify_brand_ready(user_id, notify_base_url)
         except Exception:  # never let a background thread die silently (traceback is logged)
             logger.exception(f"Background brand analysis crashed for user {user_id}")
             set_brand_scan_status(user_id, "failed", "analysis_failed")
@@ -68,6 +71,36 @@ def start_brand_analysis_async(user_id: int, website: str) -> bool:
 
     threading.Thread(target=_worker, name=f"brand-scan-{user_id}", daemon=True).start()
     return True
+
+
+def notify_brand_ready(user_id: int, base_url: str) -> dict:
+    """Tells a user their brand profile is ready (after an admin rescanned
+    their website): a bell notification, and an email when SMTP is set up.
+    Returns {"bell": bool, "email": bool}; an email failure is only logged."""
+    from datetime import datetime, timezone
+
+    from db import create_notification, get_user_brand_profile, get_user_by_id
+
+    user = get_user_by_id(user_id)
+    if user is None:
+        return {"bell": False, "email": False}
+    company = (get_user_brand_profile(user_id) or {}).get("company_name") or ""
+    title = "Your brand profile is ready"
+    body = (f"We analyzed {company}'s website" if company else "We analyzed your website") + (
+        ". Your posts and images now follow your brand's voice, colors and themes. Take a look and adjust anything.")
+    bell = bool(create_notification(user_id, "brand_ready", title, body, "/brand-profile",
+                                    f"brand-ready:{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"))
+    emailed = False
+    try:
+        from services.email_service import EmailService
+
+        mailer = EmailService()
+        if mailer.enabled and user.email:
+            mailer.send_brand_ready_email(user.email, user.name, company, base_url.rstrip("/") + "/brand-profile")
+            emailed = True
+    except Exception as err:  # noqa: BLE001 - the bell notification is enough
+        logger.warning(f"Brand-ready email to user {user_id} failed: {err}")
+    return {"bell": bell, "email": emailed}
 
 
 def run_brand_analysis(

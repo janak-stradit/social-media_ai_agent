@@ -108,7 +108,7 @@
         const list = $('notifBellList');
         const count = $('notifBellCount');
         const readAll = $('notifBellReadAll');
-        const ICONS = { occasion: 'fa-calendar-day', trend: 'fa-arrow-trend-up', inactive: 'fa-lightbulb' };
+        const ICONS = { occasion: 'fa-calendar-day', trend: 'fa-arrow-trend-up', inactive: 'fa-lightbulb', brand_ready: 'fa-palette' };
 
         function ago(iso) {
             const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
