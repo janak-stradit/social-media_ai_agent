@@ -150,6 +150,9 @@ def test_saving_adds_new_people_and_updates_known_ones_without_wiping():
     contacts = {c["email"]: c for c in db.list_invite_contacts()["contacts"]}
     assert contacts[e1]["name"] == "Priya" and contacts[e1]["company"] == "Acme Ltd" and contacts[e1]["phone"] == "123"
     assert contacts[e1]["batch"] == "b.xlsx" and contacts[e1]["status"] == "not_invited"
+    assert contacts[e1]["shared_inbox"] is False
+    db.save_invite_contacts([{"email": "sales@" + e2.split("@")[1]}], None, admin["id"], source="manual")
+    assert {c["email"]: c for c in db.list_invite_contacts()["contacts"]}["sales@" + e2.split("@")[1]]["shared_inbox"] is True
 
 
 # ── Through the admin page ──────────────────────────────────────────────────

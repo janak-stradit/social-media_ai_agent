@@ -67,6 +67,11 @@ SHARED_INBOXES = {"info", "contact", "contactus", "sales", "hello", "hi", "enqui
                   "admin", "office", "mail", "team", "marketing", "careers", "hr", "business", "connect", "help"}
 
 
+def is_shared_inbox(email: str) -> bool:
+    """info@, sales@, ... - reaches a team rather than one person."""
+    return (email or "").split("@")[0].lower() in SHARED_INBOXES
+
+
 class InviteFileError(ValueError):
     """The file can't be read (shown to the admin)."""
 
@@ -174,7 +179,7 @@ def parse(filename: str, data: bytes, existing_member_emails=None) -> dict:
         row["email"] = row["email"].lower().strip("<>").replace("mailto:", "")
         row["extra"] = {name: _clean(raw[i], MAX_EXTRA_VALUE) for i, name in extra_columns
                         if i < len(raw) and _clean(raw[i], MAX_EXTRA_VALUE)}
-        row["shared_inbox"] = row["email"].split("@")[0] in SHARED_INBOXES
+        row["shared_inbox"] = is_shared_inbox(row["email"])
         row["line"] = start_line + offset
         if not EMAIL_RE.match(row["email"]):
             row["status"] = "invalid_email"

@@ -260,8 +260,8 @@ $(document).ready(function () {
                 applyAdminUserFilters();
                 window._allAdminUsers.forEach(u => {
                     if (before[u.id] !== 'analyzing' || !u.brand || u.brand.status === 'analyzing') return;
-                    if (u.brand.status === 'configured') showToast(`${u.name}'s brand profile is ready. They've been notified.`, 'success');
-                    else showToast(`The scan for ${u.name} failed: ${BRAND_SCAN_ERRORS[u.brand.error] || 'unknown error'}.`, 'error');
+                    if (u.brand.status === 'failed') showToast(`The scan for ${u.name} failed: ${BRAND_SCAN_ERRORS[u.brand.error] || 'unknown error'}.`, 'error');
+                    else showToast(`${u.name}'s brand profile is ready. They've been notified.`, 'success');
                 });
                 pollBrandScans(tries - 1);
             });
@@ -1246,41 +1246,129 @@ $(document).ready(function () {
 
     let defaultInviterName = '';
 
+    // Sorting helpers, shared by both tables. Blank values always go last.
+    function icStore(key, value) {
+        try {
+            if (value === undefined) return JSON.parse(localStorage.getItem('avir.admin.' + key) || 'null');
+            localStorage.setItem('avir.admin.' + key, JSON.stringify(value));
+        } catch (e) { /* private window: not remembered */ }
+        return null;
+    }
+    const isBlank = v => v === null || v === undefined || v === '';
+    function sortBy(rows, getter, dir) {
+        return rows.map((row, i) => [row, getter(row), i]).sort((x, y) => {
+            const bx = isBlank(x[1]), by = isBlank(y[1]);
+            if (bx || by) return bx === by ? x[2] - y[2] : (bx ? 1 : -1);
+            const cmp = typeof x[1] === 'number' && typeof y[1] === 'number' ? x[1] - y[1]
+                : String(x[1]).localeCompare(String(y[1]), undefined, { numeric: true, sensitivity: 'base' });
+            return (dir === 'asc' ? cmp : -cmp) || x[2] - y[2];
+        }).map(x => x[0]);
+    }
+    function sortHeader(col, sort, attr) {
+        const active = sort.key === col.key;
+        const ariaSort = active ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none';
+        const icon = active ? (sort.dir === 'asc' ? 'fa-arrow-up' : 'fa-arrow-down') : 'fa-sort';
+        return `<th aria-sort="${ariaSort}"><button type="button" class="ic-sort${active ? ' active' : ''}" ${attr}="${col.key}"
+            title="Sort by ${escapeAttr(col.label.toLowerCase())}">${escapeHtml(col.label)}<i class="fas ${icon}" aria-hidden="true"></i></button></th>`;
+    }
+    function nextSort(sort, col) {
+        return sort.key === col.key ? { key: col.key, dir: sort.dir === 'asc' ? 'desc' : 'asc' } : { key: col.key, dir: col.defaultDir || 'asc' };
+    }
+
+    // ── Sent invitations: filter by status, search, sort ──
+    const SENT_FILTERS = [['all', 'All'], ['pending', 'Pending'], ['accepted', 'Joined'], ['expired', 'Expired'], ['revoked', 'Revoked']];
+    const SENT_STATUS_ORDER = { pending: 0, accepted: 1, expired: 2, revoked: 3 };
+    const SENT_COLUMNS = [
+        { key: 'invitee', label: 'Invitee', sort: i => (i.name || i.email || '').toLowerCase() },
+        { key: 'company', label: 'Company', sort: i => (i._company || '').toLowerCase() },
+        { key: 'status', label: 'Status', sort: i => SENT_STATUS_ORDER[i.status] },
+        { key: 'invited_by', label: 'Invited by', sort: i => (i.invited_by || '').toLowerCase() },
+        { key: 'message', label: 'Message' },
+        { key: 'sent', label: 'Sent', sort: i => i.sent_at, defaultDir: 'desc' },
+        { key: 'ends', label: 'Joined / Expires', sort: i => (i.status === 'accepted' ? i.accepted_at : i.expires_at), defaultDir: 'desc' },
+        { key: 'actions', label: 'Actions' },
+    ];
+    const sent = { rows: [], filter: 'all', q: '', sort: icStore('sentSort') || { key: 'sent', dir: 'desc' } };
+
+    function sentDate(iso) {  // date, with the time underneath
+        const d = new Date(iso);
+        if (!iso || isNaN(d)) return '—';
+        return `<span class="text-nowrap">${d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })}</span>`
+            + `<div class="ic-sub">${d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</div>`;
+    }
+
+    function renderSentInvites() {
+        const companies = {};
+        (ic.contacts || []).forEach(c => { companies[c.email] = c.company || ''; });
+        sent.rows.forEach(i => { i._company = companies[(i.email || '').toLowerCase()] || ''; });
+        const counts = { all: sent.rows.length };
+        sent.rows.forEach(i => { counts[i.status] = (counts[i.status] || 0) + 1; });
+        $('#sentFilters').html(SENT_FILTERS.map(([f, label]) =>
+            `<button type="button" class="ic-filter${sent.filter === f ? ' active' : ''}" data-sent-filter="${f}" aria-pressed="${sent.filter === f}">${label}<b>${counts[f] || 0}</b></button>`).join(''));
+        $('#sentThead').html('<tr>' + SENT_COLUMNS.map(c => c.sort ? sortHeader(c, sent.sort, 'data-sent-sort') : `<th>${c.label}</th>`).join('') + '</tr>');
+
+        const q = sent.q.toLowerCase();
+        const col = SENT_COLUMNS.find(c => c.key === sent.sort.key && c.sort) || SENT_COLUMNS[5];
+        const rows = sortBy(sent.rows.filter(i => (sent.filter === 'all' || i.status === sent.filter)
+            && (!q || [i.email, i.name, i._company, i.invited_by, i.message].some(v => (v || '').toLowerCase().includes(q)))), col.sort, sent.sort.dir);
+        $('#sentShowing').text(sent.rows.length ? `Showing ${rows.length} of ${sent.rows.length}` : '');
+        if (!sent.rows.length) {
+            $('#adminInvitesTbody').html(`
+                <tr><td colspan="8" class="text-center py-5 text-muted">
+                    <i class="fas fa-envelope-open-text fa-2x mb-2 d-block opacity-50"></i>
+                    No invitations yet - use <strong>Invite one person</strong> or pick people in the contact list.
+                </td></tr>`);
+            return;
+        }
+        if (!rows.length) {
+            $('#adminInvitesTbody').html('<tr><td colspan="8" class="text-center py-4 text-muted">No invitations match these filters.</td></tr>');
+            return;
+        }
+        $('#adminInvitesTbody').html(rows.map(i => {
+            const canResend = i.status !== 'accepted';
+            const canRevoke = i.status === 'pending';
+            return `
+                <tr>
+                    <td><strong>${escapeHtml(i.email)}</strong>${i.name ? `<div class="small text-muted">${escapeHtml(i.name)}</div>` : ''}</td>
+                    <td class="ic-sent-company">${i._company ? escapeHtml(i._company) : '<span class="ic-none">—</span>'}</td>
+                    <td>${INVITE_STATUS[i.status] || escapeHtml(i.status)}</td>
+                    <td>${escapeHtml(i.invited_by || '—')}</td>
+                    <td class="ic-msg">${i.message ? `<span title="${escapeAttr(i.message)}">${escapeHtml(i.message)}</span>` : '<span class="ic-none">—</span>'}</td>
+                    <td>${sentDate(i.sent_at)}</td>
+                    <td>${sentDate(i.status === 'accepted' ? i.accepted_at : i.expires_at)}</td>
+                    <td class="text-nowrap">
+                        ${canResend ? `<button type="button" class="btn-xs btn-xs-outline-neutral me-1" onclick="resendInvitation(${i.id}, this)"><i class="fas fa-paper-plane me-1"></i>Resend</button>` : ''}
+                        ${canRevoke ? `<button type="button" class="btn-xs btn-xs-outline-neutral text-danger" onclick="revokeInvitation(${i.id}, '${escapeAttr(i.email)}')"><i class="fas fa-ban me-1"></i>Revoke</button>` : ''}
+                    </td>
+                </tr>`;
+        }).join(''));
+    }
+
     window.loadInvitations = function () {
         $.getJSON('/api/admin/invitations').done(function (r) {
             defaultInviterName = (r && r.default_inviter_name) || '';
-            const rows = (r && r.invitations) || [];
-            const pending = rows.filter(i => i.status === 'pending').length;
+            sent.rows = (r && r.invitations) || [];
+            const pending = sent.rows.filter(i => i.status === 'pending').length;
             $('#adminInvitesBadge').text(pending).toggleClass('d-none', !pending);
-            $('#icSentCount').text(rows.length);
-            if (!rows.length) {
-                $('#adminInvitesTbody').html(`
-                    <tr><td colspan="6" class="text-center py-5 text-muted">
-                        <i class="fas fa-envelope-open-text fa-2x mb-2 d-block opacity-50"></i>
-                        No invitations yet - use <strong>Invite user</strong> to send the first one.
-                    </td></tr>`);
-                return;
-            }
-            $('#adminInvitesTbody').html(rows.map(i => {
-                const canResend = i.status !== 'accepted';
-                const canRevoke = i.status === 'pending';
-                return `
-                    <tr>
-                        <td><strong>${escapeHtml(i.email)}</strong>${i.name ? `<div class="small text-muted">${escapeHtml(i.name)}</div>` : ''}</td>
-                        <td>${INVITE_STATUS[i.status] || escapeHtml(i.status)}</td>
-                        <td>${escapeHtml(i.invited_by || '—')}</td>
-                        <td>${formatInviteDate(i.sent_at)}</td>
-                        <td>${i.status === 'accepted' ? formatInviteDate(i.accepted_at) : formatInviteDate(i.expires_at)}</td>
-                        <td class="text-nowrap">
-                            ${canResend ? `<button type="button" class="btn-xs btn-xs-outline-neutral me-1" onclick="resendInvitation(${i.id}, this)"><i class="fas fa-paper-plane me-1"></i>Resend</button>` : ''}
-                            ${canRevoke ? `<button type="button" class="btn-xs btn-xs-outline-neutral text-danger" onclick="revokeInvitation(${i.id}, '${escapeAttr(i.email)}')"><i class="fas fa-ban me-1"></i>Revoke</button>` : ''}
-                        </td>
-                    </tr>`;
-            }).join(''));
+            $('#icSentCount').text(sent.rows.length);
+            renderSentInvites();
         }).fail(function () {
-            $('#adminInvitesTbody').html('<tr><td colspan="6" class="text-center py-4 text-danger">Could not load invitations.</td></tr>');
+            $('#adminInvitesTbody').html('<tr><td colspan="8" class="text-center py-4 text-danger">Could not load invitations.</td></tr>');
         });
     };
+
+    $(document).on('click', '[data-sent-filter]', function () { sent.filter = $(this).data('sent-filter'); renderSentInvites(); });
+    $(document).on('click', '[data-sent-sort]', function () {
+        sent.sort = nextSort(sent.sort, SENT_COLUMNS.find(c => c.key === $(this).data('sent-sort')));
+        icStore('sentSort', sent.sort);
+        renderSentInvites();
+    });
+    let sentSearchTimer = null;
+    $('#sentSearch').on('input', function () {
+        clearTimeout(sentSearchTimer);
+        const v = this.value;
+        sentSearchTimer = setTimeout(() => { sent.q = v.trim(); renderSentInvites(); }, 200);
+    });
 
     // ── Contact list: upload people, pick them, invite them in bulk ─────────
     const IC_STATUS = {
@@ -1288,7 +1376,45 @@ $(document).ready(function () {
         expired: ['Link expired', 'fa-clock'], revoked: ['Revoked', 'fa-ban'], failed: ['Email failed', 'fa-triangle-exclamation'],
     };
     const IC_FILTERS = ['all', 'not_invited', 'invited', 'joined', 'expired', 'failed'];
-    const ic = { contacts: [], counts: {}, batches: [], filter: 'all', batch: '', q: '', selected: new Set() };
+    const IC_STATUS_ORDER = { not_invited: 0, failed: 1, invited: 2, expired: 3, revoked: 4, joined: 5 };
+    const IC_SIZE_WORDS = [['micro', 1], ['solo', 1], ['small', 2], ['mid', 3], ['medium', 3], ['large', 4], ['enterprise', 5]];
+    function sizeRank(v) {  // "Small" < "Medium" < "Large"; "11-50" < "51-200"
+        const s = String(v || '').toLowerCase();
+        if (!s) return '';
+        const word = IC_SIZE_WORDS.find(([w]) => s.includes(w));
+        if (word) return word[1] * 1e6;
+        const n = parseInt(s.replace(/[^0-9]+/g, ' ').trim(), 10);
+        return isNaN(n) ? s : n;
+    }
+    const icNone = '<span class="ic-none">—</span>';
+    const icText = v => (v ? escapeHtml(v) : icNone);
+    const icWebsite = c => (/^https?:\/\//i.test(c.website) ? c.website : 'https://' + c.website);
+    const icShortDate = iso => { const d = new Date(iso); return isNaN(d) ? '—' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }); };
+    const IC_COLUMNS = [
+        { key: 'person', label: 'Person', sort: c => (c.name || c.email).toLowerCase(),
+          cell: c => `<td class="ic-person"><strong>${escapeHtml(c.name || c.email)}</strong>${c.name ? `<span>${escapeHtml(c.email)}</span>` : ''}`
+            + `${c.job_title ? `<span class="ic-role">${escapeHtml(c.job_title)}</span>` : ''}`
+            + `${c.shared_inbox ? '<span class="ic-tag" title="A shared inbox such as info@ or sales@: the invitation reaches a team, not one person">Shared inbox</span>' : ''}</td>` },
+        { key: 'company', label: 'Company', sort: c => (c.company || c.website || '').toLowerCase(),
+          cell: c => `<td class="ic-company">${c.website ? `<a href="${escapeAttr(icWebsite(c))}" target="_blank" rel="noopener noreferrer">${escapeHtml(c.company || c.website)}</a>` : icText(c.company)}`
+            + `${c.description ? `<span class="ic-desc" title="${escapeAttr(c.description)}">${escapeHtml(c.description)}</span>` : ''}</td>` },
+        { key: 'industry', label: 'Industry', optional: true, sort: c => (c.industry || '').toLowerCase(), cell: c => `<td>${icText(c.industry)}</td>` },
+        { key: 'size', label: 'Size', optional: true, sort: c => sizeRank(c.company_size), cell: c => `<td class="text-nowrap">${icText(c.company_size)}</td>` },
+        { key: 'location', label: 'Location', optional: true, sort: c => [c.city, c.country].filter(Boolean).join(', ').toLowerCase(),
+          cell: c => `<td class="text-nowrap">${icText([c.city, c.country].filter(Boolean).join(', '))}</td>` },
+        { key: 'phone', label: 'Phone', optional: true, sort: c => c.phone,
+          cell: c => `<td class="text-nowrap">${c.phone ? `<a href="tel:${escapeAttr(c.phone.replace(/[^0-9+]/g, ''))}">${escapeHtml(c.phone)}</a>` : icNone}</td>` },
+        { key: 'added', label: 'Added', optional: true, sort: c => c.created_at, defaultDir: 'desc',
+          cell: c => `<td><span class="ic-sub d-block text-nowrap">${icShortDate(c.created_at)}</span><span class="ic-sub ic-batch" title="${escapeAttr(c.batch || 'Added by hand')}">`
+            + `${c.batch ? `<i class="fas fa-file-lines me-1"></i>${escapeHtml(c.batch)}` : 'Added by hand'}</span></td>` },
+        { key: 'status', label: 'Status', sort: c => IC_STATUS_ORDER[c.status], cell: c => `<td>${icStatusPill(c)}</td>` },
+        { key: 'last_invited', label: 'Last invited', optional: true, sort: c => c.last_invited_at, defaultDir: 'desc',
+          cell: c => `<td><span class="ic-sub text-nowrap"${c.last_invited_at ? ` title="${escapeAttr(formatInviteDate(c.last_invited_at))}"` : ''}>${c.last_invited_at ? icShortDate(c.last_invited_at) : '—'}${c.invite_count > 1 ? `<br>${c.invite_count} times` : ''}</span></td>` },
+    ];
+    const IC_MORE = { industry: '', city: '', size: '', inbox: '', source: '' };
+    const ic = { contacts: [], counts: {}, batches: [], filter: 'all', batch: '', q: '', selected: new Set(), expanded: new Set(),
+                 more: { ...IC_MORE }, sort: icStore('icSort') || { key: 'added', dir: 'desc' }, hidden: new Set(icStore('icHiddenCols') || ['phone']) };  // phone is often empty: off until chosen
+    const icColumns = () => IC_COLUMNS.filter(c => !c.optional || !ic.hidden.has(c.key));
 
     function icStatusPill(c) {
         const [label, icon] = IC_STATUS[c.status] || [c.status, 'fa-circle'];
@@ -1297,10 +1423,15 @@ $(document).ready(function () {
     }
 
     function icVisible() {
-        const q = ic.q.toLowerCase();
-        return ic.contacts.filter(c => (ic.filter === 'all' || c.status === ic.filter || (ic.filter === 'expired' && c.status === 'revoked'))
+        const q = ic.q.toLowerCase(), m = ic.more;
+        const rows = ic.contacts.filter(c => (ic.filter === 'all' || c.status === ic.filter || (ic.filter === 'expired' && c.status === 'revoked'))
             && (!ic.batch || String(c.batch_id) === ic.batch)
-            && (!q || [c.email, c.name, c.company, c.job_title, c.city, c.country, c.industry].some(v => (v || '').toLowerCase().includes(q))));
+            && (!m.industry || c.industry === m.industry) && (!m.city || c.city === m.city) && (!m.size || c.company_size === m.size)
+            && (!m.inbox || (m.inbox === 'shared') === !!c.shared_inbox) && (!m.source || c.source === m.source)
+            && (!q || [c.email, c.name, c.company, c.job_title, c.city, c.country, c.industry, c.phone, c.website, c.notes, c.description]
+                .some(v => (v || '').toLowerCase().includes(q))));
+        const col = IC_COLUMNS.find(c => c.key === ic.sort.key) || IC_COLUMNS.find(c => c.key === 'added');
+        return sortBy(rows, col.sort, ic.sort.dir);
     }
 
     function icRenderSelection() {
@@ -1313,6 +1444,45 @@ $(document).ready(function () {
         $('#icCheckAll').prop('checked', !!allShown).prop('indeterminate', !allShown && visible.some(c => ic.selected.has(c.id)));
     }
 
+    // Lists of values present in the contacts, for the filter menus
+    function icOptions(values, current, allLabel, rank) {
+        const uniq = [...new Set(values.filter(Boolean))];
+        if (current && !uniq.includes(current)) uniq.push(current);
+        const ordered = rank ? sortBy(uniq, rank, 'asc') : uniq.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+        return `<option value="">${allLabel}</option>` + ordered.map(v => `<option value="${escapeAttr(v)}"${v === current ? ' selected' : ''}>${escapeHtml(v)}</option>`).join('');
+    }
+
+    function icLinkify(value) {  // "https://a ; https://b" -> links, one per line
+        return String(value).split(/\s*;\s*/).filter(Boolean).map(part => /^https?:\/\/\S+$/i.test(part)
+            ? `<a href="${escapeAttr(part)}" target="_blank" rel="noopener noreferrer">${escapeHtml(part.replace(/^https?:\/\/(www\.)?/i, '').replace(/\/$/, ''))}</a>`
+            : escapeHtml(part)).join('<br>');
+    }
+
+    function icDetailRow(c, span) {
+        const item = (label, value, html) => (isBlank(value) ? '' : `<div class="ic-detail-item"><dt>${escapeHtml(label)}</dt><dd>${html || escapeHtml(value)}</dd></div>`);
+        const contact = [
+            item('Email', c.email, `<a href="mailto:${escapeAttr(c.email)}">${escapeHtml(c.email)}</a>${c.shared_inbox ? ' <span class="ic-sub">(shared inbox)</span>' : ''}`),
+            item('Phone', c.phone), item('Job title', c.job_title),
+            item('Website', c.website, c.website ? icLinkify(icWebsite(c)) : ''),
+            item('Industry', c.industry), item('Company size', c.company_size), item('City', c.city), item('Country', c.country),
+            item('About the company', c.description), item('Notes', c.notes),
+        ].join('');
+        const extra = Object.entries(c.extra || {}).map(([k, v]) => item(k, v, icLinkify(v))).join('');
+        const linkLive = c.status === 'invited' || c.status === 'expired';
+        const invite = [
+            item('Status', (IC_STATUS[c.status] || [c.status])[0]),
+            item('Invitations sent', String(c.invite_count || 0)),
+            item('Last invited', c.last_invited_at, formatInviteDate(c.last_invited_at)),
+            item(c.status === 'expired' ? 'Link expired' : 'Link expires', linkLive ? c.expires_at : '', formatInviteDate(c.expires_at)),
+            item('Last error', c.last_error),
+            item('Added', c.created_at, `${formatInviteDate(c.created_at)} ${c.batch ? `from ${escapeHtml(c.batch)}` : 'by hand'}`),
+        ].join('');
+        return `<tr class="ic-detail"><td colspan="${span}"><div class="ic-detail-grid">
+            <section><h6>Contact &amp; company</h6><dl>${contact}</dl></section>
+            ${extra ? `<section><h6>From the uploaded file</h6><dl>${extra}</dl></section>` : ''}
+            <section><h6>Invitation</h6><dl>${invite}</dl></section></div></td></tr>`;
+    }
+
     function icRender() {
         $('#icContactsCount').text(ic.counts.all || 0);
         $('#icFilters').html(IC_FILTERS.map(f => {
@@ -1323,30 +1493,69 @@ $(document).ready(function () {
         const batchValue = ic.batch;
         $('#icBatchFilter').html('<option value="">All uploads</option>' + ic.batches.map(b =>
             `<option value="${b.id}">${escapeHtml(b.filename)} · ${formatInviteDate(b.created_at).split(',')[0]}</option>`).join('')).val(batchValue);
+        $('[data-ic-more="industry"]').html(icOptions(ic.contacts.map(c => c.industry), ic.more.industry, 'All industries'));
+        $('[data-ic-more="city"]').html(icOptions(ic.contacts.map(c => c.city), ic.more.city, 'All cities'));
+        $('[data-ic-more="size"]').html(icOptions(ic.contacts.map(c => c.company_size), ic.more.size, 'All sizes', sizeRank));
+        $('[data-ic-more]').each(function () { $(this).val(ic.more[$(this).data('ic-more')]).toggleClass('is-set', !!this.value); });
+        const filtered = ic.filter !== 'all' || ic.batch || ic.q || Object.values(ic.more).some(Boolean);
+        $('#icClearFilters').toggleClass('d-none', !filtered);
+
+        const cols = icColumns();
+        const span = cols.length + 2;
+        $('#icThead').html(`<tr><th class="ic-check"><input type="checkbox" class="form-check-input" id="icCheckAll" aria-label="Select all shown"></th>`
+            + cols.map(c => sortHeader(c, ic.sort, 'data-ic-sort')).join('')
+            + '<th class="ic-more-col"><span class="visually-hidden">Details</span></th></tr>');
         const rows = icVisible();
         $('#icShowing').text(ic.contacts.length ? `Showing ${rows.length} of ${ic.contacts.length}` : '');
         if (!ic.contacts.length) {
-            $('#icTbody').html(`<tr><td colspan="7" class="text-center py-5 text-muted">
+            $('#icTbody').html(`<tr><td colspan="${span}" class="text-center py-5 text-muted">
                 <i class="fas fa-address-book fa-2x mb-2 d-block opacity-50"></i>
                 No contacts yet. Use <strong>Upload a list</strong> to add people from a CSV or Excel file.</td></tr>`);
         } else if (!rows.length) {
-            $('#icTbody').html('<tr><td colspan="7" class="text-center py-4 text-muted">Nobody matches these filters.</td></tr>');
+            $('#icTbody').html(`<tr><td colspan="${span}" class="text-center py-4 text-muted">Nobody matches these filters.
+                <button type="button" class="ic-link ms-1" data-ic-clear>Clear filters</button></td></tr>`);
         } else {
-            $('#icTbody').html(rows.map(c => `
-                <tr class="${ic.selected.has(c.id) ? 'is-selected' : ''}">
+            $('#icTbody').html(rows.map(c => {
+                const open = ic.expanded.has(c.id);
+                const who = escapeAttr(c.name || c.email);
+                return `
+                <tr class="${ic.selected.has(c.id) ? 'is-selected' : ''}${open ? ' is-open' : ''}">
                     <td class="ic-check"><input type="checkbox" class="form-check-input" data-ic-id="${c.id}" ${ic.selected.has(c.id) ? 'checked' : ''}
-                        aria-label="Select ${escapeAttr(c.name || c.email)}"></td>
-                    <td class="ic-person"><strong>${escapeHtml(c.name || c.email)}</strong>${c.name ? `<span>${escapeHtml(c.email)}</span>` : ''}${Object.keys(c.extra || {}).length ? `<span class="ic-extra" title="${escapeAttr(Object.entries(c.extra).map(([k, v]) => k + ': ' + v).join('\n'))}"><i class="fas fa-circle-info me-1"></i>${Object.keys(c.extra).length} more details</span>` : ''}</td>
-                    <td>${c.website ? `<a href="${escapeAttr(/^https?:\/\//.test(c.website) ? c.website : 'https://' + c.website)}" target="_blank" rel="noopener noreferrer">${escapeHtml(c.company || c.website)}</a>` : escapeHtml(c.company || '—')}
-                        <div class="ic-sub">${escapeHtml([c.industry, c.company_size, c.job_title].filter(Boolean).join(' · '))}</div></td>
-                    <td>${escapeHtml([c.city, c.country].filter(Boolean).join(', ') || '—')}</td>
-                    <td><span class="ic-sub">${c.batch ? `<i class="fas fa-file-lines me-1"></i>${escapeHtml(c.batch)}` : 'Added by hand'}</span></td>
-                    <td>${icStatusPill(c)}</td>
-                    <td><span class="ic-sub">${c.last_invited_at ? formatInviteDate(c.last_invited_at) : '—'}${c.invite_count > 1 ? ` · ${c.invite_count} times` : ''}</span></td>
-                </tr>`).join(''));
+                        aria-label="Select ${who}"></td>
+                    ${cols.map(col => col.cell(c)).join('')}
+                    <td class="ic-more-col"><button type="button" class="ic-expand" data-ic-expand="${c.id}" aria-expanded="${open}"
+                        title="${open ? 'Hide details' : 'All details'}" aria-label="${open ? 'Hide' : 'Show'} all details for ${who}"><i class="fas fa-chevron-${open ? 'up' : 'down'}"></i></button></td>
+                </tr>${open ? icDetailRow(c, span) : ''}`;
+            }).join(''));
         }
         icRenderSelection();
     }
+
+    $('#icColMenu').html('<div class="dropdown-header">Show columns</div>' + IC_COLUMNS.filter(c => c.optional).map(c =>
+        `<label class="dropdown-item ic-col-opt"><input type="checkbox" class="form-check-input me-2 mt-0" data-ic-col="${c.key}"${ic.hidden.has(c.key) ? '' : ' checked'}>${c.label}</label>`).join(''));
+    $(document).on('change', '[data-ic-col]', function () {
+        const key = $(this).data('ic-col');
+        if (this.checked) ic.hidden.delete(key); else ic.hidden.add(key);
+        icStore('icHiddenCols', [...ic.hidden]);
+        icRender();
+    });
+    $(document).on('click', '[data-ic-sort]', function () {
+        ic.sort = nextSort(ic.sort, IC_COLUMNS.find(c => c.key === $(this).data('ic-sort')));
+        icStore('icSort', ic.sort);
+        icRender();
+    });
+    $(document).on('click', '[data-ic-expand]', function () {
+        const id = Number($(this).data('ic-expand'));
+        if (ic.expanded.has(id)) ic.expanded.delete(id); else ic.expanded.add(id);
+        icRender();
+        $(`[data-ic-expand="${id}"]`).trigger('focus');
+    });
+    $(document).on('change', '[data-ic-more]', function () { ic.more[$(this).data('ic-more')] = this.value; icRender(); });
+    $(document).on('click', '#icClearFilters, [data-ic-clear]', function () {
+        ic.filter = 'all'; ic.batch = ''; ic.q = ''; ic.more = { ...IC_MORE };
+        $('#icSearch').val('');
+        icRender();
+    });
 
     function icApply(r) {
         ic.contacts = r.contacts || [];
@@ -1355,11 +1564,12 @@ $(document).ready(function () {
         const ids = new Set(ic.contacts.map(c => c.id));
         ic.selected = new Set([...ic.selected].filter(id => ids.has(id)));
         icRender();
+        if (sent.rows.length) renderSentInvites();  // the company column comes from the contacts
     }
 
     window.loadInviteContacts = function () {
         return $.getJSON('/api/admin/invite-contacts').done(icApply)
-            .fail(() => $('#icTbody').html('<tr><td colspan="7" class="text-center py-4 text-danger">Could not load the contact list.</td></tr>'));
+            .fail(() => $('#icTbody').html('<tr><td colspan="11" class="text-center py-4 text-danger">Could not load the contact list.</td></tr>'));
     };
 
     $(document).on('click', '[data-ic-view]', function () {
@@ -1378,7 +1588,7 @@ $(document).ready(function () {
         $(this).closest('tr').toggleClass('is-selected', this.checked);
         icRenderSelection();
     });
-    $('#icCheckAll').on('change', function () {
+    $(document).on('change', '#icCheckAll', function () {
         icVisible().forEach(c => { if (this.checked) ic.selected.add(c.id); else ic.selected.delete(c.id); });
         icRender();
     });

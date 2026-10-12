@@ -236,6 +236,42 @@
         .ic-link { border: none; background: none; padding: 0; color: var(--brand-strong); font-weight: 600; font-size: 0.8rem; text-decoration: none; }
         .ic-link:hover { text-decoration: underline; }
         .ic-check { width: 36px; }
+        .ic-more-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; padding: 0.5rem 0.65rem;
+            border: 1px solid #eef0f3; border-radius: 10px; background: #fafbfc; }
+        .ic-more-filters > i { color: #9ca3af; font-size: 0.8rem; }
+        .ic-more-filters select { width: auto; max-width: 210px; font-size: 0.78rem; }
+        .ic-more-filters select.is-set { border-color: var(--brand-strong); color: var(--brand-strong); background-color: #fff7ed; }
+        .ic-col-menu { min-width: 190px; padding: 0.35rem 0; }
+        .ic-col-opt { display: flex; align-items: center; font-size: 0.82rem; cursor: pointer; }
+        #icTable th, #icTable td { padding-left: 10px; padding-right: 10px; }
+        #icTable th, #adminInvitesTable th { white-space: nowrap; }
+        .ic-sort { border: none; background: none; padding: 0; font: inherit; color: inherit; text-transform: inherit; letter-spacing: inherit;
+            display: inline-flex; align-items: center; gap: 5px; cursor: pointer; }
+        .ic-sort i { font-size: 0.65rem; opacity: 0.35; }
+        .ic-sort:hover i, .ic-sort.active i { opacity: 1; }
+        .ic-sort.active { color: var(--brand-strong); }
+        .ic-sort:focus-visible { outline: 2px solid var(--brand-strong); outline-offset: 2px; border-radius: 4px; }
+        .ic-none { color: #cbd5e1; }
+        .ic-person .ic-role { display: block; color: #4b5563; }
+        .ic-tag { display: inline-block !important; margin-top: 3px; padding: 0 7px; border-radius: 999px; background: #f1f5f9; color: #64748b !important;
+            font-size: 0.68rem !important; font-weight: 600; cursor: help; }
+        .ic-company { max-width: 230px; }
+        .ic-company a { font-weight: 600; }
+        .ic-desc { display: block; font-size: 0.74rem; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
+        .ic-batch { display: block; max-width: 130px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ic-more-col { width: 40px; text-align: right; }
+        .ic-expand { border: 1px solid #e5e7eb; background: #fff; width: 28px; height: 28px; border-radius: 8px; color: #6b7280; font-size: 0.72rem; }
+        .ic-expand:hover, tr.is-open .ic-expand { color: var(--brand-strong); border-color: #fdba74; }
+        tr.is-open > td { border-bottom-color: transparent !important; }
+        tr.ic-detail > td { background: #fcfcfd; padding: 0.4rem 1rem 1rem 3.2rem !important; }
+        .ic-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.75rem 1.5rem; }
+        .ic-detail-grid h6 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #9ca3af; margin: 0 0 0.4rem; }
+        .ic-detail-grid dl { margin: 0; }
+        .ic-detail-item { display: grid; grid-template-columns: 130px 1fr; gap: 0.6rem; padding: 3px 0; font-size: 0.8rem; }
+        .ic-detail-item dt { font-weight: 600; color: #6b7280; }
+        .ic-detail-item dd { margin: 0; color: #172033; overflow-wrap: anywhere; }
+        .ic-sent-company { min-width: 150px; }
+        .ic-msg span { display: block; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.78rem; color: #4b5563; }
         #icTable tbody tr.is-selected { background: #fff7ed; }
         .ic-person strong { display: block; color: #172033; }
         .ic-person span, .ic-sub { font-size: 0.76rem; color: #6b7280; }
@@ -955,7 +991,25 @@
                         <div class="ic-filters" id="icFilters" role="group" aria-label="Filter by status"></div>
                         <div class="ic-toolbar-right">
                             <select class="form-select form-select-sm" id="icBatchFilter" aria-label="Filter by upload"><option value="">All uploads</option></select>
-                            <input type="search" class="form-control form-control-sm" id="icSearch" placeholder="Search name, email or company" aria-label="Search contacts">
+                            <input type="search" class="form-control form-control-sm" id="icSearch" placeholder="Search contacts..." aria-label="Search contacts">
+                        </div>
+                    </div>
+                    <div class="ic-more-filters" role="group" aria-label="More filters">
+                        <i class="fas fa-filter" aria-hidden="true"></i>
+                        <select class="form-select form-select-sm" data-ic-more="industry" aria-label="Filter by industry"></select>
+                        <select class="form-select form-select-sm" data-ic-more="city" aria-label="Filter by city"></select>
+                        <select class="form-select form-select-sm" data-ic-more="size" aria-label="Filter by company size"></select>
+                        <select class="form-select form-select-sm" data-ic-more="inbox" aria-label="Filter by email type">
+                            <option value="">Any email</option><option value="personal">Personal email</option><option value="shared">Shared inbox (info@, sales@...)</option>
+                        </select>
+                        <select class="form-select form-select-sm" data-ic-more="source" aria-label="Filter by how they were added">
+                            <option value="">Uploaded or by hand</option><option value="upload">Uploaded</option><option value="manual">Added by hand</option>
+                        </select>
+                        <button type="button" class="ic-link d-none" id="icClearFilters"><i class="fas fa-xmark me-1"></i>Clear filters</button>
+                        <div class="dropdown ms-auto">
+                            <button type="button" class="btn-xs btn-xs-outline-neutral" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false">
+                                <i class="fas fa-table-columns me-1"></i>Columns</button>
+                            <div class="dropdown-menu dropdown-menu-end ic-col-menu" id="icColMenu"></div>
                         </div>
                     </div>
                     <div class="ic-selection d-none" id="icSelection" role="region" aria-label="Selected contacts">
@@ -970,18 +1024,8 @@
                     <div class="admin-table-wrap">
                         <div class="admin-table-scroll">
                             <table class="admin-table-light" id="icTable">
-                                <thead>
-                                    <tr>
-                                        <th class="ic-check"><input type="checkbox" class="form-check-input" id="icCheckAll" aria-label="Select all shown"></th>
-                                        <th>Person</th>
-                                        <th>Company</th>
-                                        <th>Location</th>
-                                        <th>Added from</th>
-                                        <th>Status</th>
-                                        <th>Last invited</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="icTbody"><tr><td colspan="7" class="text-center py-4 text-muted">Loading contacts...</td></tr></tbody>
+                                <thead id="icThead"></thead>
+                                <tbody id="icTbody"><tr><td colspan="11" class="text-center py-4 text-muted">Loading contacts...</td></tr></tbody>
                             </table>
                         </div>
                     </div>
@@ -994,24 +1038,24 @@
                     </div>
                 </div>
 
-                <div class="admin-table-wrap d-none" id="icSentView">
-                    <div class="admin-table-scroll">
-                        <table class="admin-table-light" id="adminInvitesTable">
-                            <thead>
-                                <tr>
-                                    <th>Invitee</th>
-                                    <th>Status</th>
-                                    <th>Invited by</th>
-                                    <th>Sent</th>
-                                    <th>Joined / Expires</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody id="adminInvitesTbody">
-                                <tr><td colspan="6" class="text-center py-4 text-muted">Loading invitations...</td></tr>
-                            </tbody>
-                        </table>
+                <div class="d-none" id="icSentView">
+                    <div class="ic-toolbar">
+                        <div class="ic-filters" id="sentFilters" role="group" aria-label="Filter by status"></div>
+                        <div class="ic-toolbar-right">
+                            <input type="search" class="form-control form-control-sm" id="sentSearch" placeholder="Search invitations..." aria-label="Search invitations">
+                        </div>
                     </div>
+                    <div class="admin-table-wrap">
+                        <div class="admin-table-scroll">
+                            <table class="admin-table-light" id="adminInvitesTable">
+                                <thead id="sentThead"></thead>
+                                <tbody id="adminInvitesTbody">
+                                    <tr><td colspan="8" class="text-center py-4 text-muted">Loading invitations...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="ic-foot"><span id="sentShowing"></span></div>
                 </div>
             </div>
             <!-- PANE: EMAILS (automation switches, send to a segment, history) -->
