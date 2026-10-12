@@ -2452,7 +2452,7 @@ def upsert_invitation(
         return _serialize_invitation(row, inviter.name if inviter else None)
 
 
-def list_invitations(limit: int = 100) -> list[dict]:
+def list_invitations(limit: int = 2000) -> list[dict]:
     with Session(engine) as session:
         rows = session.query(UserInvitation).order_by(UserInvitation.sent_at.desc()).limit(limit).all()
         names = {u.id: u.name for u in session.query(User.id, User.name).all()}
@@ -2577,6 +2577,7 @@ def list_invite_contacts() -> dict:
                 invitations[inv.id] = inv
         members = member_emails([c.email for c in contacts])
         batches = {b.id: b for b in session.query(InviteBatch).all()}
+        from services.invite_import import is_shared_inbox
         out = []
         for c in contacts:
             invitation = invitations.get(c.invitation_id)
@@ -2584,6 +2585,7 @@ def list_invite_contacts() -> dict:
             out.append({
                 "id": c.id, "email": c.email, **{f: getattr(c, f) or "" for f in CONTACT_FIELDS},
                 "extra": json.loads(c.extra) if c.extra else {},
+                "shared_inbox": is_shared_inbox(c.email),
                 "source": c.source, "batch_id": c.batch_id, "batch": batch.filename if batch else None,
                 "status": _contact_status(c, invitation, c.email in members),
                 "invite_count": c.invite_count or 0,
