@@ -1900,6 +1900,27 @@ def mark_brief_used(user_id: int, brief_id: int) -> bool:
         return True
 
 
+def recent_hiring_designs(user_id: int, limit: int = 5) -> list[dict]:
+    """The designs of the user's last /hiring posts, newest first (services/hiring_service.py)."""
+    with Session(engine) as session:
+        rows = (
+            session.query(RunHistory.content)
+            .filter(RunHistory.user_id == user_id, RunHistory.story.like("/hiring%"))
+            .order_by(RunHistory.id.desc())
+            .limit(limit * 2)
+            .all()
+        )
+    designs = []
+    for (content,) in rows:
+        try:
+            design = (((json.loads(content or "{}") or {}).get("_preset") or {}).get("hiring") or {}).get("design")
+        except (TypeError, ValueError, AttributeError):
+            design = None
+        if isinstance(design, dict):
+            designs.append(design)
+    return designs[:limit]
+
+
 def get_image_asset(asset_id: int | None, user_id: int) -> dict | None:
     if not asset_id:
         return None

@@ -68,7 +68,7 @@ def test_menu_lists_the_commands(app):
     _, client = _client(app)
     presets = client.get("/api/image-presets").get_json()["presets"]
     assert [p["command"] for p in presets] == ["/3dbillboard", "/metaad", "/premiumshowcase", "/lifestyle", "/catalog", "/festive",
-                                               "/carousel"]
+                                               "/carousel", "/hiring"]
     meta = next(p for p in presets if p["id"] == "metaad")
     assert meta["images"] == 1 and meta["all_sizes_images"] == 3 and meta["ad_copy"]
 
@@ -270,7 +270,7 @@ def admin_client(app):
 
 def test_admin_lists_commands_and_only_admins_can_change_them(app, admin_client):
     presets = admin_client.get("/api/admin/image-presets").get_json()["presets"]
-    assert [p["id"] for p in presets] == ["3dbillboard", "metaad", "premiumshowcase", "lifestyle", "catalog", "festive", "carousel"]
+    assert [p["id"] for p in presets] == ["3dbillboard", "metaad", "premiumshowcase", "lifestyle", "catalog", "festive", "carousel", "hiring"]
     assert all(p["enabled"] and p["customized"] == [] and p["scene"] == p["defaults"]["scene"] for p in presets)
     _, user = _client(app)
     assert user.get("/api/admin/image-presets").status_code in (401, 403)

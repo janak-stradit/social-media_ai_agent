@@ -2196,13 +2196,16 @@ $(document).ready(function () {
     // The AI's text is kept, so "Restore original" brings it back.
     const textLength = text => Array.from(text).length;  // as the server counts: an emoji is one character
 
+    // An image command's own caption: a /carousel's, or a /hiring post's
+    const commandCopy = meta => (meta || {}).carousel || (meta || {}).hiring || null;
+
     function postTextOf(msgId, target) {
         const h = window.chatHistory[msgId];
         const r = h && h.responses[h.currentIndex];
         if (!r) return null;
         const content = r.content || {};
         if (target === 'carousel') {
-            const car = (content._preset || h.presetRun || {}).carousel;
+            const car = commandCopy(content._preset || h.presetRun);
             return car ? { node: car, caption: car.caption || '', tags: car.hashtags || [], runId: r.runId } : null;
         }
         const node = content[target] || {};
@@ -2212,7 +2215,10 @@ $(document).ready(function () {
     function setPostNode(msgId, target, node) {
         const h = window.chatHistory[msgId];
         const content = h.responses[h.currentIndex].content;
-        if (target === 'carousel') (content._preset || h.presetRun).carousel = node;
+        if (target === 'carousel') {
+            const meta = content._preset || h.presetRun;
+            meta[meta.hiring ? 'hiring' : 'carousel'] = node;
+        }
         else content[target] = node;
     }
 
@@ -2275,19 +2281,21 @@ $(document).ready(function () {
                     </div>`;
     }
 
-    // A /carousel's caption (shared by its slides)
+    // A /carousel's caption (shared by its slides), or a /hiring post's
     function carouselTextBlockHtml(msgId) {
         const post = postTextOf(msgId, 'carousel');
         const text = post ? window.PostPreview.postText(post.caption, post.tags) : '';
         if (!text) return '';
+        const hiring = !!post.node.job;
         return `
             <div class="preset-adcopy post-text-block" id="${msgId}_text_carousel">
-                <div class="preset-adcopy-head"><span><i class="fas fa-images me-1"></i>Carousel caption${editedBadgeHtml(post)}</span>
+                <div class="preset-adcopy-head"><span><i class="fas ${hiring ? 'fa-user-plus' : 'fa-images'} me-1"></i>${hiring ? 'Job post caption' : 'Carousel caption'}${editedBadgeHtml(post)}</span>
                     <span class="post-box-actions">${editActionsHtml(msgId, 'carousel', post)}
                     <button type="button" class="preset-copy" data-copy="${escapeAttr(text)}"><i class="fas fa-copy me-1"></i>Copy</button></span></div>
                 <div class="post-caption-text">${escapeHtml(post.caption)}</div>
                 ${post.tags.length ? `<div class="hashtags-container mt-2">${post.tags.map(t => `<span class="hashtag-pill">${escapeHtml(t)}</span>`).join(' ')}</div>` : ''}
-            </div>`;
+            </div>
+            ${hiring && post.node.compliance ? buildComplianceHtml(post.node.compliance) : ''}`;
     }
 
     function refreshTextBlock(msgId, target) {
@@ -2298,7 +2306,7 @@ $(document).ready(function () {
 
     function postEditorHtml(msgId, target, post) {
         const id = `${msgId}_edit_${target}`;
-        const name = target === 'carousel' ? 'carousel' : window.PostPreview.platformName(target);
+        const name = target === 'carousel' ? (post.node.job ? 'job' : 'carousel') : window.PostPreview.platformName(target);
         return `
             <div class="post-text-block post-text-flat" id="${msgId}_text_${target}">
             <div class="post-box-card post-editor" data-msg="${msgId}" data-target="${target}">
@@ -2427,6 +2435,15 @@ $(document).ready(function () {
         const h = window.chatHistory[msgId];
         const content = (h.responses[h.currentIndex] || {}).content || {};
         const meta = content._preset;
+        if (meta && meta.hiring) {
+            // /hiring: the square image for LinkedIn and Facebook, the portrait for Instagram
+            const url = k => content[k]?.media?.image?.url;
+            const square = url('feed') || url('portrait'), tall = url('portrait') || square;
+            return ['linkedin', 'instagram', 'facebook'].map(p => ({
+                platform: p, caption: meta.hiring.caption || '', hashtags: meta.hiring.hashtags || [],
+                images: [p === 'instagram' ? tall : square].filter(Boolean), media: 'single', on: true,
+            }));
+        }
         if (meta) {
             const images = h.platforms.map(k => content[k]?.media?.image?.url).filter(Boolean);
             const car = meta.carousel;
@@ -3107,7 +3124,7 @@ $(document).ready(function () {
                     <span class="slash-cmd">${escapeHtml(p.command)}</span><span class="slash-label">${escapeHtml(p.label)}</span>
                     <span class="slash-desc">${escapeHtml(p.description)}</span>
                 </span>
-                <span class="slash-meta">${p.carousel ? '3-10 slides + caption' : `${p.images} image${p.images === 1 ? '' : 's'}${p.ad_copy ? ' + ad copy' : ''}`}</span>
+                <span class="slash-meta">${p.carousel ? '3-10 slides + caption' : `${p.images} image${p.images === 1 ? '' : 's'}${p.ad_copy ? ' + ad copy' : ''}${p.hiring ? ' + caption' : ''}`}</span>
             </button>`).join('');
         $('#slashMenu').html(`
             <div class="slash-menu-head"><span>Image commands</span><span class="slash-keys">↑↓ choose · Enter use · Esc close</span></div>
@@ -3152,7 +3169,7 @@ $(document).ready(function () {
         } else if (reason) {
             status = `<span class="preset-status bad"><i class="fas fa-hourglass-half me-1"></i>${escapeHtml(reason)}</span>`;
         } else {
-            status = `<span class="preset-status">${p.carousel ? `${need} slides + caption (type e.g. "7 slides" to change)` : `${need} image${need === 1 ? '' : 's'}`}${p.ad_copy ? ' + ad copy' : ''}`
+            status = `<span class="preset-status">${p.carousel ? `${need} slides + caption (type e.g. "7 slides" to change)` : `${need} image${need === 1 ? '' : 's'}`}${p.ad_copy ? ' + ad copy' : ''}${p.hiring ? ' + job post caption · a new design each time' : ''}`
                 + `${q && !q.unlimited ? ` · ${q.remaining} left today` : ''}`
                 + `${!uploadedImagePath && threadActiveImagePath ? ' · uses the last image in this chat' : ''}</span>`;
         }
@@ -3359,6 +3376,7 @@ $(document).ready(function () {
                 <div class="assistant-meta-tags">${costHtml}<span class="assistant-run-tag">${r.runId ? 'Run #' + r.runId : 'Generated'}</span></div>
             </div>
             ${meta.text ? `<div class="preset-brief"><i class="fas fa-quote-left me-1"></i>${escapeHtml(meta.text)}</div>` : ''}
+            ${meta.hiring && meta.hiring.design_names ? `<div class="preset-brief"><i class="fas fa-palette me-1"></i>Design: ${escapeHtml(meta.hiring.design_names.layout)} · ${escapeHtml(meta.hiring.design_names.scene)} · ${escapeHtml(meta.hiring.design_names.treatment)}. <strong>New images</strong> gives a different design. Check the words on the image before posting.</div>` : ''}
             ${meta.occasion_auto ? `<div class="preset-brief"><i class="fas fa-calendar-day me-1"></i>Made for the next festival, <strong>${escapeHtml(meta.occasion)}</strong>. For another occasion, type e.g. <em>/festive Eid</em>.</div>` : ''}
             <div class="preset-grid${h.platforms.length > 1 ? ' multi' : ''}">${tiles}</div>
             ${adHtml}${carHtml}
