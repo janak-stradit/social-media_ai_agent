@@ -339,6 +339,12 @@
         .ch-img .cap { position: absolute; left: 14px; bottom: 12px; font-weight: 800; font-size: 1.15rem; letter-spacing: -0.01em; text-shadow: 0 2px 8px rgba(0, 0, 0, 0.25); }
         .ch-img .visual-logo { top: 10px; right: 10px; }
         .ch-img.wide { aspect-ratio: 1.91 / 1; }
+        /* Real generated images in the previews (static/img/landing) */
+        .has-photo { background-size: cover; background-position: center; background-color: #1f2937; }
+        .has-photo::before { display: none; }
+        .has-photo::after { content: ''; position: absolute; inset: 0; background: linear-gradient(to top, rgba(9, 14, 26, 0.72) 0%, rgba(9, 14, 26, 0.18) 42%, transparent 62%); pointer-events: none; }
+        .has-photo > .visual-copy, .has-photo > .cap, .has-photo > .visual-logo, .has-photo > .stamp { z-index: 1; }
+        .visual.has-photo { transition: background-image 0.6s ease; }
         .ch-img.square { aspect-ratio: 1 / 1; }
         .ch-foot { display: flex; align-items: center; gap: 16px; padding: 10px 14px 12px; border-top: 1px solid #f1f5f9; font-size: 0.78rem; font-weight: 600; color: var(--muted); }
         .ch-foot .reacts { display: inline-flex; align-items: center; gap: 4px; }
@@ -423,6 +429,7 @@
         .swatch { width: 14px; height: 14px; border-radius: 4px; display: inline-block; }
         .logo-demo { position: relative; height: 150px; border-radius: 14px; background: linear-gradient(135deg, #a5f3fc, #0ea5e9 60%, #1e40af); display: flex; align-items: center; justify-content: center; color: #fff; font-size: 2.6rem; }
         .logo-demo .visual-logo { top: 10px; right: 10px; }
+        .logo-demo.has-photo { background-size: cover; background-repeat: no-repeat; background-color: #1f2937; }
         .logo-demo .stamp { position: absolute; left: 10px; bottom: 10px; font-size: 0.68rem; font-weight: 700; background: rgba(17, 24, 39, 0.65); border-radius: 6px; padding: 3px 8px; }
         .chat-demo { display: flex; flex-direction: column; gap: 8px; }
         .bubble { max-width: 85%; font-size: 0.84rem; line-height: 1.45; padding: 9px 12px; border-radius: 14px; }
@@ -665,9 +672,8 @@
                         <div><div class="post-name">yourbrand</div><div class="post-meta">Sponsored</div></div>
                         <i class="fas fa-ellipsis"></i>
                     </div>
-                    <div class="visual" id="heroVisual" style="background: linear-gradient(150deg, #fbbf24 0%, #ea580c 55%, #7c2d12 100%);">
+                    <div class="visual has-photo" id="heroVisual" role="img" aria-label="Diwali lamps and rangoli" style="background-image: url('{{ url_for('static', filename='img/landing/hero-diwali.webp') }}');">
                         <span class="visual-logo"><i class="fas fa-circle-dot"></i>YOUR LOGO</span>
-                        <i class="fas fa-mug-hot visual-icon" id="heroIcon"></i>
                         <div class="visual-copy">
                             <div class="visual-kicker" id="heroKicker">Festive offer</div>
                             <div class="visual-headline" id="heroHeadline">Diwali Special: 20% off</div>
@@ -716,7 +722,7 @@
                         <i class="fab fa-linkedin" style="margin-left:auto;color:#0a66c2;font-size:1.15rem;"></i>
                     </div>
                     <div class="ch-body">Most teams post when they remember, not when their audience is listening. Today we're launching Smart Scheduling: it learns when your followers are active and lines up every post for that moment.<br><br>Three things it changes for marketing teams... <span class="more">see more</span><br><span class="ch-tags">#ProductLaunch #MarketingOps #SaaS</span></div>
-                    <div class="ch-img wide"><span class="visual-logo"><i class="fas fa-circle-dot"></i>YOUR LOGO</span><i class="fas fa-calendar-check big"></i><span class="cap">Smart Scheduling is here</span></div>
+                    <div class="ch-img wide has-photo" role="img" aria-label="A marketer planning posts at an office desk" style="background-image: url('{{ url_for('static', filename='img/landing/channel-wide.webp') }}');"><span class="visual-logo"><i class="fas fa-circle-dot"></i>YOUR LOGO</span><span class="cap">Smart Scheduling is here</span></div>
                     <div class="ch-foot"><span class="reacts"><span style="background:#0a66c2"><i class="fas fa-thumbs-up"></i></span><span style="background:#df704d"><i class="fas fa-heart"></i></span></span>142 &middot; 18 comments</div>
                 </article>
 
@@ -726,7 +732,7 @@
                         <div><div class="post-name">yourbrand</div><div class="post-meta">Original audio</div></div>
                         <i class="fas fa-ellipsis"></i>
                     </div>
-                    <div class="ch-img square" style="background:linear-gradient(135deg,#f472b6,#db2777 55%,#831843)"><span class="visual-logo"><i class="fas fa-circle-dot"></i>YOUR LOGO</span><i class="fas fa-calendar-check big"></i><span class="cap">Post at the perfect time</span></div>
+                    <div class="ch-img square has-photo" role="img" aria-label="A marketer planning posts at an office desk" style="background-image: url('{{ url_for('static', filename='img/landing/channel-square.webp') }}');"><span class="visual-logo"><i class="fas fa-circle-dot"></i>YOUR LOGO</span><span class="cap">Post at the perfect time</span></div>
                     <div class="post-actions"><i class="fas fa-heart"></i><i class="far fa-comment"></i><i class="far fa-paper-plane"></i><i class="far fa-bookmark"></i></div>
                     <div class="ch-body" style="padding-top:4px;"><b>yourbrand</b> Stop guessing when to post &#9200; Smart Scheduling finds the moment your followers are online. Link in bio! <span class="ch-tags">#NewFeature #SocialMediaTips #ContentCreator</span></div>
                 </article>
@@ -738,7 +744,7 @@
                         <i class="fab fa-facebook" style="margin-left:auto;color:#1877f2;font-size:1.15rem;"></i>
                     </div>
                     <div class="ch-body">Big news, everyone! &#127881; Our new Smart Scheduling feature posts your updates exactly when your friends and customers are scrolling. Less planning, more engagement. Give it a try today!</div>
-                    <div class="ch-img wide" style="background:linear-gradient(135deg,#60a5fa,#2563eb 55%,#1e3a8a)"><span class="visual-logo"><i class="fas fa-circle-dot"></i>YOUR LOGO</span><i class="fas fa-calendar-check big"></i><span class="cap">Less planning. More reach.</span></div>
+                    <div class="ch-img wide has-photo" role="img" aria-label="A marketer planning posts at an office desk" style="background-image: url('{{ url_for('static', filename='img/landing/channel-wide.webp') }}'); background-position: center 35%;"><span class="visual-logo"><i class="fas fa-circle-dot"></i>YOUR LOGO</span><span class="cap">Less planning. More reach.</span></div>
                     <div class="ch-foot"><span class="reacts"><span style="background:#1877f2"><i class="fas fa-thumbs-up"></i></span><span style="background:#f02849"><i class="fas fa-heart"></i></span></span>98 &middot; 7 comments &middot; 3 shares</div>
                 </article>
             </div>
@@ -818,7 +824,7 @@
                     <span class="tile-icon"><i class="fas fa-stamp"></i></span>
                     <h3>Your real logo on every image</h3>
                     <p>The AI never draws your logo. Your actual logo file is placed on each image, so it's always exactly right.</p>
-                    <div class="tile-demo"><div class="logo-demo"><span class="visual-logo"><i class="fas fa-circle-dot"></i>YOUR LOGO</span><i class="fas fa-headphones"></i><span class="stamp">Real logo file</span></div></div>
+                    <div class="tile-demo"><div class="logo-demo has-photo" role="img" aria-label="A generated image with the company's real logo placed in the corner" style="background-image: url('{{ url_for('static', filename='img/landing/logo-stamp.webp') }}'); background-position: left top;"><span class="stamp">Real logo file, placed as is</span></div></div>
                 </article>
                 <article class="tile reveal">
                     <span class="tile-icon"><i class="fas fa-comments"></i></span>
@@ -965,9 +971,9 @@
                     </div>
                 </div>
                 <div class="cta-stack" aria-hidden="true">
-                    <div class="mini m1"><div class="ch-img" style="background:linear-gradient(135deg,#60a5fa,#1e3a8a)"><i class="fas fa-briefcase big"></i></div><div class="ln"></div><div class="ln"></div></div>
-                    <div class="mini m2"><div class="ch-img" style="background:linear-gradient(135deg,#fbbf24,#ea580c 60%,#9a3412)"><i class="fas fa-mug-hot big"></i></div><div class="ln"></div><div class="ln"></div></div>
-                    <div class="mini m3"><div class="ch-img" style="background:linear-gradient(135deg,#34d399,#047857)"><i class="fas fa-seedling big"></i></div><div class="ln"></div><div class="ln"></div></div>
+                    <div class="mini m1"><div class="ch-img has-photo" style="background-image: url('{{ url_for('static', filename='img/landing/mini-dashboard.webp') }}');"></div><div class="ln"></div><div class="ln"></div></div>
+                    <div class="mini m2"><div class="ch-img has-photo" style="background-image: url('{{ url_for('static', filename='img/landing/mini-diwali.webp') }}');"></div><div class="ln"></div><div class="ln"></div></div>
+                    <div class="mini m3"><div class="ch-img has-photo" style="background-image: url('{{ url_for('static', filename='img/landing/mini-clinic.webp') }}');"></div><div class="ln"></div><div class="ln"></div></div>
                 </div>
             </div>
         </div>
@@ -1072,14 +1078,14 @@
             // Hero demo: type a brief, "generate", reveal the post, repeat
             if (reduceMotion) return;
             const scenes = [
-                { brief: 'Diwali offer for our cafe, warm and festive', icon: 'fa-mug-hot', kicker: 'Festive offer', headline: 'Diwali Special: 20% off',
-                  bg: 'linear-gradient(150deg, #fbbf24 0%, #ea580c 55%, #7c2d12 100%)',
+                { brief: 'Diwali offer for our cafe, warm and festive', img: '{{ url_for('static', filename='img/landing/hero-diwali.webp') }}', alt: 'Diwali lamps and rangoli',
+                  kicker: 'Festive offer', headline: 'Diwali Special: 20% off',
                   caption: 'Light up your Diwali with our festive brews. 20% off all week, see you soon!', tags: '#Diwali #FestiveOffer #CafeLife' },
-                { brief: '/metaad our new running shoes', slash: true, icon: 'fa-shoe-prints', kicker: 'New drop', headline: 'Run lighter. Run longer.',
-                  bg: 'linear-gradient(150deg, #22d3ee 0%, #2563eb 55%, #1e1b4b 100%)',
-                  caption: 'Meet the AirStride: featherlight, all-day comfort. Tap to shop the launch edition.', tags: '#Running #NewDrop #RunnersOfInstagram' },
-                { brief: "We're hiring a product designer in Dubai", icon: 'fa-briefcase', kicker: 'Join the team', headline: "We're hiring!",
-                  bg: 'linear-gradient(150deg, #34d399 0%, #059669 55%, #064e3b 100%)',
+                { brief: '/festive Thanksgiving, thank our customers', slash: true, img: '{{ url_for('static', filename='img/landing/hero-autumn.webp') }}', alt: 'Autumn garden with candles and flowers',
+                  kicker: 'Season\'s greetings', headline: 'Grateful for you',
+                  caption: 'This Thanksgiving we are grateful for every one of you. Thank you for a wonderful year together.', tags: '#Thanksgiving #Grateful #ThankYou' },
+                { brief: "We're hiring a product designer in Dubai", img: '{{ url_for('static', filename='img/landing/hero-hiring.webp') }}', alt: 'A designer reviewing work on a tablet',
+                  kicker: 'Join the team', headline: "We're hiring!",
                   caption: 'Love crafting products people enjoy? Join our Dubai studio as a Product Designer. Apply via the link in bio.', tags: '#Hiring #DesignJobs #DubaiJobs' },
             ];
             const $ = (id) => document.getElementById(id);
@@ -1114,8 +1120,8 @@
                 await wait(350);
                 post.classList.add('is-generating');
                 for (let s = 0; s < steps.length; s++) { setSteps(s, s); await wait(520); }
-                $('heroVisual').style.background = scene.bg;
-                $('heroIcon').className = 'fas ' + scene.icon + ' visual-icon';
+                $('heroVisual').style.backgroundImage = `url('${scene.img}')`;
+                $('heroVisual').setAttribute('aria-label', scene.alt);
                 $('heroKicker').textContent = scene.kicker;
                 $('heroHeadline').textContent = scene.headline;
                 $('heroCaption').innerHTML = '';
@@ -1127,6 +1133,7 @@
                 await wait(3800);
                 play(n + 1);
             };
+            scenes.forEach((sc) => { const im = new Image(); im.src = sc.img; });
             setTimeout(() => play(1), 2600);
         });
     </script>

@@ -24,3 +24,5 @@ sentence-transformers==3.0.1
 # Headless-browser fallback for onboarding website scans (bot-protected /
 # JavaScript-rendered sites). Needs its browser too: `playwright install chromium`.
 playwright==1.47.0
+# Admin -> Invitations: reading uploaded Excel (.xlsx) contact lists
+openpyxl==3.1.5

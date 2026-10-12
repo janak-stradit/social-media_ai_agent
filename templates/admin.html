@@ -214,6 +214,68 @@
             transform: translateX(0);
         }
 
+        /* Invitations: contact list, upload and bulk send */
+        .admin-side-panel.ic-wide-panel { width: 720px; }
+        .ic-views { display: flex; gap: 4px; border-bottom: 1px solid #e5e7eb; margin-bottom: 1rem; }
+        .ic-view { border: none; background: none; padding: 0.6rem 0.9rem; font-size: 0.85rem; font-weight: 600; color: #6b7280; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+        .ic-view.active { color: var(--brand-strong); border-bottom-color: var(--brand-strong); }
+        .ic-count { display: inline-block; min-width: 20px; padding: 0 6px; margin-left: 4px; border-radius: 999px; background: #f3f4f6; color: #4b5563; font-size: 0.72rem; text-align: center; }
+        .ic-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; }
+        .ic-filters { display: flex; flex-wrap: wrap; gap: 6px; }
+        .ic-filter { border: 1px solid #e5e7eb; background: #fff; border-radius: 999px; padding: 4px 12px; font-size: 0.78rem; font-weight: 600; color: #4b5563; }
+        .ic-filter.active { border-color: var(--brand-strong); color: var(--brand-strong); background: #fff7ed; }
+        .ic-filter b { font-weight: 700; margin-left: 4px; }
+        .ic-toolbar-right { display: flex; gap: 0.5rem; }
+        .ic-toolbar-right select { width: 190px; }
+        .ic-toolbar-right input { width: 240px; }
+        .ic-selection { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; padding: 0.6rem 0.9rem; margin-bottom: 0.75rem;
+          border-radius: 10px; background: #0f2244; color: #fff; font-size: 0.85rem; }
+        .ic-selection .ic-link { color: #ffa066; }
+        .ic-selection-actions { margin-left: auto; display: inline-flex; gap: 0.5rem; }
+        .ic-selection .btn-xs-outline-neutral { background: #fff; }
+        .ic-link { border: none; background: none; padding: 0; color: var(--brand-strong); font-weight: 600; font-size: 0.8rem; text-decoration: none; }
+        .ic-link:hover { text-decoration: underline; }
+        .ic-check { width: 36px; }
+        #icTable tbody tr.is-selected { background: #fff7ed; }
+        .ic-person strong { display: block; color: #172033; }
+        .ic-person span, .ic-sub { font-size: 0.76rem; color: #6b7280; }
+        .ic-person .ic-extra { display: block; margin-top: 2px; color: #6b7280; cursor: help; text-decoration: underline dotted; text-underline-offset: 2px; }
+        .ic-status { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; font-size: 0.74rem; font-weight: 700; white-space: nowrap; }
+        .ic-status.not_invited { background: #f3f4f6; color: #4b5563; }
+        .ic-status.invited { background: #fffbeb; color: #b45309; }
+        .ic-status.joined { background: #ecfdf5; color: #047857; }
+        .ic-status.expired, .ic-status.revoked { background: #f1f5f9; color: #64748b; }
+        .ic-status.failed { background: #fef2f2; color: #b91c1c; }
+        .ic-foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; font-size: 0.8rem; color: #6b7280; }
+        .ic-drop { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 2rem 1rem; border: 2px dashed #d1d5db; border-radius: 14px; background: #f9fafb;
+          text-align: center; cursor: pointer; color: #4b5563; font-size: 0.85rem; }
+        .ic-drop i { font-size: 1.8rem; color: #047857; }
+        .ic-drop span { font-size: 0.78rem; color: #6b7280; }
+        .ic-drop.is-over { border-color: var(--brand-strong); background: #fff7ed; }
+        .ic-drop:focus-within { outline: 2px solid var(--brand-strong); outline-offset: 2px; }
+        .ic-format { margin-top: 1rem; padding: 0.8rem 0.9rem; border: 1px solid #e5e7eb; border-radius: 10px; font-size: 0.8rem; color: #4b5563; }
+        .ic-format-head { display: flex; justify-content: space-between; margin-bottom: 0.35rem; color: #172033; }
+        .ic-format p { margin: 0; line-height: 1.55; }
+        .ic-file-row { display: flex; align-items: center; padding: 0.6rem 0.8rem; border: 1px solid #e5e7eb; border-radius: 10px; font-size: 0.85rem; margin-bottom: 0.8rem; }
+        .ic-summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 0.6rem; }
+        .ic-summary div { border: 1px solid #e5e7eb; border-radius: 10px; padding: 0.55rem 0.7rem; }
+        .ic-summary b { display: block; font-size: 1.2rem; color: #172033; }
+        .ic-summary span { font-size: 0.74rem; color: #6b7280; }
+        .ic-summary .is-ready { border-color: #a7f3d0; background: #ecfdf5; }
+        .ic-preview-wrap { max-height: 320px; overflow: auto; border: 1px solid #e5e7eb; border-radius: 10px; }
+        .ic-preview td, .ic-preview th { font-size: 0.78rem; padding: 7px 10px !important; vertical-align: top; }
+        .ic-preview td:nth-child(2) { overflow-wrap: anywhere; }
+        .ic-preview td:last-child, .ic-preview th:last-child { white-space: nowrap; }
+        .ic-check-ok { color: #047857; font-weight: 600; }
+        .ic-check-bad { color: #b91c1c; font-weight: 600; }
+        .ic-check-skip { color: #6b7280; font-weight: 600; }
+        .ic-progress-bar { height: 8px; border-radius: 999px; background: #f3f4f6; overflow: hidden; }
+        .ic-progress-bar span { display: block; height: 100%; width: 0; background: var(--brand-strong); transition: width 0.3s ease; }
+        .ic-result { margin-top: 0.75rem; padding: 0.6rem 0.8rem; border-radius: 10px; font-size: 0.82rem; }
+        .ic-result.ok { background: #ecfdf5; color: #065f46; }
+        .ic-result.bad { background: #fef2f2; color: #991b1b; }
+        .ic-result ul { margin: 0.4rem 0 0; padding-left: 1.1rem; }
+
         .admin-side-panel-header {
             display: flex;
             align-items: center;
@@ -868,12 +930,68 @@
                         <p>Invite people by email. The link lets them sign up with that address - no separate email verification needed.</p>
                     </div>
                     <div class="d-flex gap-2">
+                        <button type="button" class="btn-xs btn-xs-outline-neutral" onclick="openImportPanel()">
+                            <i class="fas fa-file-arrow-up me-1"></i>Upload a list
+                        </button>
                         <button type="button" class="btn-xs btn-xs-solid-success" onclick="openInvitePanel()">
-                            <i class="fas fa-user-plus me-1"></i>Invite user
+                            <i class="fas fa-user-plus me-1"></i>Invite one person
                         </button>
                     </div>
                 </div>
-                <div class="admin-table-wrap">
+
+                <!-- Two views: the contact list (uploaded people, invited in bulk) and every invitation sent -->
+                <div class="ic-views" role="tablist" aria-label="Invitations">
+                    <button type="button" class="ic-view active" role="tab" aria-selected="true" data-ic-view="contacts">
+                        <i class="fas fa-address-book me-1"></i>Contact list <span class="ic-count" id="icContactsCount">0</span></button>
+                    <button type="button" class="ic-view" role="tab" aria-selected="false" data-ic-view="sent">
+                        <i class="fas fa-paper-plane me-1"></i>Sent invitations <span class="ic-count" id="icSentCount">0</span></button>
+                </div>
+
+                <div id="icContactsView">
+                    <div class="ic-toolbar">
+                        <div class="ic-filters" id="icFilters" role="group" aria-label="Filter by status"></div>
+                        <div class="ic-toolbar-right">
+                            <select class="form-select form-select-sm" id="icBatchFilter" aria-label="Filter by upload"><option value="">All uploads</option></select>
+                            <input type="search" class="form-control form-control-sm" id="icSearch" placeholder="Search name, email or company" aria-label="Search contacts">
+                        </div>
+                    </div>
+                    <div class="ic-selection d-none" id="icSelection" role="region" aria-label="Selected contacts">
+                        <strong id="icSelectionCount">0 selected</strong>
+                        <button type="button" class="ic-link" id="icSelectAllMatching"></button>
+                        <span class="ic-selection-actions">
+                            <button type="button" class="btn-xs btn-xs-outline-neutral" id="icClearSelection">Clear</button>
+                            <button type="button" class="btn-xs btn-xs-outline-neutral text-danger" id="icRemoveSelected"><i class="fas fa-trash me-1"></i>Remove from list</button>
+                            <button type="button" class="btn-xs btn-xs-solid-success" id="icSendSelected"><i class="fas fa-paper-plane me-1"></i>Send invitations</button>
+                        </span>
+                    </div>
+                    <div class="admin-table-wrap">
+                        <div class="admin-table-scroll">
+                            <table class="admin-table-light" id="icTable">
+                                <thead>
+                                    <tr>
+                                        <th class="ic-check"><input type="checkbox" class="form-check-input" id="icCheckAll" aria-label="Select all shown"></th>
+                                        <th>Person</th>
+                                        <th>Company</th>
+                                        <th>Location</th>
+                                        <th>Added from</th>
+                                        <th>Status</th>
+                                        <th>Last invited</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="icTbody"><tr><td colspan="7" class="text-center py-4 text-muted">Loading contacts...</td></tr></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div class="ic-foot">
+                        <span id="icShowing"></span>
+                        <span>
+                            <a href="/api/admin/invite-contacts/template.csv" class="ic-link"><i class="fas fa-file-csv me-1"></i>Download template</a>
+                            <a href="/api/admin/invite-contacts/export.csv" class="ic-link ms-3"><i class="fas fa-download me-1"></i>Export list</a>
+                        </span>
+                    </div>
+                </div>
+
+                <div class="admin-table-wrap d-none" id="icSentView">
                     <div class="admin-table-scroll">
                         <table class="admin-table-light" id="adminInvitesTable">
                             <thead>
@@ -1097,6 +1215,73 @@
             <button type="button" class="btn-xs btn-xs-solid-success" id="inviteSendBtn" onclick="submitInvitation()">
                 <i class="fas fa-paper-plane me-1"></i>Send Invitation
             </button>
+        </div>
+    </aside>
+
+    <!-- Upload a list (Invitations -> Upload a list): choose a file, check the rows, import -->
+    <div class="admin-panel-backdrop" id="importBackdrop" onclick="closeImportPanel()"></div>
+    <aside class="admin-side-panel ic-wide-panel" id="importPanel" aria-labelledby="importPanelTitle">
+        <div class="admin-side-panel-header">
+            <h5 id="importPanelTitle"><i class="fas fa-file-arrow-up text-primary me-2"></i>Upload a contact list</h5>
+            <button type="button" class="admin-side-panel-close" onclick="closeImportPanel()" aria-label="Close"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="admin-side-panel-body">
+            <div id="importStepFile">
+                <p class="small text-muted mb-3">Add people from a <strong>.csv</strong> or <strong>.xlsx</strong> file. They are saved to your contact list first; nobody is emailed until you choose to send.</p>
+                <label class="ic-drop" id="importDrop" for="importFileInput">
+                    <i class="fas fa-file-excel" aria-hidden="true"></i>
+                    <strong>Drop your file here, or click to choose</strong>
+                    <span>.csv or .xlsx, up to 2,000 people and 2 MB</span>
+                    <input type="file" id="importFileInput" accept=".csv,.xlsx,.xlsm,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="visually-hidden">
+                </label>
+                <div class="ic-format">
+                    <div class="ic-format-head"><strong>Columns</strong><a href="/api/admin/invite-contacts/template.csv" class="ic-link"><i class="fas fa-download me-1"></i>Download the template</a></div>
+                    <p><code>email</code> is required. Optional: <code>name</code>, <code>company</code>, <code>job_title</code>, <code>phone</code>, <code>city</code>, <code>country</code>, <code>industry</code>, <code>company_size</code>, <code>website</code>, <code>description</code>, <code>notes</code>. Columns can be in any order, and common names such as "Business Email", "Contact Person" or "Domain/Industry" are recognised. Any other column is kept with the contact.</p>
+                </div>
+            </div>
+            <div id="importStepPreview" class="d-none">
+                <div class="ic-file-row"><i class="fas fa-file-lines me-2"></i><strong id="importFileName"></strong><button type="button" class="ic-link ms-auto" id="importChooseAgain">Choose another file</button></div>
+                <div class="ic-summary" id="importSummary"></div>
+                <div class="small text-muted mb-2" id="importColumns"></div>
+                <div class="ic-preview-wrap"><table class="admin-table-light ic-preview"><thead><tr><th>Row</th><th>Email</th><th>Contact</th><th>Company</th><th>City</th><th>Check</th></tr></thead><tbody id="importPreviewBody"></tbody></table></div>
+                <div class="small text-muted mt-2" id="importPreviewMore"></div>
+                <label class="form-check mt-3"><input type="checkbox" class="form-check-input" id="importSelectAfter" checked>
+                    <span class="form-check-label small">Select these people afterwards, ready to invite</span></label>
+            </div>
+            <div class="alert-inline alert-inline-danger d-none mt-3" id="importError"></div>
+        </div>
+        <div class="admin-side-panel-footer">
+            <button type="button" class="btn-xs btn-xs-outline-neutral" onclick="closeImportPanel()">Cancel</button>
+            <button type="button" class="btn-xs btn-xs-solid-success" id="importConfirmBtn" disabled><i class="fas fa-check me-1"></i>Import</button>
+        </div>
+    </aside>
+
+    <!-- Send invitations to the selected contacts -->
+    <div class="admin-panel-backdrop" id="bulkSendBackdrop" onclick="closeBulkSendPanel()"></div>
+    <aside class="admin-side-panel" id="bulkSendPanel" aria-labelledby="bulkSendTitle">
+        <div class="admin-side-panel-header">
+            <h5 id="bulkSendTitle"><i class="fas fa-paper-plane text-primary me-2"></i>Send invitations</h5>
+            <button type="button" class="admin-side-panel-close" onclick="closeBulkSendPanel()" aria-label="Close"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="admin-side-panel-body">
+            <p class="small text-muted mb-3" id="bulkSendIntro"></p>
+            <div class="admin-form-group">
+                <label for="bulkFromInput">Your name <span class="text-muted fw-normal">(shown in the email)</span></label>
+                <input type="text" id="bulkFromInput" class="form-control form-control-sm" placeholder="e.g. Janak" maxlength="255">
+            </div>
+            <div class="admin-form-group">
+                <label for="bulkMessageInput">Personal message <span class="text-muted fw-normal">(optional, the same for everyone)</span></label>
+                <textarea id="bulkMessageInput" class="form-control form-control-sm" rows="4" maxlength="1000" placeholder="e.g. We'd love you to try AVIR AI for your LinkedIn content."></textarea>
+            </div>
+            <div class="ic-progress d-none" id="bulkProgress" role="status" aria-live="polite">
+                <div class="ic-progress-bar"><span id="bulkProgressBar"></span></div>
+                <div class="small mt-2" id="bulkProgressText"></div>
+            </div>
+            <div id="bulkResults"></div>
+        </div>
+        <div class="admin-side-panel-footer">
+            <button type="button" class="btn-xs btn-xs-outline-neutral" id="bulkCancelBtn" onclick="closeBulkSendPanel()">Cancel</button>
+            <button type="button" class="btn-xs btn-xs-solid-success" id="bulkSendBtn"><i class="fas fa-paper-plane me-1"></i>Send</button>
         </div>
     </aside>
 

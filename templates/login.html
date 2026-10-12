@@ -30,8 +30,8 @@
             <div class="auth-card-header">
                 <div class="card-icon-circle"><i class="fas fa-right-to-bracket"></i></div>
                 <div>
-                    <h1 class="auth-heading">Hi there!</h1>
-                    <p class="auth-subheading">Have we met before?</p>
+                    <h1 class="auth-heading">Sign in</h1>
+                    <p class="auth-subheading">Welcome back to AVIR AI</p>
                 </div>
             </div>
 
@@ -70,120 +70,11 @@
         </div>
     </div>
 
-    <div class="auth-right-pane" id="sceneContainer" aria-hidden="true">
-        <div class="auth-scene-bg" style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; perspective: 1000px;">
-            <div class="auth-scene-caption">
-                From your website<br>
-                <strong>to on-brand content</strong>
-            </div>
-            
-            <!-- Animated 3D Scene Wrapper -->
-            <div id="interactiveScene" style="position: relative; width: 100%; height: 100%; z-index: 2; transform-style: preserve-3d; transition: transform 0.1s ease-out;">
-                
-                <!-- Central AI Core -->
-                <div class="shape" data-speed="0.02" style="position: absolute; top: 40%; left: 40%; width: 120px; height: 120px; background: radial-gradient(circle, #818CF8, #4F46E5); border-radius: 50%; box-shadow: 0 0 50px rgba(99, 102, 241, 0.6); display: flex; align-items: center; justify-content: center; animation: pulse-glow 3s infinite;">
-                    <i class="fas fa-network-wired" style="color: #fff; font-size: 40px;"></i>
-                </div>
-
-                <!-- Floating Social Post Mockup -->
-                <div class="shape" data-speed="0.06" style="position: absolute; top: 15%; left: 10%; width: 220px; padding: 16px; background: rgba(255,255,255,0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.9); border-radius: 16px; transform: rotate(-5deg); box-shadow: 0 20px 40px rgba(0,0,0,0.05); animation: float 6s infinite;">
-                    <div style="display: flex; gap: 10px; align-items: center; margin-bottom: 12px;">
-                        <div style="width: 30px; height: 30px; border-radius: 50%; background: #E2E8F0;"></div>
-                        <div>
-                            <div style="width: 80px; height: 8px; background: #CBD5E1; border-radius: 4px; margin-bottom: 4px;"></div>
-                            <div style="width: 40px; height: 6px; background: #E2E8F0; border-radius: 3px;"></div>
-                        </div>
-                        <i class="fab fa-twitter" style="margin-left: auto; color: #1DA1F2;"></i>
-                    </div>
-                    <div style="width: 100%; height: 6px; background: #E2E8F0; border-radius: 3px; margin-bottom: 6px;"></div>
-                    <div style="width: 90%; height: 6px; background: #E2E8F0; border-radius: 3px; margin-bottom: 12px;"></div>
-                    <div style="width: 100%; height: 80px; background: #EEF2FF; border-radius: 8px; display: flex; align-items: center; justify-content: center; color: #818CF8;"><i class="fas fa-image"></i></div>
-                </div>
-
-                <!-- Floating Analytics Card -->
-                <div class="shape" data-speed="-0.04" style="position: absolute; bottom: 32%; right: 10%; width: 200px; padding: 16px; background: rgba(255,255,255,0.7); backdrop-filter: blur(12px); border: 1px solid rgba(255,255,255,0.9); border-radius: 16px; transform: rotate(5deg); box-shadow: 0 20px 40px rgba(0,0,0,0.05); animation: float-reverse 5s infinite;">
-                    <div style="font-weight: 700; font-size: 12px; color: #64748B; margin-bottom: 12px;">Engagement Growth</div>
-                    <div style="display: flex; align-items: flex-end; gap: 8px; height: 60px; margin-bottom: 12px;">
-                        <div style="width: 24px; height: 30%; background: #C7D2FE; border-radius: 4px 4px 0 0;"></div>
-                        <div style="width: 24px; height: 50%; background: #A5B4FC; border-radius: 4px 4px 0 0;"></div>
-                        <div style="width: 24px; height: 80%; background: #6366F1; border-radius: 4px 4px 0 0;"></div>
-                        <div style="width: 24px; height: 100%; background: #4F46E5; border-radius: 4px 4px 0 0;"></div>
-                    </div>
-                    <div style="color: #54BA4A; font-weight: 700; font-size: 14px;"><i class="fas fa-arrow-up"></i> +124%</div>
-                </div>
-
-                <!-- Floating Platform Icons -->
-                <div class="shape" data-speed="-0.08" style="position: absolute; top: 25%; right: 20%; width: 50px; height: 50px; background: #fff; border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; color: #0A66C2; box-shadow: 0 10px 20px rgba(0,0,0,0.05); animation: float 4s infinite 1s;"><i class="fab fa-linkedin-in"></i></div>
-                <div class="shape" data-speed="0.05" style="position: absolute; bottom: 30%; left: 20%; width: 50px; height: 50px; background: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%); border-radius: 12px; display: flex; align-items: center; justify-content: center; font-size: 24px; color: #fff; box-shadow: 0 10px 20px rgba(0,0,0,0.05); animation: float-reverse 4.5s infinite 0.5s;"><i class="fab fa-instagram"></i></div>
-
-                <style>
-                    @keyframes float { 0%, 100% { transform: translateY(0) rotate(-5deg); } 50% { transform: translateY(-15px) rotate(-3deg); } }
-                    @keyframes float-reverse { 0%, 100% { transform: translateY(0) rotate(5deg); } 50% { transform: translateY(15px) rotate(3deg); } }
-                    @keyframes pulse-glow { 0%, 100% { box-shadow: 0 0 40px rgba(99, 102, 241, 0.4); } 50% { box-shadow: 0 0 80px rgba(99, 102, 241, 0.7); } }
-                </style>
-            </div>
-
-            <!-- Rotating Showcase - auto-advances through a few value props
-                 instead of showing one fixed message the whole time. -->
-            <div class="auth-showcase" id="authShowcase">
-                <div class="auth-showcase-slide active">
-                    <h3><i class="fas fa-bolt" aria-hidden="true"></i>Supercharge Your Strategy</h3>
-                    <p>Join thousands of brands automating their entire content lifecycle - from trend discovery to multi-platform scheduling, all powered by autonomous AI.</p>
-                </div>
-                <div class="auth-showcase-slide">
-                    <h3><i class="fas fa-network-wired" aria-hidden="true"></i>Multi-Agent Content Pipeline</h3>
-                    <p>Story, Vision, Caption, Hashtag, Strategy, and Critic agents collaborate on every single post, automatically.</p>
-                </div>
-                <div class="auth-showcase-slide">
-                    <h3><i class="fas fa-palette" aria-hidden="true"></i>Brand-Aware Every Time</h3>
-                    <p>Your voice, colors, and guidelines - honored automatically in everything your agents generate.</p>
-                </div>
-                <div class="auth-showcase-slide">
-                    <h3><i class="fas fa-share-nodes" aria-hidden="true"></i>Publish Everywhere</h3>
-                    <p>LinkedIn, Instagram, Facebook, X, YouTube, TikTok - one workspace, every platform.</p>
-                </div>
-                <div class="auth-showcase-dots" role="tablist" aria-label="Feature highlights">
-                    <button type="button" class="auth-showcase-dot active" aria-label="Slide 1"></button>
-                    <button type="button" class="auth-showcase-dot" aria-label="Slide 2"></button>
-                    <button type="button" class="auth-showcase-dot" aria-label="Slide 3"></button>
-                    <button type="button" class="auth-showcase-dot" aria-label="Slide 4"></button>
-                </div>
-            </div>
-        </div>
-    </div>
+    {% set panel = 'login' %}{% include 'partials/auth_panel.html' %}
 </div>
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script>
-    // Rotating right-pane showcase
-    (function () {
-        const $slides = $('#authShowcase .auth-showcase-slide');
-        const $dots = $('#authShowcase .auth-showcase-dot');
-        const total = $slides.length;
-        if (total <= 1) return;
-        let current = 0;
-        let timer = null;
-
-        function showSlide(index) {
-            $slides.removeClass('active').eq(index).addClass('active');
-            $dots.removeClass('active').eq(index).addClass('active');
-            current = index;
-        }
-
-        function startTimer() {
-            clearInterval(timer);
-            timer = setInterval(function () { showSlide((current + 1) % total); }, 4500);
-        }
-
-        $dots.on('click', function () {
-            showSlide($dots.index(this));
-            startTimer();
-        });
-
-        if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-            startTimer();
-        }
-    })();
 
     // Password show/hide toggle
     $('#togglePasswordBtn').on('click', function () {
@@ -240,37 +131,6 @@
         });
     });
 
-    // Parallax effect for the 3D scene - skipped entirely for users who've
-    // asked the OS for reduced motion, not just visually disabled via CSS.
-    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (!prefersReducedMotion) {
-        document.addEventListener('mousemove', function (e) {
-            const container = document.getElementById('sceneContainer');
-            if (!container) return;
-            const rect = container.getBoundingClientRect();
-
-            // Only run if mouse is inside the right pane
-            if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) return;
-
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-
-            const xRatio = (x / rect.width) - 0.5;
-            const yRatio = (y / rect.height) - 0.5;
-
-            // Rotate the entire scene slightly
-            const scene = document.getElementById('interactiveScene');
-            scene.style.transform = `rotateY(${xRatio * 10}deg) rotateX(${-yRatio * 10}deg)`;
-
-            // Move individual shapes at different speeds
-            document.querySelectorAll('.shape').forEach(shape => {
-                const speed = parseFloat(shape.getAttribute('data-speed')) || 0.05;
-                const moveX = xRatio * rect.width * speed;
-                const moveY = yRatio * rect.height * speed;
-                shape.style.transform = `translate(${moveX}px, ${moveY}px) ${shape.style.transform.replace(/translate\([^)]+\)\s*/, '')}`;
-            });
-        });
-    }
 </script>
 </body>
 </html>

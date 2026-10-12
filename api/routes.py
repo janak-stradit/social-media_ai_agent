@@ -3312,6 +3312,167 @@ def admin_revoke_invitation(invitation_id):
     return jsonify({"success": True})
 
 
+# ── Bulk invitations: the invite contact list (services/invite_import.py) ──
+SEND_BATCH = 25  # invitations per request: the page sends a long selection in parts and shows progress
+
+
+@api_bp.route("/admin/invite-contacts/template.csv", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_invite_template():
+    """The CSV to fill in: the expected columns with one example row."""
+    from flask import Response
+
+    from services.invite_import import template_csv
+
+    return Response(template_csv(), mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=avir-invite-contacts-template.csv"})
+
+
+@api_bp.route("/admin/invite-contacts/preview", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_invite_preview():
+    """Reads an uploaded .csv / .xlsx and checks every row. Nothing is saved."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import member_emails
+    from services import invite_import
+
+    upload = request.files.get("file")
+    if not upload or not upload.filename:
+        return jsonify({"success": False, "error": "Choose a .csv or .xlsx file to upload."}), 400
+    data = upload.read(invite_import.MAX_FILE_BYTES + 1)
+    try:
+        first = invite_import.parse(upload.filename, data)
+        members = member_emails([r["email"] for r in first["rows"] if r["status"] == "ready"])
+        result = invite_import.parse(upload.filename, data, members) if members else first
+    except invite_import.InviteFileError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    log_event("invites.preview", admin_id=get_current_user_id(), rows=result["summary"]["total"], ready=result["summary"]["ready"])
+    return jsonify({"success": True, "filename": secure_filename(upload.filename) or "upload", **result})
+
+
+@api_bp.route("/admin/invite-contacts/import", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_invite_import():
+    """Saves the ready rows of a preview: {filename, rows, total}. Rows are
+    checked again here; people who already have accounts are left out."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import list_invite_contacts, member_emails, save_invite_contacts
+    from services.invite_import import clean_rows
+
+    data = request.get_json(silent=True) or {}
+    rows = clean_rows(data.get("rows"))
+    members = member_emails([r["email"] for r in rows])
+    rows = [r for r in rows if r["email"] not in members]
+    if not rows:
+        return jsonify({"success": False, "error": "There are no new people to import."}), 400
+    total = data.get("total") if isinstance(data.get("total"), int) else len(rows)
+    filename = str(data.get("filename") or "upload")[:255]
+    result = save_invite_contacts(rows, filename, get_current_user_id(), rows_total=total)
+    log_event("invites.import", admin_id=get_current_user_id(), **result)
+    return jsonify({"success": True, **result, "emails": [r["email"] for r in rows], **list_invite_contacts()})
+
+
+@api_bp.route("/admin/invite-contacts", methods=["GET", "POST", "DELETE"])
+@login_required_api
+@admin_required_api
+def admin_invite_contacts():
+    """GET: the contact list with statuses. POST {email, name, ...}: add one by
+    hand. DELETE {ids}: remove from the list."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import delete_invite_contacts, list_invite_contacts, member_emails, save_invite_contacts
+    from services.invite_import import clean_rows
+
+    if request.method == "DELETE":
+        removed = delete_invite_contacts((request.get_json(silent=True) or {}).get("ids"))
+        log_event("invites.remove", admin_id=get_current_user_id(), removed=removed)
+        return jsonify({"success": True, "removed": removed, **list_invite_contacts()})
+    if request.method == "POST":
+        rows = clean_rows([request.get_json(silent=True) or {}])
+        if not rows:
+            return jsonify({"success": False, "error": "Enter a valid email address."}), 400
+        if member_emails([rows[0]["email"]]):
+            return jsonify({"success": False, "error": "This email already has an AVIR AI account."}), 409
+        save_invite_contacts(rows, None, get_current_user_id(), source="manual")
+    return jsonify({"success": True, **list_invite_contacts()})
+
+
+@api_bp.route("/admin/invite-contacts/send", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_invite_contacts_send():
+    """Invites the selected contacts: {ids (at most SEND_BATCH), inviter_name,
+    message}. Each gets the usual invitation email (a new link if one was sent
+    before). Returns a result per contact."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    import secrets
+
+    from db import get_invite_contacts, member_emails, record_contact_invite, upsert_invitation
+
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids") if isinstance(data.get("ids"), list) else []
+    if not ids:
+        return jsonify({"success": False, "error": "Select at least one person."}), 400
+    if len(ids) > SEND_BATCH:
+        return jsonify({"success": False, "error": f"Send at most {SEND_BATCH} at a time."}), 400
+    message = (data.get("message") or "").strip()[:1000]
+    inviter_name = (data.get("inviter_name") or "").strip()[:255]
+    contacts = get_invite_contacts(ids)
+    members = member_emails([c["email"] for c in contacts])
+    admin_id = get_current_user_id()
+    results = []
+    for contact in contacts:
+        if contact["email"] in members:
+            results.append({"id": contact["id"], "email": contact["email"], "status": "joined"})
+            continue
+        token = secrets.token_urlsafe(32)
+        invitation = upsert_invitation(contact["email"], contact.get("name"), message, admin_id, token, inviter_name=inviter_name)
+        try:
+            _send_invitation(invitation, token)
+        except Exception as err:  # noqa: BLE001 - one bad address must not stop the rest
+            error = str(err)[:300] or "The email could not be sent."
+            record_contact_invite(contact["id"], invitation["id"], error)
+            results.append({"id": contact["id"], "email": contact["email"], "status": "failed", "error": error})
+            continue
+        record_contact_invite(contact["id"], invitation["id"])
+        results.append({"id": contact["id"], "email": contact["email"], "status": "invited"})
+    counts = {k: sum(1 for r in results if r["status"] == k) for k in ("invited", "failed", "joined")}
+    log_event("invites.send", admin_id=admin_id, **counts)
+    return jsonify({"success": True, "results": results, **counts})
+
+
+@api_bp.route("/admin/invite-contacts/export.csv", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_invite_contacts_export():
+    """The whole contact list with statuses, as CSV."""
+    import csv
+    import io
+
+    from flask import Response
+
+    from db import list_invite_contacts
+
+    out = io.StringIO()
+    writer = csv.writer(out)
+    import json as _json
+
+    columns = ["email", "name", "company", "job_title", "phone", "city", "country", "industry", "company_size", "website",
+               "description", "notes", "status", "invite_count", "last_invited_at", "last_error", "source", "batch", "created_at"]
+    writer.writerow([*columns, "extra"])
+    for contact in list_invite_contacts()["contacts"]:
+        writer.writerow([contact.get(c) if contact.get(c) is not None else "" for c in columns]
+                        + [_json.dumps(contact.get("extra") or {}, ensure_ascii=False) if contact.get("extra") else ""])
+    return Response(out.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=avir-invite-contacts.csv"})
+
+
 # ── Image limits & model access ──────────────────────────────────────────
 _heyroute_image_models_cache = {"at": 0.0, "ids": []}
 
