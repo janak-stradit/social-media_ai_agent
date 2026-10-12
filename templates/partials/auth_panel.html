@@ -1,0 +1,84 @@
+{#- Right-hand panel of the signed-out pages (login, signup, forgot / reset
+    password). Set `panel` before including: "login", "signup" or "recovery".
+    Every statement here is something the product really does. -#}
+{% set panel = panel|default('login') %}
+<aside class="auth-right-pane auth-panel" aria-label="About AVIR AI">
+    <div class="auth-panel-inner">
+
+        {% if panel == 'recovery' %}
+        <p class="auth-panel-eyebrow">Account security</p>
+        <h2 class="auth-panel-title">Secure account recovery</h2>
+        <p class="auth-panel-lead">Reset your password with a private link sent to your inbox. Your brand profile, posts and approvals stay exactly as you left them.</p>
+
+        <div class="auth-panel-card auth-security-card">
+            <div class="auth-security-head">
+                <span class="auth-security-icon"><i class="fas fa-shield-halved" aria-hidden="true"></i></span>
+                <div>
+                    <div class="auth-security-title">How password reset works</div>
+                    <div class="auth-security-sub">Designed to keep your account private</div>
+                </div>
+            </div>
+            <ul class="auth-security-list">
+                <li><i class="fas fa-link" aria-hidden="true"></i><span><strong>Single-use link.</strong> Each reset link works once.</span></li>
+                <li><i class="fas fa-clock" aria-hidden="true"></i><span><strong>Expires in 60 minutes.</strong> An old link can't be reused later.</span></li>
+                <li><i class="fas fa-user-secret" aria-hidden="true"></i><span><strong>Private by design.</strong> We never confirm whether an email has an account.</span></li>
+                <li><i class="fas fa-envelope-circle-check" aria-hidden="true"></i><span><strong>No passwords by email.</strong> You choose the new one yourself.</span></li>
+            </ul>
+        </div>
+
+        {% else %}
+        {% if panel == 'signup' %}
+        <p class="auth-panel-eyebrow">Get started</p>
+        <h2 class="auth-panel-title">From your website to on-brand posts</h2>
+        <p class="auth-panel-lead">Add your website once. AVIR AI learns your brand, then writes and designs posts for LinkedIn, Instagram and Facebook in your voice.</p>
+        {% else %}
+        <p class="auth-panel-eyebrow">Welcome back</p>
+        <h2 class="auth-panel-title">Your brand's social studio</h2>
+        <p class="auth-panel-lead">Captions, images and approvals for LinkedIn, Instagram and Facebook, in one place and in your brand's voice.</p>
+        {% endif %}
+
+        <div class="auth-panel-stage">
+            <!-- A finished post, as it looks before it goes out -->
+            <div class="auth-panel-card auth-post">
+                <div class="auth-post-head">
+                    <span class="auth-post-avatar">YB</span>
+                    <div>
+                        <div class="auth-post-name">Your Brand</div>
+                        <div class="auth-post-meta">Ready to publish &middot; LinkedIn</div>
+                    </div>
+                    <i class="fab fa-linkedin auth-post-network" aria-hidden="true"></i>
+                </div>
+                <p class="auth-post-text">We're growing our team in Dubai. If you love building products people enjoy, we'd like to meet you.</p>
+                <div class="auth-post-image" role="img" aria-label="Sample post image: a designer reviewing work on a tablet"
+                     style="background-image: url('{{ url_for('static', filename='img/landing/hero-hiring.webp') }}');">
+                    <span class="auth-post-logo">YOUR LOGO</span>
+                </div>
+                <div class="auth-post-tags">#Hiring #DesignJobs #DubaiJobs</div>
+            </div>
+            <div class="auth-panel-chip chip-approved"><i class="fas fa-circle-check" aria-hidden="true"></i>Approved by reviewer</div>
+            <div class="auth-panel-chip chip-compliance"><i class="fas fa-scale-balanced" aria-hidden="true"></i>Advertising rules checked</div>
+        </div>
+
+        {% if panel == 'signup' %}
+        <ol class="auth-panel-steps">
+            <li><span>1</span><div><strong>Add your website</strong>We build your brand profile: voice, colours and logo.</div></li>
+            <li><span>2</span><div><strong>Describe a post</strong>One sentence gives a caption, hashtags and an image per platform.</div></li>
+            <li><span>3</span><div><strong>Review and publish</strong>Send it for approval, then publish or schedule.</div></li>
+        </ol>
+        {% else %}
+        <ul class="auth-panel-points">
+            <li><i class="fas fa-globe" aria-hidden="true"></i><div><strong>Learns your brand</strong>From your own website: voice, colours and products.</div></li>
+            <li><i class="fas fa-scale-balanced" aria-hidden="true"></i><div><strong>Checks advertising rules</strong>Captions are reviewed for your industry in the US, UAE and India.</div></li>
+            <li><i class="fas fa-user-check" aria-hidden="true"></i><div><strong>Approval built in</strong>Nothing goes out until your reviewer signs it off.</div></li>
+        </ul>
+        {% endif %}
+        {% endif %}
+
+        <div class="auth-panel-foot">
+            <span class="auth-panel-networks" aria-label="Works with LinkedIn, Instagram and Facebook">
+                <i class="fab fa-linkedin-in" aria-hidden="true"></i><i class="fab fa-instagram" aria-hidden="true"></i><i class="fab fa-facebook-f" aria-hidden="true"></i>
+            </span>
+            <span>A product of <a href="https://stradit.com/" target="_blank" rel="noopener">StradIT</a></span>
+        </div>
+    </div>
+</aside>

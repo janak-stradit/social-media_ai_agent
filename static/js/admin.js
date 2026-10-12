@@ -1197,6 +1197,7 @@ $(document).ready(function () {
             const rows = (r && r.invitations) || [];
             const pending = rows.filter(i => i.status === 'pending').length;
             $('#adminInvitesBadge').text(pending).toggleClass('d-none', !pending);
+            $('#icSentCount').text(rows.length);
             if (!rows.length) {
                 $('#adminInvitesTbody').html(`
                     <tr><td colspan="6" class="text-center py-5 text-muted">
@@ -1225,6 +1226,256 @@ $(document).ready(function () {
             $('#adminInvitesTbody').html('<tr><td colspan="6" class="text-center py-4 text-danger">Could not load invitations.</td></tr>');
         });
     };
+
+    // ── Contact list: upload people, pick them, invite them in bulk ─────────
+    const IC_STATUS = {
+        not_invited: ['Not invited', 'fa-circle'], invited: ['Invited', 'fa-paper-plane'], joined: ['Joined', 'fa-circle-check'],
+        expired: ['Link expired', 'fa-clock'], revoked: ['Revoked', 'fa-ban'], failed: ['Email failed', 'fa-triangle-exclamation'],
+    };
+    const IC_FILTERS = ['all', 'not_invited', 'invited', 'joined', 'expired', 'failed'];
+    const ic = { contacts: [], counts: {}, batches: [], filter: 'all', batch: '', q: '', selected: new Set() };
+
+    function icStatusPill(c) {
+        const [label, icon] = IC_STATUS[c.status] || [c.status, 'fa-circle'];
+        const title = c.status === 'failed' && c.last_error ? ` title="${escapeAttr(c.last_error)}"` : '';
+        return `<span class="ic-status ${c.status}"${title}><i class="fas ${icon}"></i>${label}</span>`;
+    }
+
+    function icVisible() {
+        const q = ic.q.toLowerCase();
+        return ic.contacts.filter(c => (ic.filter === 'all' || c.status === ic.filter || (ic.filter === 'expired' && c.status === 'revoked'))
+            && (!ic.batch || String(c.batch_id) === ic.batch)
+            && (!q || [c.email, c.name, c.company, c.job_title, c.city, c.country, c.industry].some(v => (v || '').toLowerCase().includes(q))));
+    }
+
+    function icRenderSelection() {
+        const n = ic.selected.size;
+        $('#icSelection').toggleClass('d-none', !n);
+        $('#icSelectionCount').text(`${n} selected`);
+        const visible = icVisible();
+        const allShown = visible.length && visible.every(c => ic.selected.has(c.id));
+        $('#icSelectAllMatching').text(!allShown && visible.length > n ? `Select all ${visible.length} shown` : '').toggle(!allShown && visible.length > n);
+        $('#icCheckAll').prop('checked', !!allShown).prop('indeterminate', !allShown && visible.some(c => ic.selected.has(c.id)));
+    }
+
+    function icRender() {
+        $('#icContactsCount').text(ic.counts.all || 0);
+        $('#icFilters').html(IC_FILTERS.map(f => {
+            const count = f === 'expired' ? (ic.counts.expired || 0) + (ic.counts.revoked || 0) : (ic.counts[f] || 0);
+            const label = f === 'all' ? 'All' : IC_STATUS[f][0];
+            return `<button type="button" class="ic-filter${ic.filter === f ? ' active' : ''}" data-ic-filter="${f}" aria-pressed="${ic.filter === f}">${label}<b>${count}</b></button>`;
+        }).join(''));
+        const batchValue = ic.batch;
+        $('#icBatchFilter').html('<option value="">All uploads</option>' + ic.batches.map(b =>
+            `<option value="${b.id}">${escapeHtml(b.filename)} · ${formatInviteDate(b.created_at).split(',')[0]}</option>`).join('')).val(batchValue);
+        const rows = icVisible();
+        $('#icShowing').text(ic.contacts.length ? `Showing ${rows.length} of ${ic.contacts.length}` : '');
+        if (!ic.contacts.length) {
+            $('#icTbody').html(`<tr><td colspan="7" class="text-center py-5 text-muted">
+                <i class="fas fa-address-book fa-2x mb-2 d-block opacity-50"></i>
+                No contacts yet. Use <strong>Upload a list</strong> to add people from a CSV or Excel file.</td></tr>`);
+        } else if (!rows.length) {
+            $('#icTbody').html('<tr><td colspan="7" class="text-center py-4 text-muted">Nobody matches these filters.</td></tr>');
+        } else {
+            $('#icTbody').html(rows.map(c => `
+                <tr class="${ic.selected.has(c.id) ? 'is-selected' : ''}">
+                    <td class="ic-check"><input type="checkbox" class="form-check-input" data-ic-id="${c.id}" ${ic.selected.has(c.id) ? 'checked' : ''}
+                        aria-label="Select ${escapeAttr(c.name || c.email)}"></td>
+                    <td class="ic-person"><strong>${escapeHtml(c.name || c.email)}</strong>${c.name ? `<span>${escapeHtml(c.email)}</span>` : ''}${Object.keys(c.extra || {}).length ? `<span class="ic-extra" title="${escapeAttr(Object.entries(c.extra).map(([k, v]) => k + ': ' + v).join('\n'))}"><i class="fas fa-circle-info me-1"></i>${Object.keys(c.extra).length} more details</span>` : ''}</td>
+                    <td>${c.website ? `<a href="${escapeAttr(/^https?:\/\//.test(c.website) ? c.website : 'https://' + c.website)}" target="_blank" rel="noopener noreferrer">${escapeHtml(c.company || c.website)}</a>` : escapeHtml(c.company || '—')}
+                        <div class="ic-sub">${escapeHtml([c.industry, c.company_size, c.job_title].filter(Boolean).join(' · '))}</div></td>
+                    <td>${escapeHtml([c.city, c.country].filter(Boolean).join(', ') || '—')}</td>
+                    <td><span class="ic-sub">${c.batch ? `<i class="fas fa-file-lines me-1"></i>${escapeHtml(c.batch)}` : 'Added by hand'}</span></td>
+                    <td>${icStatusPill(c)}</td>
+                    <td><span class="ic-sub">${c.last_invited_at ? formatInviteDate(c.last_invited_at) : '—'}${c.invite_count > 1 ? ` · ${c.invite_count} times` : ''}</span></td>
+                </tr>`).join(''));
+        }
+        icRenderSelection();
+    }
+
+    function icApply(r) {
+        ic.contacts = r.contacts || [];
+        ic.counts = r.counts || {};
+        ic.batches = r.batches || [];
+        const ids = new Set(ic.contacts.map(c => c.id));
+        ic.selected = new Set([...ic.selected].filter(id => ids.has(id)));
+        icRender();
+    }
+
+    window.loadInviteContacts = function () {
+        return $.getJSON('/api/admin/invite-contacts').done(icApply)
+            .fail(() => $('#icTbody').html('<tr><td colspan="7" class="text-center py-4 text-danger">Could not load the contact list.</td></tr>'));
+    };
+
+    $(document).on('click', '[data-ic-view]', function () {
+        const view = $(this).data('ic-view');
+        $('[data-ic-view]').each(function () { $(this).toggleClass('active', $(this).data('ic-view') === view).attr('aria-selected', $(this).data('ic-view') === view); });
+        $('#icContactsView').toggleClass('d-none', view !== 'contacts');
+        $('#icSentView').toggleClass('d-none', view !== 'sent');
+    });
+    $(document).on('click', '[data-ic-filter]', function () { ic.filter = $(this).data('ic-filter'); icRender(); });
+    $('#icBatchFilter').on('change', function () { ic.batch = this.value; icRender(); });
+    let icSearchTimer = null;
+    $('#icSearch').on('input', function () { clearTimeout(icSearchTimer); const v = this.value; icSearchTimer = setTimeout(() => { ic.q = v.trim(); icRender(); }, 200); });
+    $(document).on('change', '[data-ic-id]', function () {
+        const id = Number($(this).data('ic-id'));
+        if (this.checked) ic.selected.add(id); else ic.selected.delete(id);
+        $(this).closest('tr').toggleClass('is-selected', this.checked);
+        icRenderSelection();
+    });
+    $('#icCheckAll').on('change', function () {
+        icVisible().forEach(c => { if (this.checked) ic.selected.add(c.id); else ic.selected.delete(c.id); });
+        icRender();
+    });
+    $('#icSelectAllMatching').on('click', function () { icVisible().forEach(c => ic.selected.add(c.id)); icRender(); });
+    $('#icClearSelection').on('click', function () { ic.selected.clear(); icRender(); });
+    $('#icRemoveSelected').on('click', function () {
+        const ids = [...ic.selected];
+        if (!ids.length || !window.confirm(`Remove ${ids.length} ${ids.length === 1 ? 'person' : 'people'} from the contact list? Invitations already sent keep working.`)) return;
+        $.ajax({ url: '/api/admin/invite-contacts', type: 'DELETE', contentType: 'application/json', data: JSON.stringify({ ids: ids }) })
+            .done(r => { ic.selected.clear(); icApply(r); showToast(`Removed ${r.removed} from the list`, 'info'); })
+            .fail(xhr => showToast((xhr.responseJSON || {}).error || 'Could not remove them.', 'error'));
+    });
+
+    // Upload a list: choose a file -> check every row -> import the ready ones
+    let icPreview = null;
+    window.openImportPanel = function () {
+        icPreview = null;
+        $('#importFileInput').val('');
+        $('#importStepFile').removeClass('d-none');
+        $('#importStepPreview').addClass('d-none');
+        $('#importError').addClass('d-none').text('');
+        $('#importConfirmBtn').prop('disabled', true).html('<i class="fas fa-check me-1"></i>Import');
+        $('#importBackdrop, #importPanel').addClass('open');
+    };
+    window.closeImportPanel = function () { $('#importBackdrop, #importPanel').removeClass('open'); };
+
+    const IMPORT_CHECK = { ready: ['ic-check-ok', 'Ready'], member: ['ic-check-skip', 'Already a member'],
+                           duplicate: ['ic-check-skip', 'Repeated in the file'], invalid_email: ['ic-check-bad', 'Invalid email'] };
+
+    function icUpload(file) {
+        if (!file) return;
+        const form = new FormData();
+        form.append('file', file);
+        $('#importError').addClass('d-none');
+        $('#importDrop strong').text('Reading the file...');
+        $.ajax({ url: '/api/admin/invite-contacts/preview', type: 'POST', data: form, processData: false, contentType: false })
+            .done(function (r) {
+                icPreview = r;
+                const sm = r.summary;
+                $('#importFileName').text(r.filename);
+                $('#importSummary').html(`
+                    <div class="is-ready"><b>${sm.ready}</b><span>Ready to import</span></div>
+                    <div><b>${sm.member}</b><span>Already members</span></div>
+                    <div><b>${sm.duplicate}</b><span>Repeated</span></div>
+                    <div><b>${sm.invalid_email}</b><span>Invalid email</span></div>`);
+                $('#importColumns').html(`<strong>Saved as fields:</strong> ${escapeHtml(r.columns.join(', '))}.`
+                    + (r.extra_columns.length ? ` <strong>Kept as extra details:</strong> ${escapeHtml(r.extra_columns.join(', '))}.` : '')
+                    + ` ${sm.total} rows in the file.`
+                    + (sm.shared_inbox ? ` <br><i class="fas fa-circle-info me-1"></i>${sm.shared_inbox} of the ready addresses are shared inboxes (such as info@ or sales@), so the invitation reaches a team rather than one person.` : ''));
+                // Problems first, so they're seen
+                const order = { invalid_email: 0, duplicate: 1, member: 2, ready: 3 };
+                const shown = r.rows.slice().sort((a, b) => order[a.status] - order[b.status] || a.line - b.line).slice(0, 100);
+                $('#importPreviewBody').html(shown.map(row => {
+                    const [cls, label] = IMPORT_CHECK[row.status];
+                    const shared = row.status === 'ready' && row.shared_inbox ? ' <span class="ic-sub">· shared inbox</span>' : '';
+                    return `<tr><td>${row.line}</td><td>${escapeHtml(row.email || '(empty)').replace('@', '@<wbr>')}</td><td>${escapeHtml(row.name || '—')}</td>
+                        <td>${escapeHtml(row.company || '')}</td><td>${escapeHtml(row.city || '')}</td><td class="${cls}">${label}${shared}</td></tr>`;
+                }).join(''));
+                $('#importPreviewMore').text(r.rows.length > 100 ? `Showing 100 of ${r.rows.length} rows.` : '');
+                $('#importStepFile').addClass('d-none');
+                $('#importStepPreview').removeClass('d-none');
+                $('#importConfirmBtn').prop('disabled', !sm.ready).html(`<i class="fas fa-check me-1"></i>Import ${sm.ready} ${sm.ready === 1 ? 'person' : 'people'}`);
+            })
+            .fail(xhr => $('#importError').removeClass('d-none').text((xhr.responseJSON || {}).error || 'The file could not be read.'))
+            .always(() => $('#importDrop strong').text('Drop your file here, or click to choose'));
+    }
+
+    $('#importFileInput').on('change', function () { icUpload(this.files[0]); });
+    $('#importDrop').on('dragover', function (e) { e.preventDefault(); $(this).addClass('is-over'); })
+        .on('dragleave drop', function () { $(this).removeClass('is-over'); })
+        .on('drop', function (e) { e.preventDefault(); icUpload(e.originalEvent.dataTransfer.files[0]); });
+    $('#importChooseAgain').on('click', function () { openImportPanel(); });
+    $('#importConfirmBtn').on('click', function () {
+        if (!icPreview) return;
+        const rows = icPreview.rows.filter(r => r.status === 'ready');
+        const $btn = $(this).prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Importing...');
+        $.ajax({ url: '/api/admin/invite-contacts/import', type: 'POST', contentType: 'application/json',
+                 data: JSON.stringify({ filename: icPreview.filename, total: icPreview.summary.total, rows: rows }) })
+            .done(function (r) {
+                if ($('#importSelectAfter').is(':checked')) {
+                    const emails = new Set(r.emails || []);
+                    ic.selected = new Set();
+                    (r.contacts || []).forEach(c => { if (emails.has(c.email) && c.status !== 'joined') ic.selected.add(c.id); });
+                    ic.filter = 'all';
+                    ic.batch = String(r.batch_id || '');
+                }
+                icApply(r);
+                closeImportPanel();
+                showToast(`Imported: ${r.added} new, ${r.updated} updated`, 'success');
+            })
+            .fail(xhr => { $('#importError').removeClass('d-none').text((xhr.responseJSON || {}).error || 'The import failed.'); $btn.prop('disabled', false).html('<i class="fas fa-check me-1"></i>Import'); });
+    });
+
+    // Send invitations to the selection, in parts, with progress
+    let icSending = false;
+    window.openBulkSendPanel = function () {
+        const ids = [...ic.selected];
+        if (!ids.length) return;
+        const joined = ic.contacts.filter(c => ic.selected.has(c.id) && c.status === 'joined').length;
+        const again = ic.contacts.filter(c => ic.selected.has(c.id) && ['invited', 'expired', 'revoked', 'failed'].includes(c.status)).length;
+        $('#bulkSendTitle').html(`<i class="fas fa-paper-plane text-primary me-2"></i>Invite ${ids.length} ${ids.length === 1 ? 'person' : 'people'}`);
+        $('#bulkSendIntro').html(`Each person gets their own sign-up link by email. It works once and expires in 7 days.`
+            + (again ? ` <strong>${again}</strong> were invited before: they get a new link and the old one stops working.` : '')
+            + (joined ? ` <strong>${joined}</strong> already joined and will be skipped.` : ''));
+        $('#bulkFromInput').val(rememberedInviterName() || defaultInviterName);
+        $('#bulkProgress').addClass('d-none');
+        $('#bulkResults').empty();
+        $('#bulkSendBtn').prop('disabled', false).html(`<i class="fas fa-paper-plane me-1"></i>Send ${ids.length}`).removeClass('d-none');
+        $('#bulkCancelBtn').text('Cancel');
+        $('#bulkSendBackdrop, #bulkSendPanel').addClass('open');
+    };
+    window.closeBulkSendPanel = function () {
+        if (icSending) return;  // finishes the current part first
+        $('#bulkSendBackdrop, #bulkSendPanel').removeClass('open');
+    };
+    $('#icSendSelected').on('click', () => openBulkSendPanel());
+    $('#bulkSendBtn').on('click', async function () {
+        const ids = [...ic.selected];
+        const inviter = ($('#bulkFromInput').val() || '').trim();
+        const message = ($('#bulkMessageInput').val() || '').trim();
+        try { localStorage.setItem('admin_inviter_name', inviter); } catch (e) { /* storage blocked */ }
+        icSending = true;
+        $(this).prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Sending...');
+        $('#bulkCancelBtn').prop('disabled', true);
+        $('#bulkProgress').removeClass('d-none');
+        const results = [];
+        for (let i = 0; i < ids.length; i += 25) {
+            $('#bulkProgressBar').css('width', `${Math.round(i / ids.length * 100)}%`);
+            $('#bulkProgressText').text(`Sending ${Math.min(i + 25, ids.length)} of ${ids.length}...`);
+            try {
+                const r = await $.ajax({ url: '/api/admin/invite-contacts/send', type: 'POST', contentType: 'application/json',
+                                         data: JSON.stringify({ ids: ids.slice(i, i + 25), inviter_name: inviter, message: message }) });
+                results.push(...(r.results || []));
+            } catch (xhr) {
+                ids.slice(i, i + 25).forEach(id => results.push({ id: id, status: 'failed', error: (xhr.responseJSON || {}).error || 'Request failed' }));
+            }
+        }
+        icSending = false;
+        $('#bulkProgressBar').css('width', '100%');
+        const sent = results.filter(r => r.status === 'invited').length;
+        const failed = results.filter(r => r.status === 'failed');
+        const joined = results.filter(r => r.status === 'joined').length;
+        $('#bulkProgressText').text(`Done: ${sent} sent${joined ? `, ${joined} skipped (already joined)` : ''}${failed.length ? `, ${failed.length} failed` : ''}.`);
+        $('#bulkResults').html((sent ? `<div class="ic-result ok"><i class="fas fa-circle-check me-1"></i>${sent} invitation${sent === 1 ? '' : 's'} sent.</div>` : '')
+            + (failed.length ? `<div class="ic-result bad"><i class="fas fa-triangle-exclamation me-1"></i>${failed.length} could not be sent:<ul>${failed.slice(0, 8).map(f =>
+                `<li>${escapeHtml(f.email || 'Contact ' + f.id)}: ${escapeHtml(f.error || '')}</li>`).join('')}</ul>They are marked <strong>Email failed</strong> in the list, so you can retry them.</div>` : ''));
+        $('#bulkSendBtn').addClass('d-none');
+        $('#bulkCancelBtn').prop('disabled', false).text('Close');
+        ic.selected = new Set(failed.map(f => f.id));  // keep only what still needs sending
+        loadInviteContacts();
+        loadInvitations();
+    });
 
     function rememberedInviterName() {
         try { return localStorage.getItem('admin_inviter_name') || ''; } catch (e) { return ''; }
@@ -1545,6 +1796,7 @@ $(document).ready(function () {
     loadAdminRequests();
     loadAdminCostHistory();
     loadInvitations();
+    loadInviteContacts();
     loadImageSettings(true);
     loadAdminPresets();
     loadEmailAutomation();

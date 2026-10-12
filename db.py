@@ -279,6 +279,60 @@ class UserInvitation(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class InviteBatch(Base):
+    """One uploaded file of people to invite (Admin -> Invitations -> Contacts),
+    kept so every contact can be traced back to where it came from."""
+
+    __tablename__ = "invite_batches"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    uploaded_by_user_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=True
+    )
+    rows_total: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    rows_added: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    rows_updated: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    rows_skipped: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class InviteContact(Base):
+    """A person on the invite list: one row per email (lower-case), filled from
+    uploads or added by hand, and linked to the invitation sent to them.
+    Their status (not invited / invited / joined / expired / failed) is worked
+    out from that invitation and from whether an account exists."""
+
+    __tablename__ = "invite_contacts"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(255), nullable=False, unique=True, index=True)
+    name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    company: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    job_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    city: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    country: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    company_size: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    website: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Any other columns of the uploaded file, as JSON {header: value} (e.g. Tier, Confidence, Source URL)
+    extra: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source: Mapped[str] = mapped_column(String(16), default="upload", nullable=False)  # upload | manual
+    batch_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    invitation_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    invite_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_invited_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
 class Conversation(Base):
     """A Studio Chat thread: the runs (one per message) sent between two
     clicks of "New Conversation". See ensure_conversation."""
@@ -783,6 +837,16 @@ def init_db():
             try:
                 with engine.begin() as sub_conn:
                     sub_conn.execute(text(alter_cmd))
+            except Exception:
+                pass
+
+        # Invite contacts: the lead-sheet columns added after the table was first created
+        contact_tbl = f'"{SCHEMA}".invite_contacts' if not IS_SQLITE else "invite_contacts"
+        for col_name, col_type in [("city", "VARCHAR(80)"), ("industry", "VARCHAR(120)"), ("company_size", "VARCHAR(40)"),
+                                   ("website", "VARCHAR(255)"), ("description", "TEXT"), ("extra", "TEXT")]:
+            try:
+                with engine.begin() as sub_conn:
+                    sub_conn.execute(text(f"ALTER TABLE {contact_tbl} ADD COLUMN {col_name} {col_type}"))
             except Exception:
                 pass
 
@@ -2422,6 +2486,159 @@ def mark_invitation_accepted(invitation_id: int) -> None:
         if row and not row.accepted_at:
             row.accepted_at = _utcnow()
             session.commit()
+
+
+# ── Invite contacts (bulk invitations, services/invite_import.py) ───────────
+CONTACT_FIELDS = ("name", "company", "job_title", "phone", "city", "country", "industry", "company_size", "website",
+                  "description", "notes")
+CONTACT_STATUSES = ("not_invited", "invited", "joined", "expired", "revoked", "failed")
+
+
+def member_emails(emails) -> set[str]:
+    """The given emails (lower-case) that already have an account."""
+    wanted = {e.strip().lower() for e in emails or [] if e}
+    if not wanted:
+        return set()
+    found = set()
+    with Session(engine) as session:
+        items = sorted(wanted)
+        for start in range(0, len(items), 500):
+            chunk = items[start:start + 500]
+            found.update(e.lower() for (e,) in session.query(User.email).filter(func.lower(User.email).in_(chunk)).all())
+    return found
+
+
+def save_invite_contacts(rows: list[dict], filename: str | None, user_id: int, rows_total: int | None = None,
+                         source: str = "upload") -> dict:
+    """Adds new contacts and fills in blanks / updates details of known ones
+    (an empty cell never wipes a saved value). Returns the batch summary."""
+    now = _utcnow()
+    added = updated = 0
+    with Session(engine) as session:
+        batch = None
+        if filename:
+            batch = InviteBatch(filename=filename[:255], uploaded_by_user_id=user_id, rows_total=rows_total or len(rows), created_at=now)
+            session.add(batch)
+            session.flush()
+        emails = [r["email"] for r in rows]
+        existing = {}
+        for start in range(0, len(emails), 500):
+            for c in session.query(InviteContact).filter(InviteContact.email.in_(emails[start:start + 500])).all():
+                existing[c.email] = c
+        for row in rows:
+            contact = existing.get(row["email"])
+            if contact is None:
+                contact = InviteContact(email=row["email"], source=source, created_by_user_id=user_id, created_at=now,
+                                        batch_id=batch.id if batch else None)
+                session.add(contact)
+                existing[row["email"]] = contact
+                added += 1
+            else:
+                updated += 1
+                if batch:
+                    contact.batch_id = batch.id
+            for field in CONTACT_FIELDS:
+                if row.get(field):
+                    setattr(contact, field, row[field])
+            if row.get("extra"):  # merged: a later upload adds columns, never drops earlier ones
+                try:
+                    known = json.loads(contact.extra) if contact.extra else {}
+                except ValueError:
+                    known = {}
+                contact.extra = json.dumps({**known, **row["extra"]})
+            contact.updated_at = now
+        if batch:
+            batch.rows_added, batch.rows_updated = added, updated
+            batch.rows_skipped = max(0, (rows_total or len(rows)) - added - updated)
+        session.commit()
+        return {"batch_id": batch.id if batch else None, "added": added, "updated": updated,
+                "skipped": batch.rows_skipped if batch else 0}
+
+
+def _contact_status(contact: "InviteContact", invitation: "UserInvitation | None", is_member: bool) -> str:
+    if is_member or (invitation is not None and invitation.accepted_at):
+        return "joined"
+    if invitation is not None:
+        status = _invitation_status(invitation)
+        if contact.last_error and contact.last_invited_at is None:
+            return "failed"
+        return {"pending": "invited", "expired": "expired", "revoked": "revoked"}.get(status, "invited")
+    return "failed" if contact.last_error else "not_invited"
+
+
+def list_invite_contacts() -> dict:
+    """Every contact with its status, the upload batches, and counts per status."""
+    with Session(engine) as session:
+        contacts = session.query(InviteContact).order_by(InviteContact.created_at.desc(), InviteContact.id.desc()).all()
+        invite_ids = [c.invitation_id for c in contacts if c.invitation_id]
+        invitations = {}
+        for start in range(0, len(invite_ids), 500):
+            for inv in session.query(UserInvitation).filter(UserInvitation.id.in_(invite_ids[start:start + 500])).all():
+                invitations[inv.id] = inv
+        members = member_emails([c.email for c in contacts])
+        batches = {b.id: b for b in session.query(InviteBatch).all()}
+        out = []
+        for c in contacts:
+            invitation = invitations.get(c.invitation_id)
+            batch = batches.get(c.batch_id)
+            out.append({
+                "id": c.id, "email": c.email, **{f: getattr(c, f) or "" for f in CONTACT_FIELDS},
+                "extra": json.loads(c.extra) if c.extra else {},
+                "source": c.source, "batch_id": c.batch_id, "batch": batch.filename if batch else None,
+                "status": _contact_status(c, invitation, c.email in members),
+                "invite_count": c.invite_count or 0,
+                "last_invited_at": _as_utc(c.last_invited_at).isoformat() if c.last_invited_at else None,
+                "expires_at": _as_utc(invitation.expires_at).isoformat() if invitation is not None and invitation.expires_at else None,
+                "last_error": c.last_error,
+                "created_at": _as_utc(c.created_at).isoformat(),
+            })
+        counts = {status: sum(1 for c in out if c["status"] == status) for status in CONTACT_STATUSES}
+        counts["all"] = len(out)
+        return {
+            "contacts": out, "counts": counts,
+            "batches": [{"id": b.id, "filename": b.filename, "created_at": _as_utc(b.created_at).isoformat(),
+                         "rows_total": b.rows_total, "rows_added": b.rows_added, "rows_updated": b.rows_updated,
+                         "rows_skipped": b.rows_skipped}
+                        for b in sorted(batches.values(), key=lambda b: b.created_at, reverse=True)],
+        }
+
+
+def get_invite_contacts(ids) -> list[dict]:
+    wanted = [int(i) for i in ids or [] if str(i).isdigit()]
+    if not wanted:
+        return []
+    with Session(engine) as session:
+        rows = session.query(InviteContact).filter(InviteContact.id.in_(wanted)).all()
+        return [{"id": c.id, "email": c.email, "name": c.name, "company": c.company} for c in rows]
+
+
+def record_contact_invite(contact_id: int, invitation_id: int | None, error: str | None = None) -> None:
+    """After a send: the invitation it's linked to, or why the email failed."""
+    with Session(engine) as session:
+        contact = session.get(InviteContact, contact_id)
+        if not contact:
+            return
+        if invitation_id:
+            contact.invitation_id = invitation_id
+        if error:
+            contact.last_error = error[:500]
+        else:
+            contact.last_error = None
+            contact.invite_count = (contact.invite_count or 0) + 1
+            contact.last_invited_at = _utcnow()
+        contact.updated_at = _utcnow()
+        session.commit()
+
+
+def delete_invite_contacts(ids) -> int:
+    """Removes contacts from the list (any invitation already sent keeps working)."""
+    wanted = [int(i) for i in ids or [] if str(i).isdigit()]
+    if not wanted:
+        return 0
+    with Session(engine) as session:
+        removed = session.query(InviteContact).filter(InviteContact.id.in_(wanted)).delete(synchronize_session=False)
+        session.commit()
+        return removed
 
 
 def revoke_invitation(invitation_id: int) -> bool:
