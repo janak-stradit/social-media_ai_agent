@@ -314,6 +314,7 @@ class InviteMessage(Base):
     style: Mapped[str] = mapped_column(String(16), nullable=False, default="designed")  # designed / note / preview
     subject: Mapped[str] = mapped_column(String(300), nullable=False, default="")
     body: Mapped[str] = mapped_column(Text, nullable=False, default="")  # the plain-text version, footer included
+    html: Mapped[str | None] = mapped_column(Text, nullable=True)  # the HTML version, as sent
     status: Mapped[str] = mapped_column(String(12), nullable=False, default="sent")  # sent / failed
     error: Mapped[str | None] = mapped_column(String(500), nullable=True)
     sent_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -921,6 +922,14 @@ def init_db():
                     sub_conn.execute(text(f"ALTER TABLE {inv_tbl} ADD COLUMN {col_name} {col_type}"))
             except Exception:
                 pass
+
+        # Invitation emails: the HTML version, kept since it was added
+        msg_tbl = f'"{SCHEMA}".invite_messages' if not IS_SQLITE else "invite_messages"
+        try:
+            with engine.begin() as sub_conn:
+                sub_conn.execute(text(f"ALTER TABLE {msg_tbl} ADD COLUMN html TEXT"))
+        except Exception:  # noqa: BLE001 - already there
+            pass
 
         # Invite contacts: the lead-sheet columns added after the table was first created
         contact_tbl = f'"{SCHEMA}".invite_contacts' if not IS_SQLITE else "invite_contacts"
@@ -2799,10 +2808,11 @@ STAGES = ("added", "preview_ready", "invited", "opened", "signed_up", "made_post
 
 def record_invite_message(email: str, style: str, subject: str, body: str, status: str = "sent",
                           error: str | None = None, contact_id: int | None = None, invitation_id: int | None = None,
-                          sent_by_user_id: int | None = None, sender_name: str | None = None) -> int:
+                          sent_by_user_id: int | None = None, sender_name: str | None = None,
+                          html: str | None = None) -> int:
     with Session(engine) as session:
         row = InviteMessage(email=(email or "").strip().lower()[:320], style=(style or "designed")[:16],
-                            subject=(subject or "")[:300], body=body or "", status=status[:12],
+                            subject=(subject or "")[:300], body=body or "", html=html or None, status=status[:12],
                             error=(error or "")[:500] or None, contact_id=contact_id, invitation_id=invitation_id,
                             sent_by_user_id=sent_by_user_id, sender_name=(sender_name or "")[:255] or None)
         session.add(row)
@@ -2816,6 +2826,7 @@ def _invite_message_dict(m: "InviteMessage", with_body: bool = True) -> dict:
            "sent_at": _as_utc(m.created_at).isoformat()}
     if with_body:
         out["body"] = m.body
+        out["html"] = m.html
     return out
 
 

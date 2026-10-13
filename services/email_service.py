@@ -749,14 +749,100 @@ def _build_monthly_recap_html(
 """
 
 
+def _note_paragraph(block: str, button_url: str | None) -> str:
+    """One paragraph of a note: text with clickable links. The main link (the
+    button) is left out of the text - it's shown as the button instead."""
+    import re as _re
+
+    lines = [line for line in block.split("\n") if not (button_url and line.strip() == button_url)]
+    text = _escape("\n".join(lines)).strip()
+    text = _re.sub(r"(https?://[^\s<>&]+)", r'<a href="\1" style="color: #c2410c;">\1</a>', text)
+    return text.replace("\n", "<br>")
+
+
+def _build_note_html(text: str, heading: str, button_url: str | None, button_label: str, card: dict | None = None,
+                     unsubscribe_url: str | None = None, postal_address: str = "") -> str:
+    """The AVIR AI email design around a short note (services/invite_outreach):
+    the note's own text, its main link as a button placed where the link is
+    written, and for "Show them their posts" a peek at the first post."""
+    import re as _re
+
+    blocks = [b for b in _re.split(r"\n\s*\n", (text or "").strip()) if b.strip()]
+    button = (f"""
+                    <tr><td align="center" style="padding: 6px 32px 22px 32px;">
+                        <a href="{_escape(button_url)}" style="display: inline-block; background-color: #c2410c; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 13px 30px; border-radius: 6px;">{_escape(button_label)}</a>
+                    </td></tr>""" if button_url else "")
+    card_html = ""
+    if card:
+        color = card.get("color") if _re.fullmatch(r"#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{3}", card.get("color") or "") else "#c2410c"
+        chips = "".join(
+            f'<span style="display: inline-block; background-color: #f2f4f7; color: #475467; font-size: 11px; font-weight: 600; '
+            f'border-radius: 999px; padding: 3px 9px; margin: 0 4px 4px 0;">{_escape(t)}</span>' for t in card.get("titles") or [])
+        card_html = f"""
+                    <tr><td style="padding: 4px 32px 18px 32px;">
+                        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border: 1px solid #e6e8ef; border-top: 4px solid {color}; border-radius: 10px;">
+                            <tr><td style="padding: 14px 16px 6px 16px;">
+                                <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+                                    <td style="width: 38px; height: 38px; border-radius: 8px; background-color: {color}; color: #ffffff; font-weight: 700; font-size: 16px; text-align: center; vertical-align: middle;">{_escape((card.get("company") or "?")[:1].upper())}</td>
+                                    <td style="padding-left: 10px; font-size: 13px; color: #172033;"><strong>{_escape(card.get("company"))}</strong><br><span style="color: #98a2b3; font-size: 11px;">Draft post &middot; LinkedIn</span></td>
+                                </tr></table>
+                            </td></tr>
+                            <tr><td style="padding: 4px 16px 10px 16px; color: #344054; font-size: 13px; line-height: 1.55;">{_escape(card.get("excerpt"))}</td></tr>
+                            <tr><td style="padding: 0 16px 12px 16px;">{chips}</td></tr>
+                        </table>
+                    </td></tr>"""
+    rows, placed = [], False
+    for block in blocks:
+        has_button = bool(button_url) and button_url in block
+        paragraph = _note_paragraph(block, button_url)
+        if paragraph:
+            rows.append(f"""
+                    <tr><td style="padding: 0 32px 14px 32px; color: #172033; font-size: 15px; line-height: 1.6;">{paragraph}</td></tr>""")
+        if has_button and not placed:
+            rows.append(card_html + button)
+            placed = True
+    if not placed:  # the text doesn't show the link: card + button after the first paragraphs
+        rows.insert(min(2, len(rows)), card_html + button)
+    unsubscribe_html = (f"Don't want emails like this? <a href='{_escape(unsubscribe_url)}' style='color: #667085;'>Unsubscribe</a>.<br>"
+                        if unsubscribe_url else "")
+    address_html = f" &middot; {_escape(postal_address)}" if postal_address else ""
+    return f"""<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 0; background-color: #f8f9fc; font-family: 'Segoe UI', Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fc; padding: 24px 12px;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                       style="max-width: 560px; background-color: #ffffff; border: 1px solid #e6e8ef; border-radius: 16px; overflow: hidden;">
+                    <tr>
+                        <td style="background-color: #e85a1c; background-image: linear-gradient(135deg, #ffa066 0%, #e85a1c 100%); padding: 28px 32px; text-align: center;">
+                            <div style="color: #ffffff; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.85;">AVIR AI</div>
+                            <div style="color: #ffffff; font-size: 21px; font-weight: 700; margin-top: 6px; line-height: 1.3;">{_escape(heading)}</div>
+                        </td>
+                    </tr>
+                    <tr><td style="height: 26px; line-height: 26px; font-size: 0;">&nbsp;</td></tr>{"".join(rows)}
+                    <tr>
+                        <td style="padding: 16px 32px; background-color: #f8f9fc; border-top: 1px solid #e6e8ef; color: #667085; font-size: 12px; line-height: 1.6;">
+                            {unsubscribe_html}<span style="color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a>{address_html}</span>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+
+
 def _build_invitation_html(
     name: str | None, inviter_name: str | None, accept_url: str, message: str | None, expires_days: int,
-    unsubscribe_url: str | None = None, postal_address: str = "",
+    unsubscribe_url: str | None = None, postal_address: str = "", company: str | None = None,
 ) -> str:
     """Admin -> Invitations. Same look as the password-reset email (brand
     gradient header, white card, purple button)."""
     first_name = (name or "").strip().split(" ")[0]
-    greeting = f"Hi {_escape(first_name)}," if first_name else "Hi there,"
+    greeting = (f"Hi {_escape(first_name)}," if first_name
+                else f"Hi {_escape(company)} team," if company else "Hi there,")
     inviter = _escape(inviter_name) if inviter_name else "The AVIR AI team"
     unsubscribe_html = (f"<br>Don't want emails like this? <a href='{_escape(unsubscribe_url)}' style='color: #667085;'>Unsubscribe</a>."
                         if unsubscribe_url else "")
@@ -782,11 +868,11 @@ def _build_invitation_html(
     return f"""<!DOCTYPE html>
 <html>
 <body style="margin: 0; padding: 0; background-color: #f8f9fc; font-family: 'Segoe UI', Arial, sans-serif;">
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fc; padding: 32px 0;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fc; padding: 24px 12px;">
         <tr>
             <td align="center">
-                <table role="presentation" width="560" cellpadding="0" cellspacing="0"
-                       style="background-color: #ffffff; border: 1px solid #e6e8ef; border-radius: 16px; overflow: hidden;">
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0"
+                       style="max-width: 560px; background-color: #ffffff; border: 1px solid #e6e8ef; border-radius: 16px; overflow: hidden;">
                     <tr>
                         <td style="background-color: #e85a1c; background-image: linear-gradient(135deg, #ffa066 0%, #e85a1c 100%); padding: 32px; text-align: center;">
                             <div style="color: #ffffff; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; opacity: 0.85;">AVIR AI</div>
@@ -1515,11 +1601,14 @@ class EmailService:
         unsubscribe_url: str | None = None,
         postal_address: str = "",
         note: dict | None = None,
+        company: str | None = None,
     ):
-        """(the email, its plain text) - what send_invitation_email sends."""
+        """(the email, its plain text) - what send_invitation_email sends.
+        note may carry "heading", "button_url", "button_label" and "card" for
+        its HTML design (_build_note_html)."""
         from email.utils import formataddr, parseaddr
 
-        from services.invite_outreach import footer_text, text_to_html
+        from services.invite_outreach import footer_text
 
         msg = MIMEMultipart("alternative")
         inviter = inviter_name or "AVIR AI"
@@ -1530,14 +1619,16 @@ class EmailService:
             # A note comes from the person ("Janak"), like any email they'd write
             msg["From"] = formataddr((inviter_name or "AVIR AI", address))
             text = (note.get("text") or "").strip() + ("\n\n" + footer if footer else "")
-            html_part = text_to_html(text)
+            html_part = _build_note_html((note.get("text") or "").strip(), note.get("heading") or msg["Subject"],
+                                         note.get("button_url"), note.get("button_label") or "Open",
+                                         note.get("card"), unsubscribe_url, postal_address)
         else:
             msg["Subject"] = f"{inviter} invited you to AVIR AI"
             # Inbox shows "Janak via AVIR AI" as the sender (the address stays ours)
             msg["From"] = formataddr((f"{inviter_name} via AVIR AI" if inviter_name else "AVIR AI", address))
             first = (name or "").strip().split(" ")[0]
             text = "\n\n".join(filter(None, [
-                f"Hi {first}," if first else "Hi there,",
+                f"Hi {first}," if first else f"Hi {company} team," if company else "Hi there,",
                 (f"{inviter} has invited you to join AVIR AI - the AI studio that turns one brief into on-brand posts, "
                  "captions, hashtags and images for every social channel."),
                 (message or "").strip(),
@@ -1545,7 +1636,7 @@ class EmailService:
                 footer,
             ]))
             html_part = _build_invitation_html(name, inviter_name, accept_url, message, expires_days,
-                                               unsubscribe_url, postal_address)
+                                               unsubscribe_url, postal_address, company)
         msg["To"] = to_email
         msg["Reply-To"] = address
         if unsubscribe_url:

@@ -1310,11 +1310,25 @@ $(document).ready(function () {
                 <dt>Kind</dt><dd>${mailKind(m)}</dd>
                 <dt>Subject</dt><dd><strong>${escapeHtml(m.subject)}</strong></dd>
             </dl>
-            <pre class="ic-email-body">${escapeHtml(m.body)}</pre>
-            <p class="small text-muted mt-2 mb-0">The plain-text version, exactly as sent. ${m.style === 'designed' ? 'The person also saw the designed HTML version of it.' : 'The HTML version shows the same text.'}</p>`);
+            ${m.html ? `<div class="ic-email-tabs" role="tablist">
+                <button type="button" class="ic-filter active" data-email-tab="html" role="tab" aria-selected="true">As they see it</button>
+                <button type="button" class="ic-filter" data-email-tab="text" role="tab" aria-selected="false">Plain text</button></div>
+                <iframe class="ic-email-frame" title="The email as sent" sandbox=""></iframe>` : ''}
+            <pre class="ic-email-body${m.html ? ' d-none' : ''}">${escapeHtml(m.body)}</pre>
+            <p class="small text-muted mt-2 mb-0">${m.html ? 'Exactly as sent: the designed version most mail apps show, and the plain-text version sent with it.'
+                : 'The plain-text version, exactly as sent.'}</p>`);
+        // srcdoc set as a property: the sandbox (no scripts, no same-origin) keeps the email apart from this page
+        if (m.html) $('#emailViewBody .ic-email-frame')[0].srcdoc = m.html;
         $('#emailViewBackdrop, #emailViewPanel').addClass('open');
     }
-    $(document).on('click', '[data-view-email]', function () {
+    $(document).on('click', '[data-email-tab]', function () {
+        const tab = $(this).data('email-tab');
+        $('[data-email-tab]').each(function () { $(this).toggleClass('active', $(this).data('email-tab') === tab).attr('aria-selected', $(this).data('email-tab') === tab); });
+        $('#emailViewBody .ic-email-frame').toggleClass('d-none', tab !== 'html');
+        $('#emailViewBody .ic-email-body').toggleClass('d-none', tab !== 'text');
+    });
+    $(document).on('click', '[data-view-email]', function (e) {
+        e.preventDefault();  // inside an email's summary line: open the viewer, don't fold the text
         $.getJSON(`/api/admin/invite-messages/${$(this).data('view-email')}`).done(r => showEmail(r.message))
             .fail(() => showToast('Could not load that email.', 'error'));
     });
@@ -1529,7 +1543,8 @@ $(document).ready(function () {
         const mails = j.messages.length ? `<div class="ic-mails">${j.messages.map(m => `
             <details class="ic-mail">
                 <summary>${mailKind(m)}<strong>${escapeHtml(m.subject || '(no subject)')}</strong>
-                    <span class="ic-sub">${formatInviteDate(m.sent_at)}${m.sender_name ? ` · from ${escapeHtml(m.sender_name)}` : ''}</span></summary>
+                    <span class="ic-sub">${formatInviteDate(m.sent_at)}${m.sender_name ? ` · from ${escapeHtml(m.sender_name)}` : ''}</span>
+                    <button type="button" class="ic-link ms-2" data-view-email="${m.id}">${m.style === 'designed' ? 'See design' : 'Open'}</button></summary>
                 <pre>${escapeHtml(m.body)}${m.status === 'failed' ? `\n\nNot delivered: ${escapeHtml(m.error || '')}` : ''}</pre>
             </details>`).join('')}</div>` : '<p class="ic-sub mb-0">No emails sent to this person yet.</p>';
         return `<h6 class="ic-detail-h">Stage</h6>${journey}<h6 class="ic-detail-h">Emails sent (${j.messages.length})</h6>${mails}<hr class="my-3">`;
@@ -1843,7 +1858,10 @@ $(document).ready(function () {
         $('#bulkFromInput').val(rememberedInviterName() || defaultInviterName);
         $('#bulkAddressInput').val((ic.outreach || {}).postal_address || '');
         const withPreview = ic.contacts.filter(c => ic.selected.has(c.id) && c.preview && c.preview.status === 'ready').length;
-        $('#bulkStyleSelect').val(withPreview ? 'preview' : 'note');
+        let lastStyle = null;
+        try { lastStyle = localStorage.getItem('admin_invite_style'); } catch (e) { /* storage blocked */ }
+        // The style used last time; else their posts when previews are ready, else the short note
+        $('#bulkStyleSelect').val(['designed', 'note', 'preview'].includes(lastStyle) ? lastStyle : (withPreview ? 'preview' : 'note'));
         bulkSample.index = 0;
         bulkStyleChanged(true);
         $('#bulkProgress').addClass('d-none');
@@ -1902,33 +1920,9 @@ $(document).ready(function () {
         loadInvitations();
     });
 
-    // The email's text: a template per style, filled in per person (same rules
-    // as services/invite_outreach.render), with a sample for the selected people
+    // The email's text: a template per style, filled in per person by the server
+    // (services/invite_outreach.render); the sample shows the real email
     const bulkSample = { index: 0 };
-    function noteValues(c, sender) {
-        const name = (c.name || '').trim(), first = name ? name.split(/\s+/)[0] : '', company = shortCompany(c.company);
-        const p = c.preview || {};
-        return {
-            greeting: first ? `Hi ${first},` : (company ? `Hi ${company} team,` : 'Hi there,'),
-            first_name: first || 'there', name: name, company: company || 'your company', city: c.city || '', industry: c.industry || '',
-            first_line: p.first_line || '',
-            preview_link: p.status === 'ready' ? `${location.origin}/p/${p.token}` : `${location.origin}/i/(their link)`,
-            invite_link: `${location.origin}/i/(their link)`, sender_name: sender || 'The AVIR AI team',
-        };
-    }
-    // "Ontime Packers and Movers Pvt. Ltd." -> "Ontime Packers and Movers" (services/invite_outreach.short_company)
-    function shortCompany(name) {
-        let s = String(name || '').trim(), prev = null;
-        while (prev !== s) {
-            prev = s;
-            s = s.replace(/[\s,]+(pvt\.?|private|ltd\.?|limited|llp|llc|inc\.?|incorporated|corp\.?|corporation|co\.?|plc|gmbh|fzco|fze|fz-llc|l\.l\.c\.?)$/i, '').trim();
-        }
-        return s || String(name || '').trim();
-    }
-    function fillNote(template, values) {
-        return String(template || '').replace(/\{([a-z_]+)\}/g, (m, key) => (key in values ? values[key] : m))
-            .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
-    }
     function bulkStyleChanged(reset) {
         const style = $('#bulkStyleSelect').val();
         const templates = (ic.outreach || {}).templates || {};
@@ -1945,29 +1939,44 @@ $(document).ready(function () {
         const missing = chosen.filter(c => !(c.preview && c.preview.status === 'ready')).length;
         $('#bulkStyleHelp').html(style === 'preview'
             ? (missing ? `<span class="text-warning-emphasis"><i class="fas fa-triangle-exclamation me-1"></i>${missing} of ${chosen.length} have no preview ready, so they get the short note instead. Use <strong>Prepare previews</strong> first to show everyone their posts.</span>`
-                : 'A short plain email with a link to the posts made for them. No sign-up needed to look.')
-            : style === 'note' ? 'A short plain email from you with their sign-up link. Plain emails reach the inbox more often than designed ones.'
-                : 'The designed HTML invitation. Best for people who already know you.');
+                : 'A short designed email with a peek at the posts made for them and a button to see all of them. No sign-up needed to look.')
+            : style === 'note' ? 'A short designed email in your words, with a button to set up their account.'
+                : 'The full designed invitation: what AVIR AI does, your personal message and a button to accept.');
+        $('#bulkDesignedSample').toggleClass('d-none', note);
         renderBulkSample();
     }
+    // The sample is the real email, built by the server for the person shown (not sent)
+    let bulkSampleTimer = null, bulkSampleSeq = 0;
     function renderBulkSample() {
+        clearTimeout(bulkSampleTimer);
+        bulkSampleTimer = setTimeout(loadBulkSample, 350);
+    }
+    function loadBulkSample() {
         const chosen = ic.contacts.filter(c => ic.selected.has(c.id));
-        if (!chosen.length || $('#bulkStyleSelect').val() === 'designed') return;
+        if (!chosen.length) return;
         bulkSample.index = (bulkSample.index + chosen.length) % chosen.length;
         const c = chosen[bulkSample.index];
         const style = $('#bulkStyleSelect').val();
-        const usesPreview = style === 'preview' && c.preview && c.preview.status === 'ready';
-        const t = ((ic.outreach || {}).templates || {});
-        const subject = style === 'preview' && !usesPreview ? (t.note || {}).subject : $('#bulkSubjectInput').val();
-        const body = style === 'preview' && !usesPreview ? (t.note || {}).body : $('#bulkBodyInput').val();
-        const values = noteValues(c, ($('#bulkFromInput').val() || '').trim());
-        $('#bulkSampleWho').text(`${c.name || c.email}${c.company ? ` (${c.company})` : ''} · ${bulkSample.index + 1} of ${chosen.length}`);
-        $('#bulkSampleSubject').text(fillNote(subject, values));
-        $('#bulkSampleBody').text(fillNote(body, values) + '\n\n--\nUnsubscribe link and postal address are added here.');
+        const who = `${c.name || c.email}${c.company ? ` (${c.company})` : ''} · ${bulkSample.index + 1} of ${chosen.length}`;
+        $(style === 'designed' ? '#bulkDesignedWho' : '#bulkSampleWho').text(who);
+        const seq = ++bulkSampleSeq;
+        $.ajax({ url: '/api/admin/invite-contacts/sample', type: 'POST', contentType: 'application/json',
+                 data: JSON.stringify({ contact_id: c.id, style: style, subject: $('#bulkSubjectInput').val(), body: $('#bulkBodyInput').val(),
+                                        message: $('#bulkMessageInput').val(), inviter_name: ($('#bulkFromInput').val() || '').trim(),
+                                        postal_address: $('#bulkAddressInput').val() }) })
+            .done(r => {
+                if (seq !== bulkSampleSeq) return;  // a newer sample is on its way
+                $('#bulkSampleSubject').text(r.subject);
+                const frame = document.getElementById(style === 'designed' ? 'bulkDesignedFrame' : 'bulkSampleFrame');
+                if (frame) frame.srcdoc = r.html;
+            });
     }
-    $('#bulkStyleSelect').on('change', () => bulkStyleChanged(true));
+    $('#bulkStyleSelect').on('change', function () {
+        try { localStorage.setItem('admin_invite_style', this.value); } catch (e) { /* storage blocked */ }
+        bulkStyleChanged(true);
+    });
     $('#bulkBodyInput').on('input', function () { $(this).data('edited', true); renderBulkSample(); });
-    $('#bulkSubjectInput, #bulkFromInput').on('input', renderBulkSample);
+    $('#bulkSubjectInput, #bulkFromInput, #bulkMessageInput, #bulkAddressInput').on('input', renderBulkSample);
     $('#bulkSamplePrev').on('click', () => { bulkSample.index--; renderBulkSample(); });
     $('#bulkSampleNext').on('click', () => { bulkSample.index++; renderBulkSample(); });
     $(document).on('click', '[data-merge]', function () {
