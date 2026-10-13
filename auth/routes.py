@@ -103,6 +103,22 @@ def login_page():
     return render_template("login.html")
 
 
+def _claim_lead_preview(token, user_id: int, email: str) -> None:
+    """Signed up from their preview page (Admin -> Invitations): their brand
+    profile and draft posts move into the new account. Never blocks sign-up."""
+    token = (token or "").strip() if isinstance(token, str) else ""
+    if not token:
+        return
+    try:
+        from services.lead_preview_service import claim_preview
+
+        claimed = claim_preview(token, user_id, email)
+        if claimed and session.get("user_id") == user_id:
+            session["starter_conversation"] = claimed["conversation_id"]
+    except Exception as err:  # noqa: BLE001
+        logger.warning(f"Could not copy lead preview into user {user_id}: {err}")
+
+
 @auth_bp.route("/register", methods=["POST"])
 def register():
     data = request.get_json() or {}
@@ -135,6 +151,7 @@ def register():
         session.clear()
         session["user_id"] = user["id"]
         session.permanent = True
+        _claim_lead_preview(data.get("preview_token"), user["id"], email)
         return jsonify({"success": True, "redirect": url_for("onboarding_page")})
 
     # Checked last so a typo'd form doesn't burn the one-use token.
@@ -146,6 +163,7 @@ def register():
         }), 400
 
     user = create_user(name, email, generate_password_hash(password))
+    _claim_lead_preview(data.get("preview_token"), user["id"], email)
     # No session set here - registration no longer logs the user straight in.
     # They must verify their email first (see /api/auth/verify/<token>), which
     # is where the session actually gets created.

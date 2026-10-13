@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="robots" content="noindex, nofollow">
+    <title>{% if preview %}Posts for {{ preview.company }}{% else %}Preview not available{% endif %} - AVIR AI</title>
+    <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/svg+xml">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            color-scheme: light;
+            --brand: #c2410c; --brand-dark: #9a3412; --ink: #172033; --muted: #5b6474; --soft: #98a2b3;
+            --line: #e6e8ef; --bg: #f6f7fb; --card: #ffffff; --accent: {{ (preview.colors[0] if preview and preview.colors else '#c2410c') }};
+            --link: #0a66c2;
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: var(--bg); color: var(--ink); font-family: 'Segoe UI', -apple-system, Arial, sans-serif; }
+        a { color: inherit; }
+        .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 16px; max-width: 1180px; margin: 0 auto; }
+        .mark { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; letter-spacing: 0.02em; text-decoration: none; }
+        .mark img { width: 26px; height: 26px; }
+        .top small { color: var(--soft); font-size: 0.78rem; }
+        .hero { max-width: 1180px; margin: 0 auto; padding: 18px 16px 8px; display: flex; flex-wrap: wrap; align-items: flex-end;
+                justify-content: space-between; gap: 18px; }
+        .hero h1 { font-size: clamp(1.45rem, 3vw, 2.1rem); margin: 0 0 6px; line-height: 1.2; }
+        .hero p { margin: 0; color: var(--muted); font-size: 0.98rem; line-height: 1.5; max-width: 640px; }
+        .cta { display: inline-flex; align-items: center; gap: 8px; background: var(--brand); color: #fff; text-decoration: none; font-weight: 600;
+               padding: 13px 24px; border-radius: 999px; font-size: 0.98rem; white-space: nowrap; }
+        .cta:hover { background: var(--brand-dark); }
+        .cta:focus-visible, .more:focus-visible { outline: 3px solid #fdba74; outline-offset: 2px; }
+        .cta-note { display: block; font-size: 0.78rem; color: var(--soft); margin-top: 6px; text-align: center; }
+        .grid { max-width: 1180px; margin: 0 auto; padding: 18px 16px 8px; display: grid; gap: 18px;
+                grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); align-items: start; }
+        .post { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+                box-shadow: 0 6px 18px rgba(23, 32, 51, 0.05); border-top: 4px solid var(--accent); }
+        .post-head { display: flex; align-items: center; gap: 10px; padding: 14px 16px 8px; }
+        .avatar { width: 44px; height: 44px; border-radius: 8px; flex: none; display: flex; align-items: center; justify-content: center;
+                  background: #fff; border: 1px solid var(--line); overflow: hidden; font-weight: 700; color: #fff; }
+        .avatar img { width: 100%; height: 100%; object-fit: contain; }
+        .avatar.initial { background: var(--accent); border-color: transparent; }
+        .who strong { display: block; font-size: 0.93rem; }
+        .who span { font-size: 0.76rem; color: var(--soft); }
+        .tag { margin-left: auto; font-size: 0.7rem; font-weight: 600; color: var(--muted); background: #f2f4f7; border-radius: 999px; padding: 3px 9px; white-space: nowrap; }
+        .caption { padding: 4px 16px 0; font-size: 0.9rem; line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere; }
+        .more { border: none; background: none; color: var(--muted); font-size: 0.85rem; font-weight: 600; padding: 2px 16px 0; cursor: pointer; }
+        .tags { padding: 8px 16px 12px; font-size: 0.86rem; color: var(--link); font-weight: 600; overflow-wrap: anywhere; }
+        .media { aspect-ratio: 1 / 1; background: #f2f4f7; border-top: 1px solid var(--line); position: relative; }
+        .media img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .media .wait { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+                       color: var(--muted); font-size: 0.86rem; text-align: center; padding: 16px;
+                       background: linear-gradient(110deg, #eef0f4 8%, #f7f8fa 18%, #eef0f4 33%); background-size: 200% 100%;
+                       animation: shine 1.6s linear infinite; }
+        .media .wait i { font-size: 1.4rem; color: var(--brand); }
+        @keyframes shine { to { background-position-x: -200%; } }
+        @media (prefers-reduced-motion: reduce) { .media .wait { animation: none; } }
+        .bar { display: flex; gap: 22px; padding: 10px 16px 12px; border-top: 1px solid var(--line); color: var(--soft); font-size: 0.8rem; font-weight: 600; }
+        .bottom { max-width: 1180px; margin: 10px auto 0; padding: 22px 16px 40px; text-align: center; }
+        .bottom .cta { margin-bottom: 4px; }
+        .fine { color: var(--soft); font-size: 0.78rem; line-height: 1.6; margin-top: 18px; }
+        .fine a { color: var(--muted); }
+        .empty { max-width: 460px; margin: 12vh auto; background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 36px 28px; text-align: center; }
+        .empty h1 { font-size: 1.25rem; }
+        .empty p { color: var(--muted); }
+        @media (max-width: 520px) {
+            .grid { grid-template-columns: 1fr; }
+            .hero { align-items: stretch; }
+            .hero .cta-wrap { width: 100%; }
+            .cta { width: 100%; justify-content: center; }
+        }
+    </style>
+</head>
+<body>
+    <header class="top">
+        <a class="mark" href="/" aria-label="AVIR AI home"><img src="{{ url_for('static', filename='img/favicon.svg') }}" alt="" width="26" height="26">AVIR AI</a>
+        <small>a StradIT product</small>
+    </header>
+
+    {% if not preview %}
+    <main class="empty">
+        <h1>This preview isn't available</h1>
+        <p>The link may be incomplete, or the preview was removed.</p>
+        <a class="cta" href="/signup">Try AVIR AI</a>
+    </main>
+    {% else %}
+    <main>
+        <section class="hero">
+            <div>
+                <h1>{{ preview.posts|length }} LinkedIn posts for {{ preview.company }}</h1>
+                <p>We drafted these from {% if preview.website %}<strong>{{ preview.website|replace('https://', '')|replace('http://', '')|trim('/') }}</strong>{% else %}your website{% endif %}
+                    with AVIR AI, in your brand's voice and colours. Edit them, make more and publish them from one place.</p>
+            </div>
+            <div class="cta-wrap">
+                <a class="cta" href="/p/{{ token }}/start"><i class="fas fa-pen-to-square" aria-hidden="true"></i>Edit &amp; use these posts</a>
+                <span class="cta-note">Your brand profile is already set up for you</span>
+            </div>
+        </section>
+
+        <section class="grid" id="posts" aria-live="polite"></section>
+
+        <section class="bottom">
+            <a class="cta" href="/p/{{ token }}/start">Create my account and keep these posts</a>
+            <p class="fine">These are AI drafts based on your public website. Check the details before you post them.<br>
+                {% if unsubscribe_url %}Don't want emails from us? <a href="{{ unsubscribe_url }}">Unsubscribe</a>.{% endif %}
+                AVIR AI is a product of <a href="https://stradit.com/" rel="noopener">StradIT</a>.</p>
+        </section>
+    </main>
+
+    <script>
+        (function () {
+            const TOKEN = {{ token|tojson }};
+            let data = {{ preview|tojson }};
+            const grid = document.getElementById('posts');
+            const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+            const open = new Set();
+
+            function avatar() {
+                const initial = esc((data.company || '?').trim().charAt(0).toUpperCase());
+                if (!data.logo_url) return `<div class="avatar initial" aria-hidden="true">${initial}</div>`;
+                return `<div class="avatar" aria-hidden="true" data-initial="${initial}"><img src="${esc(data.logo_url)}" alt="" referrerpolicy="no-referrer"
+                    onerror="const a = this.parentNode; a.classList.add('initial'); a.textContent = a.dataset.initial;"></div>`;
+            }
+
+            function media(post) {
+                if (post.image_url) return `<div class="media"><img src="${esc(post.image_url)}" alt="Image for the post: ${esc(post.title)}" loading="lazy"></div>`;
+                if (post.image_status === 'failed' || post.image_status === 'skipped') return '';
+                return `<div class="media"><div class="wait"><i class="fas fa-wand-magic-sparkles" aria-hidden="true"></i>
+                    Creating the image${data.logo_url ? ' with your logo' : ''}…</div></div>`;
+            }
+
+            // LinkedIn shows the start of a post and "…see more"
+            function shortText(text) {
+                text = String(text || '');
+                if (text.length <= 260) return text;
+                return text.slice(0, 240).replace(/\s+\S*$/, '').replace(/[\s.,;:!?-]+$/, '') + '…';
+            }
+
+            function render() {
+                grid.innerHTML = data.posts.map((post, i) => `
+                    <article class="post" aria-label="Post ${i + 1}: ${esc(post.title)}">
+                        <div class="post-head">${avatar()}
+                            <div class="who"><strong>${esc(data.company)}</strong><span>Draft post · LinkedIn</span></div>
+                            <span class="tag">${esc(post.occasion || post.title)}</span>
+                        </div>
+                        <div class="caption" id="cap${i}">${esc(open.has(i) ? post.caption : shortText(post.caption))}</div>
+                        ${shortText(post.caption) !== post.caption ? `<button type="button" class="more" data-i="${i}" aria-controls="cap${i}" aria-expanded="${open.has(i)}">${open.has(i) ? 'Show less' : '…see more'}</button>` : ''}
+                        ${(post.hashtags || []).length ? `<div class="tags">${post.hashtags.map(esc).join(' ')}</div>` : ''}
+                        ${media(post)}
+                        <div class="bar" aria-hidden="true"><span><i class="far fa-thumbs-up"></i> Like</span><span><i class="far fa-comment"></i> Comment</span><span><i class="fas fa-retweet"></i> Repost</span></div>
+                    </article>`).join('');
+            }
+            grid.addEventListener('click', function (e) {
+                const btn = e.target.closest('.more');
+                if (!btn) return;
+                const i = Number(btn.dataset.i);
+                if (open.has(i)) open.delete(i); else open.add(i);
+                render();
+            });
+            render();
+
+            // Shown to a person: count the view and start the images, then follow them
+            const waiting = () => data.posts.some(p => !p.image_url && (p.image_status === 'waiting' || p.image_status === 'making'));
+            let polls = 0;
+            function poll() {
+                if (!waiting() || polls++ > 80) return;
+                setTimeout(function () {
+                    fetch(`/p/${TOKEN}/data`).then(r => r.json()).then(d => { if (d.success) { data = d; render(); } poll(); }).catch(poll);
+                }, 3000);
+            }
+            setTimeout(function () {
+                fetch(`/p/${TOKEN}/seen`, { method: 'POST' }).then(r => r.json())
+                    .then(d => { if (d.success) { data = d; render(); } poll(); }).catch(poll);
+            }, 1200);
+        })();
+    </script>
+    {% endif %}
+</body>
+</html>

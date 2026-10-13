@@ -233,9 +233,34 @@
         .ic-selection .ic-link { color: #ffa066; }
         .ic-selection-actions { margin-left: auto; display: inline-flex; gap: 0.5rem; }
         .ic-selection .btn-xs-outline-neutral { background: #fff; }
+        .ic-selection .btn-xs-outline-neutral:hover { background: #fff4ec; color: #172033; }
         .ic-link { border: none; background: none; padding: 0; color: var(--brand-strong); font-weight: 600; font-size: 0.8rem; text-decoration: none; }
         .ic-link:hover { text-decoration: underline; }
         .ic-check { width: 36px; }
+        .ic-funnel { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 0; margin-bottom: 1rem; border: 1px solid #e5e7eb;
+            border-radius: 12px; background: #fff; overflow: hidden; }
+        .ic-funnel-step { padding: 0.7rem 0.9rem; border-right: 1px solid #eef0f3; position: relative; min-width: 0; }
+        .ic-funnel-step:last-child { border-right: none; }
+        .ic-funnel-step b { display: block; font-size: 1.25rem; color: #172033; line-height: 1.2; }
+        .ic-funnel-step span { display: block; font-size: 0.74rem; color: #6b7280; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ic-funnel-step em { font-style: normal; font-size: 0.72rem; font-weight: 700; color: var(--brand-strong); }
+        .ic-funnel-note { grid-column: 1 / -1; border-top: 1px solid #eef0f3; padding: 0.45rem 0.9rem; font-size: 0.74rem; color: #6b7280; background: #fafbfc; }
+        @media (max-width: 900px) { .ic-funnel { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+        .ic-preview-cell { font-size: 0.76rem; white-space: nowrap; }
+        .ic-preview-cell a { font-weight: 600; }
+        .ic-prev { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; font-weight: 700; font-size: 0.72rem; }
+        .ic-prev.ready { background: #ecfdf5; color: #047857; }
+        .ic-prev.busy { background: #eff6ff; color: #1d4ed8; }
+        .ic-prev.failed { background: #fef2f2; color: #b91c1c; cursor: help; }
+        .ic-status.clicked { background: #eff6ff; color: #1d4ed8; }
+        .ic-status.unsubscribed { background: #f1f5f9; color: #475569; }
+        .ic-note-text { font-family: inherit; font-size: 0.82rem; line-height: 1.5; }
+        .ic-sample { border: 1px solid #e5e7eb; border-radius: 10px; background: #fafbfc; padding: 0.7rem 0.85rem; margin-bottom: 1rem; }
+        .ic-sample-head { display: flex; justify-content: space-between; align-items: center; font-size: 0.76rem; color: #6b7280; margin-bottom: 0.4rem; }
+        .ic-sample-nav { display: inline-flex; gap: 10px; }
+        .ic-sample-subject { font-weight: 700; font-size: 0.84rem; color: #172033; margin-bottom: 0.4rem; }
+        .ic-sample-body { white-space: pre-wrap; font-family: inherit; font-size: 0.8rem; line-height: 1.5; color: #374151; margin: 0; max-height: 260px; overflow: auto; }
+        .ic-merge { display: inline-block; font-family: ui-monospace, Consolas, monospace; font-size: 0.72rem; background: #f3f4f6; border-radius: 4px; padding: 0 4px; margin: 1px 2px; cursor: pointer; border: none; color: #374151; }
         .ic-more-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; padding: 0.5rem 0.65rem;
             border: 1px solid #eef0f3; border-radius: 10px; background: #fafbfc; }
         .ic-more-filters > i { color: #9ca3af; font-size: 0.8rem; }
@@ -264,6 +289,7 @@
         .ic-expand:hover, tr.is-open .ic-expand { color: var(--brand-strong); border-color: #fdba74; }
         tr.is-open > td { border-bottom-color: transparent !important; }
         tr.ic-detail > td { background: #fcfcfd; padding: 0.4rem 1rem 1rem 3.2rem !important; }
+        .ic-detail-h { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #9ca3af; margin: 0.2rem 0 0.5rem; }
         .ic-detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0.75rem 1.5rem; }
         .ic-detail-grid h6 { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: #9ca3af; margin: 0 0 0.4rem; }
         .ic-detail-grid dl { margin: 0; }
@@ -271,6 +297,41 @@
         .ic-detail-item dt { font-weight: 600; color: #6b7280; }
         .ic-detail-item dd { margin: 0; color: #172033; overflow-wrap: anywhere; }
         .ic-sent-company { min-width: 150px; }
+        .ic-stagebar { display: flex; gap: 3px; margin-top: 5px; width: 96px; }
+        .ic-stagebar i { flex: 1; height: 4px; border-radius: 2px; background: #e5e7eb; }
+        .ic-stagebar i.on { background: var(--brand-strong); }
+        .ic-stagebar i.done { background: #047857; }
+        .ic-stage-label { display: block; font-size: 0.7rem; color: #6b7280; margin-top: 2px; white-space: nowrap; }
+        .ic-lastmail { max-width: 210px; }
+        .ic-lastmail button { border: none; background: none; padding: 0; text-align: left; color: #172033; font-size: 0.8rem; font-weight: 600;
+            display: block; max-width: 210px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+        .ic-lastmail button:hover { color: var(--brand-strong); text-decoration: underline; }
+        .ic-kind { display: inline-block; font-size: 0.66rem; font-weight: 700; border-radius: 999px; padding: 0 7px; margin-right: 4px; vertical-align: 1px; }
+        .ic-kind.preview { background: #fff4ec; color: #c2410c; }
+        .ic-kind.note { background: #eff6ff; color: #1d4ed8; }
+        .ic-kind.designed { background: #f3f4f6; color: #4b5563; }
+        .ic-kind.failed { background: #fef2f2; color: #b91c1c; }
+        .ic-journey { display: flex; gap: 0; margin: 0 0 0.9rem; padding: 0; list-style: none; overflow-x: auto; }
+        .ic-journey li { flex: 1; min-width: 108px; position: relative; padding-top: 18px; font-size: 0.74rem; color: #9ca3af; }
+        .ic-journey li::before { content: ""; position: absolute; top: 5px; left: 0; right: 0; height: 3px; background: #e5e7eb; }
+        .ic-journey li::after { content: ""; position: absolute; top: 0; left: 0; width: 13px; height: 13px; border-radius: 50%; background: #fff; border: 2px solid #d1d5db; }
+        .ic-journey li.reached { color: #172033; }
+        .ic-journey li.reached::before { background: #047857; }
+        .ic-journey li.reached::after { background: #047857; border-color: #047857; }
+        .ic-journey li b { display: block; font-weight: 700; }
+        .ic-journey li span { display: block; color: #6b7280; font-size: 0.7rem; }
+        .ic-mails { display: flex; flex-direction: column; gap: 6px; }
+        .ic-mail { border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; }
+        .ic-mail summary { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; font-size: 0.8rem; list-style: none; }
+        .ic-mail summary::-webkit-details-marker { display: none; }
+        .ic-mail summary strong { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #172033; }
+        .ic-mail summary .ic-sub { white-space: nowrap; }
+        .ic-mail pre, .ic-email-body { white-space: pre-wrap; font-family: inherit; font-size: 0.8rem; line-height: 1.55; color: #374151; margin: 0;
+            padding: 10px 12px; border-top: 1px solid #f1f5f9; max-height: 340px; overflow: auto; overflow-wrap: anywhere; }
+        .ic-email-meta { display: grid; grid-template-columns: 90px 1fr; gap: 4px 10px; font-size: 0.82rem; margin-bottom: 0.9rem; }
+        .ic-email-meta dt { color: #6b7280; font-weight: 600; }
+        .ic-email-meta dd { margin: 0; overflow-wrap: anywhere; }
+        .ic-email-body { border: 1px solid #e5e7eb; border-radius: 10px; background: #fafbfc; max-height: none; }
         .ic-msg span { display: block; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.78rem; color: #4b5563; }
         #icTable tbody tr.is-selected { background: #fff7ed; }
         .ic-person strong { display: block; color: #172033; }
@@ -987,6 +1048,8 @@
                 </div>
 
                 <div id="icContactsView">
+                    <!-- Outreach funnel: how far people got (db.list_invite_contacts "funnel") -->
+                    <div class="ic-funnel" id="icFunnel" aria-label="Invitation results"></div>
                     <div class="ic-toolbar">
                         <div class="ic-filters" id="icFilters" role="group" aria-label="Filter by status"></div>
                         <div class="ic-toolbar-right">
@@ -1017,6 +1080,8 @@
                         <button type="button" class="ic-link" id="icSelectAllMatching"></button>
                         <span class="ic-selection-actions">
                             <button type="button" class="btn-xs btn-xs-outline-neutral" id="icClearSelection">Clear</button>
+                            <button type="button" class="btn-xs btn-xs-outline-neutral" id="icPreparePreviews"
+                                    title="Read each company's website and draft 3 LinkedIn posts for them, to show in the invitation"><i class="fas fa-wand-magic-sparkles me-1"></i>Prepare previews</button>
                             <button type="button" class="btn-xs btn-xs-outline-neutral text-danger" id="icRemoveSelected"><i class="fas fa-trash me-1"></i>Remove from list</button>
                             <button type="button" class="btn-xs btn-xs-solid-success" id="icSendSelected"><i class="fas fa-paper-plane me-1"></i>Send invitations</button>
                         </span>
@@ -1317,8 +1382,41 @@
                 <input type="text" id="bulkFromInput" class="form-control form-control-sm" placeholder="e.g. Janak" maxlength="255">
             </div>
             <div class="admin-form-group">
+                <label for="bulkStyleSelect">Email</label>
+                <select id="bulkStyleSelect" class="form-select form-select-sm">
+                    <option value="preview">Show them their posts (recommended)</option>
+                    <option value="note">Short personal note</option>
+                    <option value="designed">Designed invitation</option>
+                </select>
+                <div class="form-text" id="bulkStyleHelp"></div>
+            </div>
+            <div id="bulkNoteFields">
+                <div class="admin-form-group">
+                    <label for="bulkSubjectInput">Subject</label>
+                    <input type="text" id="bulkSubjectInput" class="form-control form-control-sm" maxlength="200">
+                </div>
+                <div class="admin-form-group">
+                    <label for="bulkBodyInput">Text</label>
+                    <textarea id="bulkBodyInput" class="form-control form-control-sm ic-note-text" rows="10" maxlength="5000"></textarea>
+                    <div class="form-text">Filled in for each person:
+                        <span id="bulkMergeFields"></span>. Keep it short (under 100 words) and plain.</div>
+                </div>
+                <div class="ic-sample" aria-live="polite">
+                    <div class="ic-sample-head"><span>How it looks for <strong id="bulkSampleWho"></strong></span>
+                        <span class="ic-sample-nav"><button type="button" class="ic-link" id="bulkSamplePrev" aria-label="Previous person"><i class="fas fa-chevron-left"></i></button>
+                        <button type="button" class="ic-link" id="bulkSampleNext" aria-label="Next person"><i class="fas fa-chevron-right"></i></button></span></div>
+                    <div class="ic-sample-subject" id="bulkSampleSubject"></div>
+                    <pre class="ic-sample-body" id="bulkSampleBody"></pre>
+                </div>
+            </div>
+            <div class="admin-form-group" id="bulkMessageGroup">
                 <label for="bulkMessageInput">Personal message <span class="text-muted fw-normal">(optional, the same for everyone)</span></label>
                 <textarea id="bulkMessageInput" class="form-control form-control-sm" rows="4" maxlength="1000" placeholder="e.g. We'd love you to try AVIR AI for your LinkedIn content."></textarea>
+            </div>
+            <div class="admin-form-group">
+                <label for="bulkAddressInput">Company postal address <span class="text-muted fw-normal">(shown at the bottom)</span></label>
+                <input type="text" id="bulkAddressInput" class="form-control form-control-sm" maxlength="300" placeholder="e.g. Office 4, Baner Road, Pune 411045, India">
+                <div class="form-text">Every email also gets an unsubscribe link. US anti-spam law (CAN-SPAM) requires a postal address in this kind of email.</div>
             </div>
             <div class="ic-progress d-none" id="bulkProgress" role="status" aria-live="polite">
                 <div class="ic-progress-bar"><span id="bulkProgressBar"></span></div>
@@ -1330,6 +1428,16 @@
             <button type="button" class="btn-xs btn-xs-outline-neutral" id="bulkCancelBtn" onclick="closeBulkSendPanel()">Cancel</button>
             <button type="button" class="btn-xs btn-xs-solid-success" id="bulkSendBtn"><i class="fas fa-paper-plane me-1"></i>Send</button>
         </div>
+    </aside>
+
+    <!-- One invitation email, exactly as sent (Invitations: "Last email" / "View") -->
+    <div class="admin-panel-backdrop" id="emailViewBackdrop" onclick="closeEmailView()"></div>
+    <aside class="admin-side-panel ic-wide-panel" id="emailViewPanel" aria-labelledby="emailViewTitle">
+        <div class="admin-side-panel-header">
+            <h5 id="emailViewTitle"><i class="fas fa-envelope-open-text text-primary me-2"></i>Email sent</h5>
+            <button type="button" class="admin-side-panel-close" onclick="closeEmailView()" aria-label="Close"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="admin-side-panel-body" id="emailViewBody"></div>
     </aside>
 
     <!-- Image access panel (users table ⋯ -> Image access) -->

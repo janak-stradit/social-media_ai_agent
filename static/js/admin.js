@@ -1275,6 +1275,50 @@ $(document).ready(function () {
         return sort.key === col.key ? { key: col.key, dir: sort.dir === 'asc' ? 'desc' : 'asc' } : { key: col.key, dir: col.defaultDir || 'asc' };
     }
 
+    // How far a person got, and what kind of email they were sent (db.STAGES, InviteMessage.style)
+    const STAGES = ['added', 'preview_ready', 'invited', 'opened', 'signed_up', 'made_post'];
+    const STAGE_LABELS = { added: 'Added', preview_ready: 'Preview ready', invited: 'Invited', opened: 'Opened',
+                           signed_up: 'Signed up', made_post: 'Made a post' };
+    const MAIL_KINDS = { preview: 'Their posts', note: 'Short note', designed: 'Designed' };
+    function stageBar(stage) {
+        const at = STAGES.indexOf(stage);
+        const steps = STAGES.slice(2);  // invited -> made a post
+        return `<span class="ic-stagebar" aria-hidden="true">${steps.map(s => {
+            const i = STAGES.indexOf(s);
+            return `<i class="${i <= at ? (stage === 'made_post' ? 'done' : 'on') : ''}"></i>`;
+        }).join('')}</span><span class="ic-stage-label">Stage: ${STAGE_LABELS[stage] || stage}</span>`;
+    }
+    function mailKind(m) {
+        return m.status === 'failed' ? '<span class="ic-kind failed">Failed</span>'
+            : `<span class="ic-kind ${escapeAttr(m.style)}">${MAIL_KINDS[m.style] || escapeHtml(m.style)}</span>`;
+    }
+    function lastEmailCell(m, count) {
+        if (!m) return `<td class="ic-lastmail">${icNone}</td>`;
+        return `<td class="ic-lastmail"><button type="button" data-view-email="${m.id}" title="${escapeAttr(m.subject)}">${escapeHtml(m.subject || '(no subject)')}</button>`
+            + `<span class="ic-sub">${mailKind(m)}${icShortDate(m.sent_at)}${count > 1 ? ` · ${count} emails` : ''}</span></td>`;
+    }
+    const icShortDate = iso => { const d = new Date(iso); return isNaN(d) ? '—' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }); };
+    const icNone = '<span class="ic-none">—</span>';
+
+    window.closeEmailView = function () { $('#emailViewBackdrop, #emailViewPanel').removeClass('open'); };
+    function showEmail(m) {
+        $('#emailViewBody').html(`
+            <dl class="ic-email-meta">
+                <dt>To</dt><dd>${escapeHtml(m.email)}</dd>
+                <dt>From</dt><dd>${escapeHtml(m.sender_name || 'AVIR AI')}</dd>
+                <dt>Sent</dt><dd>${formatInviteDate(m.sent_at)}${m.status === 'failed' ? ` · <span class="text-danger">not delivered: ${escapeHtml(m.error || '')}</span>` : ''}</dd>
+                <dt>Kind</dt><dd>${mailKind(m)}</dd>
+                <dt>Subject</dt><dd><strong>${escapeHtml(m.subject)}</strong></dd>
+            </dl>
+            <pre class="ic-email-body">${escapeHtml(m.body)}</pre>
+            <p class="small text-muted mt-2 mb-0">The plain-text version, exactly as sent. ${m.style === 'designed' ? 'The person also saw the designed HTML version of it.' : 'The HTML version shows the same text.'}</p>`);
+        $('#emailViewBackdrop, #emailViewPanel').addClass('open');
+    }
+    $(document).on('click', '[data-view-email]', function () {
+        $.getJSON(`/api/admin/invite-messages/${$(this).data('view-email')}`).done(r => showEmail(r.message))
+            .fail(() => showToast('Could not load that email.', 'error'));
+    });
+
     // ── Sent invitations: filter by status, search, sort ──
     const SENT_FILTERS = [['all', 'All'], ['pending', 'Pending'], ['accepted', 'Joined'], ['expired', 'Expired'], ['revoked', 'Revoked']];
     const SENT_STATUS_ORDER = { pending: 0, accepted: 1, expired: 2, revoked: 3 };
@@ -1283,7 +1327,7 @@ $(document).ready(function () {
         { key: 'company', label: 'Company', sort: i => (i._company || '').toLowerCase() },
         { key: 'status', label: 'Status', sort: i => SENT_STATUS_ORDER[i.status] },
         { key: 'invited_by', label: 'Invited by', sort: i => (i.invited_by || '').toLowerCase() },
-        { key: 'message', label: 'Message' },
+        { key: 'email_sent', label: 'Email sent', sort: i => ((i.last_email || {}).subject || '').toLowerCase() },
         { key: 'sent', label: 'Sent', sort: i => i.sent_at, defaultDir: 'desc' },
         { key: 'ends', label: 'Joined / Expires', sort: i => (i.status === 'accepted' ? i.accepted_at : i.expires_at), defaultDir: 'desc' },
         { key: 'actions', label: 'Actions' },
@@ -1310,7 +1354,7 @@ $(document).ready(function () {
         const q = sent.q.toLowerCase();
         const col = SENT_COLUMNS.find(c => c.key === sent.sort.key && c.sort) || SENT_COLUMNS[5];
         const rows = sortBy(sent.rows.filter(i => (sent.filter === 'all' || i.status === sent.filter)
-            && (!q || [i.email, i.name, i._company, i.invited_by, i.message].some(v => (v || '').toLowerCase().includes(q)))), col.sort, sent.sort.dir);
+            && (!q || [i.email, i.name, i._company, i.invited_by, i.message, (i.last_email || {}).subject].some(v => (v || '').toLowerCase().includes(q)))), col.sort, sent.sort.dir);
         $('#sentShowing').text(sent.rows.length ? `Showing ${rows.length} of ${sent.rows.length}` : '');
         if (!sent.rows.length) {
             $('#adminInvitesTbody').html(`
@@ -1331,9 +1375,9 @@ $(document).ready(function () {
                 <tr>
                     <td><strong>${escapeHtml(i.email)}</strong>${i.name ? `<div class="small text-muted">${escapeHtml(i.name)}</div>` : ''}</td>
                     <td class="ic-sent-company">${i._company ? escapeHtml(i._company) : '<span class="ic-none">—</span>'}</td>
-                    <td>${INVITE_STATUS[i.status] || escapeHtml(i.status)}</td>
+                    <td>${INVITE_STATUS[i.status] || escapeHtml(i.status)}${i.click_count && i.status === 'pending' ? `<span class="ic-sub ms-1">opened ${i.click_count}×</span>` : ''}${stageBar(i.stage)}</td>
                     <td>${escapeHtml(i.invited_by || '—')}</td>
-                    <td class="ic-msg">${i.message ? `<span title="${escapeAttr(i.message)}">${escapeHtml(i.message)}</span>` : '<span class="ic-none">—</span>'}</td>
+                    ${i.last_email ? lastEmailCell(i.last_email, i.emails_sent) : `<td class="ic-msg">${i.message ? `<span title="${escapeAttr(i.message)}">${escapeHtml(i.message)}</span>` : '<span class="ic-none">—</span>'}</td>`}
                     <td>${sentDate(i.sent_at)}</td>
                     <td>${sentDate(i.status === 'accepted' ? i.accepted_at : i.expires_at)}</td>
                     <td class="text-nowrap">
@@ -1374,9 +1418,22 @@ $(document).ready(function () {
     const IC_STATUS = {
         not_invited: ['Not invited', 'fa-circle'], invited: ['Invited', 'fa-paper-plane'], joined: ['Joined', 'fa-circle-check'],
         expired: ['Link expired', 'fa-clock'], revoked: ['Revoked', 'fa-ban'], failed: ['Email failed', 'fa-triangle-exclamation'],
+        clicked: ['Opened link', 'fa-arrow-pointer'], unsubscribed: ['Unsubscribed', 'fa-bell-slash'],
     };
-    const IC_FILTERS = ['all', 'not_invited', 'invited', 'joined', 'expired', 'failed'];
-    const IC_STATUS_ORDER = { not_invited: 0, failed: 1, invited: 2, expired: 3, revoked: 4, joined: 5 };
+    const IC_FILTERS = ['all', 'not_invited', 'invited', 'clicked', 'joined', 'expired', 'failed', 'unsubscribed'];
+    const IC_STATUS_ORDER = { not_invited: 0, failed: 1, invited: 2, clicked: 3, expired: 4, revoked: 5, joined: 6, unsubscribed: 7 };
+    const IC_PREVIEW_ORDER = { ready: 0, running: 1, pending: 2, failed: 3 };
+    function icPreviewCell(c) {
+        const p = c.preview;
+        if (!p) return `<td class="ic-preview-cell">${icNone}</td>`;
+        if (p.status === 'ready') {
+            return `<td class="ic-preview-cell"><a href="/p/${encodeURIComponent(p.token)}" target="_blank" rel="noopener" title="Open the page this person sees">`
+                + `<span class="ic-prev ready"><i class="fas fa-eye"></i>Ready</span></a>`
+                + `<span class="ic-sub d-block mt-1">${p.views ? `Seen ${p.views} time${p.views === 1 ? '' : 's'}` : 'Not seen yet'}</span></td>`;
+        }
+        if (p.status === 'failed') return `<td class="ic-preview-cell"><span class="ic-prev failed" title="${escapeAttr(p.error || '')}"><i class="fas fa-triangle-exclamation"></i>Failed</span></td>`;
+        return `<td class="ic-preview-cell"><span class="ic-prev busy"><i class="fas fa-spinner fa-spin"></i>${p.status === 'running' ? 'Preparing' : 'Queued'}</span></td>`;
+    }
     const IC_SIZE_WORDS = [['micro', 1], ['solo', 1], ['small', 2], ['mid', 3], ['medium', 3], ['large', 4], ['enterprise', 5]];
     function sizeRank(v) {  // "Small" < "Medium" < "Large"; "11-50" < "51-200"
         const s = String(v || '').toLowerCase();
@@ -1386,10 +1443,8 @@ $(document).ready(function () {
         const n = parseInt(s.replace(/[^0-9]+/g, ' ').trim(), 10);
         return isNaN(n) ? s : n;
     }
-    const icNone = '<span class="ic-none">—</span>';
     const icText = v => (v ? escapeHtml(v) : icNone);
     const icWebsite = c => (/^https?:\/\//i.test(c.website) ? c.website : 'https://' + c.website);
-    const icShortDate = iso => { const d = new Date(iso); return isNaN(d) ? '—' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }); };
     const IC_COLUMNS = [
         { key: 'person', label: 'Person', sort: c => (c.name || c.email).toLowerCase(),
           cell: c => `<td class="ic-person"><strong>${escapeHtml(c.name || c.email)}</strong>${c.name ? `<span>${escapeHtml(c.email)}</span>` : ''}`
@@ -1398,6 +1453,7 @@ $(document).ready(function () {
         { key: 'company', label: 'Company', sort: c => (c.company || c.website || '').toLowerCase(),
           cell: c => `<td class="ic-company">${c.website ? `<a href="${escapeAttr(icWebsite(c))}" target="_blank" rel="noopener noreferrer">${escapeHtml(c.company || c.website)}</a>` : icText(c.company)}`
             + `${c.description ? `<span class="ic-desc" title="${escapeAttr(c.description)}">${escapeHtml(c.description)}</span>` : ''}</td>` },
+        { key: 'preview', label: 'Preview', optional: true, sort: c => (c.preview ? IC_PREVIEW_ORDER[c.preview.status] : ''), cell: icPreviewCell },
         { key: 'industry', label: 'Industry', optional: true, sort: c => (c.industry || '').toLowerCase(), cell: c => `<td>${icText(c.industry)}</td>` },
         { key: 'size', label: 'Size', optional: true, sort: c => sizeRank(c.company_size), cell: c => `<td class="text-nowrap">${icText(c.company_size)}</td>` },
         { key: 'location', label: 'Location', optional: true, sort: c => [c.city, c.country].filter(Boolean).join(', ').toLowerCase(),
@@ -1407,13 +1463,16 @@ $(document).ready(function () {
         { key: 'added', label: 'Added', optional: true, sort: c => c.created_at, defaultDir: 'desc',
           cell: c => `<td><span class="ic-sub d-block text-nowrap">${icShortDate(c.created_at)}</span><span class="ic-sub ic-batch" title="${escapeAttr(c.batch || 'Added by hand')}">`
             + `${c.batch ? `<i class="fas fa-file-lines me-1"></i>${escapeHtml(c.batch)}` : 'Added by hand'}</span></td>` },
-        { key: 'status', label: 'Status', sort: c => IC_STATUS_ORDER[c.status], cell: c => `<td>${icStatusPill(c)}</td>` },
+        { key: 'status', label: 'Status & stage', sort: c => STAGES.indexOf(c.stage) * 10 + (IC_STATUS_ORDER[c.status] || 0),
+          cell: c => `<td>${icStatusPill(c)}${stageBar(c.stage)}</td>` },
+        { key: 'last_email', label: 'Last email', optional: true, sort: c => (c.last_email || {}).sent_at || '', defaultDir: 'desc',
+          cell: c => lastEmailCell(c.last_email, c.emails_sent) },
         { key: 'last_invited', label: 'Last invited', optional: true, sort: c => c.last_invited_at, defaultDir: 'desc',
           cell: c => `<td><span class="ic-sub text-nowrap"${c.last_invited_at ? ` title="${escapeAttr(formatInviteDate(c.last_invited_at))}"` : ''}>${c.last_invited_at ? icShortDate(c.last_invited_at) : '—'}${c.invite_count > 1 ? `<br>${c.invite_count} times` : ''}</span></td>` },
     ];
     const IC_MORE = { industry: '', city: '', size: '', inbox: '', source: '' };
     const ic = { contacts: [], counts: {}, batches: [], filter: 'all', batch: '', q: '', selected: new Set(), expanded: new Set(),
-                 more: { ...IC_MORE }, sort: icStore('icSort') || { key: 'added', dir: 'desc' }, hidden: new Set(icStore('icHiddenCols') || ['phone']) };  // phone is often empty: off until chosen
+                 more: { ...IC_MORE }, sort: icStore('icSort') || { key: 'added', dir: 'desc' }, hidden: new Set(icStore('icHiddenCols') || ['phone', 'added', 'last_invited', 'size']) };  // off until chosen (Columns menu)
     const icColumns = () => IC_COLUMNS.filter(c => !c.optional || !ic.hidden.has(c.key));
 
     function icStatusPill(c) {
@@ -1458,6 +1517,31 @@ $(document).ready(function () {
             : escapeHtml(part)).join('<br>');
     }
 
+    // Stage dates + every email sent, fetched once per person when their row opens
+    const icJourneys = {};
+    function icJourneyHtml(id) {
+        const j = icJourneys[id];
+        if (!j) return '<p class="ic-sub mb-2"><i class="fas fa-spinner fa-spin me-1"></i>Loading their emails…</p>';
+        const reachedAt = {};
+        j.stages.forEach(s => { reachedAt[s.key] = s.at; });
+        const journey = `<ol class="ic-journey" aria-label="Stage">${j.stages.map(s =>
+            `<li class="${s.at ? 'reached' : ''}"><b>${STAGE_LABELS[s.key]}</b><span>${s.at ? icShortDate(s.at) : 'Not yet'}</span></li>`).join('')}</ol>`;
+        const mails = j.messages.length ? `<div class="ic-mails">${j.messages.map(m => `
+            <details class="ic-mail">
+                <summary>${mailKind(m)}<strong>${escapeHtml(m.subject || '(no subject)')}</strong>
+                    <span class="ic-sub">${formatInviteDate(m.sent_at)}${m.sender_name ? ` · from ${escapeHtml(m.sender_name)}` : ''}</span></summary>
+                <pre>${escapeHtml(m.body)}${m.status === 'failed' ? `\n\nNot delivered: ${escapeHtml(m.error || '')}` : ''}</pre>
+            </details>`).join('')}</div>` : '<p class="ic-sub mb-0">No emails sent to this person yet.</p>';
+        return `<h6 class="ic-detail-h">Stage</h6>${journey}<h6 class="ic-detail-h">Emails sent (${j.messages.length})</h6>${mails}<hr class="my-3">`;
+    }
+    function icLoadJourney(id, force) {
+        if (icJourneys[id] && !force) return;
+        $.getJSON(`/api/admin/invite-contacts/${id}/journey`).done(j => {
+            icJourneys[id] = j;
+            $(`[data-journey="${id}"]`).html(icJourneyHtml(id));
+        }).fail(() => $(`[data-journey="${id}"]`).html('<p class="ic-sub text-danger">Could not load their emails.</p>'));
+    }
+
     function icDetailRow(c, span) {
         const item = (label, value, html) => (isBlank(value) ? '' : `<div class="ic-detail-item"><dt>${escapeHtml(label)}</dt><dd>${html || escapeHtml(value)}</dd></div>`);
         const contact = [
@@ -1468,16 +1552,26 @@ $(document).ready(function () {
             item('About the company', c.description), item('Notes', c.notes),
         ].join('');
         const extra = Object.entries(c.extra || {}).map(([k, v]) => item(k, v, icLinkify(v))).join('');
-        const linkLive = c.status === 'invited' || c.status === 'expired';
+        const linkLive = ['invited', 'clicked', 'expired'].includes(c.status);
+        const p = c.preview || {};
         const invite = [
             item('Status', (IC_STATUS[c.status] || [c.status])[0]),
             item('Invitations sent', String(c.invite_count || 0)),
+            item('Link clicks', c.invite_count ? String(c.clicks || 0) : '', `${c.clicks || 0}${c.first_clicked_at ? ` (first ${formatInviteDate(c.first_clicked_at)})` : ''}`),
+            item('Preview', p.status, p.status === 'ready'
+                ? `<a href="/p/${encodeURIComponent(p.token)}" target="_blank" rel="noopener">Open their page</a> · seen ${p.views || 0} time${p.views === 1 ? '' : 's'}${p.claimed ? ' · copied into their account' : ''}`
+                : escapeHtml(p.status === 'failed' ? `Failed: ${p.error || ''}` : 'Being prepared')),
+            item('Email opening line', p.first_line),
+            item('Made something', c.status === 'joined' ? (c.activated ? 'Yes, created a post' : 'Not yet') : ''),
+            item('Unsubscribed', c.unsubscribed_at, formatInviteDate(c.unsubscribed_at)),
             item('Last invited', c.last_invited_at, formatInviteDate(c.last_invited_at)),
             item(c.status === 'expired' ? 'Link expired' : 'Link expires', linkLive ? c.expires_at : '', formatInviteDate(c.expires_at)),
             item('Last error', c.last_error),
             item('Added', c.created_at, `${formatInviteDate(c.created_at)} ${c.batch ? `from ${escapeHtml(c.batch)}` : 'by hand'}`),
         ].join('');
-        return `<tr class="ic-detail"><td colspan="${span}"><div class="ic-detail-grid">
+        return `<tr class="ic-detail"><td colspan="${span}">
+            <div class="ic-journey-wrap" data-journey="${c.id}">${icJourneyHtml(c.id)}</div>
+            <div class="ic-detail-grid">
             <section><h6>Contact &amp; company</h6><dl>${contact}</dl></section>
             ${extra ? `<section><h6>From the uploaded file</h6><dl>${extra}</dl></section>` : ''}
             <section><h6>Invitation</h6><dl>${invite}</dl></section></div></td></tr>`;
@@ -1546,7 +1640,7 @@ $(document).ready(function () {
     });
     $(document).on('click', '[data-ic-expand]', function () {
         const id = Number($(this).data('ic-expand'));
-        if (ic.expanded.has(id)) ic.expanded.delete(id); else ic.expanded.add(id);
+        if (ic.expanded.has(id)) ic.expanded.delete(id); else { ic.expanded.add(id); icLoadJourney(id, true); }
         icRender();
         $(`[data-ic-expand="${id}"]`).trigger('focus');
     });
@@ -1561,11 +1655,64 @@ $(document).ready(function () {
         ic.contacts = r.contacts || [];
         ic.counts = r.counts || {};
         ic.batches = r.batches || [];
+        if (r.outreach) ic.outreach = r.outreach;
         const ids = new Set(ic.contacts.map(c => c.id));
         ic.selected = new Set([...ic.selected].filter(id => ids.has(id)));
+        icRenderFunnel(r.funnel);
         icRender();
         if (sent.rows.length) renderSentInvites();  // the company column comes from the contacts
+        icWatchPreviews();
     }
+
+    // Sent -> clicked -> joined -> made a post: where people drop off
+    function icRenderFunnel(f) {
+        if (!f || !f.contacts) { $('#icFunnel').addClass('d-none'); return; }
+        const pct = n => (f.invited ? `<em>${Math.round(n / f.invited * 100)}%</em>` : '');
+        const steps = [
+            [f.contacts, 'Contacts', ''],
+            [f.previews_ready, 'Previews ready', ''],
+            [f.invited, 'Invited', ''],
+            [f.clicked, 'Opened the link', pct(f.clicked)],
+            [f.joined, 'Signed up', pct(f.joined)],
+            [f.activated, 'Made a post', pct(f.activated)],
+        ];
+        $('#icFunnel').removeClass('d-none').html(steps.map(([n, label, extra]) =>
+            `<div class="ic-funnel-step"><b>${n || 0} ${extra}</b><span>${label}</span></div>`).join('')
+            + `<div class="ic-funnel-note">Percentages are of people invited. Clicks by company mail filters that check links aren't counted.`
+            + `${f.unsubscribed ? ` ${f.unsubscribed} unsubscribed and won't be emailed again.` : ''}</div>`);
+    }
+
+    // While previews are being prepared, refresh the list until they're done
+    let icPreviewTimer = null, icPreviewPolls = 0;
+    function icWatchPreviews() {
+        clearTimeout(icPreviewTimer);
+        const busy = ic.contacts.some(c => c.preview && ['pending', 'running'].includes(c.preview.status));
+        if (!busy) { icPreviewPolls = 0; return; }
+        if (icPreviewPolls++ > 150) return;  // ~10 minutes
+        icPreviewTimer = setTimeout(() => {
+            if ($('.dropdown-menu.show').length || icSending) return icWatchPreviews();
+            loadInviteContacts();
+        }, 4000);
+    }
+
+    $('#icPreparePreviews').on('click', function () {
+        const ids = [...ic.selected];
+        if (!ids.length) return;
+        const chosen = ic.contacts.filter(c => ic.selected.has(c.id));
+        const ready = chosen.filter(c => c.preview && c.preview.status === 'ready').length;
+        const refresh = ready > 0 && ready === chosen.length
+            && window.confirm(`All ${ready} already have a preview. Make new ones? (This costs another AI call each.)`);
+        if (ready === chosen.length && !refresh) return;
+        const $btn = $(this).prop('disabled', true);
+        $.ajax({ url: '/api/admin/invite-contacts/previews', type: 'POST', contentType: 'application/json', data: JSON.stringify({ ids: ids, refresh: refresh }) })
+            .done(r => {
+                showToast(r.queued ? `Preparing ${r.queued} preview${r.queued === 1 ? '' : 's'}. Each takes about a minute; the list updates as they finish.`
+                    : 'They all have a preview already.', 'info');
+                loadInviteContacts();
+            })
+            .fail(xhr => showToast((xhr.responseJSON || {}).error || 'Could not start the previews.', 'error'))
+            .always(() => $btn.prop('disabled', false));
+    });
 
     window.loadInviteContacts = function () {
         return $.getJSON('/api/admin/invite-contacts').done(icApply)
@@ -1690,10 +1837,15 @@ $(document).ready(function () {
         const joined = ic.contacts.filter(c => ic.selected.has(c.id) && c.status === 'joined').length;
         const again = ic.contacts.filter(c => ic.selected.has(c.id) && ['invited', 'expired', 'revoked', 'failed'].includes(c.status)).length;
         $('#bulkSendTitle').html(`<i class="fas fa-paper-plane text-primary me-2"></i>Invite ${ids.length} ${ids.length === 1 ? 'person' : 'people'}`);
-        $('#bulkSendIntro').html(`Each person gets their own sign-up link by email. It works once and expires in 7 days.`
+        $('#bulkSendIntro').html(`Each person gets their own sign-up link by email. It works for 30 days.`
             + (again ? ` <strong>${again}</strong> were invited before: they get a new link and the old one stops working.` : '')
             + (joined ? ` <strong>${joined}</strong> already joined and will be skipped.` : ''));
         $('#bulkFromInput').val(rememberedInviterName() || defaultInviterName);
+        $('#bulkAddressInput').val((ic.outreach || {}).postal_address || '');
+        const withPreview = ic.contacts.filter(c => ic.selected.has(c.id) && c.preview && c.preview.status === 'ready').length;
+        $('#bulkStyleSelect').val(withPreview ? 'preview' : 'note');
+        bulkSample.index = 0;
+        bulkStyleChanged(true);
         $('#bulkProgress').addClass('d-none');
         $('#bulkResults').empty();
         $('#bulkSendBtn').prop('disabled', false).html(`<i class="fas fa-paper-plane me-1"></i>Send ${ids.length}`).removeClass('d-none');
@@ -1709,6 +1861,10 @@ $(document).ready(function () {
         const ids = [...ic.selected];
         const inviter = ($('#bulkFromInput').val() || '').trim();
         const message = ($('#bulkMessageInput').val() || '').trim();
+        const style = $('#bulkStyleSelect').val();
+        const notePart = style === 'designed' ? {} : { subject: $('#bulkSubjectInput').val(), body: $('#bulkBodyInput').val() };
+        const address = ($('#bulkAddressInput').val() || '').trim();
+        if (!address && !window.confirm('There is no postal address. US anti-spam law requires one in this kind of email. Send anyway?')) return;
         try { localStorage.setItem('admin_inviter_name', inviter); } catch (e) { /* storage blocked */ }
         icSending = true;
         $(this).prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Sending...');
@@ -1720,7 +1876,8 @@ $(document).ready(function () {
             $('#bulkProgressText').text(`Sending ${Math.min(i + 25, ids.length)} of ${ids.length}...`);
             try {
                 const r = await $.ajax({ url: '/api/admin/invite-contacts/send', type: 'POST', contentType: 'application/json',
-                                         data: JSON.stringify({ ids: ids.slice(i, i + 25), inviter_name: inviter, message: message }) });
+                                         data: JSON.stringify({ ids: ids.slice(i, i + 25), inviter_name: inviter, message: message,
+                                                                style: style, postal_address: address, ...notePart }) });
                 results.push(...(r.results || []));
             } catch (xhr) {
                 ids.slice(i, i + 25).forEach(id => results.push({ id: id, status: 'failed', error: (xhr.responseJSON || {}).error || 'Request failed' }));
@@ -1731,7 +1888,10 @@ $(document).ready(function () {
         const sent = results.filter(r => r.status === 'invited').length;
         const failed = results.filter(r => r.status === 'failed');
         const joined = results.filter(r => r.status === 'joined').length;
-        $('#bulkProgressText').text(`Done: ${sent} sent${joined ? `, ${joined} skipped (already joined)` : ''}${failed.length ? `, ${failed.length} failed` : ''}.`);
+        const unsubscribed = results.filter(r => r.status === 'unsubscribed').length;
+        if (ic.outreach) ic.outreach.postal_address = address;
+        $('#bulkProgressText').text(`Done: ${sent} sent${joined ? `, ${joined} skipped (already joined)` : ''}`
+            + `${unsubscribed ? `, ${unsubscribed} skipped (unsubscribed)` : ''}${failed.length ? `, ${failed.length} failed` : ''}.`);
         $('#bulkResults').html((sent ? `<div class="ic-result ok"><i class="fas fa-circle-check me-1"></i>${sent} invitation${sent === 1 ? '' : 's'} sent.</div>` : '')
             + (failed.length ? `<div class="ic-result bad"><i class="fas fa-triangle-exclamation me-1"></i>${failed.length} could not be sent:<ul>${failed.slice(0, 8).map(f =>
                 `<li>${escapeHtml(f.email || 'Contact ' + f.id)}: ${escapeHtml(f.error || '')}</li>`).join('')}</ul>They are marked <strong>Email failed</strong> in the list, so you can retry them.</div>` : ''));
@@ -1740,6 +1900,84 @@ $(document).ready(function () {
         ic.selected = new Set(failed.map(f => f.id));  // keep only what still needs sending
         loadInviteContacts();
         loadInvitations();
+    });
+
+    // The email's text: a template per style, filled in per person (same rules
+    // as services/invite_outreach.render), with a sample for the selected people
+    const bulkSample = { index: 0 };
+    function noteValues(c, sender) {
+        const name = (c.name || '').trim(), first = name ? name.split(/\s+/)[0] : '', company = shortCompany(c.company);
+        const p = c.preview || {};
+        return {
+            greeting: first ? `Hi ${first},` : (company ? `Hi ${company} team,` : 'Hi there,'),
+            first_name: first || 'there', name: name, company: company || 'your company', city: c.city || '', industry: c.industry || '',
+            first_line: p.first_line || '',
+            preview_link: p.status === 'ready' ? `${location.origin}/p/${p.token}` : `${location.origin}/i/(their link)`,
+            invite_link: `${location.origin}/i/(their link)`, sender_name: sender || 'The AVIR AI team',
+        };
+    }
+    // "Ontime Packers and Movers Pvt. Ltd." -> "Ontime Packers and Movers" (services/invite_outreach.short_company)
+    function shortCompany(name) {
+        let s = String(name || '').trim(), prev = null;
+        while (prev !== s) {
+            prev = s;
+            s = s.replace(/[\s,]+(pvt\.?|private|ltd\.?|limited|llp|llc|inc\.?|incorporated|corp\.?|corporation|co\.?|plc|gmbh|fzco|fze|fz-llc|l\.l\.c\.?)$/i, '').trim();
+        }
+        return s || String(name || '').trim();
+    }
+    function fillNote(template, values) {
+        return String(template || '').replace(/\{([a-z_]+)\}/g, (m, key) => (key in values ? values[key] : m))
+            .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+    }
+    function bulkStyleChanged(reset) {
+        const style = $('#bulkStyleSelect').val();
+        const templates = (ic.outreach || {}).templates || {};
+        const note = style !== 'designed';
+        $('#bulkNoteFields').toggleClass('d-none', !note);
+        $('#bulkMessageGroup').toggleClass('d-none', note);
+        if (note && (reset || !$('#bulkBodyInput').data('edited'))) {
+            const t = templates[style] || {};
+            $('#bulkSubjectInput').val(t.subject || '');
+            $('#bulkBodyInput').val(t.body || '').data('edited', false);
+        }
+        $('#bulkMergeFields').html(((ic.outreach || {}).merge_fields || []).map(f => `<button type="button" class="ic-merge" data-merge="${f}">{${f}}</button>`).join(' '));
+        const chosen = ic.contacts.filter(c => ic.selected.has(c.id));
+        const missing = chosen.filter(c => !(c.preview && c.preview.status === 'ready')).length;
+        $('#bulkStyleHelp').html(style === 'preview'
+            ? (missing ? `<span class="text-warning-emphasis"><i class="fas fa-triangle-exclamation me-1"></i>${missing} of ${chosen.length} have no preview ready, so they get the short note instead. Use <strong>Prepare previews</strong> first to show everyone their posts.</span>`
+                : 'A short plain email with a link to the posts made for them. No sign-up needed to look.')
+            : style === 'note' ? 'A short plain email from you with their sign-up link. Plain emails reach the inbox more often than designed ones.'
+                : 'The designed HTML invitation. Best for people who already know you.');
+        renderBulkSample();
+    }
+    function renderBulkSample() {
+        const chosen = ic.contacts.filter(c => ic.selected.has(c.id));
+        if (!chosen.length || $('#bulkStyleSelect').val() === 'designed') return;
+        bulkSample.index = (bulkSample.index + chosen.length) % chosen.length;
+        const c = chosen[bulkSample.index];
+        const style = $('#bulkStyleSelect').val();
+        const usesPreview = style === 'preview' && c.preview && c.preview.status === 'ready';
+        const t = ((ic.outreach || {}).templates || {});
+        const subject = style === 'preview' && !usesPreview ? (t.note || {}).subject : $('#bulkSubjectInput').val();
+        const body = style === 'preview' && !usesPreview ? (t.note || {}).body : $('#bulkBodyInput').val();
+        const values = noteValues(c, ($('#bulkFromInput').val() || '').trim());
+        $('#bulkSampleWho').text(`${c.name || c.email}${c.company ? ` (${c.company})` : ''} · ${bulkSample.index + 1} of ${chosen.length}`);
+        $('#bulkSampleSubject').text(fillNote(subject, values));
+        $('#bulkSampleBody').text(fillNote(body, values) + '\n\n--\nUnsubscribe link and postal address are added here.');
+    }
+    $('#bulkStyleSelect').on('change', () => bulkStyleChanged(true));
+    $('#bulkBodyInput').on('input', function () { $(this).data('edited', true); renderBulkSample(); });
+    $('#bulkSubjectInput, #bulkFromInput').on('input', renderBulkSample);
+    $('#bulkSamplePrev').on('click', () => { bulkSample.index--; renderBulkSample(); });
+    $('#bulkSampleNext').on('click', () => { bulkSample.index++; renderBulkSample(); });
+    $(document).on('click', '[data-merge]', function () {
+        const field = `{${$(this).data('merge')}}`, el = document.getElementById('bulkBodyInput');
+        const at = el.selectionStart || el.value.length;
+        el.value = el.value.slice(0, at) + field + el.value.slice(el.selectionEnd || at);
+        el.focus();
+        el.selectionStart = el.selectionEnd = at + field.length;
+        $('#bulkBodyInput').data('edited', true);
+        renderBulkSample();
     });
 
     function rememberedInviterName() {

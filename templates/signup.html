@@ -50,6 +50,12 @@
                 </div>
             </div>
 
+        {% if preview %}
+        <div class="alert-inline alert-inline-success" style="margin-bottom: 14px;" role="status">
+            <span><i class="fas fa-circle-check me-1"></i>Your {{ preview.posts }} posts for <strong>{{ preview.company }}</strong> are saved.
+            Create your account{% if not invite %} with <strong>{{ preview.email }}</strong>{% endif %} and they'll be waiting for you, with your brand already set up.</span>
+        </div>
+        {% endif %}
         {% if invite_invalid %}
         <div class="alert-inline alert-inline-danger" style="margin-bottom: 14px;" role="alert">
             This invitation link has expired or was already used. Ask the person who invited you for a new one - or sign up below.
@@ -64,7 +70,7 @@
 
             <div class="auth-form-group">
                 <label class="auth-form-label" for="signupEmail">Email</label>
-                <input id="signupEmail" type="email" class="auth-form-input" placeholder="name@email.com" autocomplete="email" required{% if invite %} value="{{ invite.email }}" readonly title="This is the email address you were invited with"{% endif %}>
+                <input id="signupEmail" type="email" class="auth-form-input" placeholder="name@email.com" autocomplete="email" required{% if invite %} value="{{ invite.email }}" readonly title="This is the email address you were invited with"{% elif preview %} value="{{ preview.email }}"{% endif %}>
                 <div class="field-error" id="emailError"></div>
             </div>
 
@@ -122,6 +128,8 @@
     const CAPTCHA_ENABLED = {{ 'true' if captcha_enabled|default(true) else 'false' }};
     // Set when this page was opened from an invitation email (/signup?invite=...)
     const INVITE_TOKEN = {{ invite_token|tojson }};
+    // Set when opened from a lead's preview page (/signup?preview=...): their posts move into the account
+    const PREVIEW_TOKEN = {{ (preview.token if preview else None)|tojson }};
 
 
     const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -267,6 +275,7 @@
             email: $('#signupEmail').val().trim(),
             password: $('#signupPassword').val()
         };
+        if (PREVIEW_TOKEN) payload.preview_token = PREVIEW_TOKEN;
 
         // An invitation link already proves the email is theirs - no puzzle needed
         if (INVITE_TOKEN) {
