@@ -150,6 +150,13 @@ class Config:
     # day, and once more after three (services/approval_reminder_service.py).
     # Off until APPROVAL_REMINDER_EMAILS=true or switched on in Admin > Emails.
     APPROVAL_REMINDER_EMAILS = os.getenv("APPROVAL_REMINDER_EMAILS", "false").lower() == "true"
+    # Invitation outreach (Admin -> Invitations). The postal address shown at
+    # the bottom of invitation emails (US CAN-SPAM requires one in marketing
+    # email) - also editable on the Invitations page.
+    COMPANY_POSTAL_ADDRESS = os.getenv("COMPANY_POSTAL_ADDRESS", "")
+    # Lead previews: images are made when a lead opens their preview page; at
+    # most this many in 24 hours (each preview has up to 3).
+    LEAD_PREVIEW_IMAGES_PER_DAY = int(os.getenv("LEAD_PREVIEW_IMAGES_PER_DAY", "60"))
     TRENDS_MAX_AGE_HOURS = int(os.getenv("TRENDS_MAX_AGE_HOURS", "24"))
     GEMINI_VIDEO_MODEL = os.getenv("GEMINI_VIDEO_MODEL", "veo-3.1-generate-preview")
     # Veo 3.1 accepts only 4, 6 or 8 seconds (8 when a reference image is

@@ -277,6 +277,78 @@ class UserInvitation(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Clicks on the emailed link (/i/<token>), link scanners left out - see
+    # services/invite_outreach.looks_automated
+    click_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    first_clicked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_clicked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class EmailSuppression(Base):
+    """Addresses that must not get invitation / outreach emails again: they
+    unsubscribed (the link or the mail app's one-click button), or an admin
+    added them. One row per lower-case email."""
+
+    __tablename__ = "email_suppressions"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(320), nullable=False, unique=True, index=True)
+    reason: Mapped[str] = mapped_column(String(32), nullable=False, default="unsubscribed")
+    source: Mapped[str | None] = mapped_column(String(64), nullable=True)  # link / one-click / admin
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class InviteMessage(Base):
+    """Every invitation email sent from Admin -> Invitations, exactly as sent:
+    which kind (designed / note / preview), the subject and the full text, and
+    whether it went out. Shown per person and in Sent invitations."""
+
+    __tablename__ = "invite_messages"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    email: Mapped[str] = mapped_column(String(320), nullable=False, index=True)
+    contact_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    invitation_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    style: Mapped[str] = mapped_column(String(16), nullable=False, default="designed")  # designed / note / preview
+    subject: Mapped[str] = mapped_column(String(300), nullable=False, default="")
+    body: Mapped[str] = mapped_column(Text, nullable=False, default="")  # the plain-text version, footer included
+    status: Mapped[str] = mapped_column(String(12), nullable=False, default="sent")  # sent / failed
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    sent_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sender_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
+
+
+class LeadPreview(Base):
+    """Posts made for one lead before they sign up (services/lead_preview_service):
+    their website's brand profile and 3 draft posts, shown on a no-login page
+    /p/<token>. Images are made only when someone opens that page. Signing up
+    from it copies the brand profile and the drafts into the new account."""
+
+    __tablename__ = "lead_previews"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    contact_id: Mapped[int] = mapped_column(Integer, nullable=False, unique=True, index=True)
+    token: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending")  # pending/running/ready/failed
+    error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    website: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    profile: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: WebsiteAnalysisAgent output
+    posts: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of draft posts
+    first_line: Mapped[str | None] = mapped_column(Text, nullable=True)  # an opening line for the email
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    created_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    view_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    first_viewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_viewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    images_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    claimed_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class InviteBatch(Base):
@@ -837,6 +909,16 @@ def init_db():
             try:
                 with engine.begin() as sub_conn:
                     sub_conn.execute(text(alter_cmd))
+            except Exception:
+                pass
+
+        # Invitations: link clicks (outreach funnel)
+        inv_tbl = f'"{SCHEMA}".user_invitations' if not IS_SQLITE else "user_invitations"
+        for col_name, col_type in [("click_count", "INTEGER NOT NULL DEFAULT 0"), ("first_clicked_at", "TIMESTAMP"),
+                                   ("last_clicked_at", "TIMESTAMP")]:
+            try:
+                with engine.begin() as sub_conn:
+                    sub_conn.execute(text(f"ALTER TABLE {inv_tbl} ADD COLUMN {col_name} {col_type}"))
             except Exception:
                 pass
 
@@ -2382,7 +2464,7 @@ def set_user_video_access(user_id: int, enabled: bool) -> bool:
         return True
 
 
-INVITATION_TTL = timedelta(days=7)
+INVITATION_TTL = timedelta(days=30)
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
@@ -2413,6 +2495,8 @@ def _serialize_invitation(row: "UserInvitation", inviter_name: str | None = None
         "sent_at": _as_utc(row.sent_at).isoformat() if row.sent_at else None,
         "expires_at": _as_utc(row.expires_at).isoformat() if row.expires_at else None,
         "accepted_at": _as_utc(row.accepted_at).isoformat() if row.accepted_at else None,
+        "click_count": row.click_count or 0,
+        "first_clicked_at": _as_utc(row.first_clicked_at).isoformat() if row.first_clicked_at else None,
     }
 
 
@@ -2456,7 +2540,19 @@ def list_invitations(limit: int = 2000) -> list[dict]:
     with Session(engine) as session:
         rows = session.query(UserInvitation).order_by(UserInvitation.sent_at.desc()).limit(limit).all()
         names = {u.id: u.name for u in session.query(User.id, User.name).all()}
-        return [_serialize_invitation(r, names.get(r.invited_by_user_id)) for r in rows]
+        out = [_serialize_invitation(r, names.get(r.invited_by_user_id)) for r in rows]
+        # Opening their preview page counts as opening the invitation
+        viewed = {e.lower() for (e,) in session.query(InviteContact.email).join(
+            LeadPreview, LeadPreview.contact_id == InviteContact.id).filter(LeadPreview.view_count > 0).all()}
+    emails = [i["email"] for i in out]
+    sent_messages = latest_invite_messages(emails)
+    active = _active_user_emails([i["email"] for i in out if i["status"] == "accepted"])
+    for i in out:
+        entry = sent_messages.get(i["email"].lower()) or {}
+        i["last_email"], i["emails_sent"] = entry.get("latest"), entry.get("count", 0)
+        i["stage"] = ("made_post" if i["email"].lower() in active else "signed_up" if i["status"] == "accepted"
+                      else "opened" if i["click_count"] or i["email"].lower() in viewed else "invited")
+    return out
 
 
 def get_invitation(invitation_id: int) -> dict | None:
@@ -2466,6 +2562,33 @@ def get_invitation(invitation_id: int) -> dict | None:
             return None
         inviter = session.get(User, row.invited_by_user_id) if row.invited_by_user_id else None
         return _serialize_invitation(row, inviter.name if inviter else None)
+
+
+def record_invitation_click(token: str, counted: bool = True) -> dict | None:
+    """The invitation behind an emailed link (any status), counting the click
+    unless counted=False (a link scanner). None for an unknown token."""
+    if not token:
+        return None
+    with Session(engine) as session:
+        row = session.query(UserInvitation).filter(UserInvitation.token == token).first()
+        if not row:
+            return None
+        if counted:
+            now = _utcnow()
+            row.click_count = (row.click_count or 0) + 1
+            row.first_clicked_at = row.first_clicked_at or now
+            row.last_clicked_at = now
+            session.commit()
+            session.refresh(row)
+        return {**_serialize_invitation(row), "token": row.token}
+
+
+def open_invitation_token_for_contact(contact_id: int) -> str | None:
+    """The token of the contact's invitation while it can still be used."""
+    with Session(engine) as session:
+        contact = session.get(InviteContact, contact_id)
+        row = session.get(UserInvitation, contact.invitation_id) if contact is not None and contact.invitation_id else None
+        return row.token if row is not None and _invitation_status(row) == "pending" else None
 
 
 def get_open_invitation_by_token(token: str) -> dict | None:
@@ -2491,7 +2614,8 @@ def mark_invitation_accepted(invitation_id: int) -> None:
 # ── Invite contacts (bulk invitations, services/invite_import.py) ───────────
 CONTACT_FIELDS = ("name", "company", "job_title", "phone", "city", "country", "industry", "company_size", "website",
                   "description", "notes")
-CONTACT_STATUSES = ("not_invited", "invited", "joined", "expired", "revoked", "failed")
+CONTACT_STATUSES = ("not_invited", "invited", "clicked", "joined", "expired", "revoked", "failed", "unsubscribed")
+STARTER_TONE = "Starter"  # runs copied from a lead preview at sign-up - not the user's own activity
 
 
 def member_emails(emails) -> set[str]:
@@ -2555,15 +2679,38 @@ def save_invite_contacts(rows: list[dict], filename: str | None, user_id: int, r
                 "skipped": batch.rows_skipped if batch else 0}
 
 
-def _contact_status(contact: "InviteContact", invitation: "UserInvitation | None", is_member: bool) -> str:
+def _contact_status(contact: "InviteContact", invitation: "UserInvitation | None", is_member: bool,
+                    unsubscribed: bool = False, preview_viewed: bool = False) -> str:
     if is_member or (invitation is not None and invitation.accepted_at):
         return "joined"
+    if unsubscribed:
+        return "unsubscribed"
     if invitation is not None:
         status = _invitation_status(invitation)
         if contact.last_error and contact.last_invited_at is None:
             return "failed"
+        if status == "pending" and ((invitation.click_count or 0) > 0 or preview_viewed):
+            return "clicked"
         return {"pending": "invited", "expired": "expired", "revoked": "revoked"}.get(status, "invited")
     return "failed" if contact.last_error else "not_invited"
+
+
+def _active_user_emails(emails: list[str]) -> set[str]:
+    """Of these members, the ones who made something themselves (a run that
+    isn't a copied starter post)."""
+    wanted = sorted({e.lower() for e in emails if e})
+    if not wanted:
+        return set()
+    with Session(engine) as session:
+        users = {}
+        for start in range(0, len(wanted), 500):
+            for uid, email in session.query(User.id, User.email).filter(func.lower(User.email).in_(wanted[start:start + 500])).all():
+                users[uid] = email.lower()
+        if not users:
+            return set()
+        active = {uid for (uid,) in session.query(RunHistory.user_id).filter(
+            RunHistory.user_id.in_(list(users)), func.coalesce(RunHistory.tone, "") != STARTER_TONE).distinct().all()}
+        return {users[uid] for uid in active}
 
 
 def list_invite_contacts() -> dict:
@@ -2576,28 +2723,58 @@ def list_invite_contacts() -> dict:
             for inv in session.query(UserInvitation).filter(UserInvitation.id.in_(invite_ids[start:start + 500])).all():
                 invitations[inv.id] = inv
         members = member_emails([c.email for c in contacts])
+        active = _active_user_emails(list(members))
+        sent_messages = latest_invite_messages([c.email for c in contacts])
+        unsubscribed = suppressed_emails([c.email for c in contacts])
+        previews = {p.contact_id: p for p in session.query(LeadPreview).all()}
         batches = {b.id: b for b in session.query(InviteBatch).all()}
         from services.invite_import import is_shared_inbox
         out = []
         for c in contacts:
             invitation = invitations.get(c.invitation_id)
             batch = batches.get(c.batch_id)
+            preview = previews.get(c.id)
+            viewed = bool(preview is not None and preview.view_count)
             out.append({
                 "id": c.id, "email": c.email, **{f: getattr(c, f) or "" for f in CONTACT_FIELDS},
                 "extra": json.loads(c.extra) if c.extra else {},
                 "shared_inbox": is_shared_inbox(c.email),
                 "source": c.source, "batch_id": c.batch_id, "batch": batch.filename if batch else None,
-                "status": _contact_status(c, invitation, c.email in members),
+                "status": _contact_status(c, invitation, c.email in members, c.email in unsubscribed, viewed),
+                "activated": c.email in active,
+                "unsubscribed_at": unsubscribed.get(c.email),
+                "clicks": (invitation.click_count or 0) if invitation is not None else 0,
+                "first_clicked_at": _as_utc(invitation.first_clicked_at).isoformat()
+                if invitation is not None and invitation.first_clicked_at else None,
+                "preview": _preview_summary(preview),
+                "emails_sent": (sent_messages.get(c.email) or {}).get("count", 0),
+                "last_email": (sent_messages.get(c.email) or {}).get("latest"),
                 "invite_count": c.invite_count or 0,
                 "last_invited_at": _as_utc(c.last_invited_at).isoformat() if c.last_invited_at else None,
                 "expires_at": _as_utc(invitation.expires_at).isoformat() if invitation is not None and invitation.expires_at else None,
                 "last_error": c.last_error,
                 "created_at": _as_utc(c.created_at).isoformat(),
             })
+        for c in out:
+            c["stage"] = ("made_post" if c["activated"] else "signed_up" if c["status"] == "joined"
+                          else "opened" if c["clicks"] or (c["preview"] or {}).get("views")
+                          else "invited" if c["invite_count"] or c["emails_sent"]
+                          else "preview_ready" if (c["preview"] or {}).get("status") == "ready" else "added")
         counts = {status: sum(1 for c in out if c["status"] == status) for status in CONTACT_STATUSES}
         counts["all"] = len(out)
+        reached = [c for c in out if c["invite_count"] or c["status"] in ("joined", "clicked", "expired", "revoked")]
+        funnel = {
+            "contacts": len(out),
+            "previews_ready": sum(1 for c in out if (c["preview"] or {}).get("status") == "ready"),
+            "invited": len(reached),
+            "clicked": sum(1 for c in reached if c["clicks"] or (c["preview"] or {}).get("views")),
+            "previews_viewed": sum(1 for c in out if (c["preview"] or {}).get("views")),
+            "joined": sum(1 for c in out if c["status"] == "joined"),
+            "activated": sum(1 for c in out if c["status"] == "joined" and c["activated"]),
+            "unsubscribed": counts["unsubscribed"],
+        }
         return {
-            "contacts": out, "counts": counts,
+            "contacts": out, "counts": counts, "funnel": funnel,
             "batches": [{"id": b.id, "filename": b.filename, "created_at": _as_utc(b.created_at).isoformat(),
                          "rows_total": b.rows_total, "rows_added": b.rows_added, "rows_updated": b.rows_updated,
                          "rows_skipped": b.rows_skipped}
@@ -2611,7 +2788,262 @@ def get_invite_contacts(ids) -> list[dict]:
         return []
     with Session(engine) as session:
         rows = session.query(InviteContact).filter(InviteContact.id.in_(wanted)).all()
-        return [{"id": c.id, "email": c.email, "name": c.name, "company": c.company} for c in rows]
+        previews = {p.contact_id: p for p in session.query(LeadPreview).filter(LeadPreview.contact_id.in_(wanted)).all()}
+        return [{"id": c.id, "email": c.email, **{f: getattr(c, f) or "" for f in CONTACT_FIELDS},
+                 "preview": _preview_summary(previews.get(c.id))} for c in rows]
+
+
+# ── What was sent (InviteMessage) and how far each person got ──────────────
+STAGES = ("added", "preview_ready", "invited", "opened", "signed_up", "made_post")
+
+
+def record_invite_message(email: str, style: str, subject: str, body: str, status: str = "sent",
+                          error: str | None = None, contact_id: int | None = None, invitation_id: int | None = None,
+                          sent_by_user_id: int | None = None, sender_name: str | None = None) -> int:
+    with Session(engine) as session:
+        row = InviteMessage(email=(email or "").strip().lower()[:320], style=(style or "designed")[:16],
+                            subject=(subject or "")[:300], body=body or "", status=status[:12],
+                            error=(error or "")[:500] or None, contact_id=contact_id, invitation_id=invitation_id,
+                            sent_by_user_id=sent_by_user_id, sender_name=(sender_name or "")[:255] or None)
+        session.add(row)
+        session.commit()
+        return int(row.id)
+
+
+def _invite_message_dict(m: "InviteMessage", with_body: bool = True) -> dict:
+    out = {"id": m.id, "email": m.email, "style": m.style, "subject": m.subject, "status": m.status, "error": m.error,
+           "contact_id": m.contact_id, "invitation_id": m.invitation_id, "sender_name": m.sender_name,
+           "sent_at": _as_utc(m.created_at).isoformat()}
+    if with_body:
+        out["body"] = m.body
+    return out
+
+
+def get_invite_message(message_id: int) -> dict | None:
+    with Session(engine) as session:
+        m = session.get(InviteMessage, message_id)
+        return _invite_message_dict(m) if m is not None else None
+
+
+def latest_invite_messages(emails) -> dict[str, dict]:
+    """{email: {"latest": message (no body), "count": n}} - for the lists."""
+    wanted = sorted({(e or "").strip().lower() for e in emails or [] if e})
+    out: dict[str, dict] = {}
+    if not wanted:
+        return out
+    with Session(engine) as session:
+        for start in range(0, len(wanted), 500):
+            rows = session.query(InviteMessage).filter(InviteMessage.email.in_(wanted[start:start + 500])) \
+                .order_by(InviteMessage.created_at.asc(), InviteMessage.id.asc()).all()
+            for m in rows:
+                entry = out.setdefault(m.email, {"count": 0, "latest": None})
+                entry["count"] += 1
+                entry["latest"] = _invite_message_dict(m, with_body=False)
+    return out
+
+
+def invite_contact_journey(contact_id: int) -> dict | None:
+    """One person's way through the outreach: every email sent (with its text)
+    and the date each stage was reached - added, preview ready, invited,
+    opened (link or preview page), signed up, made a post of their own."""
+    with Session(engine) as session:
+        c = session.get(InviteContact, contact_id)
+        if c is None:
+            return None
+        messages = session.query(InviteMessage).filter(
+            (InviteMessage.contact_id == contact_id) | (InviteMessage.email == c.email)
+        ).order_by(InviteMessage.created_at.asc(), InviteMessage.id.asc()).all()
+        invitation = session.get(UserInvitation, c.invitation_id) if c.invitation_id else None
+        preview = session.query(LeadPreview).filter(LeadPreview.contact_id == contact_id).first()
+        user = session.query(User).filter(func.lower(User.email) == c.email).first()
+        first_post = None
+        if user is not None:
+            run = session.query(RunHistory).filter(
+                RunHistory.user_id == user.id, func.coalesce(RunHistory.tone, "") != STARTER_TONE
+            ).order_by(RunHistory.created_at.asc()).first()
+            first_post = run.created_at if run is not None else None
+        sent = [m for m in messages if m.status == "sent"]
+        opened = [d for d in (invitation.first_clicked_at if invitation is not None else None,
+                              preview.first_viewed_at if preview is not None else None) if d]
+        joined = (invitation.accepted_at if invitation is not None and invitation.accepted_at else None) or \
+            (user.created_at if user is not None else None)
+        when = {
+            "added": c.created_at,
+            "preview_ready": preview.generated_at if preview is not None and preview.status == "ready" else None,
+            "invited": sent[0].created_at if sent else c.last_invited_at,
+            "opened": min(opened) if opened else None,
+            "signed_up": joined,
+            "made_post": first_post,
+        }
+        reached = [s for s in STAGES if when[s]]
+        return {
+            "contact_id": contact_id, "email": c.email,
+            "stage": reached[-1] if reached else "added",
+            "stages": [{"key": s, "at": _as_utc(when[s]).isoformat() if when[s] else None} for s in STAGES],
+            "messages": [_invite_message_dict(m) for m in reversed(messages)],
+        }
+
+
+def _preview_summary(p: "LeadPreview | None") -> dict | None:
+    if p is None:
+        return None
+    return {"status": p.status, "token": p.token, "error": p.error, "views": p.view_count or 0,
+            "first_line": p.first_line or "", "cost_usd": round(p.cost_usd or 0.0, 4),
+            "first_viewed_at": _as_utc(p.first_viewed_at).isoformat() if p.first_viewed_at else None,
+            "generated_at": _as_utc(p.generated_at).isoformat() if p.generated_at else None,
+            "claimed": p.claimed_user_id is not None}
+
+
+# ── Unsubscribes (services/invite_outreach.py) ──────────────────────────────
+def suppressed_emails(emails) -> dict[str, str]:
+    """{email: when it was suppressed (ISO)} for the given emails."""
+    wanted = sorted({(e or "").strip().lower() for e in emails or [] if e})
+    out: dict[str, str] = {}
+    if not wanted:
+        return out
+    with Session(engine) as session:
+        for start in range(0, len(wanted), 500):
+            for row in session.query(EmailSuppression).filter(EmailSuppression.email.in_(wanted[start:start + 500])).all():
+                out[row.email] = _as_utc(row.created_at).isoformat()
+    return out
+
+
+def add_suppression(email: str, reason: str = "unsubscribed", source: str | None = None) -> bool:
+    """True when newly added (an address already on the list stays as it was)."""
+    email = (email or "").strip().lower()
+    if not email:
+        return False
+    with Session(engine) as session:
+        if session.query(EmailSuppression.id).filter(EmailSuppression.email == email).first():
+            return False
+        session.add(EmailSuppression(email=email[:320], reason=reason[:32], source=(source or "")[:64] or None))
+        session.commit()
+        return True
+
+
+# ── Lead previews (services/lead_preview_service.py) ────────────────────────
+def queue_lead_previews(contact_ids, admin_id: int, refresh: bool = False) -> dict:
+    """Marks contacts' previews as pending (new token for new ones). Contacts
+    with a ready preview are left alone unless refresh. Returns
+    {"queued": [preview ids], "already_ready": n}."""
+    import secrets as _secrets
+
+    wanted = [int(i) for i in contact_ids or [] if str(i).isdigit()]
+    queued, ready = [], 0
+    with Session(engine) as session:
+        existing = {p.contact_id: p for p in session.query(LeadPreview).filter(LeadPreview.contact_id.in_(wanted)).all()} if wanted else {}
+        contacts = {c.id for c in session.query(InviteContact.id).filter(InviteContact.id.in_(wanted)).all()} if wanted else set()
+        for cid in wanted:
+            if cid not in contacts:
+                continue
+            row = existing.get(cid)
+            if row is not None and row.status == "running":
+                continue
+            if row is not None and row.status == "ready" and not refresh:
+                ready += 1
+                continue
+            if row is None:
+                row = LeadPreview(contact_id=cid, token=_secrets.token_urlsafe(18))
+                session.add(row)
+            row.status, row.error, row.created_by_user_id = "pending", None, admin_id
+            session.flush()
+            queued.append(row.id)
+        session.commit()
+    return {"queued": queued, "already_ready": ready}
+
+
+def _lead_preview_dict(p: "LeadPreview", contact: "InviteContact | None") -> dict:
+    return {
+        "id": p.id, "token": p.token, "status": p.status, "error": p.error, "website": p.website,
+        "profile": json.loads(p.profile) if p.profile else {}, "posts": json.loads(p.posts) if p.posts else [],
+        "first_line": p.first_line or "", "cost_usd": p.cost_usd or 0.0, "created_by_user_id": p.created_by_user_id,
+        "view_count": p.view_count or 0, "images_started": p.images_started_at is not None,
+        "claimed_user_id": p.claimed_user_id,
+        "contact": ({"id": contact.id, "email": contact.email, **{f: getattr(contact, f) or "" for f in CONTACT_FIELDS},
+                     "invitation_id": contact.invitation_id} if contact is not None else None),
+    }
+
+
+def get_lead_preview(preview_id: int | None = None, token: str | None = None) -> dict | None:
+    with Session(engine) as session:
+        if preview_id is not None:
+            p = session.get(LeadPreview, preview_id)
+        elif token:
+            p = session.query(LeadPreview).filter(LeadPreview.token == token).first()
+        else:
+            p = None
+        if p is None:
+            return None
+        return _lead_preview_dict(p, session.get(InviteContact, p.contact_id))
+
+
+def update_lead_preview(preview_id: int, **fields) -> None:
+    """profile / posts are given as Python values and stored as JSON."""
+    with Session(engine) as session:
+        p = session.get(LeadPreview, preview_id)
+        if p is None:
+            return
+        for key, value in fields.items():
+            if key in ("profile", "posts"):
+                value = json.dumps(value) if value is not None else None
+            setattr(p, key, value)
+        session.commit()
+
+
+def set_lead_preview_post(preview_id: int, index: int, **fields) -> None:
+    """Updates one draft post (e.g. its image once made) without losing the others."""
+    with Session(engine) as session:
+        p = session.query(LeadPreview).filter(LeadPreview.id == preview_id).with_for_update().first() \
+            if not IS_SQLITE else session.get(LeadPreview, preview_id)
+        if p is None or not p.posts:
+            return
+        posts = json.loads(p.posts)
+        if 0 <= index < len(posts):
+            posts[index].update(fields)
+            p.posts = json.dumps(posts)
+            session.commit()
+
+
+def record_lead_preview_view(token: str) -> dict | None:
+    with Session(engine) as session:
+        p = session.query(LeadPreview).filter(LeadPreview.token == token).first()
+        if p is None:
+            return None
+        now = _utcnow()
+        p.view_count = (p.view_count or 0) + 1
+        p.first_viewed_at = p.first_viewed_at or now
+        p.last_viewed_at = now
+        session.commit()
+        return _lead_preview_dict(p, session.get(InviteContact, p.contact_id))
+
+
+def claim_lead_preview_images(preview_id: int) -> bool:
+    """True for the one caller that gets to make this preview's images."""
+    with Session(engine) as session:
+        changed = session.query(LeadPreview).filter(
+            LeadPreview.id == preview_id, LeadPreview.images_started_at.is_(None)
+        ).update({"images_started_at": _utcnow()}, synchronize_session=False)
+        session.commit()
+        return bool(changed)
+
+
+def mark_lead_preview_claimed(preview_id: int, user_id: int) -> bool:
+    """True the first time (a preview is copied into one account only)."""
+    with Session(engine) as session:
+        changed = session.query(LeadPreview).filter(
+            LeadPreview.id == preview_id, LeadPreview.claimed_user_id.is_(None)
+        ).update({"claimed_user_id": user_id, "claimed_at": _utcnow()}, synchronize_session=False)
+        session.commit()
+        return bool(changed)
+
+
+def lead_preview_images_today() -> int:
+    """Preview images made in the last 24 hours (the daily spending cap)."""
+    since = _utcnow() - timedelta(hours=24)
+    with Session(engine) as session:
+        return session.query(ImageGeneration.id).filter(
+            ImageGeneration.created_at >= since, ImageGeneration.description.like("Lead preview:%")
+        ).count()
 
 
 def record_contact_invite(contact_id: int, invitation_id: int | None, error: str | None = None) -> None:

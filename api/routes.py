@@ -3195,20 +3195,65 @@ def admin_get_all_users():
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
-def _send_invitation(invitation: dict, token: str) -> None:
-    """Emails an invitation (raises on SMTP failure). The link opens /signup
-    with the email pre-filled; signing up through it verifies the email."""
+def _send_invitation(invitation: dict, token: str, contact: dict | None = None, style: str = "designed",
+                     subject: str | None = None, body: str | None = None) -> None:
+    """Emails an invitation (raises on SMTP failure). Its link goes through
+    /i/<token> (counts the click) to /signup with the email pre-filled;
+    signing up through it verifies the email. Every email has an unsubscribe
+    link and footer (services/invite_outreach).
+
+    style "designed": the HTML invitation. "preview" / "note": a short plain
+    note from the contact's details (services/invite_outreach.TEMPLATES);
+    "preview" links to the lead's preview page and falls back to "note" for
+    contacts without a ready preview."""
     from services.email_service import EmailService
+    from services.invite_outreach import build_note, postal_address, unsubscribe_token
 
     base = (Config.APP_BASE_URL or request.host_url).rstrip("/")
-    EmailService().send_invitation_email(
+    invite_link = f"{base}/i/{token}"
+    note = None
+    if style in ("preview", "note") and contact is not None:
+        preview = contact.get("preview") or {}
+        has_preview = preview.get("status") == "ready"
+        key = "preview" if style == "preview" and has_preview else "note"
+        links = {"invite": invite_link, "preview": f"{base}/p/{preview['token']}" if has_preview else None}
+        own_text = key == style  # a fallback note uses its own wording, not the preview template's
+        note_subject, note_text = build_note(key, subject if own_text else None, body if own_text else None, contact,
+                                             links, invitation.get("invited_by") or "")
+        note = {"subject": note_subject, "text": note_text}
+        style = key
+    elif style != "designed":
+        style = "designed"
+    from db import record_invite_message
+
+    service = EmailService()
+    msg, text = service.build_invitation_email(
         to_email=invitation["email"],
         name=invitation.get("name"),
         inviter_name=invitation.get("invited_by"),
-        accept_url=f"{base}/signup?invite={token}",
+        accept_url=invite_link,
         message=invitation.get("message"),
-        expires_days=7,
+        expires_days=30,
+        unsubscribe_url=f"{base}/u/{unsubscribe_token(invitation['email'])}",
+        postal_address=postal_address(),
+        note=note,
     )
+    # Kept exactly as sent (Admin -> Invitations shows it), whether it went out or not
+    record = {"email": invitation["email"], "style": style, "subject": str(msg["Subject"] or ""), "body": text,
+              "contact_id": (contact or {}).get("id"), "invitation_id": invitation.get("id"),
+              "sent_by_user_id": get_current_user_id(), "sender_name": invitation.get("invited_by")}
+    try:
+        service.deliver_invitation(msg, invitation["email"])
+    except Exception as err:
+        record_invite_message(**record, status="failed", error=str(err)[:500])
+        raise
+    record_invite_message(**record)
+
+
+def _unsubscribed_on(email: str) -> str | None:
+    from db import suppressed_emails
+
+    return suppressed_emails([email]).get((email or "").strip().lower())
 
 
 @api_bp.route("/admin/invitations", methods=["GET"])
@@ -3241,6 +3286,8 @@ def admin_create_invitation():
         return jsonify({"success": False, "error": "Enter a valid email address."}), 400
     if get_user_by_email(email):
         return jsonify({"success": False, "error": "This email already has an AVIR AI account."}), 409
+    if _unsubscribed_on(email):
+        return jsonify({"success": False, "error": "This address unsubscribed from our emails, so it can't be invited."}), 409
 
     import secrets
 
@@ -3266,7 +3313,7 @@ def admin_create_invitation():
 @login_required_api
 @admin_required_api
 def admin_resend_invitation(invitation_id):
-    """New link + 7 more days, emailed again (also revives an expired/revoked invite)."""
+    """New link + 30 more days, emailed again (also revives an expired/revoked invite)."""
     if not DB_AVAILABLE:
         return jsonify({"error": "Database not available"}), 503
     from db import get_invitation
@@ -3276,6 +3323,8 @@ def admin_resend_invitation(invitation_id):
         return jsonify({"success": False, "error": "Invitation not found."}), 404
     if existing["status"] == "accepted" or get_user_by_email(existing["email"]):
         return jsonify({"success": False, "error": "This person has already joined."}), 409
+    if _unsubscribed_on(existing["email"]):
+        return jsonify({"success": False, "error": "This address unsubscribed from our emails, so it can't be invited."}), 409
 
     import secrets
 
@@ -3399,7 +3448,61 @@ def admin_invite_contacts():
         if member_emails([rows[0]["email"]]):
             return jsonify({"success": False, "error": "This email already has an AVIR AI account."}), 409
         save_invite_contacts(rows, None, get_current_user_id(), source="manual")
-    return jsonify({"success": True, **list_invite_contacts()})
+    from services.invite_outreach import MERGE_FIELDS, TEMPLATES, postal_address
+
+    return jsonify({"success": True, **list_invite_contacts(),
+                    "outreach": {"postal_address": postal_address(), "templates": TEMPLATES, "merge_fields": MERGE_FIELDS}})
+
+
+@api_bp.route("/admin/invite-contacts/<int:contact_id>/journey", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_invite_contact_journey(contact_id):
+    """One person: the stage they reached (with dates) and every email sent to them, in full."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import invite_contact_journey
+
+    journey = invite_contact_journey(contact_id)
+    if journey is None:
+        return jsonify({"success": False, "error": "Contact not found."}), 404
+    return jsonify({"success": True, **journey})
+
+
+@api_bp.route("/admin/invite-messages/<int:message_id>", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_invite_message(message_id):
+    """One invitation email, exactly as it was sent."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import get_invite_message
+
+    message = get_invite_message(message_id)
+    if message is None:
+        return jsonify({"success": False, "error": "Email not found."}), 404
+    return jsonify({"success": True, "message": message})
+
+
+@api_bp.route("/admin/invite-contacts/previews", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_invite_previews():
+    """Prepares lead previews (services/lead_preview_service): {ids, refresh}.
+    Runs in the background; the list shows each one's progress."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from services.lead_preview_service import queue_previews
+
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids") if isinstance(data.get("ids"), list) else []
+    if not ids:
+        return jsonify({"success": False, "error": "Select at least one person."}), 400
+    if len(ids) > 500:
+        return jsonify({"success": False, "error": "Prepare at most 500 previews at a time."}), 400
+    result = queue_previews(ids, get_current_user_id(), refresh=bool(data.get("refresh")))
+    log_event("invites.previews", admin_id=get_current_user_id(), **result)
+    return jsonify({"success": True, **result})
 
 
 @api_bp.route("/admin/invite-contacts/send", methods=["POST"])
@@ -3423,18 +3526,34 @@ def admin_invite_contacts_send():
         return jsonify({"success": False, "error": f"Send at most {SEND_BATCH} at a time."}), 400
     message = (data.get("message") or "").strip()[:1000]
     inviter_name = (data.get("inviter_name") or "").strip()[:255]
+    style = data.get("style") if data.get("style") in ("designed", "preview", "note") else "designed"
+    subject = (data.get("subject") or "").strip()[:200] or None
+    body = (data.get("body") or "").strip()[:5000] or None
+    if isinstance(data.get("postal_address"), str):
+        from db import get_setting, save_setting
+
+        address = data["postal_address"].strip()[:300]
+        if address != (get_setting("company_postal_address", "") or ""):
+            save_setting("company_postal_address", address)
+    from db import suppressed_emails
+
     contacts = get_invite_contacts(ids)
     members = member_emails([c["email"] for c in contacts])
+    unsubscribed = suppressed_emails([c["email"] for c in contacts])
     admin_id = get_current_user_id()
     results = []
     for contact in contacts:
         if contact["email"] in members:
             results.append({"id": contact["id"], "email": contact["email"], "status": "joined"})
             continue
+        if contact["email"] in unsubscribed:
+            results.append({"id": contact["id"], "email": contact["email"], "status": "unsubscribed"})
+            continue
         token = secrets.token_urlsafe(32)
-        invitation = upsert_invitation(contact["email"], contact.get("name"), message, admin_id, token, inviter_name=inviter_name)
+        invitation = upsert_invitation(contact["email"], contact.get("name"), message if style == "designed" else None,
+                                       admin_id, token, inviter_name=inviter_name)
         try:
-            _send_invitation(invitation, token)
+            _send_invitation(invitation, token, contact, style, subject, body)
         except Exception as err:  # noqa: BLE001 - one bad address must not stop the rest
             error = str(err)[:300] or "The email could not be sent."
             record_contact_invite(contact["id"], invitation["id"], error)
@@ -3442,8 +3561,8 @@ def admin_invite_contacts_send():
             continue
         record_contact_invite(contact["id"], invitation["id"])
         results.append({"id": contact["id"], "email": contact["email"], "status": "invited"})
-    counts = {k: sum(1 for r in results if r["status"] == k) for k in ("invited", "failed", "joined")}
-    log_event("invites.send", admin_id=admin_id, **counts)
+    counts = {k: sum(1 for r in results if r["status"] == k) for k in ("invited", "failed", "joined", "unsubscribed")}
+    log_event("invites.send", admin_id=admin_id, style=style, **counts)
     return jsonify({"success": True, "results": results, **counts})
 
 
@@ -3464,11 +3583,18 @@ def admin_invite_contacts_export():
     import json as _json
 
     columns = ["email", "name", "company", "job_title", "phone", "city", "country", "industry", "company_size", "website",
-               "description", "notes", "status", "invite_count", "last_invited_at", "last_error", "source", "batch", "created_at"]
-    writer.writerow([*columns, "extra"])
+               "description", "notes", "status", "invite_count", "last_invited_at", "clicks", "first_clicked_at", "activated",
+               "unsubscribed_at", "last_error", "source", "batch", "created_at"]
+    base = (Config.APP_BASE_URL or request.host_url).rstrip("/")
+    # first_line / preview_url: merge fields for an outside email tool
+    writer.writerow([*columns, "first_line", "preview_url", "preview_views", "extra"])
     for contact in list_invite_contacts()["contacts"]:
+        preview = contact.get("preview") or {}
+        ready = preview.get("status") == "ready"
         writer.writerow([contact.get(c) if contact.get(c) is not None else "" for c in columns]
-                        + [_json.dumps(contact.get("extra") or {}, ensure_ascii=False) if contact.get("extra") else ""])
+                        + [preview.get("first_line") or "", f"{base}/p/{preview['token']}" if ready else "",
+                           preview.get("views") or 0,
+                           _json.dumps(contact.get("extra") or {}, ensure_ascii=False) if contact.get("extra") else ""])
     return Response(out.getvalue(), mimetype="text/csv",
                     headers={"Content-Disposition": "attachment; filename=avir-invite-contacts.csv"})
 
@@ -5245,8 +5371,23 @@ def onboarding_account_type():
         return jsonify({"success": False, "error": "Please enter your website"}), 400
 
     complete_user_onboarding(user_id, account_type, website or None)
+    # Signed up from a lead preview: open the posts made for them
+    from flask import session as flask_session
+
+    starter = flask_session.pop("starter_conversation", None)
+    dashboard = f"/dashboard?conversation={int(starter)}" if str(starter or "").isdigit() else "/dashboard"
     if not website:
-        return jsonify({"success": True, "redirect": "/dashboard", "scan_started": False})
+        return jsonify({"success": True, "redirect": dashboard, "scan_started": False})
+    # The brand profile already came from that website (a lead preview): no second scan
+    from db import get_user_brand_profile
+
+    existing = get_user_brand_profile(user_id)
+
+    def _site(url):
+        return re.sub(r"^(https?://)?(www\.)?", "", (url or "").strip().lower()).rstrip("/")
+
+    if existing and _site(existing.get("website")) == _site(website):
+        return jsonify({"success": True, "redirect": dashboard, "scan_started": False})
 
     # Scrape the site and derive a brand profile (industry, voice, colors)
     # that future Studio Chat generation follows - in the background, so
@@ -5261,7 +5402,7 @@ def onboarding_account_type():
     except Exception as e:  # noqa: BLE001
         current_app.logger.warning(f"[onboarding] Could not start brand analysis for {website}: {e}")
 
-    return jsonify({"success": True, "redirect": "/dashboard", "scan_started": scan_started})
+    return jsonify({"success": True, "redirect": dashboard, "scan_started": scan_started})
 
 
 @api_bp.route("/brand-profile/status", methods=["GET"])

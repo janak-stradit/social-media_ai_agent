@@ -750,13 +750,17 @@ def _build_monthly_recap_html(
 
 
 def _build_invitation_html(
-    name: str | None, inviter_name: str | None, accept_url: str, message: str | None, expires_days: int
+    name: str | None, inviter_name: str | None, accept_url: str, message: str | None, expires_days: int,
+    unsubscribe_url: str | None = None, postal_address: str = "",
 ) -> str:
     """Admin -> Invitations. Same look as the password-reset email (brand
     gradient header, white card, purple button)."""
     first_name = (name or "").strip().split(" ")[0]
     greeting = f"Hi {_escape(first_name)}," if first_name else "Hi there,"
     inviter = _escape(inviter_name) if inviter_name else "The AVIR AI team"
+    unsubscribe_html = (f"<br>Don't want emails like this? <a href='{_escape(unsubscribe_url)}' style='color: #667085;'>Unsubscribe</a>."
+                        if unsubscribe_url else "")
+    address_html = f" &middot; {_escape(postal_address)}" if postal_address else ""
     message_block = (
         f"""
                     <tr>
@@ -812,15 +816,15 @@ def _build_invitation_html(
                                style="display: inline-block; background-color: #c2410c; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 14px 32px; border-radius: 6px;">
                                 Accept invitation
                             </a>
-                            <div style="color: #667085; font-size: 12px; margin-top: 12px;">This invitation expires in {expires_days} days and can only be used once.</div>
+                            <div style="color: #667085; font-size: 12px; margin-top: 12px;">This invitation link works for {expires_days} days.</div>
                         </td>
                     </tr>
                     <tr>
                         <td style="padding: 16px 32px; background-color: #f8f9fc; border-top: 1px solid #e6e8ef; color: #667085; font-size: 12px; line-height: 1.6;">
                             Button not working? Copy this link into your browser:<br>
                             <a href="{_escape(accept_url)}" style="color: #c2410c; word-break: break-all;">{_escape(accept_url)}</a><br><br>
-                            If you weren't expecting this invitation, you can safely ignore this email.
-                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a></div>
+                            If you weren't expecting this invitation, you can safely ignore this email.{unsubscribe_html}
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a>{address_html}</div>
                         </td>
                     </tr>
                 </table>
@@ -1477,30 +1481,79 @@ class EmailService:
         inviter_name: str | None,
         accept_url: str,
         message: str | None = None,
-        expires_days: int = 7,
+        expires_days: int = 30,
+        unsubscribe_url: str | None = None,
+        postal_address: str = "",
+        note: dict | None = None,
     ) -> dict:
-        """Sent from Admin -> Invitations (api/routes.py /api/admin/invitations)."""
+        """Sent from Admin -> Invitations (api/routes.py /api/admin/invitations).
+        note={"subject", "text"}: a plain personal note (services/invite_outreach)
+        instead of the designed invitation. Either way the email has a plain-text
+        part, and with unsubscribe_url a footer link plus the List-Unsubscribe
+        headers mail apps show as a one-click "Unsubscribe" button.
+        Returns {"success", "recipient", "subject", "text"}."""
+        msg, text = self.build_invitation_email(to_email, name, inviter_name, accept_url, message, expires_days,
+                                                unsubscribe_url, postal_address, note)
+        self.deliver_invitation(msg, to_email)
+        return {"success": True, "recipient": to_email, "subject": str(msg["Subject"]), "text": text}
+
+    def deliver_invitation(self, msg, to_email: str) -> None:
         if not self.enabled:
             raise RuntimeError(
                 "SMTP is not configured. Set SMTP_HOST, SMTP_USERNAME and SMTP_PASSWORD in .env."
             )
-
-        from email.utils import formataddr, parseaddr
-
-        msg = MIMEMultipart("mixed")
-        inviter = inviter_name or "AVIR AI"
-        msg["Subject"] = f"{inviter} invited you to AVIR AI"
-        # Inbox shows "Janak via AVIR AI" as the sender (the address stays ours)
-        sender = f"{inviter_name} via AVIR AI" if inviter_name else "AVIR AI"
-        msg["From"] = formataddr((sender, parseaddr(self.from_email)[1] or self.from_email))
-        msg["To"] = to_email
-        msg.attach(
-            MIMEText(_build_invitation_html(name, inviter_name, accept_url, message, expires_days), "html")
-        )
-
         self._deliver(msg, [to_email], "invitation")
 
-        return {"success": True, "recipient": to_email}
+    def build_invitation_email(
+        self,
+        to_email: str,
+        name: str | None,
+        inviter_name: str | None,
+        accept_url: str,
+        message: str | None = None,
+        expires_days: int = 30,
+        unsubscribe_url: str | None = None,
+        postal_address: str = "",
+        note: dict | None = None,
+    ):
+        """(the email, its plain text) - what send_invitation_email sends."""
+        from email.utils import formataddr, parseaddr
+
+        from services.invite_outreach import footer_text, text_to_html
+
+        msg = MIMEMultipart("alternative")
+        inviter = inviter_name or "AVIR AI"
+        address = parseaddr(self.from_email)[1] or self.from_email
+        footer = footer_text(unsubscribe_url, postal_address) if unsubscribe_url else ""
+        if note:
+            msg["Subject"] = note.get("subject") or f"{inviter} invited you to AVIR AI"
+            # A note comes from the person ("Janak"), like any email they'd write
+            msg["From"] = formataddr((inviter_name or "AVIR AI", address))
+            text = (note.get("text") or "").strip() + ("\n\n" + footer if footer else "")
+            html_part = text_to_html(text)
+        else:
+            msg["Subject"] = f"{inviter} invited you to AVIR AI"
+            # Inbox shows "Janak via AVIR AI" as the sender (the address stays ours)
+            msg["From"] = formataddr((f"{inviter_name} via AVIR AI" if inviter_name else "AVIR AI", address))
+            first = (name or "").strip().split(" ")[0]
+            text = "\n\n".join(filter(None, [
+                f"Hi {first}," if first else "Hi there,",
+                (f"{inviter} has invited you to join AVIR AI - the AI studio that turns one brief into on-brand posts, "
+                 "captions, hashtags and images for every social channel."),
+                (message or "").strip(),
+                f"Accept the invitation: {accept_url}\n(The link works for {expires_days} days.)",
+                footer,
+            ]))
+            html_part = _build_invitation_html(name, inviter_name, accept_url, message, expires_days,
+                                               unsubscribe_url, postal_address)
+        msg["To"] = to_email
+        msg["Reply-To"] = address
+        if unsubscribe_url:
+            msg["List-Unsubscribe"] = f"<{unsubscribe_url}>, <mailto:{address}?subject=unsubscribe>"
+            msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+        msg.attach(MIMEText(text, "plain", "utf-8"))
+        msg.attach(MIMEText(html_part, "html", "utf-8"))
+        return msg, text
 
     def send_sales_lead_notification(self, user_name: str, user_email: str, lead: dict) -> dict:
         """Sent when an Enterprise signup submits the Contact Sales form - see

@@ -3940,6 +3940,13 @@ $(document).ready(function () {
 
     // The tab's open conversation survives a page refresh
     function restoreConversation() {
+        // /dashboard?conversation=<id>: a link to one (e.g. the starter posts made at sign-up)
+        const linked = new URLSearchParams(window.location.search).get('conversation');
+        if (linked && /^\d+$/.test(linked)) {
+            history.replaceState(null, '', window.location.pathname);
+            loadConversation(linked);
+            return;
+        }
         let saved = null;
         try { saved = sessionStorage.getItem(CONVERSATION_KEY); } catch (e) { /* storage blocked */ }
         if (saved && !$('#chatThread').children().length && !storyInput.val()) loadConversation(saved, { quiet: true, restoring: true });

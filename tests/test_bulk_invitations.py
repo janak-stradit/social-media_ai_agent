@@ -177,7 +177,7 @@ def mail(monkeypatch):
 
     sent, fail = [], set()
 
-    def send(invitation, token):
+    def send(invitation, token, *_args):
         if invitation["email"] in fail:
             raise RuntimeError("Mailbox unavailable")
         sent.append((invitation["email"], token))

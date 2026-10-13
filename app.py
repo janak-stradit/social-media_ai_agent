@@ -310,13 +310,158 @@ def create_app(config_name="development"):
             from db import get_open_invitation_by_token
 
             invite = get_open_invitation_by_token(invite_token)
+        # &preview=<token> - from a lead's preview page: their posts are kept for them
+        preview = None
+        preview_token = (request.args.get("preview") or "").strip()
+        if preview_token:
+            from db import get_lead_preview
+
+            found = get_lead_preview(token=preview_token)
+            if found and found["status"] == "ready" and found["contact"] and not found["claimed_user_id"]:
+                preview = {"token": preview_token, "email": found["contact"]["email"], "posts": len(found["posts"]),
+                           "company": (found["profile"] or {}).get("company_name") or found["contact"].get("company")}
         return render_template(
             "signup.html",
             captcha_enabled=app.config.get("CAPTCHA_ENABLED", True),
             invite=invite,
             invite_token=invite_token if invite else None,
             invite_invalid=bool(invite_token and not invite),
+            preview=preview,
         )
+
+    # ── Invitation outreach (services/invite_outreach.py, lead_preview_service.py) ──
+    _PREVIEW_TOKEN = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+
+    def _is_person(sent_at: str | None = None) -> bool:
+        """A link opened by a person, not a mail filter checking it."""
+        from services.invite_outreach import looks_automated
+
+        return request.method != "HEAD" and not looks_automated(request.headers.get("User-Agent"), sent_at)
+
+    def _viewer_is_admin() -> bool:
+        from db import get_user_by_id
+
+        user_id = get_current_user_id()
+        user = get_user_by_id(user_id) if user_id else None
+        return bool(user and getattr(user, "is_admin", False))
+
+    @app.route("/i/<token>")
+    def invitation_link(token):
+        """Every invitation email links here: counts the click, then sign-up."""
+        from urllib.parse import quote
+
+        from db import record_invitation_click
+
+        found = record_invitation_click(token, counted=False)
+        if found and _is_person(found.get("sent_at")) and not _viewer_is_admin():
+            record_invitation_click(token)
+        target = f"/signup?invite={quote(token)}"
+        preview = request.args.get("p", "")
+        if _PREVIEW_TOKEN.match(preview):
+            target += f"&preview={preview}"
+        return redirect(target)
+
+    @app.route("/u/<token>", methods=["GET", "POST"])
+    def unsubscribe_page(token):
+        """The unsubscribe link in every invitation email. GET asks to confirm;
+        POST unsubscribes - also what mail apps' one-click "Unsubscribe" sends
+        (RFC 8058: List-Unsubscribe=One-Click)."""
+        from db import add_suppression
+        from services.invite_outreach import email_from_unsubscribe_token
+        from services.observability import log_event
+
+        email = email_from_unsubscribe_token(token)
+        one_click = request.form.get("List-Unsubscribe") == "One-Click"
+        if request.method == "POST":
+            if email and add_suppression(email, "unsubscribed", "one-click" if one_click else "link"):
+                log_event("invites.unsubscribe", source="one-click" if one_click else "link")
+            if one_click:
+                return ("", 200 if email else 400)
+        return render_template("unsubscribe.html", email=email, done=request.method == "POST" and bool(email))
+
+    def _lead_preview(token: str) -> dict | None:
+        from db import get_lead_preview
+
+        found = get_lead_preview(token=token) if _PREVIEW_TOKEN.match(token or "") else None
+        return found if found and found["status"] == "ready" else None
+
+    def _public_preview(found: dict) -> dict:
+        """Only what the lead's page shows - no admin notes, costs or emails."""
+        profile = found["profile"] or {}
+        return {
+            "company": profile.get("company_name") or (found["contact"] or {}).get("company") or "Your company",
+            "website": found.get("website") or "",
+            "logo_url": profile.get("logo_url") if str(profile.get("logo_url") or "").startswith(("https://", "http://")) else "",
+            # Only real hex colours: the value goes into the page's CSS
+            "colors": [c for c in (profile.get("primary_colors") or [])
+                       if isinstance(c, str) and re.fullmatch(r"#[0-9A-Fa-f]{3}(?:[0-9A-Fa-f]{3})?", c)][:3],
+            "posts": [{k: post.get(k) for k in ("title", "caption", "hashtags", "image_url", "image_status", "occasion")}
+                      for post in found["posts"]],
+        }
+
+    @app.route("/p/<token>")
+    def lead_preview_page(token):
+        """A lead's posts, made before they signed up - no login needed."""
+        from services.invite_outreach import unsubscribe_token
+
+        found = _lead_preview(token)
+        if not found:
+            response = app.make_response((render_template("lead_preview.html", preview=None), 404))
+        else:
+            email = (found["contact"] or {}).get("email") or ""
+            response = app.make_response(render_template(
+                "lead_preview.html", preview=_public_preview(found), token=token,
+                unsubscribe_url=f"/u/{unsubscribe_token(email)}" if email else None))
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        return response
+
+    @app.route("/p/<token>/seen", methods=["POST"])
+    def lead_preview_seen(token):
+        """Called by the page's script once it's shown (link scanners don't run
+        scripts): counts the view and starts the images."""
+        from db import get_lead_preview, record_lead_preview_view
+        from services.lead_preview_service import start_images
+
+        found = _lead_preview(token)
+        if not found:
+            return jsonify({"success": False}), 404
+        if _viewer_is_admin():
+            pass  # an admin checking the page isn't the lead looking at it
+        elif _is_person():
+            found = record_lead_preview_view(token) or found
+        else:
+            return jsonify({"success": True, **_public_preview(found)})
+        started = start_images(found)
+        shown = _public_preview(get_lead_preview(token=token) or found)
+        if not started and not found.get("images_started"):
+            # Today's image budget is used up: show the posts without images rather than a spinner
+            for post in shown["posts"]:
+                if not post.get("image_url"):
+                    post["image_status"] = "skipped"
+        return jsonify({"success": True, **shown})
+
+    @app.route("/p/<token>/data")
+    def lead_preview_data(token):
+        found = _lead_preview(token)
+        if not found:
+            return jsonify({"success": False}), 404
+        return jsonify({"success": True, **_public_preview(found)})
+
+    @app.route("/p/<token>/start")
+    def lead_preview_start(token):
+        """"Edit these posts": sign-up through their invitation when it's still
+        open (counted as a click), else plain sign-up - either way the posts
+        are kept for them."""
+        from db import open_invitation_token_for_contact
+
+        found = _lead_preview(token)
+        if not found:
+            return redirect(url_for("signup_route"))
+        invitation_token = open_invitation_token_for_contact(found["contact"]["id"]) if found["contact"] else None
+        if invitation_token:
+            return redirect(f"/i/{invitation_token}?p={token}")
+        return redirect(f"/signup?preview={token}")
 
     @app.route("/forgot-password")
     def forgot_password_page():
@@ -365,7 +510,11 @@ def create_app(config_name="development"):
         """Account-type selection (Individual/Small/Medium/Enterprise) - the
         first step after email verification. See
         POST /api/onboarding/account-type."""
-        return render_template("onboarding_account_type.html")
+        from db import get_user_by_id
+
+        user = get_user_by_id(get_current_user_id())
+        return render_template("onboarding_account_type.html",
+                               prefill_website=(getattr(user, "company_website", None) or "") if user else "")
 
     @app.route("/onboarding/contact-sales")
     @login_required_page
