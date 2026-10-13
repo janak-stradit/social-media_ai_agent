@@ -402,3 +402,46 @@ def test_email_and_journey_endpoints_are_admin_only(admin):
     assert _client(user).get("/api/admin/invite-contacts/1/journey").status_code == 403
     assert _client(user).get("/api/admin/invite-messages/1").status_code == 403
     assert _client(admin).get("/api/admin/invite-messages/999999").status_code == 404
+
+
+def test_the_designed_email_is_kept_as_html_too(admin, smtp):
+    contact = _contact(admin, name="Asha Rao")
+    client = _client(admin)
+    assert client.post("/api/admin/invite-contacts/send", json={"ids": [contact["id"]], "style": "designed",
+                                                                "inviter_name": "Janak", "message": "Welcome!"}).get_json()["invited"] == 1
+    [message] = client.get(f"/api/admin/invite-contacts/{contact['id']}/journey").get_json()["messages"]
+    assert message["style"] == "designed" and message["subject"] == "Janak invited you to AVIR AI"
+    assert "Accept invitation" in message["html"] and "Welcome!" in message["html"] and "Unsubscribe</a>" in message["html"]
+    assert message["body"].startswith("Hi Asha,")
+
+
+def test_every_style_is_a_designed_html_email(admin, smtp, fake_ai):
+    with_preview = _contact(admin, name="Rohit Tiwari")
+    without = _contact(admin, company="Beta Works Pvt. Ltd.", website="")
+    lps.build_preview(db.queue_lead_previews([with_preview["id"]], admin["id"])["queued"][0])
+    client = _client(admin)
+    client.post("/api/admin/invite-contacts/send", json={"ids": [with_preview["id"], without["id"]], "style": "preview",
+                                                         "inviter_name": "Janak"})
+    by_to = {m["To"]: _parts(m) for m in smtp}
+    token = db.get_invite_contacts([with_preview["id"]])[0]["preview"]["token"]
+    posts_html = by_to[with_preview["email"]]["text/html"]
+    assert "3 LinkedIn posts for Synkrama Technologies" in posts_html and "linear-gradient" in posts_html  # the AVIR AI design
+    assert f'/p/{token}" style="display: inline-block' in posts_html and "See your posts" in posts_html  # the link is a button
+    assert "We build apps." in posts_html and "Our apps" in posts_html and "#1A73E8" in posts_html  # a peek at the posts
+    assert "Unsubscribe</a>" in posts_html and "Hi Rohit," in posts_html
+    note_html = by_to[without["email"]]["text/html"]
+    assert "An invitation for Beta Works" in note_html and "Set up my account" in note_html and "/i/" in note_html
+    assert "Hi Beta Works team," in note_html and "Draft post" not in note_html
+    # what was kept is the same design
+    [kept] = client.get(f"/api/admin/invite-contacts/{without['id']}/journey").get_json()["messages"]
+    assert kept["html"] == note_html
+
+
+def test_the_send_panel_shows_the_real_email_without_sending_it(admin, smtp, fake_ai):
+    contact = _contact(admin, company="Sahyadri Motors")
+    r = _client(admin).post("/api/admin/invite-contacts/sample", json={
+        "contact_id": contact["id"], "style": "designed", "inviter_name": "Janak", "message": "Hello from Pune",
+        "postal_address": "Baner Road, Pune"}).get_json()
+    assert r["subject"] == "Janak invited you to AVIR AI" and "Hi Sahyadri Motors team," in r["html"]
+    assert "Hello from Pune" in r["html"] and "Baner Road, Pune" in r["html"]
+    assert not smtp and not db.invite_contact_journey(contact["id"])["messages"]  # nothing sent or kept

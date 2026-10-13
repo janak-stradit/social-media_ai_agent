@@ -15,7 +15,6 @@ measured.
   know us yet. The designed HTML invitation is still available.
 """
 
-import html
 import re
 from datetime import datetime, timezone
 
@@ -172,20 +171,6 @@ def footer_text(unsubscribe_url: str, address: str) -> str:
     if address:
         lines.append(address)
     return "\n".join(lines)
-
-
-_URL = re.compile(r"(https?://[^\s<>\"]+)")
-
-
-def text_to_html(text: str) -> str:
-    """A plain-looking HTML version of a note (paragraphs, clickable links)."""
-    paragraphs = []
-    for block in re.split(r"\n\s*\n", text.strip()):
-        safe = html.escape(block)
-        safe = _URL.sub(lambda m: f'<a href="{m.group(1)}">{m.group(1)}</a>', safe).replace("\n", "<br>")
-        paragraphs.append(f'<p style="margin: 0 0 14px 0;">{safe}</p>')
-    return ('<!DOCTYPE html><html><body style="font-family: Arial, sans-serif; font-size: 14px; line-height: 1.55; '
-            f'color: #222;">{"".join(paragraphs)}</body></html>')
 
 
 def build_note(template_key: str, subject: str | None, body: str | None, contact: dict, links: dict,

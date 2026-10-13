@@ -259,6 +259,7 @@
         .ic-sample-head { display: flex; justify-content: space-between; align-items: center; font-size: 0.76rem; color: #6b7280; margin-bottom: 0.4rem; }
         .ic-sample-nav { display: inline-flex; gap: 10px; }
         .ic-sample-subject { font-weight: 700; font-size: 0.84rem; color: #172033; margin-bottom: 0.4rem; }
+        .ic-sample-frame { width: 100%; height: 520px; border: 1px solid #e5e7eb; border-radius: 8px; background: #f8f9fc; display: block; }
         .ic-sample-body { white-space: pre-wrap; font-family: inherit; font-size: 0.8rem; line-height: 1.5; color: #374151; margin: 0; max-height: 260px; overflow: auto; }
         .ic-merge { display: inline-block; font-family: ui-monospace, Consolas, monospace; font-size: 0.72rem; background: #f3f4f6; border-radius: 4px; padding: 0 4px; margin: 1px 2px; cursor: pointer; border: none; color: #374151; }
         .ic-more-filters { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; padding: 0.5rem 0.65rem;
@@ -331,6 +332,9 @@
         .ic-email-meta { display: grid; grid-template-columns: 90px 1fr; gap: 4px 10px; font-size: 0.82rem; margin-bottom: 0.9rem; }
         .ic-email-meta dt { color: #6b7280; font-weight: 600; }
         .ic-email-meta dd { margin: 0; overflow-wrap: anywhere; }
+        .ic-email-tabs { display: flex; gap: 6px; margin-bottom: 0.6rem; }
+        .ic-email-frame { width: 100%; height: 640px; border: 1px solid #e5e7eb; border-radius: 10px; background: #f8f9fc; }
+        .ic-mail summary .ic-link { font-size: 0.76rem; }
         .ic-email-body { border: 1px solid #e5e7eb; border-radius: 10px; background: #fafbfc; max-height: none; }
         .ic-msg span { display: block; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.78rem; color: #4b5563; }
         #icTable tbody tr.is-selected { background: #fff7ed; }
@@ -1370,7 +1374,7 @@
 
     <!-- Send invitations to the selected contacts -->
     <div class="admin-panel-backdrop" id="bulkSendBackdrop" onclick="closeBulkSendPanel()"></div>
-    <aside class="admin-side-panel" id="bulkSendPanel" aria-labelledby="bulkSendTitle">
+    <aside class="admin-side-panel ic-wide-panel" id="bulkSendPanel" aria-labelledby="bulkSendTitle">
         <div class="admin-side-panel-header">
             <h5 id="bulkSendTitle"><i class="fas fa-paper-plane text-primary me-2"></i>Send invitations</h5>
             <button type="button" class="admin-side-panel-close" onclick="closeBulkSendPanel()" aria-label="Close"><i class="fas fa-xmark"></i></button>
@@ -1406,8 +1410,12 @@
                         <span class="ic-sample-nav"><button type="button" class="ic-link" id="bulkSamplePrev" aria-label="Previous person"><i class="fas fa-chevron-left"></i></button>
                         <button type="button" class="ic-link" id="bulkSampleNext" aria-label="Next person"><i class="fas fa-chevron-right"></i></button></span></div>
                     <div class="ic-sample-subject" id="bulkSampleSubject"></div>
-                    <pre class="ic-sample-body" id="bulkSampleBody"></pre>
+                    <iframe class="ic-sample-frame" id="bulkSampleFrame" title="How the email looks" sandbox=""></iframe>
                 </div>
+            </div>
+            <div class="ic-sample d-none" id="bulkDesignedSample" aria-live="polite">
+                <div class="ic-sample-head"><span>How it looks for <strong id="bulkDesignedWho"></strong></span></div>
+                <iframe class="ic-sample-frame" id="bulkDesignedFrame" title="How the email looks" sandbox=""></iframe>
             </div>
             <div class="admin-form-group" id="bulkMessageGroup">
                 <label for="bulkMessageInput">Personal message <span class="text-muted fw-normal">(optional, the same for everyone)</span></label>

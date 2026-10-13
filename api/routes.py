@@ -3206,26 +3206,51 @@ def _send_invitation(invitation: dict, token: str, contact: dict | None = None, 
     note from the contact's details (services/invite_outreach.TEMPLATES);
     "preview" links to the lead's preview page and falls back to "note" for
     contacts without a ready preview."""
+    from db import record_invite_message
+
+    service, msg, text, style = _invitation_email(invitation, token, contact, style, subject, body)
+    # Kept exactly as sent (Admin -> Invitations shows it), whether it went out or not
+    html = next((part.get_payload(decode=True).decode("utf-8", "replace") for part in msg.walk()
+                 if part.get_content_type() == "text/html"), None)
+    record = {"email": invitation["email"], "style": style, "subject": str(msg["Subject"] or ""), "body": text, "html": html,
+              "contact_id": (contact or {}).get("id"), "invitation_id": invitation.get("id"),
+              "sent_by_user_id": get_current_user_id(), "sender_name": invitation.get("invited_by")}
+    try:
+        service.deliver_invitation(msg, invitation["email"])
+    except Exception as err:
+        record_invite_message(**record, status="failed", error=str(err)[:500])
+        raise
+    record_invite_message(**record)
+
+
+def _invitation_email(invitation: dict, token: str, contact: dict | None, style: str, subject: str | None,
+                      body: str | None, address: str | None = None):
+    """(EmailService, the email, its plain text, the style used) - every style
+    is a designed HTML email (services/email_service). "preview" falls back to
+    "note" for a contact without a ready preview."""
     from services.email_service import EmailService
-    from services.invite_outreach import build_note, postal_address, unsubscribe_token
+    from services.invite_outreach import build_note, postal_address, short_company, unsubscribe_token
 
     base = (Config.APP_BASE_URL or request.host_url).rstrip("/")
     invite_link = f"{base}/i/{token}"
+    company = short_company((contact or {}).get("company")) or None
     note = None
     if style in ("preview", "note") and contact is not None:
         preview = contact.get("preview") or {}
         has_preview = preview.get("status") == "ready"
         key = "preview" if style == "preview" and has_preview else "note"
-        links = {"invite": invite_link, "preview": f"{base}/p/{preview['token']}" if has_preview else None}
+        preview_link = f"{base}/p/{preview['token']}" if has_preview else None
         own_text = key == style  # a fallback note uses its own wording, not the preview template's
         note_subject, note_text = build_note(key, subject if own_text else None, body if own_text else None, contact,
-                                             links, invitation.get("invited_by") or "")
-        note = {"subject": note_subject, "text": note_text}
+                                             {"invite": invite_link, "preview": preview_link}, invitation.get("invited_by") or "")
+        note = {"subject": note_subject, "text": note_text, "button_url": invite_link,
+                "button_label": "Set up my account", "heading": f"An invitation for {company}" if company else "You're invited to AVIR AI"}
+        if key == "preview":
+            note.update(button_url=preview_link, button_label="See your posts", card=_preview_card(preview["token"], company))
+            note["heading"] = f"{len((note['card'] or {}).get('titles') or []) or 3} LinkedIn posts for {company or 'you'}"
         style = key
     elif style != "designed":
         style = "designed"
-    from db import record_invite_message
-
     service = EmailService()
     msg, text = service.build_invitation_email(
         to_email=invitation["email"],
@@ -3235,19 +3260,26 @@ def _send_invitation(invitation: dict, token: str, contact: dict | None = None, 
         message=invitation.get("message"),
         expires_days=30,
         unsubscribe_url=f"{base}/u/{unsubscribe_token(invitation['email'])}",
-        postal_address=postal_address(),
+        postal_address=postal_address() if address is None else address,
         note=note,
+        company=company,
     )
-    # Kept exactly as sent (Admin -> Invitations shows it), whether it went out or not
-    record = {"email": invitation["email"], "style": style, "subject": str(msg["Subject"] or ""), "body": text,
-              "contact_id": (contact or {}).get("id"), "invitation_id": invitation.get("id"),
-              "sent_by_user_id": get_current_user_id(), "sender_name": invitation.get("invited_by")}
-    try:
-        service.deliver_invitation(msg, invitation["email"])
-    except Exception as err:
-        record_invite_message(**record, status="failed", error=str(err)[:500])
-        raise
-    record_invite_message(**record)
+    return service, msg, text, style
+
+
+def _preview_card(token: str, company: str | None) -> dict | None:
+    """A peek at the posts for the "Show them their posts" email: the first
+    post's opening, the posts' titles and the brand colour."""
+    from db import get_lead_preview
+
+    found = get_lead_preview(token=token)
+    if not found or not found["posts"]:
+        return None
+    caption = " ".join(found["posts"][0]["caption"].split())
+    excerpt = caption if len(caption) <= 180 else caption[:170].rsplit(" ", 1)[0].rstrip(".,;:!?-") + "…"
+    colors = (found["profile"] or {}).get("primary_colors") or []
+    return {"company": (found["profile"] or {}).get("company_name") or company or "", "excerpt": excerpt,
+            "titles": [p.get("occasion") or p["title"] for p in found["posts"]], "color": colors[0] if colors else None}
 
 
 def _unsubscribed_on(email: str) -> str | None:
@@ -3482,6 +3514,34 @@ def admin_invite_message(message_id):
     if message is None:
         return jsonify({"success": False, "error": "Email not found."}), 404
     return jsonify({"success": True, "message": message})
+
+
+@api_bp.route("/admin/invite-contacts/sample", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_invite_sample():
+    """The email one selected person would get with the send panel's current
+    settings - built exactly like the real one, but not sent and not saved."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import get_invite_contacts
+
+    data = request.get_json(silent=True) or {}
+    found = get_invite_contacts([data.get("contact_id")])
+    if not found:
+        return jsonify({"success": False, "error": "Contact not found."}), 404
+    contact = found[0]
+    style = data.get("style") if data.get("style") in ("designed", "preview", "note") else "designed"
+    invitation = {"email": contact["email"], "name": contact.get("name"), "invited_by": (data.get("inviter_name") or "").strip()[:255],
+                  "message": (data.get("message") or "").strip()[:1000] if style == "designed" else None}
+    address = data.get("postal_address") if isinstance(data.get("postal_address"), str) else None
+    _service, msg, text, used = _invitation_email(invitation, "their-own-link", contact, style,
+                                                  (data.get("subject") or "").strip()[:200] or None,
+                                                  (data.get("body") or "").strip()[:5000] or None, address)
+    html = next((part.get_payload(decode=True).decode("utf-8", "replace") for part in msg.walk()
+                 if part.get_content_type() == "text/html"), "")
+    return jsonify({"success": True, "subject": str(msg["Subject"] or ""), "from": str(msg["From"] or ""),
+                    "style": used, "html": html, "text": text})
 
 
 @api_bp.route("/admin/invite-contacts/previews", methods=["POST"])
