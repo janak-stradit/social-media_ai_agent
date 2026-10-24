@@ -52,7 +52,10 @@ def parse_when(value, now: datetime | None = None) -> datetime:
 def check_items(user_id: int, items: list[dict]) -> None:
     """What would stop the post going out, found now instead of at publish time."""
     from services.post_edit_service import MAX_HASHTAGS, limit_for
-    from services.publish_service import NAMES, PLATFORMS, connections, post_text
+    from services.publish_service import NAMES, connections, post_text
+    from services.publish_service import platforms as publishable
+
+    PLATFORMS = publishable()
 
     connected = connections(user_id)
     for item in items:
@@ -160,6 +163,10 @@ def publish(post: dict, upload_folder: str, now: datetime | None = None) -> str:
             out = publish_item(post["user_id"], item, upload_folder)
             results[platform] = {"ok": True, "permalink": out.get("permalink"), "post_id": out.get("post_id"),
                                  "account": out.get("account"), "format": out.get("format"), "at": at}
+            from db import register_published_post  # so its results can be fetched (services/metrics_service.py)
+
+            register_published_post(post["user_id"], platform, out.get("post_id"), out.get("permalink"),
+                                    item.get("caption"), "scheduled", post["id"])
         except PublishError as err:
             results[platform] = {"ok": False, "error": str(err)[:400], "at": at}
         except Exception as err:  # one platform's surprise must not lose the others' results

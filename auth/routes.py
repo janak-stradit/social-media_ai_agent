@@ -1,6 +1,7 @@
 import hashlib
 import logging
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 
 from flask import (
@@ -16,6 +17,7 @@ from flask import (
 from werkzeug.security import check_password_hash, generate_password_hash
 
 from auth.captcha import consume_pass_token
+from auth.rate_limit import RULES, client_ip, count, hit, limit_by_ip, reset, too_many
 from auth.utils import get_current_user_id
 from config import Config
 from db import (
@@ -30,6 +32,7 @@ from db import (
     reset_user_password,
     set_user_password_reset_token,
     set_user_verification_token,
+    user_currency,
 )
 from logging_setup import mask_email
 
@@ -40,7 +43,7 @@ auth_bp = Blueprint("auth", __name__)
 VERIFICATION_TOKEN_TTL = timedelta(hours=24)
 RESEND_COOLDOWN = timedelta(seconds=60)
 PASSWORD_RESET_TTL = timedelta(hours=1)
-MIN_PASSWORD_LENGTH = 6  # same rule as register()
+MIN_PASSWORD_LENGTH = 8  # sign-up and password reset; existing shorter passwords still work
 
 
 def _as_utc(dt):
@@ -91,7 +94,8 @@ def _user_payload(user) -> dict:
         "email": user.email,
         "initials": initials,
         "is_admin": bool(getattr(user, "is_admin", False)),
-        "credit_limit": round(float(getattr(user, "credit_limit", 10.0) or 10.0), 2),
+        "credit_limit": round(float(getattr(user, "credit_limit", 0.0) or 0.0), 2),
+        "currency": user_currency(user.id),
         "account_type": getattr(user, "account_type", None),
     }
 
@@ -120,6 +124,7 @@ def _claim_lead_preview(token, user_id: int, email: str) -> None:
 
 
 @auth_bp.route("/register", methods=["POST"])
+@limit_by_ip("register_ip")
 def register():
     data = request.get_json() or {}
     name = (data.get("name") or "").strip()
@@ -128,8 +133,8 @@ def register():
 
     if not name or not email or not password:
         return jsonify({"success": False, "error": "Name, email, and password are required"}), 400
-    if len(password) < 6:
-        return jsonify({"success": False, "error": "Password must be at least 6 characters"}), 400
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return jsonify({"success": False, "error": f"Password must be at least {MIN_PASSWORD_LENGTH} characters"}), 400
     if get_user_by_email(email):
         return jsonify({"success": False, "error": "An account with this email already exists"}), 409
 
@@ -179,15 +184,163 @@ def login():
 
     if not email or not password:
         return jsonify({"success": False, "error": "Email and password are required"}), 400
+    # Brute-force protection: per visitor and per account being tried
+    ip_blocked = hit("login_ip", client_ip())
+    tries = count("login_email", email)
+    if tries == RULES["login_email"][0] + 1:
+        _notify_sign_in_lockout(email)  # the first attempt over the limit: tell the account's owner, once
+    if ip_blocked or tries > RULES["login_email"][0]:
+        return too_many("Too many sign-in attempts. Please wait 15 minutes, or reset your password.")
 
     user = get_user_by_email(email)
     if not user or not check_password_hash(user.password_hash, password):
         return jsonify({"success": False, "error": "Invalid email or password"}), 401
 
+    reset("login_email", email)
     session.clear()
+    if user.totp_enabled_at is not None:
+        # Password was right; the authenticator code comes next (/api/auth/2fa/verify)
+        session["pending_2fa"] = {"user_id": user.id, "at": int(time.time())}
+        return jsonify({"success": True, "two_factor_required": True})
     session["user_id"] = user.id
     session.permanent = True
     return jsonify({"success": True, "user": _user_payload(user)})
+
+
+def _notify_sign_in_lockout(email: str) -> None:
+    """Someone keeps getting an account's password wrong: email its owner
+    (once per lock window) and record it. Silent for unknown emails, so this
+    can't be used to find out which addresses have accounts."""
+    from db import log_audit
+
+    user = get_user_by_email(email)
+    if not user:
+        return
+    log_audit("login.locked", target_user_id=user.id, details={"attempts": RULES["login_email"][0] + 1}, ip=client_ip())
+    try:
+        from services.email_service import EmailService
+
+        base = (Config.APP_BASE_URL or request.host_url).rstrip("/")
+        EmailService().send_billing_email(
+            to_email=user.email, name=user.name or "there", subject="Sign-in attempts on your account",
+            headline="Someone tried to sign in to your account",
+            lines=[f"There were {RULES['login_email'][0] + 1} sign-in attempts with a wrong password on your AVIR AI "
+                   "account, so signing in is paused for 15 minutes.",
+                   "If this was you, wait a few minutes or reset your password. If it wasn't, your account is still safe; "
+                   "consider a new password and turning on two-step sign-in in Settings -> Security."],
+            button="Reset my password", url=f"{base}/forgot-password",
+            footer="You get this email to keep your AVIR AI account secure.")
+    except Exception as err:  # noqa: BLE001 - the lock works without the email
+        logger.warning(f"Lockout email to user {user.id} failed: {err}")
+
+
+# ── Two-step sign-in (auth/two_factor.py) ─────────────────────────────────
+PENDING_2FA_SECONDS = 5 * 60
+
+
+@auth_bp.route("/2fa/verify", methods=["POST"])
+def verify_two_factor():
+    """Second step of signing in: the six-digit code from the authenticator app."""
+    from auth import two_factor
+    from db import get_totp_state, log_audit, mark_totp_used
+
+    pending = session.get("pending_2fa") or {}
+    user_id = pending.get("user_id")
+    if not user_id or time.time() - int(pending.get("at") or 0) > PENDING_2FA_SECONDS:
+        session.pop("pending_2fa", None)
+        return jsonify({"success": False, "error": "Your sign-in expired. Enter your email and password again."}), 401
+    if hit("totp_user", str(user_id)):
+        return too_many("Too many wrong codes. Wait a few minutes and sign in again.")
+    state = get_totp_state(user_id)
+    counter = two_factor.check_code(two_factor.decrypt_secret(state["secret"]), (request.get_json() or {}).get("code"),
+                                    state["last_counter"])
+    if counter is None:
+        log_audit("login.2fa_failed", target_user_id=user_id, ip=client_ip())
+        return jsonify({"success": False, "error": "That code isn't right. Check the app and try again."}), 401
+    mark_totp_used(user_id, counter)
+    reset("totp_user", str(user_id))
+    session.clear()
+    session["user_id"] = user_id
+    session.permanent = True
+    user = get_user_by_id(user_id)
+    return jsonify({"success": True, "user": _user_payload(user)})
+
+
+@auth_bp.route("/2fa", methods=["GET"])
+def two_factor_status():
+    from db import get_totp_state
+
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"success": False, "error": "Authentication required"}), 401
+    user = get_user_by_id(user_id)
+    return jsonify({"success": True, "enabled": get_totp_state(user_id)["enabled"],
+                    "required": bool(Config.ADMIN_2FA_REQUIRED and user and user.is_admin)})
+
+
+@auth_bp.route("/2fa/setup", methods=["POST"])
+def two_factor_setup():
+    """Start setting up: a new secret, shown once as a QR code / key. Not on
+    until a code from the app is confirmed (/2fa/enable)."""
+    from auth import two_factor
+    from db import get_totp_state, set_totp
+
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"success": False, "error": "Authentication required"}), 401
+    if get_totp_state(user_id)["enabled"]:
+        return jsonify({"success": False, "error": "Two-step sign-in is already on."}), 409
+    secret = two_factor.new_secret()
+    set_totp(user_id, two_factor.encrypt_secret(secret), enabled=False)
+    user = get_user_by_id(user_id)
+    return jsonify({"success": True, "secret": secret, "uri": two_factor.provisioning_uri(secret, user.email)})
+
+
+def _confirm_code(user_id):
+    """The time step of a valid code in the request body, else None."""
+    from auth import two_factor
+    from db import get_totp_state
+
+    if hit("totp_user", str(user_id)):
+        return None
+    state = get_totp_state(user_id)
+    return two_factor.check_code(two_factor.decrypt_secret(state["secret"]), (request.get_json() or {}).get("code"),
+                                 state["last_counter"])
+
+
+@auth_bp.route("/2fa/enable", methods=["POST"])
+def two_factor_enable():
+    from db import get_totp_state, log_audit, set_totp
+
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"success": False, "error": "Authentication required"}), 401
+    state = get_totp_state(user_id)
+    if not state["secret"]:
+        return jsonify({"success": False, "error": "Start the set-up first."}), 400
+    counter = _confirm_code(user_id)
+    if counter is None:
+        return jsonify({"success": False, "error": "That code isn't right. Check the app and try again."}), 400
+    set_totp(user_id, state["secret"], enabled=True, last_counter=counter)
+    log_audit("2fa.enabled", actor_user_id=user_id, target_user_id=user_id, ip=client_ip())
+    return jsonify({"success": True, "enabled": True})
+
+
+@auth_bp.route("/2fa/disable", methods=["POST"])
+def two_factor_disable():
+    """Turning it off needs a current code, so a stolen session can't remove it."""
+    from db import get_totp_state, log_audit, set_totp
+
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"success": False, "error": "Authentication required"}), 401
+    if not get_totp_state(user_id)["enabled"]:
+        return jsonify({"success": True, "enabled": False})
+    if _confirm_code(user_id) is None:
+        return jsonify({"success": False, "error": "That code isn't right. Check the app and try again."}), 400
+    set_totp(user_id, None, enabled=False)
+    log_audit("2fa.disabled", actor_user_id=user_id, target_user_id=user_id, ip=client_ip())
+    return jsonify({"success": True, "enabled": False})
 
 
 @auth_bp.route("/verify/<token>", methods=["GET"])
@@ -219,6 +372,7 @@ def verify_email(token):
 
 
 @auth_bp.route("/resend-verification", methods=["POST"])
+@limit_by_ip("reset_ip")
 def resend_verification():
     data = request.get_json() or {}
     email = (data.get("email") or "").strip().lower()
@@ -242,6 +396,7 @@ def resend_verification():
 
 
 @auth_bp.route("/forgot-password", methods=["POST"])
+@limit_by_ip("reset_ip")
 def forgot_password():
     """Emails a single-use reset link. Always answers the same way whether or
     not the account exists, so this can't be used to discover which emails
@@ -280,6 +435,7 @@ def forgot_password():
 
 
 @auth_bp.route("/reset-password", methods=["POST"])
+@limit_by_ip("reset_ip")
 def reset_password():
     data = request.get_json() or {}
     token = data.get("token") or ""
@@ -314,22 +470,10 @@ def logout():
 
 @auth_bp.route("/me", methods=["GET"])
 def me():
+    # No fallback account: a visitor without a session is not signed in. (This
+    # used to sign them in as user #1 - the first admin - from any browser.)
     user_id = get_current_user_id()
-    user = None
-    if user_id:
-        user = get_user_by_id(user_id)
-
-    if not user:
-        try:
-            from db import get_user_by_email
-
-            # Default dev/local fallback user
-            user = get_user_by_id(1) or get_user_by_email("vaishnavi@try.com")
-            if user:
-                session["user_id"] = user.id
-        except Exception:
-            pass
-
+    user = get_user_by_id(user_id) if user_id else None
     if not user:
         return jsonify({"success": False, "error": "Not authenticated"}), 401
 

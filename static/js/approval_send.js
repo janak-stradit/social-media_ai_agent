@@ -9,9 +9,9 @@
 // The server checks each platform's rules again (services/approval_bundle_service.py,
 // services/schedule_service.py).
 (function () {
-    const NAMES = { linkedin: 'LinkedIn', instagram: 'Instagram', facebook: 'Facebook', youtube: 'YouTube' };
-    const ICONS = { linkedin: 'fa-linkedin', instagram: 'fa-instagram', facebook: 'fa-facebook', youtube: 'fa-youtube' };
-    const LIMITS = { instagram: [2, 10], linkedin: [2, 20], facebook: [2, 10] };
+    const NAMES = { linkedin: 'LinkedIn', instagram: 'Instagram', facebook: 'Facebook', youtube: 'YouTube', twitter: 'X', threads: 'Threads' };
+    const ICONS = { linkedin: 'fa-linkedin', instagram: 'fa-instagram', facebook: 'fa-facebook', youtube: 'fa-youtube', twitter: 'fa-x-twitter', threads: 'fa-threads' };
+    const LIMITS = { instagram: [2, 10], linkedin: [2, 20], facebook: [2, 10], twitter: [2, 4], threads: [2, 10] };
     const ORDER = ['linkedin', 'instagram', 'facebook', 'youtube'];
     const SCHEDULABLE = ['linkedin', 'instagram', 'facebook'];
 
@@ -108,7 +108,24 @@
                 <label for="saWhen">Publish on</label>
                 <input type="datetime-local" class="form-control form-control-sm" id="saWhen" value="${esc(state.when)}" min="${localInputValue(new Date())}">
                 <span class="sa-when-zone">your time${zone ? ' (' + esc(zone.replace(/_/g, ' ')) + ')' : ''}</span>
-            </span>`);
+            </span>
+            ${state.whenHint ? `<span class="sa-when-hint"><i class="fas fa-clock me-1"></i>${esc(state.whenHint)}</span>` : ''}`);
+    }
+
+    // Start the time at the best slot for the post's first platform
+    // (/api/best-times: from their own results, or a common starting point)
+    function suggestBestTime() {
+        const tz = -new Date().getTimezoneOffset();
+        $.getJSON('/api/best-times?tz=' + tz).done(function (r) {
+            if (!state || state.whenTouched) return;
+            const platform = Object.keys(state.sections).find(p => state.sections[p].on) || Object.keys(state.sections)[0];
+            const best = (r.platforms || {})[platform];
+            if (!best) return;
+            state.when = localInputValue(new Date(best.next_slot));
+            state.whenHint = `${best.source === 'your_posts' ? 'Best time from your past ' + NAMES[platform] + ' posts' : 'A good time for ' + NAMES[platform]}: ${best.label}.`;
+            renderWhen();
+            render();
+        });
     }
 
     // ── Rendering ────────────────────────────────────────────────────────
@@ -173,6 +190,8 @@
                     <input type="checkbox" class="form-check-input" data-include="${platform}" ${sec.on ? 'checked' : ''}>
                     <i class="fab ${ICONS[platform]} sa-icon-${platform}"></i><strong>${NAMES[platform]}</strong>
                     ${sec.on && !issues.length ? '<span class="sa-ok"><i class="fas fa-check"></i> Ready</span>' : ''}
+                    ${scheduling() && state.connections && !state.connections[platform]
+                        ? `<a class="sa-connect" href="/settings" target="_blank" rel="noopener" title="Opens Settings in a new tab - this post stays here">Connect ${NAMES[platform]}</a>` : ''}
                 </label>
                 ${sec.on ? `
                 ${connectionHtml(platform)}
@@ -348,7 +367,7 @@
                 .done(r => { state.reviewer = r.reviewer_email; renderReviewer(); render(); })
                 .fail(xhr => toast((xhr.responseJSON || {}).error || 'Could not save the reviewer.', 'error'));
         });
-        $doc.on('input change', '#saWhen', function () { state.when = this.value; render(); });
+        $doc.on('input change', '#saWhen', function () { state.when = this.value; state.whenTouched = true; render(); });
         // The image picker opens on top of the dialog. When it closes, the dialog
         // behind takes the keyboard back (Esc, Tab) and the page stays locked.
         $doc.on('hidden.bs.modal', '#saPickerModal', function () {
@@ -429,6 +448,7 @@
         if (scheduling()) {
             renderWhen();
             render();
+            suggestBestTime();
             $.get('/api/social/connections').done(r => {
                 state.connections = r.connections || {};
                 // A platform that isn't connected starts unticked, so the rest can be scheduled straight away
@@ -436,6 +456,7 @@
                 if (!Object.values(sections).some(sec => sec.on)) Object.values(sections).forEach(sec => { sec.on = true; });  // none connected: show what to connect
                 render();
             }).fail(() => { state.connections = {}; render(); });
+            watchConnections();
         } else {
             render();
             $('#saReviewer').text('Loading reviewer...');
@@ -446,6 +467,24 @@
             });
         }
         bootstrap.Modal.getOrCreateInstance(document.getElementById('sendApprovalModal')).show();
+    }
+
+    // After "Connect" (in a new tab), coming back here picks up the new
+    // connection and ticks that platform, without losing the post
+    let watching = false;
+    function watchConnections() {
+        if (watching) return;
+        watching = true;
+        $(window).on('focus', function () {
+            if (!state || !scheduling() || !state.connections) return;
+            if (!$('#sendApprovalModal').hasClass('show')) return;
+            $.get('/api/social/connections').done(r => {
+                const now = r.connections || {};
+                Object.keys(state.sections).forEach(p => { if (now[p] && !state.connections[p]) state.sections[p].on = true; });
+                state.connections = now;
+                render();
+            });
+        });
     }
 
     window.openSendForApproval = function (source) { open(source, 'approval'); };

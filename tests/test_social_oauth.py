@@ -116,10 +116,11 @@ def _account(user, platform):
 
 
 def test_connect_buttons_only_exist_once_the_apps_are_set_up(app, monkeypatch):
-    for name in ("META_APP_ID", "META_APP_SECRET", "LINKEDIN_CLIENT_ID", "LINKEDIN_CLIENT_SECRET"):
+    for name in ("META_APP_ID", "META_APP_SECRET", "LINKEDIN_CLIENT_ID", "LINKEDIN_CLIENT_SECRET", "INSTAGRAM_APP_ID", "INSTAGRAM_APP_SECRET"):
         monkeypatch.setattr(Config, name, "")
+    monkeypatch.delenv("YOUTUBE_CLIENT_ID", raising=False)
     client = _login(app, _user())
-    assert client.get("/api/social/oauth/providers").get_json()["providers"] == {"facebook": False, "linkedin": False}
+    assert client.get("/api/social/oauth/providers").get_json()["providers"] == {"facebook": False, "linkedin": False, "instagram": False, "youtube": False}
     r = client.get("/api/social/oauth/facebook/start")
     assert r.status_code == 302 and r.headers["Location"].endswith("/settings")  # not to Facebook
     assert "isn't set up" in _result(client)["message"]
@@ -128,11 +129,14 @@ def test_connect_buttons_only_exist_once_the_apps_are_set_up(app, monkeypatch):
     assert client.get("/api/social/oauth/tiktok/start").headers["Location"].endswith("/settings")
 
 
-def test_admins_see_the_return_addresses_to_register(app, platforms):
+def test_admins_see_the_return_addresses_to_register(app, platforms, monkeypatch):
+    monkeypatch.delenv("YOUTUBE_CLIENT_ID", raising=False)
+    monkeypatch.setattr(Config, "INSTAGRAM_APP_ID", "")
     body = _login(app, _user(is_admin=True)).get("/api/social/oauth/providers").get_json()
-    assert body["providers"] == {"facebook": True, "linkedin": True}
+    assert body["providers"] == {"facebook": True, "linkedin": True, "instagram": False, "youtube": False}
     assert body["redirect_uris"] == {"facebook": "https://app.test/api/social/oauth/facebook/callback",
-                                     "linkedin": "https://app.test/api/social/oauth/linkedin/callback"}
+                                     "linkedin": "https://app.test/api/social/oauth/linkedin/callback",
+                                     "instagram": "https://app.test/api/social/oauth/instagram/callback"}
     assert "redirect_uris" not in _login(app, _user()).get("/api/social/oauth/providers").get_json()
     assert "meta-secret" not in json.dumps(body) and "li-secret" not in json.dumps(body)
 
@@ -427,10 +431,14 @@ def test_typing_new_details_by_hand_replaces_a_one_click_connection():
 
 
 def test_settings_page_carries_the_connect_buttons(app):
+    """The cards (and their Connect buttons) are drawn by settings.js from
+    /api/social/oauth/providers; the page carries the containers and the
+    script's start addresses."""
     html = _login(app, _user(is_admin=True)).get("/settings").get_data(as_text=True)
-    assert html.count('href="/api/social/oauth/facebook/start"') == 2  # the Facebook card and the Instagram card
-    assert 'href="/api/social/oauth/linkedin/start"' in html and 'id="oauthChooseModal"' in html and 'id="oauthBanner"' in html
-    assert html.count("oauth-connect-btn") == 3 and html.count("oauth-connect-btn oauth-facebook d-none") == 2  # hidden until set up
+    assert 'id="socialCards"' in html and 'id="oauthChooseModal"' in html and 'id="oauthBanner"' in html
+    script = open("static/js/settings.js", encoding="utf-8").read()
+    for start in ("/api/social/oauth/facebook/start", "/api/social/oauth/linkedin/start", "/api/auth/youtube"):
+        assert start in script
 
 
 # ── YouTube: the same check on Google's answer ──────────────────────────────
@@ -507,3 +515,155 @@ def test_nothing_from_the_address_is_shown_as_a_page(app, google):
     r = app.test_client().get("/api/auth/youtube/callback?error=%3Cscript%3Ealert(1)%3C/script%3E")
     assert "<script>alert" not in r.get_data(as_text=True)
     assert not google
+
+
+# ── Simple connect page (Settings: one card per network) ────────────────────
+
+
+def test_settings_shows_simple_cards_with_tokens_tucked_under_advanced(app):
+    user = _user()
+    with Session(db.engine) as session:  # a fully set-up account, so Settings opens
+        session.query(db.User).filter(db.User.id == user["id"]).update({"email_verified": True, "onboarding_completed": True})
+        session.commit()
+    html = _login(app, user).get("/settings").get_data(as_text=True)
+    assert 'id="socialCards"' in html and 'id="socialAdvanced"' in html
+    assert 'id="fbStatusBadge"' not in html  # the old token-first cards are gone
+
+
+def test_providers_say_when_youtube_one_click_is_set_up(app, monkeypatch):
+    client = _login(app, _user())
+    monkeypatch.delenv("YOUTUBE_CLIENT_ID", raising=False)
+    assert client.get("/api/social/oauth/providers").get_json()["providers"]["youtube"] is False
+    monkeypatch.setenv("YOUTUBE_CLIENT_ID", "yt-123")
+    monkeypatch.setenv("YOUTUBE_CLIENT_SECRET", "yt-secret")
+    assert client.get("/api/social/oauth/providers").get_json()["providers"]["youtube"] is True
+
+
+def test_the_expiry_heads_up_is_emailed_too(monkeypatch):
+    from services import email_service
+
+    sent = []
+    monkeypatch.setattr(Config, "APP_BASE_URL", "https://app.test")
+    monkeypatch.setattr(email_service.EmailService, "send_billing_email", lambda self, **kw: sent.append(kw))
+    user = _user()
+    _linkedin_expiring(user, days=3)
+    oauth.notify_expiring()
+    oauth.notify_expiring()  # once only
+    [mail] = [m for m in sent if m["to_email"] == user["email"]]
+    assert mail["button"] == "Reconnect LinkedIn" and mail["url"] == "https://app.test/settings"
+
+
+def test_a_failed_reminder_email_still_leaves_the_bell_note(monkeypatch):
+    from services import email_service
+
+    def boom(self, **kw):
+        raise RuntimeError("SMTP is not configured")
+
+    monkeypatch.setattr(Config, "APP_BASE_URL", "https://app.test")
+    monkeypatch.setattr(email_service.EmailService, "send_billing_email", boom)
+    user = _user()
+    _linkedin_expiring(user, days=-1)
+    oauth.notify_expiring()
+    assert db.list_notifications(user["id"])["items"][0]["title"] == "Your LinkedIn connection has expired"
+
+
+# ── Instagram on its own (Instagram API with Instagram Login) ───────────────
+
+
+class FakeInstagram:
+    """Answers Instagram's sign-in, token and profile calls, and records them."""
+
+    def __init__(self):
+        self.calls = []
+        self.long_lived = True
+
+    def __call__(self, method, url, **kw):
+        self.calls.append((method, url, kw))
+        params, data = kw.get("params") or {}, kw.get("data") or {}
+        if url == oauth.INSTAGRAM_TOKEN:
+            if data.get("code") != "ig-code":
+                return Resp(400, {"error_type": "OAuthException", "code": 400, "error_message": "Invalid authorization code"})
+            return Resp(200, {"data": [{"access_token": "IGSHORT", "user_id": "1789", "permissions": "instagram_business_basic"}]})
+        if url.endswith("graph.instagram.com/access_token"):
+            if not self.long_lived:
+                return Resp(400, {"error": {"message": "nope"}})
+            return Resp(200, {"access_token": "IGLONG", "token_type": "bearer", "expires_in": 5184000})
+        if url.endswith("/me"):
+            return Resp(200, {"user_id": "17841400000000001", "username": "priya.makes", "account_type": "MEDIA_CREATOR"})
+        if url.endswith("/refresh_access_token"):
+            return Resp(200, {"access_token": params["access_token"] + "-RENEWED", "expires_in": 5184000})
+        return Resp(404, {"message": f"unexpected {method} {url}"})
+
+
+@pytest.fixture
+def instagram(monkeypatch):
+    fake = FakeInstagram()
+    monkeypatch.setattr(oauth, "_http", fake)
+    for name, value in (("INSTAGRAM_APP_ID", "ig-app-1"), ("INSTAGRAM_APP_SECRET", "ig-secret"), ("APP_BASE_URL", "https://app.test"),
+                        ("INSTAGRAM_OAUTH_SCOPES", "instagram_business_basic,instagram_business_content_publish")):
+        monkeypatch.setattr(Config, name, value)
+    return fake
+
+
+def test_instagram_sign_in_goes_to_instagram_itself(app, instagram):
+    client = _login(app, _user())
+    assert client.get("/api/social/oauth/providers").get_json()["providers"]["instagram"] is True
+    target, query = _start(client, "instagram")
+    assert target.netloc == "www.instagram.com" and target.path == "/oauth/authorize"
+    assert query["client_id"] == ["ig-app-1"] and query["enable_fb_login"] == ["0"]
+    assert query["scope"] == ["instagram_business_basic,instagram_business_content_publish"]
+    assert query["redirect_uri"] == ["https://app.test/api/social/oauth/instagram/callback"] and "secret" not in target.query
+
+
+def test_an_instagram_account_without_a_page_is_connected_for_60_days(app, instagram):
+    user = _user()
+    client = _login(app, user)
+    _, query = _start(client, "instagram")
+    r = client.get(f"/api/social/oauth/instagram/callback?code=ig-code%23_&state={query['state'][0]}")
+    assert r.status_code == 302
+    assert _result(client) == {"ok": True, "provider": "instagram", "message": "Connected Instagram (@priya.makes)."}
+    account = _account(user, "instagram")
+    assert (account.account_id, account.account_name, account.access_token) == ("17841400000000001", "@priya.makes", "IGLONG")
+    days = (account.token_expires_at - datetime.now(timezone.utc).replace(tzinfo=None)).days
+    assert 58 <= days <= 60 and _account(user, "facebook") is None
+    exchange = instagram.calls[0][2]["data"]
+    assert exchange["code"] == "ig-code" and exchange["client_secret"] == "ig-secret"  # "#_" removed
+    assert "IGLONG" not in json.dumps(client.get("/api/social/accounts").get_json())
+
+
+def test_a_refused_instagram_code_is_explained(app, instagram):
+    client = _login(app, _user())
+    _, query = _start(client, "instagram")
+    client.get(f"/api/social/oauth/instagram/callback?code=used&state={query['state'][0]}")
+    result = _result(client)
+    assert result["ok"] is False and "Invalid authorization code" in result["message"]
+
+
+def test_cancelling_instagram_connects_nothing(app, instagram):
+    user = _user()
+    client = _login(app, user)
+    _, query = _start(client, "instagram")
+    client.get(f"/api/social/oauth/instagram/callback?error=access_denied&error_reason=user_denied&state={query['state'][0]}")
+    assert "cancelled" in _result(client)["message"] and _account(user, "instagram") is None
+
+
+def test_instagram_login_tokens_are_renewed_before_they_run_out(instagram):
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    soon, later, page_linked = _user(), _user(), _user()
+    for user, token, days in ((soon, "IGSOON", 10), (later, "IGLATER", 50), (page_linked, "EAAPAGE", 10)):
+        db.save_social_account(user_id=user["id"], platform="instagram", account_name="@x", account_id="1", access_token=token,
+                               connected_via="oauth", token_expires_at=now + timedelta(days=days))
+    assert oauth.refresh_instagram_tokens() >= 1
+    renewed = _account(soon, "instagram")
+    assert renewed.access_token == "IGSOON-RENEWED" and (renewed.token_expires_at - now).days >= 59
+    assert _account(later, "instagram").access_token == "IGLATER"  # plenty of time left
+    assert _account(page_linked, "instagram").access_token == "EAAPAGE"  # a Facebook Page token: left alone
+
+
+def test_instagram_login_tokens_publish_through_graph_instagram():
+    from services import instagram_service
+
+    assert instagram_service.graph_url("123/media", "IGAAtoken").startswith("https://graph.instagram.com/")
+    assert instagram_service.graph_url("123/media", "EAAtoken").startswith("https://graph.facebook.com/")
+    assert instagram_service.graph_url("123/media").startswith("https://graph.facebook.com/")
+

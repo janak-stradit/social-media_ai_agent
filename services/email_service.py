@@ -435,15 +435,22 @@ def _build_password_reset_html(name: str, reset_url: str, ttl_minutes: int) -> s
 
 
 def _build_credit_decision_html(
-    name: str, approved: bool, requested_amount: float, credit_limit: float | None, dashboard_url: str
+    name: str, approved: bool, requested_amount: float, credit_limit: float | None, dashboard_url: str,
+    currency: str = "USD",
 ) -> str:
     """The user's answer to a credit extension request (Admin -> Credit
-    Extension Requests -> approve / reject)."""
+    Extension Requests -> approve / reject). Amounts are USD, shown in the
+    user's currency (db.format_money)."""
+    from db import format_money
+
+    def money(usd):
+        return format_money(usd, currency)
+
     if approved:
         heading = "Your credit request was approved"
         body = (
-            f"Good news: your request for <strong>${requested_amount:,.2f}</strong> of extra credit has been approved. "
-            + (f"Your credit limit is now <strong>${credit_limit:,.2f}</strong>." if credit_limit is not None else "")
+            f"Good news: your request for <strong>{money(requested_amount)}</strong> of extra credit has been approved. "
+            + (f"Your credit limit is now <strong>{money(credit_limit)}</strong>." if credit_limit is not None else "")
             + " You can carry on creating content right away."
         )
         button = "Open AVIR AI"
@@ -451,8 +458,8 @@ def _build_credit_decision_html(
     else:
         heading = "Your credit request was not approved"
         body = (
-            f"Your request for <strong>${requested_amount:,.2f}</strong> of extra credit was not approved this time. "
-            + (f"Your credit limit stays at <strong>${credit_limit:,.2f}</strong>. " if credit_limit is not None else "")
+            f"Your request for <strong>{money(requested_amount)}</strong> of extra credit was not approved this time. "
+            + (f"Your credit limit stays at <strong>{money(credit_limit)}</strong>. " if credit_limit is not None else "")
             + "If you need more, you can send a new request with a little more detail about what you plan to create."
         )
         button = "Go to AVIR AI"
@@ -654,6 +661,11 @@ def _build_monthly_recap_html(
         f"You reached your weekly goal in <strong>{stats['weeks_goal_met']} of {stats['weeks']}</strong> weeks."
         if stats.get("weeks") else ""
     )
+    results = stats.get("results") or {}
+    if results.get("posts"):
+        goal_line += (f" The {results['posts']} posts you published got <strong>{results.get('likes', 0):,} likes</strong>, "
+                      f"{results.get('comments', 0):,} comments and {results.get('shares', 0):,} shares"
+                      + (f", reaching {results['reach']:,} people." if results.get("reach") else "."))
     tips_html = "".join(
         f'<div style="color: #475569; font-size: 14px; line-height: 1.55; margin-top: 8px;">&bull; {_escape(tip)}</div>'
         for tip in tips
@@ -832,6 +844,49 @@ def _build_note_html(text: str, heading: str, button_url: str | None, button_lab
     </table>
 </body>
 </html>"""
+
+
+def _build_billing_html(name: str, headline: str, lines: list[str], button: str, url: str, footer: str) -> str:
+    """Billing emails (services/billing_notice_service.py): receipts, renewal
+    and expiry reminders, failed renewals. lines are plain text, escaped here."""
+    body = "".join(f'<p style="margin: 0 0 12px 0;">{_escape(line)}</p>' for line in lines)
+    return f"""<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 0; background-color: #f8f9fc; font-family: 'Segoe UI', Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fc; padding: 32px 0;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="560" cellpadding="0" cellspacing="0"
+                       style="background-color: #ffffff; border: 1px solid #e6e8ef; border-radius: 16px; overflow: hidden;">
+                    <tr>
+                        <td style="background-color: #e85a1c; background-image: linear-gradient(135deg, #ffa066 0%, #e85a1c 100%); padding: 28px 32px; text-align: center;">
+                            <span style="color: #ffffff; font-size: 21px; font-weight: 700;">{_escape(headline)}</span>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 28px 32px 8px 32px; color: #172033; font-size: 15px; line-height: 1.6;">
+                            <p style="margin: 0 0 12px 0;">Hi {_escape(name)},</p>
+                            {body}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td align="center" style="padding: 12px 32px 28px 32px;">
+                            <a href="{_escape(url)}" style="display: inline-block; background-color: #c2410c; color: #ffffff; font-size: 15px; font-weight: 700; text-decoration: none; padding: 13px 28px; border-radius: 6px;">{_escape(button)}</a>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 16px 32px; background-color: #f8f9fc; border-top: 1px solid #e6e8ef; color: #667085; font-size: 12px; line-height: 1.6;">
+                            {_escape(footer)}
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a>.</div>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
+"""
 
 
 def _build_invitation_html(
@@ -1466,7 +1521,7 @@ class EmailService:
 
     def send_credit_decision_email(
         self, to_email: str, name: str, approved: bool, requested_amount: float,
-        credit_limit: float | None, dashboard_url: str,
+        credit_limit: float | None, dashboard_url: str, currency: str = "USD",
     ) -> dict:
         """Sent when an admin approves or rejects a credit extension request
         (api/routes.py admin_approve_request / admin_reject_request)."""
@@ -1482,7 +1537,7 @@ class EmailService:
         msg["From"] = self.from_email
         msg["To"] = to_email
         msg.attach(MIMEText(
-            _build_credit_decision_html(name, approved, requested_amount, credit_limit, dashboard_url), "html"
+            _build_credit_decision_html(name, approved, requested_amount, credit_limit, dashboard_url, currency), "html"
         ))
 
         self._deliver(msg, [to_email], "credit_decision")
@@ -1512,6 +1567,25 @@ class EmailService:
 
         self._deliver(msg, [to_email], "weekly_ideas")
 
+        return {"success": True, "recipient": to_email}
+
+    def send_billing_email(self, to_email: str, name: str, subject: str, headline: str, lines: list[str],
+                           button: str, url: str, footer: str) -> dict:
+        """A billing email (services/billing_notice_service.py). Account email:
+        sent whatever the marketing email settings are."""
+        if not self.enabled:
+            raise RuntimeError(
+                "SMTP is not configured. Set SMTP_HOST, SMTP_USERNAME and SMTP_PASSWORD in .env."
+            )
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = f"{subject} - AVIR AI"
+        msg["From"] = self.from_email
+        msg["To"] = to_email
+        msg.attach(MIMEText(_build_billing_html(name, headline, lines, button, url, footer), "html"))
+        with smtplib.SMTP(self.host, self.port, timeout=30) as server:
+            server.starttls()
+            server.login(self.username, self.password)
+            server.sendmail(self.from_email, [to_email], msg.as_string())
         return {"success": True, "recipient": to_email}
 
     def send_nudge_email(

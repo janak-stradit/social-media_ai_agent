@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 # What is posted is the caption, a blank line and the hashtags - counted together.
 # Facebook itself allows far more; 3000 is what an approval request carries
 # (approval_bundle_service.MAX_CAPTION), so nothing is cut off later.
-POST_LIMITS = {"instagram": 2200, "linkedin": 3000, "facebook": 3000}
+POST_LIMITS = {"instagram": 2200, "linkedin": 3000, "facebook": 3000, "twitter": 280, "threads": 500}
 DEFAULT_LIMIT = 3000
 MAX_HASHTAGS = 30
 CAROUSEL = "carousel"  # the caption shared by a /carousel's slides (posted to LinkedIn and Instagram)

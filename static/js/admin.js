@@ -53,7 +53,8 @@ $(document).ready(function () {
                 fillCostUserFilter();
                 renderAdminUserKpis(users);
                 renderAdminAccountSummary(users);
-                applyAdminUserFilters();
+                // the Plan column needs the plan list; the table shows without it if that fails
+                plansLoaded().always(applyAdminUserFilters);
             }
         });
     }
@@ -178,9 +179,217 @@ $(document).ready(function () {
         }
     }
 
+    // ── Plan column: change a user's plan straight from the table ─────────
+    function plansLoaded() {
+        if (window._plans) return $.when(window._plans);
+        return $.getJSON('/api/admin/plans').then(r => (window._plans = r.plans));
+    }
+    function planCell(u) {
+        const plans = window._plans || [];
+        if (!plans.length) return `<span class="text-muted small">${escapeHtml(u.plan || '')}</span>`;
+        const options = plans.map(p => `<option value="${escapeAttr(p.slug)}"${p.slug === u.plan ? ' selected' : ''}>${escapeHtml(p.name)}</option>`).join('');
+        const note = u.is_admin ? '<div class="small text-muted mt-1">No limits (admin)</div>' : '';
+        return `<select class="form-select form-select-sm admin-plan-select" data-user="${u.id}" data-current="${escapeAttr(u.plan || '')}"
+                    aria-label="Plan for ${escapeAttr(u.name)}">${options}</select>${note}`;
+    }
+    $(document).on('change', '.admin-plan-select', function () {
+        const $select = $(this);
+        const userId = $select.data('user');
+        const previous = $select.data('current');
+        const plan = $select.val();
+        const name = $select.find('option:selected').text();
+        $select.prop('disabled', true).addClass('is-saving');
+        $.ajax({
+            url: `/api/admin/users/${userId}/plan`,
+            type: 'PUT',
+            contentType: 'application/json',
+            data: JSON.stringify({ plan: plan }),
+            success: function () {
+                $select.data('current', plan);
+                const u = (window._allAdminUsers || []).find(x => x.id === userId);
+                if (u) u.plan = plan;
+                showToast(`Plan changed to ${name}. Its monthly allowance starts today.`, 'success');
+            },
+            error: function (xhr) {
+                $select.val(previous);
+                showToast((xhr.responseJSON || {}).error || 'Could not change the plan.', 'error');
+            },
+            complete: function () { $select.prop('disabled', false).removeClass('is-saving'); }
+        });
+    });
+
+    // ── Payments tab: invoices and refunds ────────────────────────────────
+    function minor(amount, currency) {
+        return (currency === 'USD' ? '$' : '₹') + (amount / 100).toLocaleString(currency === 'USD' ? 'en-US' : 'en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    window.loadAdminPayments = function () {
+        loadAdminSubscriptions();
+        $.getJSON('/api/admin/payments').done(function (r) {
+            const STATUS = { paid: 'Paid', refunded: 'Refunded', partially_refunded: 'Partly refunded', failed: 'Failed' };
+            const rows = (r.payments || []).map(p => {
+                const left = p.amount - p.refunded_amount;
+                const canRefund = (p.status === 'paid' || p.status === 'partially_refunded') && left > 0;
+                return `<tr>
+                    <td class="text-nowrap">${p.paid_at ? escapeHtml(new Date(p.paid_at).toLocaleString()) : '–'}</td>
+                    <td>${escapeHtml(p.email || '#' + p.user_id)}</td>
+                    <td>${escapeHtml(p.description || p.item)}<div class="small text-muted">${escapeHtml(p.provider)} · ${escapeHtml(p.payment_id || p.order_id)}</div></td>
+                    <td class="text-nowrap">${minor(p.amount, p.currency)}${p.refunded_amount ? `<div class="small text-muted">${minor(p.refunded_amount, p.currency)} refunded</div>` : ''}</td>
+                    <td>${STATUS[p.status] || escapeHtml(p.status)}</td>
+                    <td class="small">${(p.invoices || []).map(i => `<a href="/invoices/${encodeURI(i.number)}" target="_blank" rel="noopener">${escapeHtml(i.number)}</a>`).join('<br>')}</td>
+                    <td class="text-end">${canRefund ? `<button type="button" class="btn-xs btn-xs-outline-neutral admin-refund-btn" data-order="${escapeAttr(p.order_id)}"
+                        data-left="${left}" data-currency="${escapeAttr(p.currency)}">Refund…</button>` : ''}</td></tr>`;
+            });
+            $('#adminPaymentsTbody').html(rows.join('') || '<tr><td colspan="7" class="text-center py-4 text-muted">No online payments yet.</td></tr>');
+        }).fail(() => $('#adminPaymentsTbody').html('<tr><td colspan="7" class="text-center py-4 text-danger">Could not load payments.</td></tr>'));
+    };
+    function loadAdminSubscriptions() {
+        $.getJSON('/api/admin/subscriptions').done(function (r) {
+            const STATUS = { active: 'Renewing', cancelled: 'Cancelled (runs to end)', ended: 'Ended' };
+            const rows = (r.subscriptions || []).map(s => `<tr>
+                <td class="text-nowrap">${escapeHtml(new Date(s.created_at).toLocaleDateString())}</td>
+                <td>${escapeHtml(s.email || '#' + s.user_id)}</td>
+                <td>${escapeHtml(s.plan_slug.charAt(0).toUpperCase() + s.plan_slug.slice(1))}, every ${escapeHtml(s.period)}<div class="small text-muted">${escapeHtml(s.provider)} · ${escapeHtml(s.provider_subscription_id)}</div></td>
+                <td class="text-nowrap">${minor(s.amount, s.currency)}</td>
+                <td>${STATUS[s.status] || escapeHtml(s.status)}</td>
+                <td class="text-nowrap">${s.paid_until ? escapeHtml(new Date(s.paid_until).toLocaleDateString()) : '–'}</td>
+                <td class="text-end">${s.status === 'active' ? `<button type="button" class="btn-xs btn-xs-outline-neutral admin-sub-cancel" data-user="${s.user_id}">Stop renewal</button>` : ''}</td></tr>`);
+            $('#adminSubsTbody').html(rows.join('') || '<tr><td colspan="7" class="text-center py-4 text-muted">No automatic renewals yet.</td></tr>');
+        });
+    }
+    $(document).on('click', '.admin-sub-cancel', function () {
+        if (!window.confirm("Stop this user's automatic renewal? They keep the time already paid for.")) return;
+        const $btn = $(this).prop('disabled', true);
+        $.post(`/api/admin/users/${$btn.data('user')}/subscription/cancel`)
+            .done(() => { showToast('Automatic renewal stopped.', 'success'); loadAdminSubscriptions(); })
+            .fail(xhr => { showToast((xhr.responseJSON || {}).error || 'Could not stop it.', 'error'); $btn.prop('disabled', false); });
+    });
+
+    $(document).on('click', '.admin-refund-btn', function () {
+        const $btn = $(this);
+        const left = Number($btn.data('left'));
+        const currency = $btn.data('currency');
+        const answer = window.prompt(`Refund how much? Leave as is for the full ${minor(left, currency)} still unrefunded.`, (left / 100).toFixed(2));
+        if (answer === null) return;
+        const amount = Number(answer);
+        if (!(amount > 0) || Math.round(amount * 100) > left) return showToast(`Enter an amount between 0.01 and ${(left / 100).toFixed(2)}.`, 'warning');
+        $btn.prop('disabled', true);
+        $.ajax({ url: `/api/admin/payments/${encodeURIComponent($btn.data('order'))}/refund`, type: 'POST', contentType: 'application/json',
+            data: JSON.stringify({ amount: Math.round(amount * 100) === left ? null : amount }) })
+            .done(r => { showToast(`Refunded ${minor(r.refunded || 0, currency)}${r.credit_note ? ' · credit note ' + r.credit_note : ''}.`, 'success'); loadAdminPayments(); })
+            .fail(xhr => { showToast((xhr.responseJSON || {}).error || 'The refund failed.', 'error'); $btn.prop('disabled', false); });
+    });
+
+    // ── Audit log tab ─────────────────────────────────────────────────────
+    const AUDIT_LABELS = {
+        'plan.assigned': 'Plan changed', 'plan.updated': 'Plan prices/limits edited', 'pack.granted': 'Pack added',
+        'credits.set': 'Credit limit set', 'credits.add': 'Credit added', 'credit_request.approved': 'Credit request approved',
+        'credit_request.rejected': 'Credit request rejected', 'access.updated': 'Image & video access changed',
+        'user.activated': 'Account activated', 'user.deactivated': 'Account deactivated', 'user.deleted': 'Account deleted',
+        '2fa.enabled': 'Two-step sign-in on', '2fa.disabled': 'Two-step sign-in off', 'login.2fa_failed': 'Wrong sign-in code',
+        'payment.received': 'Payment received', 'payment.refunded': 'Payment refunded', 'payment.bad_signature': 'Payment signature refused',
+        'payment.amount_mismatch': 'Payment amount mismatch', 'subscription.cancelled': 'Auto-renewal cancelled',
+        'subscription.ended': 'Subscription ended', 'subscription.payment_failed': 'Renewal payment failed'
+    };
+    function auditDetails(e) {
+        const d = e.details || {};
+        if (e.action === 'plan.assigned') return `${escapeHtml(d.from || '–')} → ${escapeHtml(d.to || '')}`;
+        if (e.action === 'pack.granted') return `${d.quantity} ${d.kind === 'video' ? 'videos' : 'images'}${d.note ? ' · ' + escapeHtml(d.note) : ''}`;
+        if (e.action === 'plan.updated') {
+            return `<strong>${escapeHtml(d.plan || '')}</strong>: ` + Object.entries(d.changes || {})
+                .map(([k, v]) => `${escapeHtml(k)} ${escapeHtml(String(v.from ?? '–'))} → ${escapeHtml(String(v.to ?? 'unlimited'))}`).join(', ');
+        }
+        return Object.keys(d).length ? escapeHtml(Object.entries(d).filter(([, v]) => v !== null && v !== undefined)
+            .map(([k, v]) => `${k}: ${v}`).join(' · ')) : '';
+    }
+    window.loadAuditLog = function () {
+        const action = $('#auditActionFilter').val();
+        $.getJSON('/api/admin/audit-log?limit=200' + (action ? '&action=' + encodeURIComponent(action) : '')).done(function (r) {
+            const rows = (r.entries || []).map(e => `<tr>
+                <td class="text-nowrap">${escapeHtml(new Date(e.at).toLocaleString())}</td>
+                <td>${escapeHtml(AUDIT_LABELS[e.action] || e.action)}</td>
+                <td>${escapeHtml(e.actor || '')}</td>
+                <td>${escapeHtml(e.target || '')}</td>
+                <td class="small">${auditDetails(e)}</td>
+                <td class="small text-muted">${escapeHtml(e.ip || '')}</td></tr>`);
+            $('#auditTbody').html(rows.join('') || '<tr><td colspan="6" class="text-center py-4 text-muted">No changes recorded yet.</td></tr>');
+        }).fail(() => $('#auditTbody').html('<tr><td colspan="6" class="text-center py-4 text-danger">Could not load the audit log.</td></tr>'));
+    };
+    $('#auditActionFilter').on('change', loadAuditLog);
+
+    // ── Plans tab: edit prices and limits ─────────────────────────────────
+    const PLAN_EDITOR_ROWS = [
+        ['name', 'Name', 'text'],
+        ['price_inr', 'Price a month (₹, before GST)', 'money'],
+        ['price_usd', 'Price a month ($)', 'money'],
+        ['annual_inr', 'Price a year (₹)', 'money'],
+        ['annual_usd', 'Price a year ($)', 'money'],
+        ['best_for', 'Best for', 'text'],
+        ['posts_month', 'Posts a month', 'limit'],
+        ['images_month', 'Images a month (incl. edits)', 'limit'],
+        ['images_day', 'Images a day', 'limit'],
+        ['videos_month', 'Videos included a month (0 = packs only)', 'limit'],
+        ['videos_day', 'Videos a day', 'limit'],
+        ['video_pack_discount', 'Video pack discount (%)', 'number'],
+        ['brands', 'Brands (websites)', 'limit'],
+        ['approvals', 'Approvals', 'bool'],
+        ['support', 'Support', 'text']
+    ];
+    function planInput(plan, [field, label, type]) {
+        const value = plan[field];
+        const data = `data-plan="${escapeAttr(plan.slug)}" data-field="${field}" aria-label="${escapeAttr(plan.name + ': ' + label)}"`;
+        if (type === 'bool') {
+            return `<div class="form-check form-switch d-flex justify-content-center m-0"><input class="form-check-input plan-edit" type="checkbox" ${data}${value ? ' checked' : ''}></div>`;
+        }
+        const shown = value === null || value === undefined ? '' : value;
+        const attrs = type === 'text' ? 'type="text" maxlength="120"'
+            : `type="number" min="0" step="${type === 'money' ? '0.01' : '1'}"${type === 'limit' ? ' placeholder="Unlimited"' : (type === 'money' ? ' placeholder="On request"' : '')}`;
+        return `<input class="form-control form-control-sm plan-edit" ${attrs} ${data} value="${escapeAttr(String(shown))}">`;
+    }
+    window.loadPlanEditor = function () {
+        $('#planEditorStatus').text('');
+        $.getJSON('/api/admin/plans').done(function (r) {
+            window._plans = r.plans;
+            const head = '<thead><tr><th></th>' + r.plans.map(p => `<th>${escapeHtml(p.name)}</th>`).join('') + '</tr></thead>';
+            const body = '<tbody>' + PLAN_EDITOR_ROWS.map(row =>
+                `<tr><th scope="row">${row[1]}</th>` + r.plans.map(p => `<td>${planInput(p, row)}</td>`).join('') + '</tr>').join('') + '</tbody>';
+            $('#planEditorTable').html(head + body);
+            $('#planEditorSaveBtn').prop('disabled', true);
+        }).fail(function () { $('#planEditorTable').html('<tbody><tr><td class="text-danger py-4">Could not load the plans.</td></tr></tbody>'); });
+    };
+    $(document).on('input change', '.plan-edit', function () {
+        $(this).addClass('is-changed');
+        $('#planEditorSaveBtn').prop('disabled', false);
+        $('#planEditorStatus').text('Unsaved changes');
+    });
+    $('#planEditorSaveBtn').on('click', function () {
+        const changes = {};
+        $('.plan-edit.is-changed').each(function () {
+            const slug = $(this).data('plan');
+            const field = $(this).data('field');
+            const raw = this.type === 'checkbox' ? this.checked : $(this).val().trim();
+            (changes[slug] = changes[slug] || {})[field] = raw === '' ? null : raw;
+        });
+        const $btn = $(this).prop('disabled', true);
+        $('#planEditorStatus').text('Saving...');
+        const saves = Object.keys(changes).map(slug => $.ajax({
+            url: `/api/admin/plans/${encodeURIComponent(slug)}`,
+            type: 'PUT',
+            contentType: 'application/json',
+            data: JSON.stringify(changes[slug])
+        }));
+        $.when.apply($, saves).done(function () {
+            showToast('Plans saved. They apply to everyone on them from now on.', 'success');
+            loadPlanEditor();
+            loadAdminUsers();
+        }).fail(function (xhr) {
+            $('#planEditorStatus').text((xhr.responseJSON || {}).error || 'Some changes could not be saved.');
+            $btn.prop('disabled', false);
+        });
+    });
+
     function renderAdminUsersTable(users) {
         if (!users.length) {
-            $('#adminUsersTbody').html('<tr><td colspan="6" class="text-center py-5 text-muted">No users match these filters.</td></tr>');
+            $('#adminUsersTbody').html('<tr><td colspan="7" class="text-center py-5 text-muted">No users match these filters.</td></tr>');
             return;
         }
         $('#adminUsersTbody').html(users.map(u => {
@@ -207,6 +416,7 @@ $(document).ready(function () {
                     </td>
                     <td>${accountTypeBadge(u)}</td>
                     <td>${brandStatusCell(u.brand, u)}</td>
+                    <td>${planCell(u)}</td>
                     <td>
                         <div class="admin-credit">
                             <div class="admin-credit-top"><span><strong>${money(used)}</strong> of ${money(limit)}</span><span>${Math.round(pct)}%</span></div>
@@ -228,7 +438,7 @@ $(document).ready(function () {
                                 <ul class="dropdown-menu dropdown-menu-end admin-menu" aria-labelledby="${menuId}">
                                     <li><button type="button" class="dropdown-item" onclick="adminSetCustomCredit(${u.id}, ${limit})"><i class="fas fa-sliders"></i>Set credit limit</button></li>
                                     <li><button type="button" class="dropdown-item" onclick="adminEditUserProfile(${u.id})"><i class="fas fa-user-pen"></i>Edit profile</button></li>
-                                    <li><button type="button" class="dropdown-item" onclick="openImageAccessPanel(${u.id})"><i class="fas fa-image"></i>Image &amp; video access…</button></li>
+                                    <li><button type="button" class="dropdown-item" onclick="openImageAccessPanel(${u.id})"><i class="fas fa-image"></i>Plan, images &amp; video…</button></li>
                                     ${canRescanBrand(u) ? `<li><button type="button" class="dropdown-item" onclick="adminRescanBrand(${u.id})"><i class="fas fa-rotate-right"></i>Rescan website</button></li>` : ''}
                                     <li><button type="button" class="dropdown-item" onclick="adminSetUserActive(${u.id}, ${!isActive})">
                                         <i class="fas ${isActive ? 'fa-user-slash' : 'fa-user-check'}"></i>${isActive ? 'Deactivate account' : 'Activate account'}</button></li>
@@ -1017,9 +1227,50 @@ $(document).ready(function () {
         });
     };
 
+    // ── Plan & packs (inside the same panel) ─────────────────────────────
+    function planUsageText(usage) {
+        const fmt = (part, noun) => part.limit === null
+            ? `${part.used} ${noun} (unlimited)` : `${part.used} of ${part.limit} ${noun}`;
+        const end = new Date(usage.period_end).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+        return `This month: ${fmt(usage.posts, 'posts')} · ${fmt(usage.images, 'images')} · resets ${end}`;
+    }
+    function renderPlanUsage(usage) {
+        $('#planSelect').val(usage.plan.slug);
+        $('#planUsageText').text(usage.is_admin ? 'Admins have no limits.' : planUsageText(usage));
+        $('#planPacksText').text(`Left in packs: ${usage.images.pack_remaining} images, ${usage.videos.pack_remaining} videos`);
+    }
+    function loadUserPlan(userId) {
+        $('#planUsageText, #planPacksText').text('Loading...');
+        const plans = window._plans ? $.when(window._plans) : $.getJSON('/api/admin/plans').then(r => (window._plans = r.plans));
+        $.when(plans, $.getJSON(`/api/admin/users/${userId}/plan`)).done(function (planList, res) {
+            const list = Array.isArray(planList) ? planList : window._plans;
+            $('#planSelect').html(list.map(p => `<option value="${escapeAttr(p.slug)}">${escapeHtml(p.name)}${p.price_inr ? ` - ₹${Number(p.price_inr).toLocaleString('en-IN')} / $${p.price_usd} a month` : (p.price_inr === 0 ? ' - free' : ' - on request')}</option>`).join(''));
+            const usage = (res[0] || res).usage;
+            $('#planSelect').data('current', usage.plan.slug);
+            renderPlanUsage(usage);
+        }).fail(function () { $('#planUsageText').text('Could not load the plan.'); });
+    }
+    $('#packGrantBtn').on('click', function () {
+        const $btn = $(this).prop('disabled', true);
+        $.ajax({
+            url: `/api/admin/users/${window._imageAccessUserId}/packs`,
+            type: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ kind: $('#packKind').val(), quantity: Number($('#packQuantity').val()), note: $('#packNote').val() }),
+            success: function (r) {
+                renderPlanUsage(r.usage);
+                $('#packNote').val('');
+                showToast(`Added ${r.pack.quantity} ${r.pack.kind === 'video' ? 'videos' : 'images'}.`, 'success');
+            },
+            error: function (xhr) { showToast((xhr.responseJSON || {}).error || 'Could not add the pack.', 'error'); },
+            complete: function () { $btn.prop('disabled', false); }
+        });
+    });
+
     window.openImageAccessPanel = function (userId) {
         const u = (window._allAdminUsers || []).find(x => x.id === userId);
         if (!u) return;
+        loadUserPlan(userId);
         const open = function () {
             const s = window._imageSettings;
             const im = u.images || {};
@@ -1028,7 +1279,7 @@ $(document).ready(function () {
             $('#imageAccessUsed').text(im.unlimited ? `${im.used_today} (unlimited)` : `${im.used_today} of ${im.limit}`);
             $('#imageAccessDefaultHint').text(u.is_admin
                 ? 'Admins: unlimited'
-                : `${s.default_limit} image${s.default_limit === 1 ? '' : 's'} per day (Image Settings)`);
+                : "The plan's daily image cap");
             const custom = im.custom_limit;
             const choice = custom === null || custom === undefined ? 'default' : (custom === -1 ? 'unlimited' : 'custom');
             $(`input[name=imageAccessLimit][value=${choice}]`).prop('checked', true);
@@ -1071,6 +1322,17 @@ $(document).ready(function () {
             }
         }
         const $btn = $('#imageAccessSaveBtn').prop('disabled', true);
+        // The plan is saved first when it changed; then the image & video settings
+        const plan = $('#planSelect').val();
+        const planSaved = plan && plan !== $('#planSelect').data('current')
+            ? $.ajax({ url: `/api/admin/users/${window._imageAccessUserId}/plan`, type: 'PUT', contentType: 'application/json',
+                data: JSON.stringify({ plan: plan }) })
+            : $.when();
+        planSaved.fail(function (xhr) {
+            $err.text((xhr.responseJSON || {}).error || 'Could not change the plan.').removeClass('d-none');
+            $btn.prop('disabled', false);
+        });
+        planSaved.done(function () {
         $.ajax({
             url: `/api/admin/users/${window._imageAccessUserId}/image-access`,
             type: 'PUT',
@@ -1082,13 +1344,14 @@ $(document).ready(function () {
             }),
             success: function () {
                 closeImageAccessPanel();
-                showToast('Image and video access updated.', 'success');
+                showToast('Plan, image and video access updated.', 'success');
                 loadAdminUsers();
             },
             error: function (xhr) {
                 $err.text((xhr.responseJSON || {}).error || 'Could not update image access.').removeClass('d-none');
             },
             complete: function () { $btn.prop('disabled', false); }
+        });
         });
     };
 

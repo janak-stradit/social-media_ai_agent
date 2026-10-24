@@ -30,7 +30,8 @@ def routes():
 
 
 def _user(app, name="Priya"):
-    user = db.create_user(name, f"{uuid.uuid4().hex[:10]}@example.com", "hash")
+    # enough credit for the many images these tests make (new accounts start with only $2)
+    user = db.create_user(name, f"{uuid.uuid4().hex[:10]}@example.com", "hash", credit_limit=10.0)
     db.set_user_image_access(user["id"], db.IMAGE_UNLIMITED, None)  # many edits per test
     client = app.test_client()
     with client.session_transaction() as s:

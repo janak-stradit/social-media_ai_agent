@@ -534,6 +534,14 @@
            Popper mis-positions it under the app-wide zoom - so the table must
            not clip it. It never needs sideways scrolling (phones get cards). */
         #adminPaneUsers .admin-table-wrap, #adminPaneUsers .admin-table-scroll { overflow: visible; }
+        /* Users table: plan picker; Plans tab: one column per plan */
+        .admin-plan-select { min-width: 118px; font-size: 0.8rem; padding: 4px 26px 4px 8px; }
+        .admin-plan-select.is-saving { opacity: 0.5; }
+        .plan-editor th[scope="row"] { white-space: nowrap; font-weight: 600; color: #475569; background: #f8fafc; }
+        .plan-editor td { min-width: 120px; }
+        .plan-editor .form-control-sm { font-size: 0.8rem; }
+        .plan-editor .form-control-sm.is-changed { border-color: var(--brand); background: #fff8f3; }
+        .plan-editor thead th { text-align: center; }
         #adminUsersTable thead th:first-child { border-top-left-radius: 14px; }
         #adminUsersTable thead th:last-child { border-top-right-radius: 14px; }
         .admin-row-actions .dropdown-menu { margin-top: 4px; z-index: 1030; }
@@ -820,6 +828,15 @@
                 <button type="button" class="bc-nav-item" data-admin-tab="images" onclick="switchAdminTab('images')">
                     <i class="fas fa-image"></i> Image Settings
                 </button>
+                <button type="button" class="bc-nav-item" data-admin-tab="plans" onclick="switchAdminTab('plans'); loadPlanEditor();">
+                    <i class="fas fa-gem"></i> Plans
+                </button>
+                <button type="button" class="bc-nav-item" data-admin-tab="payments" onclick="switchAdminTab('payments'); loadAdminPayments();">
+                    <i class="fas fa-receipt"></i> Payments
+                </button>
+                <button type="button" class="bc-nav-item" data-admin-tab="audit" onclick="switchAdminTab('audit'); loadAuditLog();">
+                    <i class="fas fa-clipboard-list"></i> Audit log
+                </button>
             </nav>
         </aside>
 
@@ -847,6 +864,7 @@
                                     <th>User</th>
                                     <th>Account</th>
                                     <th>Brand</th>
+                                    <th>Plan</th>
                                     <th>Credits</th>
                                     <th>Status</th>
                                     <th class="text-end">Actions</th>
@@ -854,7 +872,7 @@
                             </thead>
                             <tbody id="adminUsersTbody">
                                 <tr>
-                                    <td colspan="6" class="text-center py-4 text-muted">Loading users...</td>
+                                    <td colspan="7" class="text-center py-4 text-muted">Loading users...</td>
                                 </tr>
                             </tbody>
                         </table>
@@ -1236,6 +1254,87 @@
                 </div>
             </div>
             <!-- PANE: IMAGE SETTINGS (daily image limit + models) -->
+            <!-- PANE: PAYMENTS (admin.js loadAdminPayments; services/billing_service.py) -->
+            <div class="admin-pane d-none" id="adminPanePayments">
+                <div class="bc-pane-header">
+                    <div>
+                        <h5><i class="fas fa-receipt text-primary me-2"></i>Payments</h5>
+                        <p>Online payments, their invoices and refunds. A refund goes back through Razorpay or Stripe, issues a credit note, and - once the whole amount is refunded - takes back the plan time or the unused pack.</p>
+                    </div>
+                </div>
+                <div class="admin-table-wrap">
+                    <div class="admin-table-scroll">
+                        <table class="admin-table-light">
+                            <thead><tr><th>Paid</th><th>User</th><th>What</th><th>Amount</th><th>Status</th><th>Documents</th><th class="text-end">Refund</th></tr></thead>
+                            <tbody id="adminPaymentsTbody"><tr><td colspan="7" class="text-center py-4 text-muted">Loading...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+                <h6 class="mt-4 mb-2 fw-bold">Automatic renewals</h6>
+                <div class="admin-table-wrap">
+                    <div class="admin-table-scroll">
+                        <table class="admin-table-light">
+                            <thead><tr><th>Started</th><th>User</th><th>Plan</th><th>Charge</th><th>Status</th><th>Paid until</th><th class="text-end"></th></tr></thead>
+                            <tbody id="adminSubsTbody"><tr><td colspan="7" class="text-center py-4 text-muted">Loading...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PANE: AUDIT LOG (admin.js loadAuditLog; db.AuditLog) -->
+            <div class="admin-pane d-none" id="adminPaneAudit">
+                <div class="bc-pane-header">
+                    <div>
+                        <h5><i class="fas fa-clipboard-list text-primary me-2"></i>Audit log</h5>
+                        <p>Who changed plans, packs, credit, access and accounts, and when. Newest first.</p>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <select id="auditActionFilter" class="form-select form-select-sm" aria-label="Kind of change">
+                            <option value="">All changes</option>
+                            <option value="plan">Plans</option>
+                            <option value="pack">Packs</option>
+                            <option value="credit">Credit</option>
+                            <option value="access">Image &amp; video access</option>
+                            <option value="user">Accounts</option>
+                            <option value="2fa">Two-step sign-in</option>
+                            <option value="login">Failed codes</option>
+                            <option value="payment">Payments</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="admin-table-wrap">
+                    <div class="admin-table-scroll">
+                        <table class="admin-table-light">
+                            <thead><tr><th>When</th><th>Change</th><th>By</th><th>User</th><th>Details</th><th>IP</th></tr></thead>
+                            <tbody id="auditTbody"><tr><td colspan="6" class="text-center py-4 text-muted">Loading...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- PANE: PLANS (admin.js loadPlanEditor; PRICING.md section 8) -->
+            <div class="admin-pane d-none" id="adminPanePlans">
+                <div class="bc-pane-header">
+                    <div>
+                        <h5><i class="fas fa-gem text-primary me-2"></i>Plans</h5>
+                        <p>Prices and limits for each plan. Changes apply at once to everyone on that plan. Leave a limit empty for unlimited; 0 means none. Give a user a plan from the users table.</p>
+                    </div>
+                </div>
+                <div class="admin-table-wrap">
+                    <div class="admin-table-scroll">
+                        <table class="admin-table-light plan-editor" id="planEditorTable">
+                            <tbody><tr><td class="text-center py-4 text-muted">Loading plans...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+                <div class="d-flex align-items-center gap-3 mt-3">
+                    <button type="button" class="btn-xs btn-xs-solid-success" id="planEditorSaveBtn" disabled>
+                        <i class="fas fa-check me-1"></i>Save changes
+                    </button>
+                    <span class="small text-muted" id="planEditorStatus"></span>
+                </div>
+            </div>
+
             <div class="admin-pane d-none" id="adminPaneImages">
                 <div class="bc-pane-header">
                     <div>
@@ -1452,7 +1551,7 @@
     <div class="admin-panel-backdrop" id="imageAccessBackdrop" onclick="closeImageAccessPanel()"></div>
     <aside class="admin-side-panel" id="imageAccessPanel" aria-labelledby="imageAccessTitle">
         <div class="admin-side-panel-header">
-            <h5 id="imageAccessTitle"><i class="fas fa-image text-primary me-2"></i>Image &amp; video access</h5>
+            <h5 id="imageAccessTitle"><i class="fas fa-image text-primary me-2"></i>Plan, images &amp; video</h5>
             <button type="button" class="admin-side-panel-close" onclick="closeImageAccessPanel()" aria-label="Close">
                 <i class="fas fa-xmark"></i>
             </button>
@@ -1462,11 +1561,31 @@
                 <div><span>User</span><strong id="imageAccessUser">—</strong></div>
                 <div><span>Images today</span><strong id="imageAccessUsed">—</strong></div>
             </div>
+            <!-- Plan (PRICING.md): admins assign plans until payments exist -->
+            <div class="admin-form-group">
+                <label for="planSelect">Plan</label>
+                <select id="planSelect" class="form-select form-select-sm"></select>
+                <div class="small text-muted mt-1" id="planUsageText">—</div>
+            </div>
+            <div class="admin-form-group">
+                <label>Top-up packs</label>
+                <div class="small text-muted mb-2" id="planPacksText">—</div>
+                <div class="d-flex gap-2 align-items-center">
+                    <select id="packKind" class="form-select form-select-sm" style="max-width: 110px;" aria-label="Pack type">
+                        <option value="image">Images</option>
+                        <option value="video">Videos</option>
+                    </select>
+                    <input type="number" id="packQuantity" class="form-control form-control-sm" min="1" max="1000" value="10" style="max-width: 90px;" aria-label="How many">
+                    <input type="text" id="packNote" class="form-control form-control-sm" maxlength="200" placeholder="Note, e.g. paid by UPI" aria-label="Note">
+                    <button type="button" class="btn-xs btn-xs-outline-neutral text-nowrap" id="packGrantBtn">Add pack</button>
+                </div>
+                <div class="small text-muted mt-1">Packs are used after the plan's monthly allowance and last 12 months.</div>
+            </div>
             <div class="admin-form-group">
                 <label>Daily image limit</label>
                 <div class="img-choice">
                     <label><input type="radio" name="imageAccessLimit" value="default">
-                        <span>Default<small id="imageAccessDefaultHint">Follows Image Settings</small></span></label>
+                        <span>Default<small id="imageAccessDefaultHint">Follows the plan</small></span></label>
                     <label><input type="radio" name="imageAccessLimit" value="custom">
                         <span>Custom<small>Images per day for this user</small></span>
                         <input type="number" id="imageAccessCustomInput" class="form-control form-control-sm" min="0" max="10000" step="1" aria-label="Custom daily limit"></label>
@@ -1659,7 +1778,7 @@
             document.querySelectorAll('.admin-pane').forEach(function (pane) {
                 pane.classList.add('d-none');
             });
-            var paneMap = { users: 'adminPaneUsers', requests: 'adminPaneRequests', cost: 'adminPaneCost', invites: 'adminPaneInvites', emails: 'adminPaneEmails', images: 'adminPaneImages' };
+            var paneMap = { users: 'adminPaneUsers', requests: 'adminPaneRequests', cost: 'adminPaneCost', invites: 'adminPaneInvites', emails: 'adminPaneEmails', images: 'adminPaneImages', plans: 'adminPanePlans', audit: 'adminPaneAudit', payments: 'adminPanePayments' };
             var pane = document.getElementById(paneMap[tab]);
             if (pane) pane.classList.remove('d-none');
         }

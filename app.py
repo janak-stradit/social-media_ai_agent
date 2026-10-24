@@ -163,7 +163,50 @@ def create_app(config_name="development"):
     app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
     app.config["TEMPLATES_AUTO_RELOAD"] = True
     app.config.from_object(config_map[config_name])
-    CORS(app, supports_credentials=True)
+    # A forgeable session key lets anyone sign in as any user (admins included)
+    if config_name == "production" and app.config["SECRET_KEY"] in ("", "dev-secret-key", None):
+        raise RuntimeError("SECRET_KEY must be set to a long random value in production.")
+    # Cross-site requests with the user's cookies only from origins listed in
+    # CORS_ORIGINS (comma-separated). The app itself is same-origin and needs none;
+    # allowing every origin with credentials let any website act as the user.
+    cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+    if cors_origins:
+        CORS(app, supports_credentials=True, origins=cors_origins)
+
+    @app.before_request
+    def _same_site_changes_only():
+        """Cross-site request forgery guard: a request that changes something
+        (POST/PUT/PATCH/DELETE) sent by a browser from another website is
+        refused. Browsers always say where such requests come from (Origin,
+        else Referer); requests with neither (mail apps' one-click
+        unsubscribe, payment webhooks, scripts) are let through and rely on
+        their own checks."""
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return None
+        source = request.headers.get("Origin") or request.headers.get("Referer")
+        if not source or source == "null":
+            return None
+        from urllib.parse import urlsplit
+
+        source_host = urlsplit(source).netloc.lower()
+        allowed = {request.host.lower()} | {urlsplit(o).netloc.lower() for o in cors_origins}
+        if source_host in allowed:
+            return None
+        app.logger.warning(f"Blocked a cross-site {request.method} {request.path} from {source_host}")
+        return jsonify({"success": False, "error": "This request came from another website and was blocked."}), 403
+
+    @app.after_request
+    def _security_headers(response):
+        """Basic browser protections on every response."""
+        headers = response.headers
+        headers.setdefault("X-Content-Type-Options", "nosniff")  # no guessing file types
+        headers.setdefault("X-Frame-Options", "SAMEORIGIN")  # no clickjacking in other sites' frames
+        headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+        headers.setdefault("Content-Security-Policy", "frame-ancestors 'self'; object-src 'none'; base-uri 'self'")
+        if request.is_secure or request.headers.get("X-Forwarded-Proto") == "https":
+            headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        return response
 
     # Ensure upload directory exists
     os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
@@ -207,6 +250,21 @@ def create_app(config_name="development"):
     @login_required_page
     def settings_route():
         return render_template("settings.html")
+
+    @app.route("/invoices/<path:number>")
+    @login_required_page
+    def invoice_page(number):
+        """A GST invoice or credit note, printable (services/invoice_service.py).
+        Only for the customer it was issued to, and admins."""
+        from db import get_invoice, get_user_by_id
+        from services.invoice_service import STATE_CODES
+
+        user_id = session.get("user_id")
+        invoice = get_invoice(number)
+        user = get_user_by_id(user_id) if user_id else None
+        if not invoice or not user or (invoice["user_id"] != user.id and not user.is_admin):
+            abort(404)
+        return render_template("invoice.html", inv=invoice, state_codes=STATE_CODES)
 
     @app.route("/calendar")
     @login_required_page
@@ -633,4 +691,6 @@ if __name__ == "__main__":
     if os.name == "nt":
         _quiet_windows_reload_error()
     app = create_app()
-    app.run(host="0.0.0.0", port=5000, debug=True)  # nosec B201 B104
+    # The debug server runs code from its error pages: only this machine can reach
+    # it unless DEV_HOST=0.0.0.0 is set (e.g. to try the app from a phone on the same Wi-Fi)
+    app.run(host=os.getenv("DEV_HOST", "127.0.0.1"), port=5000, debug=True)  # nosec B201

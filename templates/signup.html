@@ -77,7 +77,7 @@
             <div class="auth-form-group">
                 <label class="auth-form-label" for="signupPassword">Password</label>
                 <div class="auth-password-wrap">
-                    <input id="signupPassword" type="password" class="auth-form-input" placeholder="At least 6 characters" autocomplete="new-password" required>
+                    <input id="signupPassword" type="password" class="auth-form-input" placeholder="At least 8 characters" autocomplete="new-password" required>
                     <button type="button" class="auth-password-toggle" id="togglePasswordBtn" aria-label="Show password" aria-pressed="false">
                         <i class="fas fa-eye" aria-hidden="true"></i>
                     </button>
@@ -199,8 +199,8 @@
             showFieldError($input, $error, 'Password is required.');
             return false;
         }
-        if (value.length < 6) {
-            showFieldError($input, $error, 'Password must be at least 6 characters.');
+        if (value.length < 8) {
+            showFieldError($input, $error, 'Password must be at least 8 characters.');
             return false;
         }
         clearFieldError($input, $error);

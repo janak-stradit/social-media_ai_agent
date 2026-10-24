@@ -108,6 +108,17 @@ class Config:
     LINKEDIN_CLIENT_SECRET = os.getenv("LINKEDIN_CLIENT_SECRET", "")
     # Add "w_organization_social r_organization_admin" once LinkedIn has approved the app for company pages
     LINKEDIN_OAUTH_SCOPES = os.getenv("LINKEDIN_OAUTH_SCOPES", "openid profile w_member_social")
+    # "Instagram API with Instagram Login": Instagram professional accounts
+    # without a Facebook Page. The Instagram app ID and secret are separate from
+    # META_APP_ID (Meta app -> Instagram -> API setup with Instagram login).
+    INSTAGRAM_APP_ID = os.getenv("INSTAGRAM_APP_ID", "")
+    INSTAGRAM_APP_SECRET = os.getenv("INSTAGRAM_APP_SECRET", "")
+    # Unified social API (Zernio, formerly Late) for networks without our own
+    # app: services/zernio_service.py. Off until ZERNIO_API_KEY is set.
+    ZERNIO_API_KEY = os.getenv("ZERNIO_API_KEY", "")
+    ZERNIO_API_BASE = os.getenv("ZERNIO_API_BASE", "https://zernio.com/api/v1")
+    ZERNIO_PLATFORMS = os.getenv("ZERNIO_PLATFORMS", "twitter,threads")
+    INSTAGRAM_OAUTH_SCOPES = os.getenv("INSTAGRAM_OAUTH_SCOPES", "instagram_business_basic,instagram_business_content_publish")
     # Public HTTPS address Instagram downloads post images from (Meta fetches
     # them itself). Defaults to APP_BASE_URL; set it if images are served elsewhere.
     PUBLIC_MEDIA_BASE_URL = os.getenv("PUBLIC_MEDIA_BASE_URL", "")
@@ -117,6 +128,44 @@ class Config:
     APP_BASE_URL = os.getenv("APP_BASE_URL")
 
     GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+    # Free credit every new account starts with, in USD (credits are kept in
+    # USD because generation is billed in USD). Existing accounts keep theirs.
+    DEFAULT_CREDIT_USD = float(os.getenv("DEFAULT_CREDIT_USD", "2"))
+    # Admins must turn on two-step sign-in (Settings -> Security) before the
+    # Admin Control Center and admin APIs work. Set false only for local testing.
+    ADMIN_2FA_REQUIRED = os.getenv("ADMIN_2FA_REQUIRED", "true").lower() == "true"
+    # Razorpay (INR payments; services/billing_service.py). Test keys start
+    # rzp_test_. The webhook secret is set on the webhook in the Razorpay
+    # dashboard (URL: <APP_BASE_URL>/api/billing/razorpay/webhook). Buying is
+    # hidden until the key id and secret are set.
+    RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
+    RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
+    RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
+    GST_RATE = float(os.getenv("GST_RATE", "0.18"))
+    # Stripe (USD payments; services/billing_service.py). Test keys start
+    # sk_test_. Webhook endpoint in the Stripe dashboard:
+    # <APP_BASE_URL>/api/billing/stripe/webhook (event checkout.session.completed,
+    # checkout.session.async_payment_succeeded); its signing secret starts whsec_.
+    # GST invoices (services/invoice_service.py): the seller's details printed on
+    # every invoice. Invoice numbers are PREFIX/YY-YY/NNNNN, one series per
+    # financial year (April-March). SAC 997331 = licensing the right to use
+    # software; confirm the code and the LUT wording with your accountant.
+    INVOICE_SELLER_NAME = os.getenv("INVOICE_SELLER_NAME", "StradIT")
+    INVOICE_SELLER_ADDRESS = os.getenv("INVOICE_SELLER_ADDRESS", "")
+    INVOICE_SELLER_GSTIN = os.getenv("INVOICE_SELLER_GSTIN", "")
+    INVOICE_SELLER_STATE = os.getenv("INVOICE_SELLER_STATE", "Gujarat")
+    INVOICE_PREFIX = os.getenv("INVOICE_PREFIX", "AVIR")
+    INVOICE_SAC = os.getenv("INVOICE_SAC", "997331")
+    INVOICE_EXPORT_NOTE = os.getenv(
+        "INVOICE_EXPORT_NOTE", "Export of services: supply meant for export under LUT without payment of IGST.")
+    STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+    STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+    # Plan for accounts no admin has assigned one to (Enterprise accounts get
+    # "enterprise"). See db.DEFAULT_PLANS and PRICING.md.
+    DEFAULT_PLAN = os.getenv("DEFAULT_PLAN", "free")
+    # Users whose brand is in India see credits in rupees at this rate
+    # (display only - the stored amounts stay in USD). Review it regularly.
+    USD_INR_RATE = float(os.getenv("USD_INR_RATE", "95"))
     # "Ideas for you" (services/trend_service.py): this week's topics per
     # industry come from Gemini with Google Search (needs a GOOGLE_API_KEY
     # whose plan includes search grounding); when that call fails, from
@@ -248,6 +297,8 @@ class DevelopmentConfig(Config):
 
 class ProductionConfig(Config):
     DEBUG = False
+    # The session cookie only travels over HTTPS in production
+    SESSION_COOKIE_SECURE = True
 
 
 config_map = {"development": DevelopmentConfig, "production": ProductionConfig}

@@ -284,6 +284,15 @@
                                     <input type="checkbox" value="youtube" id="ytCheck">
                                     <span class="chip-content"><i class="fab fa-youtube me-1 color-yt"></i>YouTube</span>
                                 </label>
+                                <!-- Published through the unified social API (services/zernio_service.py) -->
+                                <label class="platform-chip-sm" for="xCheck">
+                                    <input type="checkbox" value="twitter" id="xCheck">
+                                    <span class="chip-content"><i class="fab fa-x-twitter me-1 color-x"></i>X</span>
+                                </label>
+                                <label class="platform-chip-sm" for="thCheck">
+                                    <input type="checkbox" value="threads" id="thCheck">
+                                    <span class="chip-content"><i class="fab fa-threads me-1 color-x"></i>Threads</span>
+                                </label>
                             </div>
                         </div>
 
@@ -340,6 +349,13 @@
                                         <option value="urgent">Urgent</option>
                                     </select>
                                 </label>
+                                <!-- Post language (services/language_service.py); options from /api/languages -->
+                                <label class="style-menu-field" for="languageSelect">
+                                    <span>Language</span>
+                                    <select id="languageSelect" class="chat-select-sm">
+                                        <option value="en">English</option>
+                                    </select>
+                                </label>
                             </div>
                         </div>
 
@@ -388,7 +404,7 @@
                 <div class="credit-card-light mb-3">
                     <div class="d-flex justify-content-between align-items-center mb-2">
                         <span class="text-slate-600 font-medium fs-7"><i class="fas fa-wallet me-1 text-primary"></i>Current Credit Limit:</span>
-                        <strong class="text-navy font-bold" id="modalCreditLimit">$10.00</strong>
+                        <strong class="text-navy font-bold" id="modalCreditLimit">–</strong>
                     </div>
                     <div class="d-flex justify-content-between align-items-center mb-2">
                         <span class="text-slate-600 font-medium fs-7"><i class="fas fa-chart-pie me-1 text-warning"></i>Total Credits Used:</span>
@@ -401,22 +417,25 @@
                 </div>
 
                 <div id="pendingRequestNotice" class="alert alert-warning-light d-none mb-3">
-                    <i class="fas fa-clock text-warning me-2"></i>You have a pending credit extension request (<strong id="pendingReqAmount">$10.00</strong>). Submitting again will update your request.
+                    <i class="fas fa-clock text-warning me-2"></i>You have a pending credit extension request (<strong id="pendingReqAmount">–</strong>). Submitting again will update your request.
                 </div>
 
                 <form id="creditRequestForm">
                     <div class="mb-3">
-                        <label for="requestedAmountInput" class="form-label text-slate-700 font-semibold mb-1">Requested Extension Amount ($USD):</label>
+                        <!-- Label, symbol and presets switch to rupees for Indian brands (app_v2.js applyCreditRequestCurrency) -->
+                        <label for="requestedAmountInput" class="form-label text-slate-700 font-semibold mb-1" id="requestedAmountLabel">Requested extension amount (USD):</label>
                         <div class="input-group mb-2">
-                            <span class="input-group-text bg-slate-100 text-slate-600 border-slate">$</span>
+                            <span class="input-group-text bg-slate-100 text-slate-600 border-slate" id="requestedAmountSymbol">$</span>
                             <input type="number" class="form-control credit-input-light" id="requestedAmountInput" min="1" max="1000" step="1" value="10" required>
                         </div>
                         <div class="d-flex gap-2 align-items-center">
                             <span class="text-slate-500 fs-7">Presets:</span>
-                            <button type="button" class="preset-btn" onclick="$('#requestedAmountInput').val(10)">+$10</button>
-                            <button type="button" class="preset-btn" onclick="$('#requestedAmountInput').val(25)">+$25</button>
-                            <button type="button" class="preset-btn" onclick="$('#requestedAmountInput').val(50)">+$50</button>
-                            <button type="button" class="preset-btn" onclick="$('#requestedAmountInput').val(100)">+$100</button>
+                            <span class="d-flex gap-2" id="requestedAmountPresets">
+                                <button type="button" class="preset-btn" data-amount="10">+$10</button>
+                                <button type="button" class="preset-btn" data-amount="25">+$25</button>
+                                <button type="button" class="preset-btn" data-amount="50">+$50</button>
+                                <button type="button" class="preset-btn" data-amount="100">+$100</button>
+                            </span>
                         </div>
                     </div>
 
@@ -902,35 +921,6 @@
                 <button type="button" class="btn-submit-emerald" id="confirmSchedulePostBtn">
                     <i class="fas fa-calendar-check me-1"></i>Confirm Post Schedule
                 </button>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- ═══════════════════════ AI MODELS & PURPOSE ARCHITECTURE MODAL ═══════════════════════ -->
-<div class="modal fade" id="modelArchitectureModal" tabindex="-1" aria-labelledby="modelArchitectureModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-xl modal-dialog-centered">
-        <div class="modal-content model-modal-light">
-            <div class="modal-header model-modal-header-light">
-                <div class="d-flex align-items-center gap-3">
-                    <div class="model-icon-badge"><i class="fas fa-microchip"></i></div>
-                    <div>
-                        <h5 class="modal-title text-navy font-bold mb-0" id="modelArchitectureModalLabel">Active AI Models &amp; Purpose Matrix</h5>
-                        <small class="text-slate-500 font-medium">Real-time model engine assignments for text generation, vision, images, videos &amp; RAG memory</small>
-                    </div>
-                </div>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body p-4">
-                <div class="row g-4" id="modelsInfoCardsContainer">
-                    <div class="col-12 text-center py-5 text-slate-400">
-                        <i class="fas fa-spinner fa-spin fa-2x mb-2"></i>
-                        <p>Loading AI Model configurations...</p>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer model-modal-footer-light">
-                <button type="button" class="btn-cancel-light" data-bs-dismiss="modal">Close Inspector</button>
             </div>
         </div>
     </div>

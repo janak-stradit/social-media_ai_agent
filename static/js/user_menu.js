@@ -3,6 +3,20 @@
 // neither jQuery nor Bootstrap's JS. Owns open/close, identity + credit
 // fields, role-based links and sign-out. On the Studio Chat page app_v2.js
 // also updates some of the same IDs with the same values, which is harmless.
+// Money as the user should see it. Credits and costs are kept in USD; users
+// whose brand is in India see rupees (db.user_currency). Set from
+// /api/metrics/usage (currency + usd_inr_rate); dollars until it arrives.
+window.avirMoney = function (usd, digits) {
+    const m = window.__avirMoney || { currency: 'USD', rate: 1 };
+    const d = digits === undefined ? 2 : digits;
+    const value = Number(usd || 0) * (m.currency === 'INR' ? m.rate : 1);
+    const text = value.toLocaleString(m.currency === 'INR' ? 'en-IN' : 'en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+    return (m.currency === 'INR' ? '₹' : '$') + text;
+};
+window.avirSetMoney = function (r) {
+    if (r && r.currency) window.__avirMoney = { currency: r.currency, rate: Number(r.usd_inr_rate) || 1 };
+};
+
 (function () {
     const root = document.getElementById('userMenu');
     if (!root) return;
@@ -80,18 +94,33 @@
         .then((r) => (r.ok ? r.json() : null))
         .then(function (r) {
             if (!r || !r.success) return;
+            window.avirSetMoney(r);
+            // Features the plan doesn't include are tagged in the menu
+            toggle('umApprovalsTag', !!r.plan_features && r.plan_features.approvals === false);
+            // Paid plans are limited by their monthly allowances, not by credit:
+            // show the plan instead of a credit balance
+            if (r.credit_capped === false) {
+                setText('umCreditLabel', 'Plan');
+                setText('dropHeaderCreditsRemaining', r.plan_name || 'Paid plan');
+                toggle('umCreditProgress', false);
+                toggle('umCreditSub', false);
+                toggle('umPlanLink', true);
+                setText('dropHeaderTokens', Number(r.total_tokens || 0).toLocaleString());
+                setText('dropHeaderCost', window.avirMoney(r.total_cost_usd, r.currency === 'INR' ? 2 : 4));
+                return;
+            }
             const remaining = Number(r.remaining_credits || 0);
-            const limit = Number(r.credit_limit || 10);
-            setText('dropHeaderCreditsRemaining', '$' + remaining.toFixed(2));
-            setText('dropHeaderCreditLimit', '$' + limit.toFixed(2));
+            const limit = Number(r.credit_limit || 0);
+            setText('dropHeaderCreditsRemaining', window.avirMoney(remaining));
+            setText('dropHeaderCreditLimit', window.avirMoney(limit));
             setText('dropHeaderTokens', Number(r.total_tokens || 0).toLocaleString());
-            setText('dropHeaderCost', '$' + Number(r.total_cost_usd || 0).toFixed(4));
+            setText('dropHeaderCost', window.avirMoney(r.total_cost_usd, r.currency === 'INR' ? 2 : 4));
 
             const pct = limit > 0 ? Math.max(0, Math.min(100, (remaining / limit) * 100)) : 0;
             const bar = $('umCreditBar');
             if (bar) {
                 bar.style.width = pct + '%';
-                bar.parentElement.classList.toggle('low', remaining > 0 && remaining < 2);
+                bar.parentElement.classList.toggle('low', remaining > 0 && remaining < limit * 0.2);
                 bar.parentElement.classList.toggle('empty', remaining <= 0);
             }
         })
@@ -108,7 +137,7 @@
         const list = $('notifBellList');
         const count = $('notifBellCount');
         const readAll = $('notifBellReadAll');
-        const ICONS = { occasion: 'fa-calendar-day', trend: 'fa-arrow-trend-up', inactive: 'fa-lightbulb', brand_ready: 'fa-palette' };
+        const ICONS = { occasion: 'fa-calendar-day', trend: 'fa-arrow-trend-up', inactive: 'fa-lightbulb', brand_ready: 'fa-palette', billing: 'fa-receipt' };
 
         function ago(iso) {
             const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
@@ -210,8 +239,8 @@
     })();
 
     // ── Actions that need a modal only some pages have ────────────────
-    // Studio Chat (index.html) has both modals and app_v2.js opens them;
-    // settings.html has the AI Models one. Anywhere else, go to Studio Chat
+    // Studio Chat (index.html) has the credit modal and app_v2.js opens it.
+    // Anywhere else, go to Studio Chat
     // and let app_v2.js open the modal from the URL hash.
     function modalOrRedirect(modalId, hash) {
         if (document.getElementById(modalId)) return; // page's own handler opens it
@@ -226,13 +255,6 @@
         });
     }
 
-    const modelsBtn = $('dropHeaderModelInfoBtn');
-    if (modelsBtn) {
-        modelsBtn.addEventListener('click', function () {
-            closeMenu();
-            modalOrRedirect('modelArchitectureModal', 'ai-models');
-        });
-    }
 
     // ── Sign out ──────────────────────────────────────────────────────
     const logoutBtn = $('logoutBtn');

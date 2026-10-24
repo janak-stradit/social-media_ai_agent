@@ -125,7 +125,9 @@ Rules:
 - Fit the ideas to ACCOUNT TYPE: an individual gets personal-brand ideas in the first person that one person can
   make in minutes; a small business gets practical, low-budget ideas close to its customers; a medium business can
   plan small campaigns; an enterprise gets thought leadership, corporate and employer-brand ideas.
-- Do not repeat ALREADY SHOWN titles or RECENTLY POSTED topics."""
+- Do not repeat ALREADY SHOWN titles or RECENTLY POSTED topics.
+- When WHAT WORKED BEFORE lists posts, lean towards their angles, formats and platforms where they fit this
+  week's ideas - without copying their topics, and still keep the ideas varied."""
 
 
 # users.account_type -> how the ideas prompt names it
@@ -402,6 +404,19 @@ def cached_idea_feed(user_id: int) -> dict | None:
     return saved["feed"]
 
 
+def _past_winners(user_id: int, days: int = 90) -> str:
+    """Their three best-performing published posts, as lines for the prompt ("none" without results)."""
+    try:
+        from db import post_analytics
+
+        data = post_analytics(user_id, datetime.now(timezone.utc) - timedelta(days=days))
+    except Exception:  # noqa: BLE001 - ideas don't depend on results
+        return "none"
+    lines = [f"- {p['platform']}: \"{p['title']}\" ({p['engagement']} likes, comments and shares)"
+             for p in data["top_posts"][:3] if p["engagement"] > 0 and p.get("title")]
+    return "\n".join(lines) or "none"
+
+
 def generate_idea_feed(user_id: int, force: bool = False) -> tuple[dict | None, dict]:
     """(feed, llm usage). feed is None when the user has no brand profile.
     Served from the per-user cache unless it is out of date or `force`."""
@@ -449,6 +464,7 @@ def generate_idea_feed(user_id: int, force: bool = False) -> tuple[dict | None, 
             + ("\n".join(f"- {f['name']} ({f['date']}, {f['region']})" for f in occasions) or "none")
             + f"\n\nALREADY SHOWN (do not repeat): {'; '.join(previous) or 'none'}"
             + f"\nRECENTLY POSTED (avoid these topics): {' | '.join(recent) or 'none'}"
+            + "\n\nWHAT WORKED BEFORE (their published posts with the most engagement):\n" + _past_winners(user_id)
         )
         result, usage = LLMService().generate_json(
             IDEA_FEED_SYSTEM_PROMPT.format(trending_count=4, playbook_count=4, dates_count=3),

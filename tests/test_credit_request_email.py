@@ -54,7 +54,7 @@ def test_approving_emails_the_user_the_new_limit(app, sent):
     assert res["success"] and res["email_sent"] is True
     assert sent == [{
         "to_email": user["email"], "name": "Priya", "approved": True, "requested_amount": 25.0,
-        "credit_limit": pytest.approx(before + 25.0), "dashboard_url": "http://localhost/dashboard",
+        "credit_limit": pytest.approx(before + 25.0), "currency": "USD", "dashboard_url": "http://localhost/dashboard",
     }]
 
 
@@ -94,3 +94,30 @@ def test_the_emails_say_what_was_decided():
     rejected = _build_credit_decision_html("Priya", False, 25, 10, "https://app.example/dashboard")
     assert "was approved" in approved and "$25.00" in approved and "$35.00" in approved
     assert "not approved" in rejected and "$10.00" in rejected and "https://app.example/dashboard" in rejected
+
+
+def test_new_accounts_start_with_two_dollars_shown_in_rupees_for_india(app):
+    import json
+
+    from sqlalchemy.orm import Session
+
+    from config import Config
+
+    user, client = _client(app)
+    usage = client.get("/api/metrics/usage").get_json()
+    assert usage["credit_limit"] == Config.DEFAULT_CREDIT_USD == 2.0 and usage["currency"] == "USD"
+
+    with Session(db.engine) as session:  # an Indian brand
+        session.add(db.UserBrandProfile(user_id=user["id"], website="https://example.in", compliance_regions=json.dumps(["India"])))
+        session.commit()
+    usage = client.get("/api/metrics/usage").get_json()
+    assert usage["currency"] == "INR" and usage["usd_inr_rate"] == Config.USD_INR_RATE
+    assert db.format_money(2.0, "INR") == f"₹{2.0 * Config.USD_INR_RATE:,.2f}"
+
+
+def test_a_rupee_request_is_stored_in_dollars(app):
+    from config import Config
+
+    user, client = _client(app)
+    client.post("/api/credit-requests", json={"requested_amount": 950, "currency": "INR", "reason": "Diwali posts"})
+    assert db.get_user_credit_requests(user["id"])[0]["requested_amount"] == pytest.approx(950 / Config.USD_INR_RATE, abs=0.01)

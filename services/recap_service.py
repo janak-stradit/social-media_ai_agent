@@ -76,6 +76,10 @@ def month_stats(user_id: int, year: int, month: int) -> dict:
         monday += timedelta(days=7)
     stats.update(goal=goal, weeks=len(weeks), weeks_goal_met=sum(1 for w in weeks if per_week.get(w, 0) >= goal),
                  month_name=start.strftime("%B"), month=month_key(year, month))
+    from db import post_analytics
+
+    results = post_analytics(user_id, start, end)
+    stats["results"] = {"posts": results["posts"], **results["totals"]}
     return stats
 
 

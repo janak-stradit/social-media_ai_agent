@@ -33,6 +33,19 @@ class CaptionAgent:
             "features": ["statistics", "professional hashtags", "thought leadership"],
             "optimal_length": "100-200 words",
         },
+        # Published through the unified social API (services/zernio_service.py)
+        "twitter": {
+            "max_length": 280,
+            "tone": "punchy, direct, conversational",
+            "features": ["a strong hook in the first line", "one idea", "at most one or two hashtags"],
+            "optimal_length": "under 250 characters, including hashtags",
+        },
+        "threads": {
+            "max_length": 500,
+            "tone": "casual, conversational, like talking to followers",
+            "features": ["a hook", "short lines", "a question to invite replies", "at most one hashtag"],
+            "optimal_length": "40-80 words",
+        },
     }
 
     # A caption is short, focused writing - "low" keeps it well-written without
@@ -187,8 +200,10 @@ class CaptionAgent:
         has_project_context=True,
         brand_profile_block=None,
         on_partial=None,
+        language=None,
     ):
         """Generate a platform-specific caption.
+        language: a services/language_service.py code (None / "en" = English).
         on_partial(text_so_far): streamed answer for a live preview (LLMService.generate_json).
 
         has_project_context: True when this brief is tied to a specific StradIT
@@ -334,6 +349,9 @@ Return ONLY a JSON object with the following key:
 primary_caption
 """
 
+        from services.language_service import instruction
+
+        system_prompt += instruction(language, "caption")
         user_prompt = self._build_prompt(
             story_analysis,
             vision_analysis,
@@ -391,8 +409,9 @@ primary_caption
         reviewer_feedback,
         brand_voice=None,
         brand_profile_block=None,
+        language=None,
     ):
-        """Refine caption based on ReviewerAgent feedback.
+        """Refine caption based on ReviewerAgent feedback (in the post's language).
         brand_profile_block (see services/brand_profile_service.py): without
         this, the refinement pass used to hardcode "the company is StradIT"
         unconditionally - for a Studio Chat user with their own onboarding
@@ -473,6 +492,9 @@ Critic Feedback:
 Rewrite and return ONLY the improved plain-text caption.
 """
 
+        from services.language_service import instruction
+
+        system_prompt += instruction(language, "rewritten caption")
         refined_caption, usage = self.llm.generate(
             system_prompt,
             user_prompt,

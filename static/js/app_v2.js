@@ -196,7 +196,9 @@ $(document).ready(function () {
     function updateStyleMenuLabel() {
         const tone = $('#toneSelect').val();
         const voice = $('#brandVoiceSelect').val();
+        const language = $('#languageSelect').val();
         const parts = [];
+        if (language && language !== 'en') parts.push($('#languageSelect option:selected').text().split(' ').pop());
         if (voice && voice !== 'Standard Enterprise') parts.push(voice);
         if (tone) parts.push($('#toneSelect option:selected').text());
         $('#styleMenuLabel').text(parts.length ? parts.join(' · ') : 'Style');
@@ -213,8 +215,34 @@ $(document).ready(function () {
     $(document).on('keydown', function (e) {
         if (e.key === 'Escape' && !$('#styleMenuPanel').hasClass('d-none')) { setStyleMenuOpen(false); $('#styleMenuBtn').focus(); }
     });
-    $('#toneSelect, #brandVoiceSelect').on('change', updateStyleMenuLabel);
+    $('#toneSelect, #brandVoiceSelect, #languageSelect').on('change', updateStyleMenuLabel);
     updateStyleMenuLabel();
+
+    // Post language: the menu's choices come from the server; the choice is
+    // remembered in this browser, and every Generate / Refine request carries
+    // it (a prefilter, so each request builder doesn't have to)
+    const LANGUAGE_KEY = 'avir_post_language';
+    $.getJSON('/api/languages').done(function (r) {
+        const $select = $('#languageSelect');
+        $select.html((r.languages || []).map(l => `<option value="${escapeAttr(l.code)}">${escapeHtml(l.name)}</option>`).join(''));
+        let saved = null;
+        try { saved = localStorage.getItem(LANGUAGE_KEY); } catch (e) { /* storage blocked */ }
+        if (saved && $select.find(`option[value="${saved}"]`).length) $select.val(saved);
+        updateStyleMenuLabel();
+    });
+    $('#languageSelect').on('change', function () {
+        try { localStorage.setItem(LANGUAGE_KEY, this.value); } catch (e) { /* storage blocked */ }
+    });
+    $.ajaxPrefilter(function (options) {
+        if (!/^\/api\/(generate|refine)$/.test(options.url || '') || typeof options.data !== 'string') return;
+        try {
+            const body = JSON.parse(options.data);
+            if (body && !body.language) {
+                body.language = $('#languageSelect').val() || 'en';
+                options.data = JSON.stringify(body);
+            }
+        } catch (e) { /* not JSON: leave it */ }
+    });
 
     $('#dockOptionsBtn').on('click', function () {
         const open = !$('#dropZone').hasClass('options-open');
@@ -278,6 +306,24 @@ $(document).ready(function () {
         });
     }
 
+    // The credit request form asks in the user's own currency (rupees for
+    // Indian brands); the server converts rupees to USD (/api/credit-requests)
+    function applyCreditRequestCurrency(currency) {
+        const inr = currency === 'INR';
+        if ($('#creditRequestForm').data('currency') === currency) return;
+        $('#creditRequestForm').data('currency', currency);
+        const presets = inr ? [500, 1000, 2500, 5000] : [10, 25, 50, 100];
+        const symbol = inr ? '₹' : '$';
+        $('#requestedAmountLabel').text(inr ? 'Requested extension amount (₹):' : 'Requested extension amount (USD):');
+        $('#requestedAmountSymbol').text(symbol);
+        $('#requestedAmountInput').attr({ max: inr ? 100000 : 1000, step: 1 }).val(presets[0]);
+        $('#requestedAmountPresets').html(presets.map(v =>
+            `<button type="button" class="preset-btn" data-amount="${v}">+${symbol}${v.toLocaleString(inr ? 'en-IN' : 'en-US')}</button>`).join(''));
+    }
+    $(document).on('click', '#requestedAmountPresets .preset-btn', function () {
+        $('#requestedAmountInput').val($(this).data('amount'));
+    });
+
     function loadUserUsageMetrics() {
         loadGoalPill();
         $.ajax({
@@ -285,25 +331,29 @@ $(document).ready(function () {
             type: 'GET',
             success: function (r) {
                 if (r.success) {
+                    window.avirSetMoney(r);
+                    applyCreditRequestCurrency(r.currency);
                     const formattedTokens = Number(r.total_tokens || 0).toLocaleString() + ' Tokens';
-                    const formattedCost = '$' + Number(r.total_cost_usd || 0).toFixed(4);
-                    const rem = Number(r.remaining_credits || 0).toFixed(2);
-                    const lim = Number(r.credit_limit || 10).toFixed(2);
-                    const used = Number(r.used_credits || 0).toFixed(2);
+                    const formattedCost = window.avirMoney(r.total_cost_usd, r.currency === 'INR' ? 2 : 4);
+                    const rem = window.avirMoney(r.remaining_credits);
+                    const lim = window.avirMoney(r.credit_limit);
+                    const used = window.avirMoney(r.used_credits);
 
                     $('#headerTokens').text(Number(r.total_tokens || 0).toLocaleString());
                     $('#headerCost').text(formattedCost);
                     $('#dropHeaderTokens').text(formattedTokens);
                     $('#dropHeaderCost').text(formattedCost);
 
-                    $('#headerCreditsRemaining').text('$' + rem);
-                    $('#headerCreditLimit').text('$' + lim);
-                    $('#dropHeaderCreditsRemaining').text('$' + rem);
-                    $('#dropHeaderCreditLimit').text('$' + lim);
+                    $('#headerCreditsRemaining').text(rem);
+                    $('#headerCreditLimit').text(lim);
+                    if (r.credit_capped !== false) {  // paid plans show the plan there instead (user_menu.js)
+                        $('#dropHeaderCreditsRemaining').text(rem);
+                        $('#dropHeaderCreditLimit').text(lim);
+                    }
 
-                    $('#modalCreditLimit').text('$' + lim);
-                    $('#modalUsedCredits').text('$' + used);
-                    $('#modalRemainingCredits').text('$' + rem);
+                    $('#modalCreditLimit').text(lim);
+                    $('#modalUsedCredits').text(used);
+                    $('#modalRemainingCredits').text(rem);
 
                     // Update credit pill badge class
                     const pill = $('#headerCreditPill');
@@ -311,7 +361,7 @@ $(document).ready(function () {
                         pill.removeClass('warn danger');
                         if (r.remaining_credits <= 0) {
                             pill.addClass('danger');
-                        } else if (r.remaining_credits < 2.0) {
+                        } else if (r.remaining_credits < Number(r.credit_limit || 0) * 0.2) {
                             pill.addClass('warn');
                         }
                     }
@@ -327,7 +377,7 @@ $(document).ready(function () {
                     // Show pending request notice if user has pending request
                     if (r.has_pending_request && r.pending_request) {
                         $('#pendingRequestNotice').removeClass('d-none');
-                        $('#pendingReqAmount').text('$' + Number(r.pending_request.requested_amount || 10).toFixed(2));
+                        $('#pendingReqAmount').text(window.avirMoney(r.pending_request.requested_amount));
                     } else {
                         $('#pendingRequestNotice').addClass('d-none');
                     }
@@ -335,10 +385,6 @@ $(document).ready(function () {
             }
         });
     }
-
-    $('#dropHeaderModelInfoBtn').on('click', function () {
-        openModelArchitectureModal();
-    });
 
     // Admin Management Portal is now a plain link to /admin (see
     // templates/admin.html) - no click handler needed.
@@ -366,8 +412,6 @@ $(document).ready(function () {
         const hash = window.location.hash;
         if (hash === '#request-credit') {
             $('#dropRequestCreditBtn').trigger('click');
-        } else if (hash === '#ai-models') {
-            openModelArchitectureModal();
         } else {
             return;
         }
@@ -568,7 +612,8 @@ $(document).ready(function () {
     const IDEA_FORMATS = { text: ['fa-align-left', 'Text'], image: ['fa-image', 'Image'], video: ['fa-video', 'Video'] };
     const IDEA_PLATFORMS = {
         linkedin: ['fa-linkedin', 'LinkedIn'], instagram: ['fa-instagram', 'Instagram'],
-        facebook: ['fa-facebook', 'Facebook'], youtube: ['fa-youtube', 'YouTube']
+        facebook: ['fa-facebook', 'Facebook'], youtube: ['fa-youtube', 'YouTube'],
+        twitter: ['fa-x-twitter', 'X'], threads: ['fa-threads', 'Threads']
     };
     let _ideaFeed = null;
     let _ideaTabPicked = false;  // the user chose a tab: don't switch it under them
@@ -1168,7 +1213,7 @@ $(document).ready(function () {
     function setAgentStep(msgId, step, state) {
         const $item = $(`#${msgId}_step_${step}`);
         if (!$item.length || $item.data('state') === state) return;
-        $item.data('state', state).removeClass('active completed');
+        $item.data('state', state).removeClass('active completed d-none');
         const $icon = $item.find('.agent-step-icon');
         if (state === 'active') {
             $item.addClass('active');
@@ -1194,7 +1239,7 @@ $(document).ready(function () {
             }
             return;
         }
-        const names = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', twitter: 'X', x: 'X', tiktok: 'TikTok' };
+        const names = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', twitter: 'X', x: 'X', threads: 'Threads', tiktok: 'TikTok' };
         const label = names[key.toLowerCase()] || key.charAt(0).toUpperCase() + key.slice(1);
         $list.removeClass('d-none').append(`
             <div class="caption-preview" data-platform="${key}">
@@ -1205,7 +1250,7 @@ $(document).ready(function () {
     }
 
     function captionPlatformLabel(key) {
-        const names = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', twitter: 'X', x: 'X', tiktok: 'TikTok' };
+        const names = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', twitter: 'X', x: 'X', threads: 'Threads', tiktok: 'TikTok' };
         return names[key.toLowerCase()] || key.charAt(0).toUpperCase() + key.slice(1);
     }
 
@@ -1222,6 +1267,9 @@ $(document).ready(function () {
                     <div class="caption-preview-text"></div>
                 </div>`);
             $list.removeClass('d-none').append($item);
+            // The post is what people wait for: fold the research away and bring the draft into view
+            $(`#${msgId}_pipeline_research`).addClass('is-folded');
+            try { $item[0].scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { /* old browsers */ }
         }
         if (!$item.hasClass('is-draft')) return;  // already finished
         smoothText($item.find('.caption-preview-text')[0], text);
@@ -1235,7 +1283,9 @@ $(document).ready(function () {
         if (!$step.length) return;
         let $live = $(`#${msgId}_pipeline_research`);
         if (!$live.length) {
-            $live = $(`<div class="research-live writing pipeline-research" id="${msgId}_pipeline_research" aria-live="polite"></div>`);
+            $live = $(`<div class="research-live writing pipeline-research" id="${msgId}_pipeline_research" aria-live="polite"
+                            title="Click to show or hide the research"></div>`);
+            $live.on('click', function () { $(this).toggleClass('is-folded'); });
             $step.after($live);
         }
         if ($step.hasClass('completed') || $step.data('state') === 'done') $live.removeClass('writing');
@@ -1260,6 +1310,12 @@ $(document).ready(function () {
     function pollGenerationProgress(msgId, progressId) {
         let stopped = false;
         let timer = null;
+        // A running clock, so a long AI answer never looks like a frozen page
+        const started = Date.now();
+        const clock = setInterval(function () {
+            const s = Math.round((Date.now() - started) / 1000);
+            $(`#${msgId}_timer`).text(s < 20 ? `Working... ${s}s` : `Working... ${s}s (usually 30-60s)`);
+        }, 1000);
         (function poll() {
             if (stopped) return;
             $.getJSON(`/api/generate/progress/${encodeURIComponent(progressId)}`)
@@ -1280,6 +1336,7 @@ $(document).ready(function () {
         return function stop() {
             stopped = true;
             clearTimeout(timer);
+            clearInterval(clock);
         };
     }
 
@@ -1514,7 +1571,7 @@ $(document).ready(function () {
     function appendUserMessage(text, imagePath, platforms, tone, mediaType, brandVoice, opts) {
         const isBrief = !(opts && opts.followUp);
         const platformBadges = platforms.map(p => {
-            const icons = { facebook: 'fab fa-facebook color-fb', instagram: 'fab fa-instagram color-ig', linkedin: 'fab fa-linkedin color-li', youtube: 'fab fa-youtube color-yt' };
+            const icons = { facebook: 'fab fa-facebook color-fb', instagram: 'fab fa-instagram color-ig', linkedin: 'fab fa-linkedin color-li', youtube: 'fab fa-youtube color-yt', twitter: 'fab fa-x-twitter color-x', threads: 'fab fa-threads color-x' };
             return `<span class="chat-badge"><i class="${icons[p] || 'fas fa-share'} me-1"></i>${p.toUpperCase()}</span>`;
         }).join(' ');
 
@@ -1702,7 +1759,7 @@ $(document).ready(function () {
                     <i class="fas fa-network-wired text-primary me-1"></i>Multi-Agent Execution Pipeline
                 </div>
                 <div class="d-flex align-items-center">
-                    <span class="assistant-run-tag me-2">Active Agents</span>
+                    <span class="assistant-run-tag gen-timer me-2" id="${msgId}_timer" aria-live="off">Working...</span>
                     <button class="btn btn-sm btn-outline-danger py-0 px-2 cancel-generation-btn" onclick="cancelGeneration('${msgId}')" title="Cancel generation"><i class="fas fa-times me-1"></i>Cancel</button>
                 </div>
             </div>
@@ -1731,7 +1788,7 @@ $(document).ready(function () {
                 <div class="agent-step-item" id="${msgId}_step_hashtag">
                     <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
                     <span class="agent-step-name"><i class="fas fa-hashtag me-1 text-warning"></i>Hashtag Agent</span>
-                    <span class="agent-step-desc">Curating broad, niche &amp; brand hashtags (runs alongside captions)</span>
+                    <span class="agent-step-desc">Curating broad, niche &amp; brand hashtags (runs alongside the research and captions)</span>
                 </div>
 
                 <div class="agent-step-item" id="${msgId}_step_reviewer">
@@ -1744,6 +1801,13 @@ $(document).ready(function () {
                     <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
                     <span class="agent-step-name"><i class="fas fa-user-shield me-1 text-indigo"></i>Brand Guardrail</span>
                     <span class="agent-step-desc">Verifying the brand-voice persona was never used as the company name</span>
+                </div>
+
+                <!-- Shown only when the user has industry/market rules (server step "compliance") -->
+                <div class="agent-step-item d-none" id="${msgId}_step_compliance">
+                    <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
+                    <span class="agent-step-name"><i class="fas fa-scale-balanced me-1 text-indigo"></i>Compliance Check</span>
+                    <span class="agent-step-desc">Checking the caption against your industry's advertising rules</span>
                 </div>
             </div>
         `;
@@ -2153,7 +2217,7 @@ $(document).ready(function () {
 
         // This card's Image option follows today's image limit too
         if (window.__imageQuota) window.applyImageQuota(window.__imageQuota);
-        window.applyVideoAccess(window.__videoEnabled);  // and its Video option, the user's video access
+        window.applyVideoAccess(window.__videoEnabled || !!window.__videoLock, window.__videoLock);  // and its Video option, the user's video access
         $(`#${msgId}_researchGenerateBtn`).on('click', function () {
             const platforms = [];
             $(`#${msgId}_researchPlatforms input:checked`).each(function () { platforms.push($(this).val()); });
@@ -2425,7 +2489,7 @@ $(document).ready(function () {
 
     // ── "Preview": the post as each platform shows it ─────────────────────
     // (the cards of the approval review page: static/js/post_preview.js)
-    const PREVIEW_ICONS = { facebook: 'fab fa-facebook', instagram: 'fab fa-instagram', linkedin: 'fab fa-linkedin', youtube: 'fab fa-youtube' };
+    const PREVIEW_ICONS = { facebook: 'fab fa-facebook', instagram: 'fab fa-instagram', linkedin: 'fab fa-linkedin', youtube: 'fab fa-youtube', twitter: 'fab fa-x-twitter', threads: 'fab fa-threads' };
     const previewState = { posts: [], active: 0, slide: 0 };
 
     // What a message would post, per platform: {platform, caption, hashtags, images, media, slideTitles, on}.
@@ -2577,7 +2641,7 @@ $(document).ready(function () {
         // Only real numbers - nothing is shown when a value isn't known (e.g. history items)
         const hasUsage = usage && usage.total_tokens;
         const totalTokens = hasUsage ? Number(usage.total_tokens).toLocaleString() : '';
-        const costUsd = hasUsage ? '$' + Number(usage.cost_usd || 0).toFixed(4) : '';
+        const costUsd = hasUsage ? window.avirMoney(usage.cost_usd, (window.__avirMoney || {}).currency === 'INR' ? 2 : 4) : '';
         const memCount = usage?.memories_referenced || 0;
         const agentsCount = agentsExecuted?.length || 0;
         const checksTotal = qualitySummary?.checks_total || 0;
@@ -2616,7 +2680,7 @@ $(document).ready(function () {
         let tabsHtml = `<div class="platform-tabs-chat">`;
         platforms.forEach((p, idx) => {
             const active = idx === 0 ? 'active' : '';
-            const icons = { facebook: 'fab fa-facebook color-fb', instagram: 'fab fa-instagram color-ig', linkedin: 'fab fa-linkedin color-li', youtube: 'fab fa-youtube color-yt' };
+            const icons = { facebook: 'fab fa-facebook color-fb', instagram: 'fab fa-instagram color-ig', linkedin: 'fab fa-linkedin color-li', youtube: 'fab fa-youtube color-yt', twitter: 'fab fa-x-twitter color-x', threads: 'fab fa-threads color-x' };
             tabsHtml += `
                 <button class="platform-tab-chat ${active}" data-target="${msgId}_tab_${p}">
                     <i class="${icons[p] || 'fas fa-share'} me-1"></i>${capitalize(p)}
@@ -2946,6 +3010,10 @@ $(document).ready(function () {
     }
 
     function imageLimitText(q) {
+        if (q.blocked_by === 'month') {
+            return `You've used all the images in your ${q.plan ? q.plan.charAt(0).toUpperCase() + q.plan.slice(1) : ''} plan for this month. `
+                + 'Upgrade your plan or ask your admin for an image pack.';
+        }
         return `You've used your ${q.limit} image${q.limit === 1 ? '' : 's'} for today. `
             + `Your limit resets in ${resetsInText(q.resets_in_seconds)} (midnight UTC). For more, contact your admin.`;
     }
@@ -3013,22 +3081,46 @@ $(document).ready(function () {
 
     // Video is "coming soon" unless an admin switched it on for this user
     // (Admin -> Users -> Image access -> Video); admins always have it.
-    window.applyVideoAccess = function (enabled) {
-        window.__videoEnabled = !!enabled;
+    // lock: null (usable), or {tag, title} - the plan has no video ("Starter"),
+    // or no videos are left ("0 left"); title explains it on hover
+    window.applyVideoAccess = function (enabled, lock) {
+        window.__videoEnabled = !!enabled && !lock;
+        window.__videoLock = lock || null;
         $('.video-gate').each(function () {
             const $input = $(this).find('input');
-            $(this).toggleClass('coming-soon', !enabled).attr('title', enabled ? null : 'Coming soon');
-            $(this).find('.soon-tag').toggleClass('d-none', !!enabled);
-            if (!enabled && $input.prop('checked')) $input.prop('checked', false).trigger('change');
-            $input.prop('disabled', !enabled);
+            const usable = !!enabled && !lock;
+            const tag = !enabled ? 'Soon' : (lock ? lock.tag : '');
+            $(this).toggleClass('coming-soon', !usable)
+                .attr('title', usable ? null : (!enabled ? 'Coming soon' : lock.title));
+            $(this).find('.soon-tag').text(tag).toggleClass('d-none', usable);
+            if (!usable && $input.prop('checked')) $input.prop('checked', false).trigger('change');
+            $input.prop('disabled', !usable);
         });
     };
+
+    // What the Video option should say for this user's plan and video credits
+    function videoLock(r) {
+        const v = r && r.video_quota;
+        if (!v || !v.enabled) return null;
+        if (r.features && r.features.video === false) {
+            const plan = (r.upgrade_plans || {}).video || 'a higher';
+            return { tag: plan, title: `Video is on the ${plan} plan and above` };
+        }
+        if (v.blocked_by === 'month') return { tag: '0 left', title: 'No videos left - ask your admin for a video pack' };
+        return null;
+    }
 
     function loadImageQuota() {
         // kept so an emailed idea waits for it before ticking Image / Video (openEmailedIdea)
         window.__quotaLoaded = $.getJSON('/api/me/image-quota').done(function (r) {
+            window.__planFeatures = (r && r.features) || null;
+            window.__upgradePlans = (r && r.upgrade_plans) || {};
             window.applyImageQuota(r && r.quota);
-            window.applyVideoAccess(!!(r && r.video_quota && r.video_quota.enabled));
+            window.applyVideoAccess(!!(r && r.video_quota && r.video_quota.enabled), videoLock(r));
+            // approval buttons drawn before the plan was known
+            $('.btn-send-approval').each(function () {
+                if (window.__planFeatures && !window.__planFeatures.approvals) $(this).replaceWith(approvalButtonHtml($(this).data('msg')));
+            });
         });
     }
     window.loadImageQuota = loadImageQuota;
@@ -3424,9 +3516,16 @@ $(document).ready(function () {
     function approvalButtonHtml(msgId) {
         const h = window.chatHistory[msgId] || {};
         const sent = h.approval && h.approval[h.currentIndex];
-        return sent
-            ? `<a class="btn btn-sm btn-outline-success" href="/approve/${sent}" target="_blank" rel="noopener"><i class="fas fa-check me-1"></i>Sent for approval · View</a>`
-            : `<button class="btn btn-sm btn-outline-primary btn-send-approval" data-msg="${msgId}"><i class="fas fa-paper-plane me-1"></i>Send for approval</button>`;
+        if (sent) {
+            return `<a class="btn btn-sm btn-outline-success" href="/approve/${sent}" target="_blank" rel="noopener"><i class="fas fa-check me-1"></i>Sent for approval · View</a>`;
+        }
+        // Approvals come with some plans only (see /api/me/image-quota features)
+        if (window.__planFeatures && !window.__planFeatures.approvals) {
+            const plan = (window.__upgradePlans || {}).approvals || 'a higher';
+            return `<a class="btn btn-sm btn-outline-secondary btn-plan-locked" href="/settings#plan"
+                       title="Approvals are on the ${escapeAttr(plan)} plan and above"><i class="fas fa-lock me-1"></i>Send for approval<span class="plan-chip">${escapeHtml(plan)}</span></a>`;
+        }
+        return `<button class="btn btn-sm btn-outline-primary btn-send-approval" data-msg="${msgId}"><i class="fas fa-paper-plane me-1"></i>Send for approval</button>`;
     }
 
     function openApproval(msgId) {
@@ -3508,7 +3607,7 @@ $(document).ready(function () {
         });
     }
 
-    const PLATFORM_NAMES = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube' };
+    const PLATFORM_NAMES = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', twitter: 'X', threads: 'Threads' };
     const platformName = p => PLATFORM_NAMES[p] || (p.charAt(0).toUpperCase() + p.slice(1));
 
     // A platform that was showing the shared image asks for its own (paid) one
@@ -3528,8 +3627,9 @@ $(document).ready(function () {
     // so the badge is updated again when each one is done - see addMediaCost)
     function costBadgeInner(usage) {
         const media = Number(usage.media_cost_usd || 0);
-        return `<i class="fas fa-bolt text-warning me-1"></i>${Number(usage.total_tokens || 0).toLocaleString()} tok | $${Number(usage.cost_usd || 0).toFixed(4)}`
-            + (media > 0 ? `<span class="cost-media-note"> · incl. ${usage.media_count > 1 ? usage.media_count + ' images' : 'image'} $${media.toFixed(2)}</span>` : '');
+        const inr = (window.__avirMoney || {}).currency === 'INR';
+        return `<i class="fas fa-bolt text-warning me-1"></i>${Number(usage.total_tokens || 0).toLocaleString()} tok | ${window.avirMoney(usage.cost_usd, inr ? 2 : 4)}`
+            + (media > 0 ? `<span class="cost-media-note"> · incl. ${usage.media_count > 1 ? usage.media_count + ' images' : 'image'} ${window.avirMoney(media)}</span>` : '');
     }
 
     // The server already adds the image's cost to the saved run (credits);
@@ -3625,7 +3725,7 @@ $(document).ready(function () {
                     window.applyImageQuota(body.quota);
                     return;
                 }
-                if (xhr.status === 403 && (body.code === 'video_limit_reached' || body.code === 'video_not_enabled')) {
+                if (xhr.status === 403 && ['video_limit_reached', 'video_not_enabled', 'video_pack_needed'].includes(body.code)) {
                     $('#' + targetSlotId).html(`
                         <div class="alert alert-warning py-2 px-3 small mt-2">
                             <i class="fas fa-hourglass-half me-1"></i>${escapeHtml(body.error || 'Video is not available right now.')}
@@ -4017,7 +4117,7 @@ $(document).ready(function () {
             url: '/api/credit-requests',
             type: 'POST',
             contentType: 'application/json',
-            data: JSON.stringify({ requested_amount: amount, reason: reason }),
+            data: JSON.stringify({ requested_amount: amount, reason: reason, currency: $('#creditRequestForm').data('currency') || 'USD' }),
             success: function (r) {
                 if (r.success) {
                     showToast(r.message || 'Credit extension request submitted to admin!', 'success');
@@ -4582,109 +4682,6 @@ $(document).ready(function () {
         });
     });
 
-    // ── AI Models & Purpose Inspector Handler ─────────────────────────────
-    $('#headerModelInfoBtn').on('click', function () {
-        openModelArchitectureModal();
-    });
-
-    function openModelArchitectureModal() {
-        const modalElem = document.getElementById('modelArchitectureModal');
-        if (modalElem) {
-            const modal = bootstrap.Modal.getOrCreateInstance(modalElem);
-            modal.show();
-            loadModelsInfoData();
-        }
-    }
-
-    function loadModelsInfoData() {
-        $.ajax({
-            url: '/api/models/info',
-            type: 'GET',
-            success: function (r) {
-                if (!r.success || !r.models) return;
-
-                const summary = r.summary || {};
-                const categoryIcons = {
-                    llm: { icon: 'fa-brain', class: 'cat-llm' },
-                    vision: { icon: 'fa-eye', class: 'cat-vision' },
-                    image: { icon: 'fa-image', class: 'cat-image' },
-                    video: { icon: 'fa-video', class: 'cat-video' },
-                    memory: { icon: 'fa-database', class: 'cat-memory' }
-                };
-
-                let html = `
-                    <div class="col-12 mb-2">
-                        <div class="runtime-metrics-bar p-3 bg-slate-50 border rounded-3 d-flex flex-wrap align-items-center justify-content-between gap-3">
-                            <div class="d-flex align-items-center gap-2">
-                                <span class="badge bg-success-subtle text-success border border-success-subtle px-2.5 py-1.5 font-bold fs-8">
-                                    <i class="fas fa-circle-check me-1"></i>Runtime Active
-                                </span>
-                                <span class="text-slate-600 font-semibold fs-7">
-                                    AWS Region: <strong class="text-navy">${escapeHtml(summary.aws_region || 'us-east-1')}</strong>
-                                </span>
-                            </div>
-                            <div class="d-flex gap-4 fs-7">
-                                <div><span class="text-slate-500">User Runs:</span> <strong class="text-navy">${summary.total_user_runs || 0}</strong></div>
-                                <div><span class="text-slate-500">Tokens:</span> <strong class="text-navy font-monospace">${Number(summary.total_tokens_used || 0).toLocaleString()}</strong></div>
-                                <div><span class="text-slate-500">Cost USD:</span> <strong class="text-emerald font-monospace">$${Number(summary.total_cost_usd || 0).toFixed(4)}</strong></div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-
-                r.models.forEach(m => {
-                    const iconMeta = categoryIcons[m.category] || { icon: 'fa-microchip', class: 'cat-llm' };
-                    const agentTags = (m.agents || []).map(a => `<span class="agent-pill-tag">${a}</span>`).join(' ');
-
-                    const statusBadges = {
-                        ACTIVE: '<span class="badge bg-success text-white"><i class="fas fa-circle me-1 fs-9"></i>ACTIVE</span>',
-                        ONLINE: '<span class="badge bg-primary text-white"><i class="fas fa-signal me-1 fs-9"></i>ONLINE</span>',
-                        STANDBY: '<span class="badge bg-secondary text-white"><i class="fas fa-pause me-1 fs-9"></i>STANDBY</span>'
-                    };
-
-                    html += `
-                        <div class="col-md-6 col-lg-4">
-                            <div class="model-purpose-card">
-                                <div class="d-flex align-items-center justify-content-between mb-3">
-                                    <div class="d-flex align-items-center gap-3">
-                                        <div class="cat-icon-box ${iconMeta.class}">
-                                            <i class="fas ${iconMeta.icon}"></i>
-                                        </div>
-                                        <div>
-                                            <h6 class="font-bold text-navy mb-0">${escapeHtml(m.purpose)}</h6>
-                                            <small class="text-primary font-semibold">${escapeHtml(m.provider)}</small>
-                                        </div>
-                                    </div>
-                                    ${statusBadges[m.status] || '<span class="badge bg-info text-white">ONLINE</span>'}
-                                </div>
-                                <div class="mb-3">
-                                    <span class="small text-slate-500 d-block mb-1">Active Model Slug:</span>
-                                    <span class="slug-badge"><i class="fas fa-code-branch me-1 text-slate-400"></i>${escapeHtml(m.model_name)}</span>
-                                </div>
-                                <p class="small text-slate-600 mb-3 flex-grow-1" style="font-size: 12px; line-height: 1.5;">${escapeHtml(m.description)}</p>
-                                <div class="pt-2 border-top">
-                                    <small class="text-slate-500 font-semibold d-block mb-2">Assigned Agents &amp; Services:</small>
-                                    <div class="d-flex gap-1 flex-wrap">
-                                        ${agentTags}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                });
-
-                $('#modelsInfoCardsContainer').html(html);
-            },
-            error: function () {
-                $('#modelsInfoCardsContainer').html(`
-                    <div class="col-12 text-center py-5 text-danger">
-                        <i class="fas fa-triangle-exclamation fa-2x mb-2"></i>
-                        <p>Failed to load dynamic AI Model architecture information.</p>
-                    </div>
-                `);
-            }
-        });
-    }
 
 
 

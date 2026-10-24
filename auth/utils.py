@@ -20,6 +20,14 @@ def login_required_api(view):
     return wrapped
 
 
+def admin_needs_2fa(user) -> bool:
+    """An admin who hasn't turned on two-step sign-in, while it is required."""
+    from config import Config
+
+    return bool(Config.ADMIN_2FA_REQUIRED and getattr(user, "is_admin", False)
+                and getattr(user, "totp_enabled_at", None) is None)
+
+
 def admin_required_api(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -29,6 +37,9 @@ def admin_required_api(view):
         user = get_user_by_id(user_id)
         if not user or not getattr(user, "is_admin", False):
             return jsonify({"error": "Admin access required", "success": False}), 403
+        if admin_needs_2fa(user):
+            return jsonify({"error": "Turn on two-step sign-in (Settings -> Security) to use admin tools.",
+                            "code": "admin_2fa_required", "success": False}), 403
         return view(*args, **kwargs)
 
     return wrapped
@@ -89,6 +100,8 @@ def admin_required_page(view):
         user = get_user_by_id(user_id) if user_id else None
         if not user or not getattr(user, "is_admin", False):
             return redirect(url_for("index"))
+        if admin_needs_2fa(user):
+            return redirect("/settings#security")
         return view(*args, **kwargs)
 
     return wrapped

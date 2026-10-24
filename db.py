@@ -32,6 +32,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 from sqlalchemy.sql import func
 
+from config import Config
+
 logger = logging.getLogger(__name__)
 
 
@@ -73,7 +75,7 @@ class User(Base):
     email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
-    credit_limit: Mapped[float] = mapped_column(Float, default=10.0, nullable=False)
+    credit_limit: Mapped[float] = mapped_column(Float, default=lambda: Config.DEFAULT_CREDIT_USD, nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Post-signup onboarding journey (see docs/plan for "Post-Signup Onboarding
@@ -116,6 +118,8 @@ class User(Base):
     # Video is "coming soon" for everyone until an admin switches it on for
     # the user (Admin -> Users -> Image access -> Video). Admins always have it.
     video_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
+    # The user's profile at the unified social API (services/zernio_service.py)
+    zernio_profile_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Weekly "ideas for you" email (services/idea_digest_service.py). None = on:
     # users get it until they switch it off (Settings -> Notifications, or the
     # email's unsubscribe link).
@@ -129,6 +133,24 @@ class User(Base):
     # recap_email_last_month: the month ("2026-09") the last recap covered, so each month is sent once.
     recap_email_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     recap_email_last_month: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    # Two-step sign-in (auth/two_factor.py): the authenticator secret,
+    # encrypted; set while being set up, turned on once a code is confirmed.
+    totp_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
+    totp_enabled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    totp_last_counter: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Pricing plan (Plan.slug; see PRICING.md). None = the default for the
+    # account type (plan_slug_for). plan_started_at anchors the monthly
+    # allowance: it resets on that day of each month.
+    plan_slug: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    plan_started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Paid-for plans end here (then the user is back on the default plan);
+    # None = no end (assigned by an admin, or the default plan).
+    plan_paid_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Billing details printed on GST invoices (Settings -> Plan & usage)
+    billing_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    billing_gstin: Mapped[str | None] = mapped_column(String(15), nullable=True)
+    billing_address: Mapped[str | None] = mapped_column(String(400), nullable=True)
+    billing_state: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Posts the user aims to create each week (Content Calendar). None = WEEKLY_POST_GOAL_DEFAULT.
     weekly_post_goal: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # In-app guide (services/guide_service.py): JSON {"tours": [...seen],
@@ -588,6 +610,184 @@ class SuggestedStorylineSeen(Base):
     first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
+class Payment(Base):
+    """One purchase through a payment provider (services/billing_service.py).
+    The amount and what it buys are set by the server when the order is
+    created; fulfilled_at makes applying it happen only once, however many
+    times the browser and the webhook report it."""
+
+    __tablename__ = "payments"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(16), nullable=False)  # razorpay
+    order_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    payment_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    item: Mapped[str] = mapped_column(String(48), nullable=False)  # plan:growth:month, pack:image10, ...
+    description: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)  # smallest unit (paise), GST included
+    tax: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), default="created", nullable=False)  # created / paid / failed
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    fulfilled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    refunded_amount: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    refunded_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class PublishedPost(Base):
+    """A post the app published to a platform (scheduled or from an approved
+    request), and how it is doing there (services/metrics_service.py).
+    metrics: {likes, comments, shares, saves, reach, views} - whatever the
+    platform reports; engagement = likes + comments + shares + saves."""
+
+    __tablename__ = "published_posts"
+    __table_args__ = (
+        UniqueConstraint("platform", "platform_post_id", name="uq_published_platform_post"),
+        {"schema": SCHEMA} if not IS_SQLITE else {},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    platform: Mapped[str] = mapped_column(String(16), nullable=False)
+    platform_post_id: Mapped[str] = mapped_column(String(160), nullable=False)
+    permalink: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    title: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)  # scheduled / approval
+    source_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    published_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
+    metrics: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON
+    engagement: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    metrics_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    metrics_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
+class Subscription(Base):
+    """An automatically renewing plan (Razorpay Subscriptions / Stripe
+    subscriptions). Each charge is also a Payment, applied once, which
+    extends the plan (db.extend_paid_plan) and gets its own invoice."""
+
+    __tablename__ = "subscriptions"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(16), nullable=False)
+    provider_subscription_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    plan_slug: Mapped[str] = mapped_column(String(32), nullable=False)
+    period: Mapped[str] = mapped_column(String(8), nullable=False)  # month / year
+    amount: Mapped[int] = mapped_column(Integer, nullable=False)  # each charge, paise / cents (GST included)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False)
+    # created (waiting for the first payment) / active / cancelled (no more renewals) / ended
+    status: Mapped[str] = mapped_column(String(16), default="created", nullable=False)
+    cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class Invoice(Base):
+    """A GST tax invoice for a payment, or a credit note for a refund
+    (services/invoice_service.py). Amounts in paise / cents; the seller and
+    buyer details are copied in, so a later change of address doesn't alter
+    an issued invoice."""
+
+    __tablename__ = "invoices"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    number: Mapped[str] = mapped_column(String(16), nullable=False, unique=True)  # GST allows 16 characters
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # invoice / credit_note
+    series: Mapped[str] = mapped_column(String(16), nullable=False, index=True)  # e.g. AVIR/26-27
+    sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    order_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    original_number: Mapped[str | None] = mapped_column(String(16), nullable=True)  # credit note -> its invoice
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    issued_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False)
+    taxable: Mapped[int] = mapped_column(Integer, nullable=False)
+    cgst: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    sgst: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    igst: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total: Mapped[int] = mapped_column(Integer, nullable=False)
+    details: Mapped[str] = mapped_column(Text, nullable=False)  # JSON: seller, buyer, line, place of supply, notes
+
+
+class PaymentEvent(Base):
+    """Webhook events already handled (provider's event id), so a resent
+    webhook is ignored."""
+
+    __tablename__ = "payment_events"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    event_id: Mapped[str] = mapped_column(String(80), primary_key=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class AuditLog(Base):
+    """Who changed what, for changes that matter for money and access: plans,
+    packs, credit, video access, account status, two-step sign-in, and (later)
+    payments. actor_user_id is None for the system or a payment provider."""
+
+    __tablename__ = "audit_log"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
+    actor_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    action: Mapped[str] = mapped_column(String(48), nullable=False, index=True)
+    target_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    details: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: before / after / note
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class Plan(Base):
+    """A pricing plan (PRICING.md section 8). Seeded with DEFAULT_PLANS on
+    first start; admins can change prices and limits later without a
+    release. A limit of None means unlimited ("Custom" for Enterprise)."""
+
+    __tablename__ = "plans"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    slug: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    sort: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    price_inr: Mapped[float | None] = mapped_column(Float, nullable=True)  # monthly, before GST; None = on request
+    price_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    annual_inr: Mapped[float | None] = mapped_column(Float, nullable=True)
+    annual_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
+    best_for: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    posts_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    images_month: Mapped[int | None] = mapped_column(Integer, nullable=True)  # includes edits
+    images_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    videos_month: Mapped[int | None] = mapped_column(Integer, nullable=True)  # included videos; 0 = packs only
+    videos_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    video_pack_discount: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # percent
+    brands: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    approvals: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    support: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class UsagePack(Base):
+    """Prepaid images or videos on top of the plan (PRICING.md top-up packs).
+    Used only after the plan's monthly allowance runs out, oldest first;
+    expire after 12 months. Granted by an admin until payments exist."""
+
+    __tablename__ = "usage_packs"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)  # image / video
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    used: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    note: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    order_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)  # bought online: the payment
+
+
 class IndustryTrend(Base):
     """This week's talked-about topics for one industry in one market (see
     services/trend_service.py). Shared by every user in that industry, so
@@ -810,8 +1010,6 @@ class CompetitorPostEmbedding(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
-
-
 def init_db():
     """Create schema, tables, and apply lightweight migrations."""
     if not IS_SQLITE:
@@ -820,11 +1018,15 @@ def init_db():
             conn.commit()
 
     Base.metadata.create_all(engine)
+    _seed_plans()
 
     with engine.connect() as conn:
         run_tbl = f'"{SCHEMA}".run_history' if not IS_SQLITE else "run_history"
         img_tbl = f'"{SCHEMA}".image_generations' if not IS_SQLITE else "image_generations"
         usr_tbl = f'"{SCHEMA}".users' if not IS_SQLITE else "users"
+
+        def _tbl(name: str) -> str:
+            return f'"{SCHEMA}".{name}' if not IS_SQLITE else name
 
         for alter_cmd in [
             f"ALTER TABLE {run_tbl} ADD COLUMN user_id INTEGER",
@@ -845,8 +1047,9 @@ def init_db():
             f"CREATE INDEX IF NOT EXISTS ix_image_generations_conversation_id ON {img_tbl} (conversation_id)",
             f"CREATE INDEX IF NOT EXISTS ix_image_generations_parent_id ON {img_tbl} (parent_id)",
             f"CREATE INDEX IF NOT EXISTS ix_image_generations_root_id ON {img_tbl} (root_id)",
-            f"ALTER TABLE {usr_tbl} ADD COLUMN credit_limit DOUBLE PRECISION DEFAULT 10.0",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN credit_limit DOUBLE PRECISION DEFAULT {Config.DEFAULT_CREDIT_USD}",
             f"ALTER TABLE {usr_tbl} ADD COLUMN is_admin BOOLEAN DEFAULT FALSE",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN zernio_profile_id VARCHAR(64)",
             f"ALTER TABLE {usr_tbl} ADD COLUMN email_verified BOOLEAN DEFAULT FALSE",
             f"ALTER TABLE {usr_tbl} ADD COLUMN verification_token VARCHAR(64)",
             f"ALTER TABLE {usr_tbl} ADD COLUMN verification_sent_at TIMESTAMP",
@@ -867,6 +1070,19 @@ def init_db():
             f"ALTER TABLE {usr_tbl} ADD COLUMN ideas_email_last_sent_at TIMESTAMP",
             f"ALTER TABLE {usr_tbl} ADD COLUMN nudge_email_enabled BOOLEAN",
             f"ALTER TABLE {usr_tbl} ADD COLUMN weekly_post_goal INTEGER",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN plan_slug VARCHAR(32)",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN totp_secret TEXT",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN totp_enabled_at TIMESTAMP",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN totp_last_counter INTEGER",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN plan_started_at TIMESTAMP",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN plan_paid_until TIMESTAMP",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN billing_name VARCHAR(160)",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN billing_gstin VARCHAR(15)",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN billing_address VARCHAR(400)",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN billing_state VARCHAR(64)",
+            f"ALTER TABLE {_tbl('payments')} ADD COLUMN refunded_amount INTEGER DEFAULT 0",
+            f"ALTER TABLE {_tbl('payments')} ADD COLUMN refunded_at TIMESTAMP",
+            f"ALTER TABLE {_tbl('usage_packs')} ADD COLUMN order_id VARCHAR(64)",
             f"ALTER TABLE {usr_tbl} ADD COLUMN guide_state TEXT",
             f"ALTER TABLE {usr_tbl} ADD COLUMN recap_email_enabled BOOLEAN",
             f"ALTER TABLE {usr_tbl} ADD COLUMN recap_email_last_month VARCHAR(7)",
@@ -984,20 +1200,35 @@ def init_db():
                 )
                 if existing:
                     existing.is_admin = True  # type: ignore[assignment]
-                    existing.credit_limit = max(existing.credit_limit or 10.0, 1000.0)  # type: ignore[assignment]
+                    existing.credit_limit = max(existing.credit_limit or 0.0, 1000.0)  # type: ignore[assignment]
                 else:
+                    # Never a known password: ADMIN_PASSWORD if set, else a random one
+                    # shown once in the log (sign in, then change it)
+                    password = os.getenv("ADMIN_PASSWORD") or secrets.token_urlsafe(16)
                     new_admin = User(
                         name="System Admin",
-                        email="admin@vortexsocial.ai",
-                        password_hash=generate_password_hash("admin123"),
+                        email=os.getenv("ADMIN_EMAIL") or "admin@vortexsocial.ai",
+                        password_hash=generate_password_hash(password),
                         credit_limit=1000.0,
                         is_admin=True,
                     )
                     session.add(new_admin)
+                    if not os.getenv("ADMIN_PASSWORD"):
+                        logger.warning(f"First admin created: {new_admin.email} with password {password} - change it after signing in.")
                 session.commit()
-                logger.warning("Default admin user created with the built-in password - change it now.")
     except Exception as seed_err:
         logger.warning(f"Warning seeding admin user: {seed_err}")
+
+    # Older versions created the first admin with the password "admin123"
+    try:
+        from werkzeug.security import check_password_hash
+
+        with Session(engine) as session:
+            for admin in session.query(User).filter(User.is_admin.is_(True)).all():
+                if admin.password_hash and check_password_hash(admin.password_hash, "admin123"):
+                    logger.error(f"SECURITY: admin {admin.email} still uses the old default password - change it now.")
+    except Exception as check_err:
+        logger.warning(f"Could not check admin passwords: {check_err}")
 
     try:
         made = _backfill_conversations()
@@ -1026,14 +1257,14 @@ def _serialize_run(row: RunHistory, truncate_story: bool = False) -> dict:
     }
 
 
-def create_user(name: str, email: str, password_hash: str, is_admin: bool = False, credit_limit: float = 10.0) -> dict:
+def create_user(name: str, email: str, password_hash: str, is_admin: bool = False, credit_limit: float | None = None) -> dict:
     with Session(engine) as session:
         row = User(
             name=name.strip(),
             email=email.strip().lower(),
             password_hash=password_hash,
             is_admin=is_admin,
-            credit_limit=credit_limit,
+            credit_limit=Config.DEFAULT_CREDIT_USD if credit_limit is None else credit_limit,
         )
         session.add(row)
         session.commit()
@@ -2314,8 +2545,682 @@ def log_image_generation(
             conv = session.get(Conversation, conversation_id)
             if conv is not None and conv.user_id == user_id:
                 conv.active_image_id = row.id
+        _use_pack_if_over_allowance(session, user_id, "video" if kind == "video" else "image")
         session.commit()
         return int(row.id)
+
+
+# ── Payments (services/billing_service.py) ────────────────────────────────
+
+
+def create_payment(user_id: int, provider: str, order_id: str, item: str, description: str,
+                   amount: int, tax: int, currency: str) -> None:
+    with Session(engine) as session:
+        session.add(Payment(user_id=user_id, provider=provider, order_id=order_id, item=item, description=description,
+                            amount=amount, tax=tax, currency=currency))
+        session.commit()
+
+
+def get_payment(order_id: str) -> dict | None:
+    with Session(engine) as session:
+        row = session.query(Payment).filter(Payment.order_id == order_id).first()
+        if row is None:
+            return None
+        return {c.name: getattr(row, c.name) for c in Payment.__table__.columns}
+
+
+def claim_payment_for_fulfilment(order_id: str, payment_id: str | None) -> dict | None:
+    """Mark the order paid and claim it for fulfilment - once. Returns the
+    payment the first time, None if it was already fulfilled (or unknown)."""
+    with Session(engine) as session:
+        row = session.query(Payment).filter(Payment.order_id == order_id).with_for_update().first()
+        if row is None or row.fulfilled_at is not None:
+            return None
+        now = _utcnow()
+        row.status = "paid"
+        row.payment_id = payment_id or row.payment_id
+        row.paid_at = row.paid_at or now
+        row.fulfilled_at = now
+        session.commit()
+        return {c.name: getattr(row, c.name) for c in Payment.__table__.columns}
+
+
+def mark_payment_failed(order_id: str, payment_id: str | None) -> None:
+    with Session(engine) as session:
+        session.query(Payment).filter(Payment.order_id == order_id, Payment.fulfilled_at.is_(None)).update(
+            {"status": "failed", "payment_id": payment_id})
+        session.commit()
+
+
+def record_payment_event(event_id: str) -> bool:
+    """True the first time an event id is seen, False for a repeat."""
+    from sqlalchemy.exc import IntegrityError
+
+    with Session(engine) as session:
+        session.add(PaymentEvent(event_id=event_id[:80]))
+        try:
+            session.commit()
+            return True
+        except IntegrityError:
+            session.rollback()
+            return False
+
+
+def get_payment_by_provider_id(payment_id: str) -> dict | None:
+    """The payment a provider's payment id belongs to (Razorpay pay_..., Stripe pi_...)."""
+    with Session(engine) as session:
+        row = session.query(Payment).filter(Payment.payment_id == payment_id).first()
+        return {c.name: getattr(row, c.name) for c in Payment.__table__.columns} if row else None
+
+
+def record_refund(order_id: str, refunded_total: int) -> dict | None:
+    """Set the order's refunded total (never lowered). Returns the payment
+    with "newly_refunded" (paise / cents refunded by this call), or None."""
+    with Session(engine) as session:
+        row = session.query(Payment).filter(Payment.order_id == order_id).with_for_update().first()
+        if row is None:
+            return None
+        refunded_total = min(int(refunded_total), row.amount)
+        newly = max(0, refunded_total - (row.refunded_amount or 0))
+        if newly:
+            row.refunded_amount = refunded_total
+            row.refunded_at = _utcnow()
+            row.status = "refunded" if refunded_total >= row.amount else "partially_refunded"
+            session.commit()
+        return {**{c.name: getattr(row, c.name) for c in Payment.__table__.columns}, "newly_refunded": newly}
+
+
+def revoke_purchase(order_id: str, item: str, user_id: int, period_days: int | None) -> dict:
+    """Take back what a fully refunded order bought: a plan's paid time, or a
+    pack's unused units. Returns what was taken back."""
+    with Session(engine) as session:
+        if item.startswith("pack:"):
+            packs = session.query(UsagePack).filter(UsagePack.order_id == order_id).all()
+            removed = 0
+            for pack in packs:
+                removed += pack.quantity - pack.used
+                pack.quantity = pack.used
+            session.commit()
+            return {"pack_units_removed": removed}
+        user = session.get(User, user_id)
+        slug = item.split(":")[1]
+        if user is None or user.plan_slug != slug or not user.plan_paid_until or not period_days:
+            return {"plan_days_removed": 0}
+        now = _utcnow().replace(tzinfo=None)
+        user.plan_paid_until = max(now, user.plan_paid_until - timedelta(days=period_days))
+        session.commit()
+        return {"plan_days_removed": period_days, "paid_until": _as_utc(user.plan_paid_until).isoformat()}
+
+
+def get_billing_profile(user_id: int) -> dict:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if user is None:
+            return {}
+        return {"name": user.billing_name or user.name, "email": user.email, "gstin": user.billing_gstin,
+                "address": user.billing_address, "state": user.billing_state}
+
+
+def save_billing_profile(user_id: int, name: str | None, gstin: str | None, address: str | None, state: str | None) -> dict:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if user is not None:
+            user.billing_name, user.billing_gstin = name or None, gstin or None
+            user.billing_address, user.billing_state = address or None, state or None
+            session.commit()
+    return get_billing_profile(user_id)
+
+
+def next_invoice_number(series: str) -> tuple[str, int]:
+    """The next free number in a series ("AVIR/26-27" -> "AVIR/26-27/00007")."""
+    with Session(engine) as session:
+        last = session.query(func.max(Invoice.sequence)).filter(Invoice.series == series).scalar() or 0
+    return f"{series}/{last + 1:05d}", last + 1
+
+
+def save_invoice(**fields) -> dict | None:
+    """Store an invoice; None if its number was taken meanwhile (the caller retries)."""
+    from sqlalchemy.exc import IntegrityError
+
+    with Session(engine) as session:
+        row = Invoice(**{**fields, "details": json.dumps(fields["details"], default=str)})
+        session.add(row)
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            return None
+        return _invoice_dict(row)
+
+
+def _invoice_dict(row: "Invoice") -> dict:
+    data = {c.name: getattr(row, c.name) for c in Invoice.__table__.columns}
+    data["details"] = json.loads(row.details or "{}")
+    data["issued_at"] = _as_utc(row.issued_at).isoformat()
+    return data
+
+
+def get_invoice(number: str) -> dict | None:
+    with Session(engine) as session:
+        row = session.query(Invoice).filter(Invoice.number == number).first()
+        return _invoice_dict(row) if row else None
+
+
+def invoices_for_order(order_id: str) -> list[dict]:
+    with Session(engine) as session:
+        return [_invoice_dict(r) for r in session.query(Invoice).filter(Invoice.order_id == order_id).order_by(Invoice.id)]
+
+
+def _subscription_dict(row: "Subscription") -> dict:
+    data = {c.name: getattr(row, c.name) for c in Subscription.__table__.columns}
+    data["created_at"] = _as_utc(row.created_at).isoformat()
+    data["cancelled_at"] = _as_utc(row.cancelled_at).isoformat() if row.cancelled_at else None
+    return data
+
+
+def create_subscription(user_id: int, provider: str, provider_subscription_id: str, plan_slug: str, period: str,
+                        amount: int, currency: str) -> dict:
+    with Session(engine) as session:
+        row = Subscription(user_id=user_id, provider=provider, provider_subscription_id=provider_subscription_id,
+                           plan_slug=plan_slug, period=period, amount=amount, currency=currency)
+        session.add(row)
+        session.commit()
+        return _subscription_dict(row)
+
+
+def get_subscription(provider_subscription_id: str) -> dict | None:
+    with Session(engine) as session:
+        row = session.query(Subscription).filter(Subscription.provider_subscription_id == provider_subscription_id).first()
+        return _subscription_dict(row) if row else None
+
+
+def update_subscription(provider_subscription_id: str, **fields) -> dict | None:
+    with Session(engine) as session:
+        row = session.query(Subscription).filter(Subscription.provider_subscription_id == provider_subscription_id).first()
+        if row is None:
+            return None
+        for key, value in fields.items():
+            setattr(row, key, value)
+        session.commit()
+        return _subscription_dict(row)
+
+
+def plans_ending_between(start: datetime, end: datetime) -> list[dict]:
+    """Paid plans whose paid time ends in [start, end), with whether they renew
+    automatically - for the billing reminders."""
+    lo, hi = start.astimezone(timezone.utc).replace(tzinfo=None), end.astimezone(timezone.utc).replace(tzinfo=None)
+    with Session(engine) as session:
+        users = session.query(User).filter(User.plan_paid_until >= lo, User.plan_paid_until < hi,
+                                           User.is_active.isnot(False)).all()
+        names = dict(session.query(Plan.slug, Plan.name).all())
+        out = []
+        for user in users:
+            sub = (session.query(Subscription)
+                   .filter(Subscription.user_id == user.id, Subscription.status == "active",
+                           Subscription.plan_slug == user.plan_slug)
+                   .order_by(Subscription.created_at.desc()).first())
+            out.append({"user_id": user.id, "plan_slug": user.plan_slug, "plan_name": names.get(user.plan_slug, user.plan_slug),
+                        "paid_until": _as_utc(user.plan_paid_until), "renewing": sub is not None,
+                        "subscription_id": sub.provider_subscription_id if sub else None,
+                        "amount": sub.amount if sub else None, "currency": sub.currency if sub else None})
+        return out
+
+
+def list_subscriptions(limit: int = 200) -> list[dict]:
+    """Admin -> Payments: subscriptions with the user's email, newest first."""
+    with Session(engine) as session:
+        rows = session.query(Subscription).filter(Subscription.status != "created") \
+            .order_by(Subscription.created_at.desc()).limit(limit).all()
+        emails = dict(session.query(User.id, User.email).filter(User.id.in_({r.user_id for r in rows} or {0})).all())
+        paid_until = dict(session.query(User.id, User.plan_paid_until).filter(User.id.in_({r.user_id for r in rows} or {0})).all())
+        return [{**_subscription_dict(r), "email": emails.get(r.user_id),
+                 "paid_until": _as_utc(paid_until[r.user_id]).isoformat() if paid_until.get(r.user_id) else None} for r in rows]
+
+
+# ── Published posts and how they did (services/metrics_service.py) ────────
+
+
+def register_published_post(user_id: int, platform: str, platform_post_id: str | None, permalink: str | None,
+                            title: str | None, source: str, source_id: int | None = None) -> None:
+    """Remember a post the app just published, so its results can be fetched. Once per platform post."""
+    if not platform_post_id:
+        return  # e.g. LinkedIn through an MCP server: no id to look up
+    from sqlalchemy.exc import IntegrityError
+
+    with Session(engine) as session:
+        session.add(PublishedPost(user_id=user_id, platform=platform, platform_post_id=str(platform_post_id)[:160],
+                                  permalink=(permalink or "")[:500] or None, title=" ".join((title or "").split())[:160] or None,
+                                  source=source, source_id=source_id))
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+
+
+def published_posts_due_for_metrics(now: datetime, max_age_days: int = 30) -> list[dict]:
+    """Posts to refresh: published within max_age_days, never fetched, or last
+    fetched over 6 hours ago (first 2 days) / 24 hours ago (after that)."""
+    oldest = (now - timedelta(days=max_age_days)).astimezone(timezone.utc).replace(tzinfo=None)
+    naive_now = now.astimezone(timezone.utc).replace(tzinfo=None)
+    with Session(engine) as session:
+        rows = session.query(PublishedPost).filter(PublishedPost.published_at >= oldest).all()
+        due = []
+        for row in rows:
+            fresh = naive_now - row.published_at < timedelta(days=2)
+            every = timedelta(hours=6) if fresh else timedelta(hours=24)
+            if row.metrics_at is None or naive_now - row.metrics_at >= every:
+                due.append({"id": row.id, "user_id": row.user_id, "platform": row.platform,
+                            "platform_post_id": row.platform_post_id})
+        return due
+
+
+def save_post_metrics(post_id: int, metrics: dict | None, error: str | None = None) -> None:
+    with Session(engine) as session:
+        row = session.get(PublishedPost, post_id)
+        if row is None:
+            return
+        row.metrics_at = _utcnow()
+        row.metrics_error = (error or "")[:300] or None
+        if metrics is not None:
+            row.metrics = json.dumps(metrics)
+            row.engagement = sum(int(metrics.get(k) or 0) for k in ("likes", "comments", "shares", "saves"))
+        session.commit()
+
+
+def published_posts_for_timing(user_id: int, since: datetime) -> list[dict]:
+    """Published posts with fetched results since `since` - for best times to post."""
+    lo = since.astimezone(timezone.utc).replace(tzinfo=None)
+    with Session(engine) as session:
+        rows = session.query(PublishedPost.platform, PublishedPost.published_at, PublishedPost.engagement).filter(
+            PublishedPost.user_id == user_id, PublishedPost.published_at >= lo, PublishedPost.metrics_at.isnot(None)).all()
+        return [{"platform": p, "published_at": _as_utc(at), "engagement": int(e or 0)} for p, at, e in rows]
+
+
+def post_analytics(user_id: int, since: datetime, until: datetime | None = None) -> dict:
+    """Totals, per platform and top posts for posts published in [since, until)."""
+    lo = since.astimezone(timezone.utc).replace(tzinfo=None)
+    hi = (until or _utcnow()).astimezone(timezone.utc).replace(tzinfo=None)
+    keys = ("likes", "comments", "shares", "saves", "reach", "views")
+    with Session(engine) as session:
+        rows = session.query(PublishedPost).filter(PublishedPost.user_id == user_id, PublishedPost.published_at >= lo,
+                                                   PublishedPost.published_at < hi).all()
+        totals = {k: 0 for k in keys}
+        platforms: dict[str, dict] = {}
+        posts = []
+        for row in rows:
+            metrics = json.loads(row.metrics) if row.metrics else {}
+            per = platforms.setdefault(row.platform, {"posts": 0, "engagement": 0, **{k: 0 for k in keys}})
+            per["posts"] += 1
+            per["engagement"] += row.engagement
+            for k in keys:
+                totals[k] += int(metrics.get(k) or 0)
+                per[k] += int(metrics.get(k) or 0)
+            posts.append({"platform": row.platform, "title": row.title, "permalink": row.permalink,
+                          "published_at": _as_utc(row.published_at).isoformat(), "engagement": row.engagement,
+                          "metrics": metrics, "updated_at": _as_utc(row.metrics_at).isoformat() if row.metrics_at else None,
+                          "error": row.metrics_error})
+        posts.sort(key=lambda p: p["engagement"], reverse=True)
+        engagement = sum(p["engagement"] for p in posts)
+        return {"posts": len(posts), "engagement": engagement, "totals": totals,
+                "engagement_rate": round(100 * engagement / totals["reach"], 1) if totals["reach"] else None,
+                "platforms": platforms, "top_posts": posts[:5], "all_posts": posts}
+
+
+def current_subscription(user_id: int) -> dict | None:
+    """The user's renewing subscription (active, or active but cancelled at period end)."""
+    with Session(engine) as session:
+        row = (session.query(Subscription)
+               .filter(Subscription.user_id == user_id, Subscription.status.in_(("active", "cancelled")))
+               .order_by(Subscription.created_at.desc()).first())
+        return _subscription_dict(row) if row else None
+
+
+def list_payments(limit: int = 100, user_id: int | None = None) -> list[dict]:
+    """Admin -> Payments: recent paid / refunded payments with the buyer's email and invoice numbers."""
+    with Session(engine) as session:
+        query = session.query(Payment).filter(Payment.status != "created")
+        if user_id:
+            query = query.filter(Payment.user_id == user_id)
+        rows = query.order_by(Payment.created_at.desc()).limit(limit).all()
+        emails = dict(session.query(User.id, User.email).filter(User.id.in_({r.user_id for r in rows} or {0})).all())
+        numbers: dict[str, list] = {}
+        for inv in session.query(Invoice).filter(Invoice.order_id.in_([r.order_id for r in rows] or [""])):
+            numbers.setdefault(inv.order_id, []).append({"number": inv.number, "kind": inv.kind})
+        return [{
+            "order_id": r.order_id, "payment_id": r.payment_id, "provider": r.provider, "user_id": r.user_id,
+            "email": emails.get(r.user_id), "item": r.item, "description": r.description, "amount": r.amount,
+            "tax": r.tax, "currency": r.currency, "status": r.status, "refunded_amount": r.refunded_amount or 0,
+            "paid_at": _as_utc(r.paid_at).isoformat() if r.paid_at else None, "invoices": numbers.get(r.order_id, []),
+        } for r in rows]
+
+
+def list_user_payments(user_id: int, limit: int = 20) -> list[dict]:
+    with Session(engine) as session:
+        rows = session.query(Payment).filter(Payment.user_id == user_id, Payment.paid_at.isnot(None)) \
+            .order_by(Payment.paid_at.desc()).limit(limit).all()
+        numbers: dict[str, list] = {}
+        for inv in session.query(Invoice).filter(Invoice.order_id.in_([r.order_id for r in rows] or [""])):
+            numbers.setdefault(inv.order_id, []).append({"number": inv.number, "kind": inv.kind})
+        return [{"description": r.description, "amount": r.amount, "tax": r.tax, "currency": r.currency,
+                 "status": r.status, "refunded_amount": r.refunded_amount or 0,
+                 "paid_at": _as_utc(r.paid_at).isoformat() if r.paid_at else None, "payment_id": r.payment_id,
+                 "invoices": numbers.get(r.order_id, [])} for r in rows]
+
+
+# ── Audit log ─────────────────────────────────────────────────────────────
+
+
+def log_audit(action: str, actor_user_id: int | None = None, target_user_id: int | None = None,
+              details: dict | None = None, ip: str | None = None) -> None:
+    """Record a change. Never raises: a failed audit write must not undo the change."""
+    try:
+        with Session(engine) as session:
+            session.add(AuditLog(action=action[:48], actor_user_id=actor_user_id, target_user_id=target_user_id,
+                                 details=json.dumps(details, default=str) if details else None, ip=(ip or "")[:64] or None))
+            session.commit()
+    except Exception as err:  # noqa: BLE001
+        logger.warning(f"Audit log write failed ({action}): {err}")
+
+
+def list_audit_log(limit: int = 100, target_user_id: int | None = None, action: str | None = None) -> list[dict]:
+    with Session(engine) as session:
+        query = session.query(AuditLog)
+        if target_user_id:
+            query = query.filter(AuditLog.target_user_id == target_user_id)
+        if action:
+            query = query.filter(AuditLog.action.like(f"{action}%"))
+        rows = query.order_by(AuditLog.created_at.desc(), AuditLog.id.desc()).limit(max(1, min(500, limit))).all()
+        ids = {r.actor_user_id for r in rows if r.actor_user_id} | {r.target_user_id for r in rows if r.target_user_id}
+        emails = dict(session.query(User.id, User.email).filter(User.id.in_(ids or {0})).all())
+        return [{
+            "id": r.id, "at": _as_utc(r.created_at).isoformat(), "action": r.action,
+            "actor": emails.get(r.actor_user_id) if r.actor_user_id else "system",
+            "target": emails.get(r.target_user_id), "target_user_id": r.target_user_id,
+            "details": json.loads(r.details) if r.details else None, "ip": r.ip,
+        } for r in rows]
+
+
+# ── Two-step sign-in (auth/two_factor.py) ─────────────────────────────────
+
+
+def get_totp_state(user_id: int) -> dict:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if user is None:
+            return {"enabled": False, "secret": None, "last_counter": None}
+        return {"enabled": user.totp_enabled_at is not None, "secret": user.totp_secret,
+                "last_counter": user.totp_last_counter}
+
+
+def set_totp(user_id: int, encrypted_secret: str | None, enabled: bool, last_counter: int | None = None) -> None:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if user is None:
+            return
+        user.totp_secret = encrypted_secret
+        user.totp_enabled_at = _utcnow() if enabled else None
+        user.totp_last_counter = last_counter
+        session.commit()
+
+
+def mark_totp_used(user_id: int, counter: int) -> None:
+    with Session(engine) as session:
+        session.query(User).filter(User.id == user_id).update({"totp_last_counter": counter})
+        session.commit()
+
+
+# ── Pricing plans (PRICING.md) ────────────────────────────────────────────
+
+DEFAULT_PLANS = [
+    {"slug": "free", "name": "Free", "sort": 0, "price_inr": 0, "price_usd": 0, "annual_inr": None, "annual_usd": None,
+     "best_for": "Trying it out", "posts_month": 10, "images_month": 3, "images_day": 1, "videos_month": 0,
+     "videos_day": 0, "video_pack_discount": 0, "brands": 1, "approvals": False, "support": "Help centre"},
+    {"slug": "starter", "name": "Starter", "sort": 1, "price_inr": 1599, "price_usd": 19, "annual_inr": 15990,
+     "annual_usd": 190, "best_for": "Individuals", "posts_month": 60, "images_month": 10, "images_day": 5,
+     "videos_month": 0, "videos_day": 1, "video_pack_discount": 0, "brands": 1, "approvals": False, "support": "Email"},
+    {"slug": "growth", "name": "Growth", "sort": 2, "price_inr": 3999, "price_usd": 49, "annual_inr": 39990,
+     "annual_usd": 490, "best_for": "Small businesses", "posts_month": 200, "images_month": 25, "images_day": 10,
+     "videos_month": 0, "videos_day": 2, "video_pack_discount": 0, "brands": 1, "approvals": True, "support": "Email"},
+    {"slug": "pro", "name": "Pro", "sort": 3, "price_inr": 9999, "price_usd": 129, "annual_inr": 99990,
+     "annual_usd": 1290, "best_for": "Agencies, medium businesses", "posts_month": 600, "images_month": 60,
+     "images_day": 25, "videos_month": 0, "videos_day": 3, "video_pack_discount": 20, "brands": 5, "approvals": True,
+     "support": "Priority"},
+    {"slug": "enterprise", "name": "Enterprise", "sort": 4, "price_inr": None, "price_usd": None, "annual_inr": None,
+     "annual_usd": None, "best_for": "Regulated and large brands", "posts_month": None, "images_month": None,
+     "images_day": None, "videos_month": None, "videos_day": None, "video_pack_discount": 0, "brands": None,
+     "approvals": True, "support": "Account manager"},
+]
+PLAN_FIELDS = [c for c in DEFAULT_PLANS[0] if c != "slug"]
+PACK_MONTHS = 12
+
+
+def _seed_plans() -> None:
+    """Add any plan in DEFAULT_PLANS that isn't in the table yet. Never
+    overwrites a plan an admin has edited."""
+    with Session(engine) as session:
+        existing = {slug for (slug,) in session.query(Plan.slug)}
+        for plan in DEFAULT_PLANS:
+            if plan["slug"] not in existing:
+                session.add(Plan(**plan))
+        session.commit()
+
+
+def _plan_dict(plan: "Plan") -> dict:
+    return {"slug": plan.slug, **{field: getattr(plan, field) for field in PLAN_FIELDS}}
+
+
+def list_plans() -> list[dict]:
+    with Session(engine) as session:
+        return [_plan_dict(p) for p in session.query(Plan).order_by(Plan.sort, Plan.slug)]
+
+
+def update_plan(slug: str, fields: dict) -> dict | None:
+    """Admin: change a plan's prices or limits. Unknown fields are ignored."""
+    with Session(engine) as session:
+        plan = session.get(Plan, slug)
+        if plan is None:
+            return None
+        for field in PLAN_FIELDS:
+            if field in fields and field not in ("sort",):
+                setattr(plan, field, fields[field])
+        session.commit()
+        return _plan_dict(plan)
+
+
+def plan_slug_for(user: "User") -> str:
+    """The user's plan: the one an admin assigned, else Enterprise for
+    enterprise accounts and DEFAULT_PLAN (Free) for everyone else."""
+    if user.plan_slug and not (user.plan_paid_until and _as_utc(user.plan_paid_until) <= datetime.now(timezone.utc)):
+        return user.plan_slug
+    return "enterprise" if user.account_type == "enterprise" else Config.DEFAULT_PLAN
+
+
+def _user_plan(session, user: "User") -> dict:
+    plan = session.get(Plan, plan_slug_for(user)) or session.get(Plan, "free")
+    if plan is None:  # plans not seeded yet (e.g. a test database)
+        _seed_plans()
+        plan = session.get(Plan, plan_slug_for(user)) or session.get(Plan, "free")
+    return _plan_dict(plan)
+
+
+def plan_period(user: "User", now: datetime | None = None) -> tuple[datetime, datetime]:
+    """The current monthly allowance period: from the latest "plan day" of the
+    month (the day the plan started; 1st when unknown) to the next one."""
+    now = now or datetime.now(timezone.utc)
+    anchor_day = (_as_utc(user.plan_started_at).day if user.plan_started_at else 1)
+
+    def on_day(year: int, month: int) -> datetime:
+        import calendar
+
+        day = min(anchor_day, calendar.monthrange(year, month)[1])
+        return datetime(year, month, day, tzinfo=timezone.utc)
+
+    start = on_day(now.year, now.month)
+    if start > now:
+        year, month = (now.year - 1, 12) if now.month == 1 else (now.year, now.month - 1)
+        start = on_day(year, month)
+    year, month = (start.year + 1, 1) if start.month == 12 else (start.year, start.month + 1)
+    return start, on_day(year, month)
+
+
+def _pack_remaining(session, user_id: int, kind: str, now: datetime) -> int:
+    rows = session.query(UsagePack).filter(
+        UsagePack.user_id == user_id, UsagePack.kind == kind,
+        UsagePack.expires_at > now.replace(tzinfo=None), UsagePack.used < UsagePack.quantity,
+    ).all()
+    return sum(r.quantity - r.used for r in rows)
+
+
+def _count_media(session, user_id: int, kinds: tuple, since: datetime) -> int:
+    return int(session.query(func.count(ImageGeneration.id)).filter(
+        ImageGeneration.user_id == user_id, ImageGeneration.kind.in_(kinds),
+        ImageGeneration.created_at >= since.astimezone(timezone.utc).replace(tzinfo=None),
+    ).scalar() or 0)
+
+
+def _use_pack_if_over_allowance(session, user_id: int, kind: str) -> None:
+    """Called as an image or video is logged: once the plan's monthly
+    allowance is used up, each new one takes one unit from the oldest pack."""
+    user = session.get(User, user_id)
+    if user is None or user.is_admin:
+        return
+    plan = _user_plan(session, user)
+    limit = plan["videos_month"] if kind == "video" else plan["images_month"]
+    if limit is None:
+        return  # unlimited
+    start, _ = plan_period(user)
+    used = _count_media(session, user_id, ("video",) if kind == "video" else ("image", "edit"), start)
+    if used <= limit:
+        return
+    now = _utcnow().replace(tzinfo=None)
+    pack = (
+        session.query(UsagePack)
+        .filter(UsagePack.user_id == user_id, UsagePack.kind == kind, UsagePack.expires_at > now,
+                UsagePack.used < UsagePack.quantity)
+        .order_by(UsagePack.expires_at.asc(), UsagePack.id.asc())
+        .first()
+    )
+    if pack is not None:
+        pack.used += 1
+
+
+# Features that depend on the plan (what the user can see and use)
+PLAN_FEATURES = ("approvals", "video", "multiple_brands")
+
+
+def plan_features(plan: dict, is_admin: bool = False) -> dict:
+    """{feature: True/False} for a plan; admins have everything."""
+    if is_admin:
+        return {f: True for f in PLAN_FEATURES}
+    return {
+        "approvals": bool(plan["approvals"]),
+        # video comes included, or in packs on plans with a daily video cap above 0
+        "video": plan["videos_month"] is None or plan["videos_month"] > 0 or (plan["videos_day"] or 0) > 0,
+        "multiple_brands": plan["brands"] is None or plan["brands"] > 1,
+    }
+
+
+def cheapest_plan_with(feature: str) -> dict | None:
+    """The lowest plan that includes a feature - for "Upgrade to Growth" messages."""
+    for plan in list_plans():
+        if plan_features(plan).get(feature):
+            return plan
+    return None
+
+
+def get_user_features(user_id: int | None) -> dict:
+    """{feature: True/False} for the user's plan, plus "plan" (its slug)."""
+    if not user_id:
+        return {f: False for f in PLAN_FEATURES}
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if user is None:
+            return {f: False for f in PLAN_FEATURES}
+        plan = _user_plan(session, user)
+        return {**plan_features(plan, bool(user.is_admin)), "plan": plan["slug"], "plan_name": plan["name"]}
+
+
+def get_plan_usage(user_id: int, now: datetime | None = None) -> dict | None:
+    """The user's plan and how much of it is used this period. limits of None = unlimited."""
+    now = now or datetime.now(timezone.utc)
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if user is None:
+            return None
+        plan = _user_plan(session, user)
+        start, end = plan_period(user, now)
+        posts_used = len(posts_created_between(user_id, start, now + timedelta(seconds=1)))
+        images_used = _count_media(session, user_id, ("image", "edit"), start)
+        videos_used = _count_media(session, user_id, ("video",), start)
+        image_pack = _pack_remaining(session, user_id, "image", now)
+        video_pack = _pack_remaining(session, user_id, "video", now)
+
+        def left(limit, used, pack=0):
+            if limit is None:
+                return None
+            return max(0, limit - used) + pack
+
+        return {
+            "plan": plan,
+            "paid_until": _as_utc(user.plan_paid_until).isoformat() if user.plan_paid_until and user.plan_slug == plan["slug"] else None,
+            "features": plan_features(plan, bool(user.is_admin)),
+            "is_admin": bool(user.is_admin),
+            "period_start": start.isoformat(),
+            "period_end": end.isoformat(),
+            "posts": {"used": posts_used, "limit": plan["posts_month"], "remaining": left(plan["posts_month"], posts_used)},
+            "images": {"used": images_used, "limit": plan["images_month"], "pack_remaining": image_pack,
+                       "remaining": left(plan["images_month"], images_used, image_pack)},
+            "videos": {"used": videos_used, "limit": plan["videos_month"], "pack_remaining": video_pack,
+                       "remaining": left(plan["videos_month"], videos_used, video_pack)},
+        }
+
+
+def assign_plan(user_id: int, slug: str) -> bool:
+    """Admin: put the user on a plan. Its monthly allowance starts today."""
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if user is None or session.get(Plan, slug) is None:
+            return False
+        if user.plan_slug != slug:
+            user.plan_slug = slug
+            user.plan_started_at = _utcnow()
+        user.plan_paid_until = None  # an admin's assignment has no end date
+        session.commit()
+        return True
+
+
+def extend_paid_plan(user_id: int, slug: str, days: int) -> dict | None:
+    """A paid plan: the same plan again extends its end date; a different
+    plan starts today. Returns {"plan", "paid_until"}."""
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if user is None or session.get(Plan, slug) is None:
+            return None
+        now = _utcnow()
+        current_end = _as_utc(user.plan_paid_until) if user.plan_paid_until else None
+        if user.plan_slug == slug and current_end and current_end > now:
+            start = current_end
+        else:
+            start = now
+            user.plan_slug = slug
+            user.plan_started_at = now
+        user.plan_paid_until = (start + timedelta(days=days)).replace(tzinfo=None)
+        session.commit()
+        return {"plan": slug, "paid_until": _as_utc(user.plan_paid_until).isoformat()}
+
+
+def grant_pack(user_id: int, kind: str, quantity: int, note: str | None = None, order_id: str | None = None) -> dict | None:
+    """Admin: add prepaid images or videos (kind "image" or "video")."""
+    if kind not in ("image", "video") or quantity <= 0:
+        return None
+    with Session(engine) as session:
+        if session.get(User, user_id) is None:
+            return None
+        pack = UsagePack(user_id=user_id, kind=kind, quantity=int(quantity), note=(note or "")[:200] or None,
+                         expires_at=(_utcnow() + timedelta(days=30 * PACK_MONTHS)).replace(tzinfo=None), order_id=order_id)
+        session.add(pack)
+        session.commit()
+        return {"id": pack.id, "kind": kind, "quantity": pack.quantity}
 
 
 # ── Image limits & model access ───────────────────────────────────────────
@@ -2387,17 +3292,35 @@ def get_image_quota(user_id: int) -> dict:
         )
         if user is None:
             return {"used": used, "limit": 0, "unlimited": False, "remaining": 0, "model": settings["default_model"]}
+        # Daily cap: an admin's override for this user, else the plan's, else Image Settings
+        plan = _user_plan(session, user)
         raw_limit = user.image_limit
         if raw_limit is None:
-            raw_limit = IMAGE_UNLIMITED if user.is_admin else settings["default_limit"]
+            if user.is_admin:
+                raw_limit = IMAGE_UNLIMITED
+            elif plan["images_day"] is None:
+                raw_limit = IMAGE_UNLIMITED
+            else:
+                raw_limit = plan["images_day"]
         unlimited = raw_limit == IMAGE_UNLIMITED
         model = _user_image_model(user, settings)
         resets_at = day_start + timedelta(days=1)
+        # Monthly allowance + packs: once both run out, no more images until the next period
+        month_left = None
+        if not user.is_admin and plan["images_month"] is not None:
+            start, _ = plan_period(user, now)
+            month_left = max(0, plan["images_month"] - _count_media(session, user_id, ("image", "edit"), start)) \
+                + _pack_remaining(session, user_id, "image", now)
+        day_left = None if unlimited else max(0, int(raw_limit) - int(used))
+        remaining = day_left if month_left is None else (month_left if day_left is None else min(day_left, month_left))
         return {
             "used": int(used),
             "limit": None if unlimited else int(raw_limit),
-            "unlimited": unlimited,
-            "remaining": None if unlimited else max(0, int(raw_limit) - int(used)),
+            "unlimited": unlimited and month_left is None,
+            "remaining": remaining,
+            "month_remaining": month_left,
+            "blocked_by": ("month" if month_left == 0 else ("day" if day_left == 0 else None)),
+            "plan": plan["slug"],
             "is_default_limit": user.image_limit is None,
             "model": model,
             "is_default_model": not user.image_model,
@@ -2431,15 +3354,29 @@ def get_video_quota(user_id: int) -> dict:
             or 0
         )
         unlimited = bool(user and user.is_admin)
+        plan = _user_plan(session, user) if user else None
         limit = default_limit if user else 0
+        if plan and plan["videos_day"] is not None:
+            limit = plan["videos_day"]
         resets_at = day_start + timedelta(days=1)
+        # Videos come from the plan's included allowance, then video packs
+        month_left = None
+        if user and not user.is_admin and plan and plan["videos_month"] is not None:
+            start, _ = plan_period(user, now)
+            month_left = max(0, plan["videos_month"] - _count_media(session, user_id, ("video",), start)) \
+                + _pack_remaining(session, user_id, "video", now)
+        day_left = None if unlimited else max(0, int(limit) - int(used))
+        remaining = day_left if month_left is None else (month_left if day_left is None else min(day_left, month_left))
         return {
             # False = video is still "coming soon" for this user
             "enabled": bool(user and (user.is_admin or user.video_enabled)),
             "used": int(used),
             "limit": None if unlimited else int(limit),
             "unlimited": unlimited,
-            "remaining": None if unlimited else max(0, int(limit) - int(used)),
+            "remaining": remaining,
+            "month_remaining": month_left,
+            "blocked_by": ("month" if month_left == 0 else ("day" if day_left == 0 else None)),
+            "plan": plan["slug"] if plan else None,
             "resets_at": resets_at.isoformat(),
             "resets_in_seconds": int((resets_at - now).total_seconds()),
         }
@@ -3133,11 +4070,36 @@ def get_run_by_id(run_id: int, user_id: int | None = None) -> dict | None:
         return _serialize_run(row)
 
 
+def user_currency(user_id: int | None) -> str:
+    """"INR" for users whose brand is in India (brand profile markets), else
+    "USD". Display only: credits and costs are stored in USD."""
+    if not user_id:
+        return "USD"
+    with Session(engine) as session:
+        row = session.query(UserBrandProfile).filter(UserBrandProfile.user_id == user_id).first()
+        if not row:
+            return "USD"
+        regions = []
+        for field in (row.compliance_regions, row.regions_detected):
+            try:
+                regions += json.loads(field or "[]")
+            except (TypeError, ValueError):
+                pass
+        return "INR" if "India" in regions else "USD"
+
+
+def format_money(amount_usd: float, currency: str = "USD") -> str:
+    """A USD amount as the user should see it: "$2.00" or "₹190.00"."""
+    if currency == "INR":
+        return f"₹{amount_usd * Config.USD_INR_RATE:,.2f}"
+    return f"${amount_usd:,.2f}"
+
+
 def get_user_usage_stats(user_id: int) -> dict:
     """Return aggregated token, cost metrics, and credit details for a user."""
     with Session(engine) as session:
         user = session.get(User, user_id)
-        credit_limit = user.credit_limit if user and user.credit_limit is not None else 10.0
+        credit_limit = user.credit_limit if user and user.credit_limit is not None else Config.DEFAULT_CREDIT_USD
         is_admin = user.is_admin if user else False
 
         result = (
@@ -3164,13 +4126,23 @@ def get_user_usage_stats(user_id: int) -> dict:
             .first()
         )
 
+        plan = _user_plan(session, user) if user else None
         return {
             "total_runs": total_runs,
             "total_tokens": total_tokens,
             "total_cost_usd": round(used_cost, 6),
+            # The credit limit caps spending on the Free plan only; paid plans
+            # are limited by their monthly allowances instead (get_plan_usage)
+            "plan": plan["slug"] if plan else None,
+            "plan_name": plan["name"] if plan else None,
+            "plan_features": plan_features(plan, is_admin) if plan else {},
+            "credit_capped": bool(plan and plan["slug"] == "free" and not is_admin),
             "used_credits": round(used_cost, 4),
             "credit_limit": round(credit_limit, 2),
             "remaining_credits": round(remaining, 4),
+            # How the page shows these USD amounts (user_currency / format_money)
+            "currency": user_currency(user_id),
+            "usd_inr_rate": Config.USD_INR_RATE,
             "is_admin": is_admin,
             "has_pending_request": pending_req is not None,
             "pending_request": (
@@ -3303,7 +4275,7 @@ def approve_credit_request(request_id: int) -> dict | None:
             return None
 
         req.status = "approved"
-        user.credit_limit = (user.credit_limit or 10.0) + req.requested_amount
+        user.credit_limit = (user.credit_limit or 0.0) + req.requested_amount
         session.commit()
         return {
             "request_id": req.id,
@@ -3332,7 +4304,7 @@ def reject_credit_request(request_id: int) -> dict | None:
             "user_email": user.email if user else None,
             "user_name": user.name if user else None,
             "requested_amount": round(req.requested_amount, 2),
-            "credit_limit": round(user.credit_limit or 10.0, 2) if user else None,
+            "credit_limit": round(user.credit_limit or 0.0, 2) if user else None,
             "status": "rejected",
         }
 
@@ -3349,7 +4321,7 @@ def update_user_credit_limit(
         if new_limit is not None:
             user.credit_limit = max(0.0, new_limit)
         elif add_amount is not None:
-            user.credit_limit = max(0.0, (user.credit_limit or 10.0) + add_amount)
+            user.credit_limit = max(0.0, (user.credit_limit or 0.0) + add_amount)
 
         session.commit()
         return {
@@ -3439,7 +4411,7 @@ def get_all_users_credit_summary() -> list[dict]:
             used_cost = float(cost_res.used_cost) if cost_res else 0.0
             used_cost += float(media_costs.get(u.id, 0.0))
             total_runs = cost_res.total_runs if cost_res else 0
-            limit = u.credit_limit if u.credit_limit is not None else 10.0
+            limit = u.credit_limit if u.credit_limit is not None else Config.DEFAULT_CREDIT_USD
             remaining = max(0.0, limit - used_cost)
 
             # Check pending request
@@ -3469,6 +4441,7 @@ def get_all_users_credit_summary() -> list[dict]:
                     "created_at": u.created_at.strftime("%Y-%m-%d"),
                     "brand": _brand_status(u, profiles.get(u.id)),
                     "images": _image_access_summary(u, int(images_today.get(u.id, 0)), image_settings),
+                    "plan": plan_slug_for(u),
                 }
             )
         return summaries
