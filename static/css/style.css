@@ -5196,11 +5196,6 @@ a.cal-top-post:hover { background: var(--brand-bg); }
 .sa-connect { margin-left: auto; font-size: 0.72rem; font-weight: 700; color: #fff; background: var(--brand-gradient-strong); border-radius: 6px; padding: 2px 9px; text-decoration: none; }
 .sa-connect:hover { color: #fff; filter: brightness(1.08); }
 
-/* X and Threads (unified social API) */
-.color-x { color: #0f1419; }
-.platform-chip-sm input:checked + .chip-content .color-x { color: #fff; }
-.bg-x { background: #0f1419; }
-
 /* Studio Chat generation: research folds away once the caption is being written */
 .pipeline-research { cursor: pointer; }
 .pipeline-research.is-folded { max-height: 4.2em; overflow: hidden; position: relative; }

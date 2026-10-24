@@ -2975,10 +2975,7 @@ def publish_approved_item(request_id):
     if not DB_AVAILABLE:
         return jsonify({"error": "Database not available"}), 503
     from db import update_approval_item
-    from services.publish_service import NAMES, PublishError, publish_item
-    from services.publish_service import platforms as publishable
-
-    PLATFORMS = publishable()
+    from services.publish_service import NAMES, PLATFORMS, PublishError, publish_item
 
     user_id = get_current_user_id()
     req = get_approval_request(request_id)
@@ -4709,24 +4706,6 @@ def test_mcp_connection_endpoint():
         )
 
 
-def _disconnect_unified(user_id: int, platform: str) -> None:
-    """An account connected through the unified API is removed there too."""
-    from sqlalchemy.orm import Session
-
-    from db import SocialAccount, engine
-    from services import zernio_service
-
-    with Session(engine) as s:
-        acc = s.query(SocialAccount).filter(SocialAccount.user_id == user_id, SocialAccount.platform == platform,
-                                            SocialAccount.status == "connected").first()
-        account_id = acc.account_id if acc and acc.connection_type == "zernio" else None
-    if account_id and zernio_service.enabled():
-        try:
-            zernio_service.disconnect(account_id)
-        except requests.exceptions.RequestException as err:
-            logger.warning(f"Could not remove {platform} account {account_id} at the unified API: {err}")
-
-
 @api_bp.route("/social/accounts/<platform>", methods=["DELETE"])
 @login_required_api
 def disconnect_social_account_endpoint(platform):
@@ -4735,9 +4714,7 @@ def disconnect_social_account_endpoint(platform):
     if not DB_AVAILABLE or not user_id:
         return jsonify({"error": "Database unavailable"}), 503
 
-    platform = platform.lower()
-    _disconnect_unified(user_id, platform)
-    success = disconnect_social_account(user_id, platform)
+    success = disconnect_social_account(user_id, platform.lower())
     if success:
         return jsonify({"success": True, "message": f"{platform.capitalize()} disconnected"})
     return jsonify({"error": "Account not found or already disconnected"}), 404
@@ -4843,83 +4820,11 @@ def social_oauth_providers():
 
     providers = dict(oauth.providers())
     providers["youtube"] = bool(os.getenv("YOUTUBE_CLIENT_ID") and os.getenv("YOUTUBE_CLIENT_SECRET"))
-    from services import zernio_service
-
-    # Networks connected through the unified social API (services/zernio_service.py)
-    out = {"success": True, "providers": providers,
-           "unified": [{"platform": p, "name": zernio_service.NAMES[p]} for p in zernio_service.platforms()]}
+    out = {"success": True, "providers": providers}
     user = get_user_by_id(get_current_user_id()) if DB_AVAILABLE else None
     if user and user.is_admin:
         out["redirect_uris"] = {p: oauth.redirect_uri(p, _oauth_base_url()) for p in oauth.PROVIDERS}
     return jsonify(out)
-
-
-@api_bp.route("/social/unified/<platform>/start", methods=["GET"])
-def social_unified_start(platform):
-    """X, Threads, ...: to the network's sign-in through the unified social API."""
-    from flask import redirect, session
-
-    from services import zernio_service
-
-    user_id = get_current_user_id()
-    if not user_id:
-        return redirect("/")
-    name = zernio_service.NAMES.get(platform, "that network")
-    if platform not in zernio_service.platforms() or not DB_AVAILABLE:
-        return _oauth_done(platform, False, f"Connecting {name} isn't available yet.")
-    state = secrets.token_urlsafe(32)
-    session["oauth_state"] = {"provider": f"unified:{platform}", "state": state, "at": time.time(), "user_id": user_id}
-    back = f"{_oauth_base_url()}/api/social/unified/callback?{urllib.parse.urlencode({'state': state, 'network': platform})}"
-    try:
-        url = zernio_service.connect_url(user_id, platform, back)
-    except zernio_service.ZernioError as err:
-        return _oauth_done(platform, False, str(err))
-    except requests.exceptions.RequestException:
-        return _oauth_done(platform, False, f"Could not reach {name}. Please try again.")
-    log_event("social.oauth", provider=f"unified:{platform}", status="started")
-    return redirect(url)
-
-
-@api_bp.route("/social/unified/callback", methods=["GET"])
-def social_unified_callback():
-    """Back from the network: the account is confirmed with the unified API before it is saved."""
-    from flask import session
-
-    from services import zernio_service
-
-    saved = session.pop("oauth_state", None)  # one use
-    user_id = get_current_user_id()
-    if not user_id:
-        from flask import redirect
-
-        return redirect("/")
-    platform = request.args.get("network") or request.args.get("platform") or ""
-    name = zernio_service.NAMES.get(platform, "that network")
-    if platform not in zernio_service.platforms() or not DB_AVAILABLE:
-        return _oauth_done(platform, False, f"Connecting {name} isn't available yet.")
-    if not _oauth_state_genuine(saved, f"unified:{platform}", user_id):
-        log_event("social.oauth", provider=f"unified:{platform}", status="rejected_state")
-        return _oauth_done(platform, False, f"The {name} sign-in could not be verified. Please click Connect again.")
-    if request.args.get("error"):
-        error = request.args.get("error")
-        log_event("social.oauth", provider=f"unified:{platform}", status="refused", error=error[:80])
-        if error in ("oauth_denied", "access_denied", "user_cancelled"):
-            return _oauth_done(platform, False, f"You cancelled the {name} sign-in, so nothing was connected.")
-        detail = (request.args.get("error_message") or error)[:200]
-        return _oauth_done(platform, False, f"{name} did not complete the sign-in: {detail}")
-    account_id = request.args.get("accountId")
-    if not account_id:
-        return _oauth_done(platform, False, f"{name} did not complete the sign-in. Please try again.")
-    try:
-        account = zernio_service.confirm_account(user_id, platform, account_id)
-    except zernio_service.ZernioError as err:
-        return _oauth_done(platform, False, str(err))
-    except requests.exceptions.RequestException:
-        return _oauth_done(platform, False, f"Could not reach {name}. Please try again.")
-    save_social_account(user_id=user_id, platform=platform, account_name=account["name"], account_id=account["id"],
-                        access_token=None, connection_type="zernio", connected_via="oauth", token_expires_at=None)
-    log_event("social.oauth", provider=f"unified:{platform}", status="connected")
-    return _oauth_done(platform, True, f"Connected {name} ({account['name']}).")
 
 
 @api_bp.route("/social/oauth/<provider>/start", methods=["GET"])

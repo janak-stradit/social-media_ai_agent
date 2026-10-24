@@ -15,11 +15,11 @@ slides, so the reviewer sees exactly what will be posted).
 
 import os
 
-PLATFORMS = ("linkedin", "instagram", "facebook", "youtube", "twitter", "threads")
+PLATFORMS = ("linkedin", "instagram", "facebook", "youtube")
 PLATFORM_NAMES = {"linkedin": "LinkedIn", "instagram": "Instagram", "facebook": "Facebook", "youtube": "YouTube"}
 LINKEDIN_FORMATS = {"multi_image": "Multi-image post", "document": "Document carousel (PDF)"}
 # (min, max) slides per carousel
-CAROUSEL_LIMITS = {"instagram": (2, 10), "linkedin": (2, 20), "facebook": (2, 10), "twitter": (2, 4), "threads": (2, 10)}
+CAROUSEL_LIMITS = {"instagram": (2, 10), "linkedin": (2, 20), "facebook": (2, 10)}
 MAX_INSTAGRAM_HASHTAGS = 30
 MAX_CAPTION = 3000
 ASPECT_TOLERANCE = 0.02  # Instagram: every slide must have the same shape

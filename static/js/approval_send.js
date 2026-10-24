@@ -9,9 +9,9 @@
 // The server checks each platform's rules again (services/approval_bundle_service.py,
 // services/schedule_service.py).
 (function () {
-    const NAMES = { linkedin: 'LinkedIn', instagram: 'Instagram', facebook: 'Facebook', youtube: 'YouTube', twitter: 'X', threads: 'Threads' };
-    const ICONS = { linkedin: 'fa-linkedin', instagram: 'fa-instagram', facebook: 'fa-facebook', youtube: 'fa-youtube', twitter: 'fa-x-twitter', threads: 'fa-threads' };
-    const LIMITS = { instagram: [2, 10], linkedin: [2, 20], facebook: [2, 10], twitter: [2, 4], threads: [2, 10] };
+    const NAMES = { linkedin: 'LinkedIn', instagram: 'Instagram', facebook: 'Facebook', youtube: 'YouTube' };
+    const ICONS = { linkedin: 'fa-linkedin', instagram: 'fa-instagram', facebook: 'fa-facebook', youtube: 'fa-youtube' };
+    const LIMITS = { instagram: [2, 10], linkedin: [2, 20], facebook: [2, 10] };
     const ORDER = ['linkedin', 'instagram', 'facebook', 'youtube'];
     const SCHEDULABLE = ['linkedin', 'instagram', 'facebook'];
 

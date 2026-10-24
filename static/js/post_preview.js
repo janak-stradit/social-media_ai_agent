@@ -5,13 +5,13 @@
 (function () {
     // Caption and hashtags are posted together and counted together.
     // The same numbers are enforced by services/post_edit_service.py.
-    const LIMITS = { instagram: 2200, linkedin: 3000, facebook: 3000, twitter: 280, threads: 500 };
+    const LIMITS = { instagram: 2200, linkedin: 3000, facebook: 3000 };
     const DEFAULT_LIMIT = 3000;
     const MAX_HASHTAGS = 30;
     // Roughly where each feed cuts a caption short and shows "more". It
     // varies with the device, so this is a guide, not an exact line.
     const FOLD = { linkedin: 210, instagram: 125, facebook: 480 };
-    const NAMES = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', twitter: 'X', threads: 'Threads', blog: 'Blog', youtube: 'YouTube' };
+    const NAMES = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', twitter: 'Twitter / X', blog: 'Blog', youtube: 'YouTube' };
 
     function esc(str) {
         if (!str) return '';

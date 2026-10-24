@@ -66,15 +66,6 @@ $(document).ready(function () {
         $.getJSON('/api/social/oauth/providers').done(function (r) {
             oauthProviders = r.providers || {};
             oauthRedirectUris = r.redirect_uris || null;
-            // X, Threads, ...: connected through the unified social API (services/zernio_service.py)
-            const UNIFIED = { twitter: ['fab fa-x-twitter', 'Post to your X account.'], threads: ['fab fa-threads', 'Post to your Threads profile.'] };
-            (r.unified || []).forEach(function (u) {
-                if (NETWORKS.some(n => n.key === u.platform)) return;
-                const [icon, what] = UNIFIED[u.platform] || ['fas fa-share-nodes', `Post to ${u.name}.`];
-                NETWORKS.push({ key: u.platform, name: u.name, icon: icon, cls: 'bg-x', what: what, oauth: 'unified',
-                                start: `/api/social/unified/${encodeURIComponent(u.platform)}/start` });
-            });
-            oauthProviders.unified = (r.unified || []).length > 0;
             renderSocialCards();
         });
         $.getJSON('/api/social/oauth/result').done(function (r) {
@@ -92,14 +83,14 @@ $(document).ready(function () {
     // otherwise the access-token form, which also lives under Advanced.
     const NETWORKS = [
         { key: 'facebook', name: 'Facebook', icon: 'fab fa-facebook-f', cls: 'bg-fb', what: 'Post to your Facebook Page.',
-          oauth: 'facebook', start: '/api/social/oauth/facebook/start' },
+          oauth: 'facebook', start: '/connect/facebook' },
         // Instagram signs in on its own (Instagram Login) when that is set up, else through its Facebook Page
         { key: 'instagram', name: 'Instagram', icon: 'fab fa-instagram', cls: 'bg-ig', what: 'Post to your Instagram business or creator account.',
-          oauth: 'facebook', start: '/api/social/oauth/facebook/start', via: 'Facebook' },
+          oauth: 'facebook', start: '/connect/facebook', via: 'Facebook' },
         { key: 'linkedin', name: 'LinkedIn', icon: 'fab fa-linkedin-in', cls: 'bg-li', what: 'Post to your profile or a company page you manage.',
-          oauth: 'linkedin', start: '/api/social/oauth/linkedin/start' },
+          oauth: 'linkedin', start: '/connect/linkedin' },
         { key: 'youtube', name: 'YouTube', icon: 'fab fa-youtube', cls: 'bg-yt', what: 'Upload videos to your channel.',
-          oauth: 'youtube', start: '/api/auth/youtube' }
+          oauth: 'youtube', start: '/connect/youtube' }
     ];
 
     function untilText(iso) {
@@ -112,7 +103,7 @@ $(document).ready(function () {
         $('#socialCards').html(NETWORKS.map(function (n) {
             const acc = byPlatform[n.key];
             if (n.key === 'instagram' && oauthProviders.instagram) {
-                n = { ...n, oauth: 'instagram', start: '/api/social/oauth/instagram/start', via: null, alsoFacebook: !!oauthProviders.facebook };
+                n = { ...n, oauth: 'instagram', start: '/connect/instagram', via: null, alsoFacebook: !!oauthProviders.facebook };
             }
             const oneClick = !!oauthProviders[n.oauth];
             let status, body, actions;

@@ -251,6 +251,43 @@ def create_app(config_name="development"):
     def settings_route():
         return render_template("settings.html")
 
+    @app.route("/connect/<provider>")
+    @login_required_page
+    def connect_welcome(provider):
+        """The short "AVIR AI wants to connect to your Facebook" page shown
+        before the network's own sign-in (services/social_oauth_service.py)."""
+        from flask import redirect
+
+        from services import social_oauth_service as oauth
+
+        pages = {
+            "facebook": ("Facebook", "facebook", "facebook-f", "/api/social/oauth/facebook/start", [
+                ("flag", "Choose the Facebook Page posts go to. Its linked Instagram account connects with it."),
+                ("pen-to-square", "AVIR AI can publish the posts you approve or schedule, nothing else."),
+                ("rotate-left", "Disconnect any time in Settings, or in Facebook's Business Integrations.")]),
+            "instagram": ("Instagram", "instagram", "instagram", "/api/social/oauth/instagram/start", [
+                ("user-check", "For Instagram business and creator accounts. No Facebook Page needed."),
+                ("pen-to-square", "AVIR AI can publish the posts you approve or schedule, nothing else."),
+                ("rotate-left", "Disconnect any time in Settings, or in Instagram's settings.")]),
+            "linkedin": ("LinkedIn", "linkedin", "linkedin-in", "/api/social/oauth/linkedin/start", [
+                ("user", "Post as yourself, or as a company page you manage."),
+                ("pen-to-square", "AVIR AI can publish the posts you approve or schedule, nothing else."),
+                ("rotate-left", "Disconnect any time in Settings, or in LinkedIn's settings.")]),
+            "youtube": ("YouTube", "youtube", "youtube", "/api/auth/youtube", [
+                ("video", "Upload the videos you create to your channel."),
+                ("pen-to-square", "AVIR AI only uploads what you choose to publish."),
+                ("rotate-left", "Disconnect any time in Settings, or in your Google account.")]),
+        }
+        if provider not in pages:
+            return redirect("/settings")
+        set_up = (bool(os.getenv("YOUTUBE_CLIENT_ID") and os.getenv("YOUTUBE_CLIENT_SECRET"))
+                  if provider == "youtube" else oauth.enabled(provider))
+        if not set_up:
+            return redirect("/settings")
+        name, icon, fa_icon, start_url, points = pages[provider]
+        return render_template("connect_welcome.html", name=name, provider_icon=icon, fa_icon=fa_icon,
+                               start_url=start_url, points=points)
+
     @app.route("/invoices/<path:number>")
     @login_required_page
     def invoice_page(number):

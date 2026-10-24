@@ -118,8 +118,6 @@ class User(Base):
     # Video is "coming soon" for everyone until an admin switches it on for
     # the user (Admin -> Users -> Image access -> Video). Admins always have it.
     video_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True, default=False)
-    # The user's profile at the unified social API (services/zernio_service.py)
-    zernio_profile_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Weekly "ideas for you" email (services/idea_digest_service.py). None = on:
     # users get it until they switch it off (Settings -> Notifications, or the
     # email's unsubscribe link).
@@ -1049,7 +1047,6 @@ def init_db():
             f"CREATE INDEX IF NOT EXISTS ix_image_generations_root_id ON {img_tbl} (root_id)",
             f"ALTER TABLE {usr_tbl} ADD COLUMN credit_limit DOUBLE PRECISION DEFAULT {Config.DEFAULT_CREDIT_USD}",
             f"ALTER TABLE {usr_tbl} ADD COLUMN is_admin BOOLEAN DEFAULT FALSE",
-            f"ALTER TABLE {usr_tbl} ADD COLUMN zernio_profile_id VARCHAR(64)",
             f"ALTER TABLE {usr_tbl} ADD COLUMN email_verified BOOLEAN DEFAULT FALSE",
             f"ALTER TABLE {usr_tbl} ADD COLUMN verification_token VARCHAR(64)",
             f"ALTER TABLE {usr_tbl} ADD COLUMN verification_sent_at TIMESTAMP",

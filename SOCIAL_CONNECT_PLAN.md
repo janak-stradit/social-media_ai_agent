@@ -72,7 +72,7 @@ and keep the setup simple for users in the meantime.
 
 ## 3. Recommended plan
 
-**Decision (Oct 2026): hybrid.**
+**Decision (Oct 2026): our own apps only.** Hybrid was chosen first, then the unified-API part (Zernio, formerly Late) was built and removed on 24 Oct 2026: connections go only through AVIR's own Meta, LinkedIn and Google apps.
 
 ### Week 1: what users see becomes simple (code, about 2-3 days) - done
 
@@ -119,7 +119,7 @@ renewed hourly before they expire, publishing and analytics through
 11. Add Meta's "Instagram API with Instagram Login" as a second Instagram
     button, so creators and small businesses without a Facebook Page can connect.
 
-### Later: more networks through a unified API (optional, 2-3 days)
+### Later: more networks through a unified API - dropped (own apps only)
 
 12. If users ask for X, TikTok, Pinterest, Threads or Google Business Profile,
     add one adapter for Late (cheapest to start) behind the same Connect cards,

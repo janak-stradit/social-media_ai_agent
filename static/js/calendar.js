@@ -7,7 +7,7 @@
     const $ = (id) => document.getElementById(id);
     const tz = -new Date().getTimezoneOffset();  // minutes ahead of UTC: days follow the user's own clock
     const RING = 2 * Math.PI * 27;
-    const PLATFORM_ICONS = { linkedin: 'fa-linkedin', instagram: 'fa-instagram', facebook: 'fa-facebook', youtube: 'fa-youtube', twitter: 'fa-x-twitter', threads: 'fa-threads' };
+    const PLATFORM_ICONS = { linkedin: 'fa-linkedin', instagram: 'fa-instagram', facebook: 'fa-facebook', youtube: 'fa-youtube' };
     const CONVERSATION_KEY = 'avir_active_conversation';  // Studio Chat reopens this conversation (app_v2.js)
     const PENDING_IDEA_KEY = 'avir_pending_idea';         // ...or starts a new post from this idea
     let shownMonth = null;  // "YYYY-MM"
@@ -110,7 +110,7 @@
     // ── Scheduled posts: open, move, cancel, retry ────────────────────
     const STATUS_TEXT = { pending: 'Scheduled', publishing: 'Publishing', published: 'Published', partial: 'Partly published', failed: 'Not published' };
     const STATUS_ICONS = { pending: 'fa-clock', publishing: 'fa-spinner', published: 'fa-circle-check', partial: 'fa-circle-exclamation', failed: 'fa-triangle-exclamation' };
-    const PLATFORM_NAMES = { linkedin: 'LinkedIn', instagram: 'Instagram', facebook: 'Facebook', youtube: 'YouTube', twitter: 'X', threads: 'Threads' };
+    const PLATFORM_NAMES = { linkedin: 'LinkedIn', instagram: 'Instagram', facebook: 'Facebook', youtube: 'YouTube' };
     let dragged = null;  // the scheduled post being dragged to another day
 
     function api(method, url, body) {

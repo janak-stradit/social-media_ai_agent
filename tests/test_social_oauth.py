@@ -437,7 +437,7 @@ def test_settings_page_carries_the_connect_buttons(app):
     html = _login(app, _user(is_admin=True)).get("/settings").get_data(as_text=True)
     assert 'id="socialCards"' in html and 'id="oauthChooseModal"' in html and 'id="oauthBanner"' in html
     script = open("static/js/settings.js", encoding="utf-8").read()
-    for start in ("/api/social/oauth/facebook/start", "/api/social/oauth/linkedin/start", "/api/auth/youtube"):
+    for start in ("/connect/facebook", "/connect/linkedin", "/connect/youtube", "/connect/instagram"):
         assert start in script
 
 
@@ -666,4 +666,29 @@ def test_instagram_login_tokens_publish_through_graph_instagram():
     assert instagram_service.graph_url("123/media", "IGAAtoken").startswith("https://graph.instagram.com/")
     assert instagram_service.graph_url("123/media", "EAAtoken").startswith("https://graph.facebook.com/")
     assert instagram_service.graph_url("123/media").startswith("https://graph.facebook.com/")
+
+
+# ── Our own connect page ("AVIR AI wants to connect to your Facebook") ──────
+
+
+def _ready_user():
+    user = _user()
+    with Session(db.engine) as session:  # a fully set-up account, so pages open
+        session.query(db.User).filter(db.User.id == user["id"]).update({"email_verified": True, "onboarding_completed": True})
+        session.commit()
+    return user
+
+
+def test_the_connect_page_leads_to_the_networks_own_sign_in(app, platforms):
+    html = _login(app, _ready_user()).get("/connect/facebook").get_data(as_text=True)
+    assert "AVIR AI wants to connect to your Facebook" in html
+    assert 'href="/api/social/oauth/facebook/start"' in html and "meta-secret" not in html
+
+
+def test_the_connect_page_only_exists_once_the_app_is_set_up(app, monkeypatch):
+    monkeypatch.setattr(Config, "META_APP_ID", "")
+    client = _login(app, _ready_user())
+    assert client.get("/connect/facebook").headers["Location"].endswith("/settings")
+    assert client.get("/connect/tiktok").headers["Location"].endswith("/settings")
+    assert app.test_client().get("/connect/facebook").status_code in (302, 401)  # signed out
 

@@ -33,19 +33,6 @@ class CaptionAgent:
             "features": ["statistics", "professional hashtags", "thought leadership"],
             "optimal_length": "100-200 words",
         },
-        # Published through the unified social API (services/zernio_service.py)
-        "twitter": {
-            "max_length": 280,
-            "tone": "punchy, direct, conversational",
-            "features": ["a strong hook in the first line", "one idea", "at most one or two hashtags"],
-            "optimal_length": "under 250 characters, including hashtags",
-        },
-        "threads": {
-            "max_length": 500,
-            "tone": "casual, conversational, like talking to followers",
-            "features": ["a hook", "short lines", "a question to invite replies", "at most one hashtag"],
-            "optimal_length": "40-80 words",
-        },
     }
 
     # A caption is short, focused writing - "low" keeps it well-written without

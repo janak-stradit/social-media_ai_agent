@@ -52,10 +52,7 @@ def parse_when(value, now: datetime | None = None) -> datetime:
 def check_items(user_id: int, items: list[dict]) -> None:
     """What would stop the post going out, found now instead of at publish time."""
     from services.post_edit_service import MAX_HASHTAGS, limit_for
-    from services.publish_service import NAMES, connections, post_text
-    from services.publish_service import platforms as publishable
-
-    PLATFORMS = publishable()
+    from services.publish_service import NAMES, PLATFORMS, connections, post_text
 
     connected = connections(user_id)
     for item in items:

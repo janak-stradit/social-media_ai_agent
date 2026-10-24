@@ -11,8 +11,6 @@ An item (the shape approval_bundle_service.normalize_items produces):
   facebook   text, one photo or several photos     services/facebook_service.py
   linkedin   text, one image, a multi-image post
              or a document (PDF) carousel          services/linkedin_service.py
-  twitter,   text and images, through the unified
-  threads    social API (Zernio)                   services/zernio_service.py
 """
 
 import os
@@ -21,15 +19,7 @@ from datetime import datetime, timezone
 import requests
 
 PLATFORMS = ("linkedin", "instagram", "facebook")
-NAMES = {"linkedin": "LinkedIn", "instagram": "Instagram", "facebook": "Facebook", "youtube": "YouTube", "twitter": "X",
-         "threads": "Threads"}
-
-
-def platforms() -> tuple[str, ...]:
-    """What can be published to: our own three, plus the unified API's when it is set up."""
-    from services import zernio_service
-
-    return PLATFORMS + tuple(p for p in zernio_service.platforms() if p not in PLATFORMS)
+NAMES = {"linkedin": "LinkedIn", "instagram": "Instagram", "facebook": "Facebook", "youtube": "YouTube"}
 
 
 class PublishError(RuntimeError):
@@ -72,11 +62,9 @@ def connections(user_id: int) -> dict[str, str | None]:
             return False
         if acc["connection_type"] == "mcp":
             return bool(acc["mcp_endpoint"])
-        if acc["connection_type"] == "zernio":  # the token is held by the unified API
-            return bool(acc["account_id"])
         return bool(acc["account_id"] and acc["token"])
 
-    return {p: (connected[p]["name"] if usable(p) else None) for p in platforms()}
+    return {p: (connected[p]["name"] if usable(p) else None) for p in PLATFORMS}
 
 
 def post_text(item: dict) -> str:
@@ -115,37 +103,16 @@ def _linkedin_mcp(acc: dict, text: str) -> dict:
     return {"post_id": None, "permalink": None, "format": "text"}
 
 
-def _publish_unified(acc: dict, platform: str, text: str, images: list[str], upload_folder: str) -> dict:
-    """X, Threads, ...: the unified API downloads the images from our public address."""
-    from services import zernio_service
-    from services.instagram_service import InstagramError, public_base_url
-
-    limit = {"twitter": 4, "threads": 10}.get(platform, 4)
-    if len(images) > limit:
-        raise PublishError(f"{NAMES.get(platform, platform)} posts can have at most {limit} images.")
-    urls = []
-    if images:
-        for url in images:
-            _local(url, upload_folder)  # it exists (and is on this server's disk to be served)
-        try:
-            base = public_base_url()
-        except InstagramError as err:
-            raise PublishError(str(err).replace("Instagram", NAMES.get(platform, platform))) from err
-        urls = [base + url for url in images]
-    return zernio_service.publish(str(acc["account_id"]), platform, text, urls)
-
-
 def publish_item(user_id: int, item: dict, upload_folder: str) -> dict:
     """Publishes the item and returns {platform, post_id, permalink, account, format}.
     PublishError says why it couldn't be."""
     from services.facebook_service import FacebookError
     from services.instagram_service import InstagramError
     from services.linkedin_service import LinkedInError
-    from services.zernio_service import ZernioError
 
     platform = (item.get("platform") or "").lower()
     name = NAMES.get(platform, platform or "this platform")
-    if platform not in platforms():
+    if platform not in PLATFORMS:
         raise PublishError(f"Publishing to {name} isn't available yet.")
     text = post_text(item)
     images = list(item.get("images") or []) if item.get("media") != "none" else []
@@ -166,8 +133,6 @@ def publish_item(user_id: int, item: dict, upload_folder: str) -> dict:
             raise PublishError(f"Connect your {name} account first (Settings -> Social accounts).")
         if acc["expired"]:
             raise PublishError(f"Your {name} connection has expired - connect it again in Settings.")
-        if acc["connection_type"] == "zernio":
-            return {"platform": platform, "account": acc["name"], **_publish_unified(acc, platform, text, images, upload_folder)}
         paths = [_local(url, upload_folder) for url in images]
         if platform == "facebook":
             from services import facebook_service
@@ -200,7 +165,7 @@ def publish_item(user_id: int, item: dict, upload_folder: str) -> dict:
             result = linkedin_service.publish(author, str(acc["token"]), text, [] if document else paths,
                                               document_path=document, document_title=title or text.split("\n")[0][:80] or "Carousel")
         return {"platform": platform, "account": acc["name"], **result}
-    except (InstagramError, FacebookError, LinkedInError, ZernioError) as err:
+    except (InstagramError, FacebookError, LinkedInError) as err:
         raise PublishError(str(err)) from err
     except requests.exceptions.RequestException as err:
         raise PublishError(f"Could not reach {name}: {err}", unreachable=True) from err

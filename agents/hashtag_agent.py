@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 class HashtagAgent:
     """Agent that generates optimized hashtags with trend awareness and usage tracking"""
 
-    PLATFORM_HASHTAG_LIMITS = {"facebook": 3, "instagram": 30, "linkedin": 5, "twitter": 2, "threads": 1}
+    PLATFORM_HASHTAG_LIMITS = {"facebook": 3, "instagram": 30, "linkedin": 5}
 
     def __init__(self):
         self.llm = LLMService()

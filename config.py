@@ -113,11 +113,6 @@ class Config:
     # META_APP_ID (Meta app -> Instagram -> API setup with Instagram login).
     INSTAGRAM_APP_ID = os.getenv("INSTAGRAM_APP_ID", "")
     INSTAGRAM_APP_SECRET = os.getenv("INSTAGRAM_APP_SECRET", "")
-    # Unified social API (Zernio, formerly Late) for networks without our own
-    # app: services/zernio_service.py. Off until ZERNIO_API_KEY is set.
-    ZERNIO_API_KEY = os.getenv("ZERNIO_API_KEY", "")
-    ZERNIO_API_BASE = os.getenv("ZERNIO_API_BASE", "https://zernio.com/api/v1")
-    ZERNIO_PLATFORMS = os.getenv("ZERNIO_PLATFORMS", "twitter,threads")
     INSTAGRAM_OAUTH_SCOPES = os.getenv("INSTAGRAM_OAUTH_SCOPES", "instagram_business_basic,instagram_business_content_publish")
     # Public HTTPS address Instagram downloads post images from (Meta fetches
     # them itself). Defaults to APP_BASE_URL; set it if images are served elsewhere.

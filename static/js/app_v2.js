@@ -612,8 +612,7 @@ $(document).ready(function () {
     const IDEA_FORMATS = { text: ['fa-align-left', 'Text'], image: ['fa-image', 'Image'], video: ['fa-video', 'Video'] };
     const IDEA_PLATFORMS = {
         linkedin: ['fa-linkedin', 'LinkedIn'], instagram: ['fa-instagram', 'Instagram'],
-        facebook: ['fa-facebook', 'Facebook'], youtube: ['fa-youtube', 'YouTube'],
-        twitter: ['fa-x-twitter', 'X'], threads: ['fa-threads', 'Threads']
+        facebook: ['fa-facebook', 'Facebook'], youtube: ['fa-youtube', 'YouTube']
     };
     let _ideaFeed = null;
     let _ideaTabPicked = false;  // the user chose a tab: don't switch it under them
@@ -1239,7 +1238,7 @@ $(document).ready(function () {
             }
             return;
         }
-        const names = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', twitter: 'X', x: 'X', threads: 'Threads', tiktok: 'TikTok' };
+        const names = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', twitter: 'X', x: 'X', tiktok: 'TikTok' };
         const label = names[key.toLowerCase()] || key.charAt(0).toUpperCase() + key.slice(1);
         $list.removeClass('d-none').append(`
             <div class="caption-preview" data-platform="${key}">
@@ -1250,7 +1249,7 @@ $(document).ready(function () {
     }
 
     function captionPlatformLabel(key) {
-        const names = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', twitter: 'X', x: 'X', threads: 'Threads', tiktok: 'TikTok' };
+        const names = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', twitter: 'X', x: 'X', tiktok: 'TikTok' };
         return names[key.toLowerCase()] || key.charAt(0).toUpperCase() + key.slice(1);
     }
 
@@ -1571,7 +1570,7 @@ $(document).ready(function () {
     function appendUserMessage(text, imagePath, platforms, tone, mediaType, brandVoice, opts) {
         const isBrief = !(opts && opts.followUp);
         const platformBadges = platforms.map(p => {
-            const icons = { facebook: 'fab fa-facebook color-fb', instagram: 'fab fa-instagram color-ig', linkedin: 'fab fa-linkedin color-li', youtube: 'fab fa-youtube color-yt', twitter: 'fab fa-x-twitter color-x', threads: 'fab fa-threads color-x' };
+            const icons = { facebook: 'fab fa-facebook color-fb', instagram: 'fab fa-instagram color-ig', linkedin: 'fab fa-linkedin color-li', youtube: 'fab fa-youtube color-yt' };
             return `<span class="chat-badge"><i class="${icons[p] || 'fas fa-share'} me-1"></i>${p.toUpperCase()}</span>`;
         }).join(' ');
 
@@ -2489,7 +2488,7 @@ $(document).ready(function () {
 
     // ── "Preview": the post as each platform shows it ─────────────────────
     // (the cards of the approval review page: static/js/post_preview.js)
-    const PREVIEW_ICONS = { facebook: 'fab fa-facebook', instagram: 'fab fa-instagram', linkedin: 'fab fa-linkedin', youtube: 'fab fa-youtube', twitter: 'fab fa-x-twitter', threads: 'fab fa-threads' };
+    const PREVIEW_ICONS = { facebook: 'fab fa-facebook', instagram: 'fab fa-instagram', linkedin: 'fab fa-linkedin', youtube: 'fab fa-youtube' };
     const previewState = { posts: [], active: 0, slide: 0 };
 
     // What a message would post, per platform: {platform, caption, hashtags, images, media, slideTitles, on}.
@@ -2680,7 +2679,7 @@ $(document).ready(function () {
         let tabsHtml = `<div class="platform-tabs-chat">`;
         platforms.forEach((p, idx) => {
             const active = idx === 0 ? 'active' : '';
-            const icons = { facebook: 'fab fa-facebook color-fb', instagram: 'fab fa-instagram color-ig', linkedin: 'fab fa-linkedin color-li', youtube: 'fab fa-youtube color-yt', twitter: 'fab fa-x-twitter color-x', threads: 'fab fa-threads color-x' };
+            const icons = { facebook: 'fab fa-facebook color-fb', instagram: 'fab fa-instagram color-ig', linkedin: 'fab fa-linkedin color-li', youtube: 'fab fa-youtube color-yt' };
             tabsHtml += `
                 <button class="platform-tab-chat ${active}" data-target="${msgId}_tab_${p}">
                     <i class="${icons[p] || 'fas fa-share'} me-1"></i>${capitalize(p)}
@@ -3607,7 +3606,7 @@ $(document).ready(function () {
         });
     }
 
-    const PLATFORM_NAMES = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube', twitter: 'X', threads: 'Threads' };
+    const PLATFORM_NAMES = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube' };
     const platformName = p => PLATFORM_NAMES[p] || (p.charAt(0).toUpperCase() + p.slice(1));
 
     // A platform that was showing the shared image asks for its own (paid) one
