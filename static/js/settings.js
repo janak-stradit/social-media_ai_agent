@@ -116,7 +116,7 @@ $(document).ready(function () {
                     + (acc.token_expires_at ? `<div class="sc-note${expired ? ' is-bad' : ''}">${expired
                         ? `The sign-in ran out on ${untilText(acc.token_expires_at)}. Connect again to keep publishing.`
                         : `Signed in until ${untilText(acc.token_expires_at)}. You'll get a reminder a week before.`}</div>` : '');
-                actions = (expired && oneClick ? `<a class="sc-btn sc-primary" href="${n.start}">Connect again</a>` : '')
+                actions = (expired && oneClick ? `<a class="sc-btn sc-primary" href="${n.start}" target="_blank" rel="noopener" data-oauth-start>Connect again</a>` : '')
                     + `<button type="button" class="sc-btn sc-quiet" data-disconnect="${n.key}">Disconnect</button>`;
             } else {
                 status = '<span class="sc-status">Not connected</span>';
@@ -125,7 +125,7 @@ $(document).ready(function () {
                     // The Page is connected: its linked Instagram account is one click away
                     actions = '<button type="button" class="sc-btn sc-primary" id="igFromFacebookBtn">Add the Instagram linked to your Page</button>';
                 } else if (oneClick) {
-                    actions = `<a class="sc-btn sc-primary" href="${n.start}"><i class="${n.icon} me-2"></i>Connect ${n.via ? 'with ' + n.via : n.name}</a>`;
+                    actions = `<a class="sc-btn sc-primary" href="${n.start}" target="_blank" rel="noopener" data-oauth-start><i class="${n.icon} me-2"></i>Connect ${n.via ? 'with ' + n.via : n.name}</a>`;
                     if (n.via) body += `<div class="sc-note">Instagram connects through the Facebook Page it's linked to.</div>`;
                     if (n.key === 'instagram' && n.oauth === 'instagram') {
                         body += '<div class="sc-note">Needs an Instagram business or creator account. No Facebook Page needed.</div>';
@@ -193,6 +193,14 @@ $(document).ready(function () {
         $.ajax({ url: `/api/social/accounts/${encodeURIComponent(platform)}`, type: 'DELETE' })
             .done(() => { showToast(`${name} disconnected.`, 'success'); loadUserSocialAccounts(); })
             .fail(xhr => showToast((xhr.responseJSON || {}).error || `Could not disconnect ${name}.`, 'error'));
+    });
+    // Connect links open the sign-in in a new tab: refresh the cards once the user comes back here
+    let awaitingOAuth = false;
+    $(document).on('click', '[data-oauth-start]', function () { awaitingOAuth = true; });
+    document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState !== 'visible' || !awaitingOAuth) return;
+        awaitingOAuth = false;
+        loadUserSocialAccounts();
     });
     $(document).on('click', '#igFromFacebookBtn', function () {
         const $btn = $(this).prop('disabled', true);
