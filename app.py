@@ -220,6 +220,26 @@ def create_app(config_name="development"):
 
         return redirect("/login")
 
+    @app.before_request
+    def _bearer_token_sign_in():
+        """API clients without the session cookie sign in with
+        `Authorization: Bearer <access token>` (auth/jwt_tokens.py). A token
+        that is sent but not valid (forged, expired, or its sessions ended) is
+        refused outright rather than treated as signed out."""
+        if not request.path.startswith("/api/"):
+            return None
+        from auth.jwt_tokens import bearer_token, user_id_from_token
+
+        token = bearer_token(request.headers.get("Authorization"))
+        if not token:
+            return None
+        user_id = user_id_from_token(token)
+        if user_id is None:
+            return jsonify({"success": False, "error": "Your access token is invalid or expired. Sign in again.",
+                            "code": "invalid_token"}), 401
+        g.token_user_id = user_id
+        return None
+
     @app.after_request
     def _hide_internal_errors(response):
         """A server error never shows its raw text (database messages, file

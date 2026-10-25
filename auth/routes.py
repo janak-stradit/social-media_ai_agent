@@ -202,27 +202,36 @@ def register():
     return jsonify({"success": True, "pending_verification": True, "email": email})
 
 
-@auth_bp.route("/login", methods=["POST"])
-def login():
-    data = request.get_json() or {}
+def _check_password(data: dict):
+    """(user, None) for a right email + password, else (None, error response).
+    Shared by the browser sign-in and the API token sign-in, so both have the
+    same brute-force limits."""
     email = (data.get("email") or "").strip().lower()
     password = data.get("password") or ""
 
     if not email or not password:
-        return jsonify({"success": False, "error": "Email and password are required"}), 400
+        return None, (jsonify({"success": False, "error": "Email and password are required"}), 400)
     # Brute-force protection: per visitor and per account being tried
     ip_blocked = hit("login_ip", client_ip())
     tries = count("login_email", email)
     if tries == RULES["login_email"][0] + 1:
         _notify_sign_in_lockout(email)  # the first attempt over the limit: tell the account's owner, once
     if ip_blocked or tries > RULES["login_email"][0]:
-        return too_many("Too many sign-in attempts. Please wait 15 minutes, or reset your password.")
+        return None, too_many("Too many sign-in attempts. Please wait 15 minutes, or reset your password.")
 
     user = get_user_by_email(email)
     if not user or not check_password_hash(user.password_hash, password):
-        return jsonify({"success": False, "error": "Invalid email or password"}), 401
+        return None, (jsonify({"success": False, "error": "Invalid email or password"}), 401)
 
     reset("login_email", email)
+    return user, None
+
+
+@auth_bp.route("/login", methods=["POST"])
+def login():
+    user, error = _check_password(request.get_json() or {})
+    if error:
+        return error
     session.clear()
     if user.totp_enabled_at is not None:
         # Password was right; the authenticator code comes next (/api/auth/2fa/verify)
@@ -263,27 +272,35 @@ def _notify_sign_in_lockout(email: str) -> None:
 PENDING_2FA_SECONDS = 5 * 60
 
 
-@auth_bp.route("/2fa/verify", methods=["POST"])
-def verify_two_factor():
-    """Second step of signing in: the six-digit code from the authenticator app."""
+def _check_two_factor_code(user_id: int, code):
+    """None when the authenticator code is right (and marks it used), else an
+    error response. Shared by the browser and API token sign-ins."""
     from auth import two_factor
     from db import get_totp_state, log_audit, mark_totp_used
 
-    pending = session.get("pending_2fa") or {}
-    user_id = pending.get("user_id")
-    if not user_id or time.time() - int(pending.get("at") or 0) > PENDING_2FA_SECONDS:
-        session.pop("pending_2fa", None)
-        return jsonify({"success": False, "error": "Your sign-in expired. Enter your email and password again."}), 401
     if hit("totp_user", str(user_id)):
         return too_many("Too many wrong codes. Wait a few minutes and sign in again.")
     state = get_totp_state(user_id)
-    counter = two_factor.check_code(two_factor.decrypt_secret(state["secret"]), (request.get_json() or {}).get("code"),
-                                    state["last_counter"])
+    counter = two_factor.check_code(two_factor.decrypt_secret(state["secret"]), code, state["last_counter"])
     if counter is None:
         log_audit("login.2fa_failed", target_user_id=user_id, ip=client_ip())
         return jsonify({"success": False, "error": "That code isn't right. Check the app and try again."}), 401
     mark_totp_used(user_id, counter)
     reset("totp_user", str(user_id))
+    return None
+
+
+@auth_bp.route("/2fa/verify", methods=["POST"])
+def verify_two_factor():
+    """Second step of signing in: the six-digit code from the authenticator app."""
+    pending = session.get("pending_2fa") or {}
+    user_id = pending.get("user_id")
+    if not user_id or time.time() - int(pending.get("at") or 0) > PENDING_2FA_SECONDS:
+        session.pop("pending_2fa", None)
+        return jsonify({"success": False, "error": "Your sign-in expired. Enter your email and password again."}), 401
+    error = _check_two_factor_code(user_id, (request.get_json() or {}).get("code"))
+    if error:
+        return error
     session.clear()
     start_session(user_id)
     user = get_user_by_id(user_id)
@@ -517,6 +534,40 @@ def logout():
     if request.is_json or request.headers.get("X-Requested-With") == "XMLHttpRequest" or request.method == "POST":
         return jsonify({"success": True})
     return redirect(url_for("auth.login_page"))
+
+
+# ── API bearer tokens (auth/jwt_tokens.py) ────────────────────────────────
+@auth_bp.route("/token", methods=["POST"])
+def issue_token():
+    """Sign-in for API clients: email + password (+ `code` from the
+    authenticator app when two-step sign-in is on) -> access + refresh token."""
+    from auth.jwt_tokens import issue_tokens
+
+    data = request.get_json() or {}
+    user, error = _check_password(data)
+    if error:
+        return error
+    if user.totp_enabled_at is not None:
+        if not data.get("code"):
+            return jsonify({"success": False, "two_factor_required": True,
+                            "error": "Enter the code from your authenticator app as \"code\"."}), 401
+        error = _check_two_factor_code(user.id, data.get("code"))
+        if error:
+            return error
+    return jsonify({"success": True, "user": _user_payload(user), **issue_tokens(user.id)})
+
+
+@auth_bp.route("/token/refresh", methods=["POST"])
+def refresh_token():
+    """A refresh token -> a new access + refresh token pair."""
+    from auth.jwt_tokens import issue_tokens, user_id_from_token
+
+    token = (request.get_json(silent=True) or {}).get("refresh_token") or ""
+    user_id = user_id_from_token(token, kind="refresh") if isinstance(token, str) else None
+    if user_id is None or not get_user_by_id(user_id):
+        return jsonify({"success": False, "error": "Your refresh token is invalid or expired. Sign in again.",
+                        "code": "invalid_token"}), 401
+    return jsonify({"success": True, **issue_tokens(user_id)})
 
 
 @auth_bp.route("/me", methods=["GET"])

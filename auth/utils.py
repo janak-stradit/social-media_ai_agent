@@ -1,11 +1,16 @@
 from functools import wraps
 
-from flask import jsonify, redirect, request, session, url_for
+from flask import g, has_request_context, jsonify, redirect, request, session, url_for
 
 from db import get_user_by_id
 
 
 def get_current_user_id() -> int | None:
+    """The signed-in user: from a verified API bearer token (app.py
+    _bearer_token_sign_in), else from the browser's session cookie."""
+    token_user_id = g.get("token_user_id") if has_request_context() else None
+    if token_user_id is not None:
+        return token_user_id
     user_id = session.get("user_id")
     return int(user_id) if user_id is not None else None
 
