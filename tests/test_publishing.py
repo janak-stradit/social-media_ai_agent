@@ -619,11 +619,15 @@ def test_the_older_schedule_shape_still_works_and_stores_utc(app):
     assert client.post("/api/social/schedule", json={"platforms": [], "scheduled_at": local.isoformat()}).status_code == 400
 
 
-def test_the_schedule_button_is_soon_until_switched_on(app, monkeypatch):
+def test_the_schedule_button_is_on_unless_switched_off(app, monkeypatch):
+    from config import Config
+
+    assert Config.STUDIO_SCHEDULING is True or "STUDIO_SCHEDULING" in __import__("os").environ  # on by default
     admin = db.create_user("Admin", f"{uuid.uuid4().hex[:10]}@example.com", "h", is_admin=True)
     client = _login(app, admin)
-    for page in ("/dashboard", "/library"):
-        assert "window.SCHEDULING_ENABLED = false;" in client.get(page).get_data(as_text=True)
     app.config["STUDIO_SCHEDULING"] = True
     for page in ("/dashboard", "/library"):
         assert "window.SCHEDULING_ENABLED = true;" in client.get(page).get_data(as_text=True)
+    app.config["STUDIO_SCHEDULING"] = False
+    for page in ("/dashboard", "/library"):
+        assert "window.SCHEDULING_ENABLED = false;" in client.get(page).get_data(as_text=True)

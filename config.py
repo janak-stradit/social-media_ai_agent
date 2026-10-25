@@ -93,7 +93,7 @@ class Config:
     # The "Schedule" button in Studio Chat and the Image Library. Off: the
     # button is shown as "Soon" and can't be clicked. The scheduling itself
     # (calendar, Settings > Scheduled posts, the scheduler) is unaffected.
-    STUDIO_SCHEDULING = os.getenv("STUDIO_SCHEDULING", "false").lower() == "true"
+    STUDIO_SCHEDULING = os.getenv("STUDIO_SCHEDULING", "true").lower() == "true"  # "Schedule post" under each post
     # One-click "Connect with Facebook / LinkedIn" in Settings
     # (services/social_oauth_service.py, docs/social-connect-setup.md). Each
     # button appears once its app's ID and secret are set; until then accounts
@@ -129,6 +129,12 @@ class Config:
     # Admins must turn on two-step sign-in (Settings -> Security) before the
     # Admin Control Center and admin APIs work. Set false only for local testing.
     ADMIN_2FA_REQUIRED = os.getenv("ADMIN_2FA_REQUIRED", "true").lower() == "true"
+    # Bearer tokens for API clients (auth/jwt_tokens.py). Signed with
+    # JWT_SECRET_KEY, else SECRET_KEY. Access tokens last an hour by default;
+    # refresh tokens (which get a new pair) 30 days.
+    JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
+    JWT_ACCESS_TTL_SECONDS = int(os.getenv("JWT_ACCESS_TTL_SECONDS", str(60 * 60)))
+    JWT_REFRESH_TTL_SECONDS = int(os.getenv("JWT_REFRESH_TTL_SECONDS", str(30 * 24 * 60 * 60)))
     # Razorpay (INR payments; services/billing_service.py). Test keys start
     # rzp_test_. The webhook secret is set on the webhook in the Razorpay
     # dashboard (URL: <APP_BASE_URL>/api/billing/razorpay/webhook). Buying is
@@ -284,6 +290,10 @@ class Config:
 
     # Redis (for Celery)
     REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    # The shared embedding service (scripts/embedding_server.py): one copy of
+    # the model for every web worker. Empty: each process loads its own.
+    EMBEDDING_URL = os.getenv("EMBEDDING_URL", "")
+    EMBEDDING_TOKEN = os.getenv("EMBEDDING_TOKEN", "")
 
 
 class DevelopmentConfig(Config):

@@ -22,6 +22,7 @@ from agents.reviewer_agent import ReviewerAgent
 from agents.story_agent import StoryAgent
 from agents.strategy_agent import StrategyAgent
 from agents.vision_agent import VisionAgent
+from auth.rate_limit import limit_by_user
 from auth.utils import admin_required_api, get_current_user_id, login_required_api
 from config import Config
 from services import storage_service
@@ -203,6 +204,23 @@ def extract_prompt_for_type(full_text: str, content_type: str) -> str:
 
 def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in current_app.config["ALLOWED_EXTENSIONS"]
+
+
+def is_real_image(file) -> bool:
+    """The upload really is an image (not a script or page renamed .png):
+    Pillow must recognise and check it. The stream is rewound afterwards."""
+    from PIL import Image, UnidentifiedImageError
+
+    try:
+        file.stream.seek(0)
+        with Image.open(file.stream) as img:
+            img.verify()
+            ok = (img.format or "").upper() in ("PNG", "JPEG", "GIF", "WEBP", "MPO")
+    except (UnidentifiedImageError, OSError, ValueError, SyntaxError):
+        ok = False
+    finally:
+        file.stream.seek(0)
+    return ok
 
 
 # Initialize agents
@@ -387,6 +405,8 @@ def upload_image():
         return jsonify({"error": "No file selected"}), 400
 
     if file and allowed_file(filename):
+        if not is_real_image(file):
+            return jsonify({"error": "That file isn't a valid image. Upload a PNG, JPG, GIF or WebP picture."}), 400
         secure_name = secure_filename(filename)
         unique_name = f"{uuid.uuid4()}_{secure_name}"
         filepath = os.path.join(current_app.config["UPLOAD_FOLDER"], unique_name)
@@ -461,6 +481,7 @@ def _partial_research(text: str) -> dict:
 
 @api_bp.route("/analyze-story", methods=["POST"])
 @login_required_api
+@limit_by_user("ai_user")
 def analyze_story():
     """Analyze story text"""
     data = request.get_json()
@@ -738,6 +759,7 @@ def generate_progress(progress_id):
 
 @api_bp.route("/generate", methods=["POST"])
 @login_required_api
+@limit_by_user("ai_user")
 def generate_content():
     """
     Main endpoint to generate complete social media content with Multi-Turn Refinement, A/B Hook Variations & Critic Self-Correction
@@ -1396,6 +1418,7 @@ def _refine_language_line(code) -> str:
 
 @api_bp.route("/refine", methods=["POST"])
 @login_required_api
+@limit_by_user("ai_user")
 def refine_post():
     """Apply a Studio Chat follow-up to an existing post.
 
@@ -1891,6 +1914,7 @@ def admin_reset_image_preset(slug):
 
 @api_bp.route("/presets/run", methods=["POST"])
 @login_required_api
+@limit_by_user("media_user")
 def run_image_preset():
     """Runs an image command on the user's product photo. Every image counts
     toward the daily limit, and all of a command's images are checked against
@@ -2378,6 +2402,7 @@ def get_history_run(run_id):
 
 @api_bp.route("/generate/<platform>", methods=["POST"])
 @login_required_api
+@limit_by_user("ai_user")
 def generate_for_platform(platform):
     """Generate content for a specific platform"""
     if platform not in ["facebook", "instagram", "linkedin"]:
@@ -2505,6 +2530,7 @@ def schedule_campaign():
 
 @api_bp.route("/generate-media", methods=["POST"])
 @login_required_api
+@limit_by_user("media_user")
 def generate_media():
     """
     Generate image or video for a given platform and caption.
@@ -2606,7 +2632,9 @@ def generate_media():
     if blocked:
         return blocked
 
-    try:
+    def _work() -> dict:
+        """The render itself: run here, or in the background (services/media_jobs.py)."""
+        nonlocal tone  # the request's "context" can replace it below
         caption_to_use = extract_prompt_for_type(caption, media_type)
         if media_type == "video":
             if video_prompt:
@@ -2688,14 +2716,40 @@ def generate_media():
             log_event("video.generate" if media_type == "video" else "image.generate", run_id=run_id,
                       platform=platform, status="failed", error=str(result.get("error"))[:200])
 
-        return jsonify(result)
+        return result
 
+    # Studio Chat asks for the background: the request returns at once with a
+    # job id, and the page checks /api/media-jobs/<id> until it is done
+    if data.get("background") and DB_AVAILABLE and user_id is not None:
+        from services import media_jobs
+
+        try:
+            job_id = media_jobs.start(user_id, media_type, platform, _work, current_app._get_current_object())
+        except media_jobs.TooManyJobs as err:
+            return jsonify({"success": False, "error": str(err), "code": "too_many_jobs"}), 429
+        return jsonify({"success": True, "job_id": job_id, "status": "running"}), 202
+
+    try:
+        return jsonify(_work())
     except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
 
 
+@api_bp.route("/media-jobs/<job_id>", methods=["GET"])
+@login_required_api
+def media_job_status(job_id):
+    """An image or video being made in the background: {status, result, error}."""
+    from services import media_jobs
+
+    job = media_jobs.get(get_current_user_id(), job_id) if DB_AVAILABLE else None
+    if not job:
+        return jsonify({"success": False, "error": "Not found"}), 404
+    return jsonify({"success": True, **job})
+
+
 @api_bp.route("/send-approval-email", methods=["POST"])
 @login_required_api
+@limit_by_user("email_user")
 def send_approval_email():
     """Sends an HTML notification email (with the generated asset attached,
     if it's an image) when a piece of content is approved on the Analysis
@@ -2803,6 +2857,7 @@ def list_approval_requests_route():
 
 @api_bp.route("/approval-requests", methods=["POST"])
 @login_required_api
+@limit_by_user("email_user")
 def create_approval_request_route():
     """Creates a review request for a pipeline's generated content and emails
     the reviewer a link to open it in the dashboard (sign-in required) - this
@@ -3185,7 +3240,7 @@ def create_brand_asset_route():
     file = request.files["image"]
     if not file.filename:
         return jsonify({"error": "No file selected"}), 400
-    if not allowed_file(file.filename):
+    if not allowed_file(file.filename) or not is_real_image(file):
         return jsonify({"error": "Invalid file type"}), 400
 
     key = _brand_asset_key_from_label(label)
@@ -3216,7 +3271,7 @@ def upload_brand_asset_route(key):
     file = request.files["image"]
     if not file.filename:
         return jsonify({"error": "No file selected"}), 400
-    if not allowed_file(file.filename):
+    if not allowed_file(file.filename) or not is_real_image(file):
         return jsonify({"error": "Invalid file type"}), 400
 
     ext = file.filename.rsplit(".", 1)[1].lower()
@@ -3263,6 +3318,7 @@ def delete_brand_asset_route(key):
 
 @api_bp.route("/credit-requests", methods=["POST"])
 @login_required_api
+@limit_by_user("email_user")
 def request_credit_extension():
     """Submit a credit extension request to the admin."""
     if not DB_AVAILABLE:
@@ -3957,6 +4013,10 @@ def admin_set_user_active(target_user_id):
         return jsonify({"error": "is_active (bool) is required"}), 400
 
     res = set_user_active(target_user_id, bool(data["is_active"]))
+    if res and not data["is_active"]:  # a deactivated account is signed out everywhere
+        from db import bump_session_version
+
+        bump_session_version(target_user_id)
     if not res:
         return jsonify({"error": "User not found"}), 404
     _audit("user.activated" if data["is_active"] else "user.deactivated", target_user_id)
@@ -5199,6 +5259,8 @@ def verify_social_account_endpoint(platform):
 
 
 @api_bp.route("/competitor-posts", methods=["GET"])
+@login_required_api
+@limit_by_user("ai_user")
 def competitor_posts():
     target = request.args.get("target")
     if not target:
@@ -5225,6 +5287,8 @@ def competitor_posts():
 
 
 @api_bp.route("/platform-posts", methods=["GET"])
+@login_required_api
+@limit_by_user("ai_user")
 def platform_posts():
     platform = request.args.get("platform")
     competitor = request.args.get("competitor") or ""
@@ -5261,6 +5325,7 @@ def platform_posts():
 
 
 @api_bp.route("/competitor-posts-db", methods=["GET"])
+@login_required_api
 def competitor_posts_db():
     platform = request.args.get("platform")
     competitor = request.args.get("competitor")
@@ -5332,6 +5397,7 @@ def _is_storyline_worthy(post: dict) -> bool:
 
 @api_bp.route("/generate-suggested-collections", methods=["POST"])
 @login_required_api
+@limit_by_user("ai_user")
 def generate_suggested_collections():
     """Group already-scraped competitor posts (last 15 days, per get_competitor_posts)
     by semantic similarity into "storyline" suggestions, labeled with a theme and
@@ -5439,6 +5505,7 @@ def festive_storylines():
 
 
 @api_bp.route("/stradit-projects", methods=["GET"])
+@login_required_api
 def get_stradit_projects():
     try:
         from services.stradit_service import StradITService
@@ -5452,6 +5519,7 @@ def get_stradit_projects():
 
 @api_bp.route("/generate-channel-storyline", methods=["POST"])
 @login_required_api
+@limit_by_user("ai_user")
 def generate_channel_storyline():
     data = request.get_json()
     if not data:
@@ -5494,6 +5562,7 @@ def opportunity_suggestions():
 
 @api_bp.route("/generate-opportunity-suggestions", methods=["POST"])
 @login_required_api
+@limit_by_user("ai_user")
 def generate_opportunity_suggestions():
     data = request.get_json()
     if not data:
@@ -5805,6 +5874,7 @@ def update_my_notifications():
 
 @api_bp.route("/me/notifications/recap-email/send-now", methods=["POST"])
 @login_required_api
+@limit_by_user("email_user")
 def send_my_recap_email_now():
     """Settings -> Notifications -> "Send me last month's recap now": the
     same email the monthly run sends, to the logged-in user's own address."""
@@ -5879,6 +5949,42 @@ def post_analytics_route():
     data = post_analytics(get_current_user_id(), datetime.now(timezone.utc) - timedelta(days=days))
     data.pop("all_posts", None)
     return jsonify({"success": True, "days": days, "analytics": data})
+
+
+@api_bp.route("/repurpose", methods=["POST"])
+@login_required_api
+@limit_by_user("ai_user")
+def repurpose_content():
+    """Turn a link or a PDF into post ideas (services/repurpose_service.py).
+    JSON {url} or a form upload "file" (PDF) -> {title, source, summary,
+    angles: [{title, brief, format}]}; the composer loads the chosen brief."""
+    from services import repurpose_service as repurpose
+
+    user_id = get_current_user_id()
+    if DB_AVAILABLE and user_id is not None:
+        stats = get_user_usage_stats(user_id)
+        if _credit_blocked(stats):
+            return jsonify({"success": False, "credit_limit_exceeded": True,
+                            "error": f"Credit limit reached ({format_money(stats.get('credit_limit', Config.DEFAULT_CREDIT_USD), stats.get('currency', 'USD'))}). "
+                                     "Please request a credit extension from admin."}), 402
+    try:
+        upload = request.files.get("file")
+        if upload:
+            doc = repurpose.read_pdf(upload.read(repurpose.MAX_PDF_BYTES + 1), upload.filename or "document.pdf")
+        else:
+            doc = repurpose.read_url((request.get_json(silent=True) or {}).get("url"))
+        ideas = repurpose.to_angles(doc)
+    except repurpose.RepurposeError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    except requests.exceptions.RequestException:
+        return jsonify({"success": False, "error": "Couldn't reach that page. Check the link and try again."}), 502
+    except Exception as err:  # noqa: BLE001 - the AI call
+        logger.warning(f"Repurpose failed: {err}")
+        return jsonify({"success": False, "error": "The AI service didn't answer. Please try again."}), 502
+    usage = ideas.pop("usage", {})
+    log_event("repurpose", user_id=user_id, kind="pdf" if upload else "url", angles=len(ideas["angles"]),
+              tokens=usage.get("total_tokens", 0))
+    return jsonify({"success": True, "title": doc["title"], "source": doc["source"], **ideas})
 
 
 @api_bp.route("/languages", methods=["GET"])
@@ -6353,6 +6459,7 @@ def read_my_bell():
 
 @api_bp.route("/me/notifications/ideas-email/send-now", methods=["POST"])
 @login_required_api
+@limit_by_user("email_user")
 def send_my_ideas_email_now():
     """Settings -> Notifications -> "Send me this week's ideas now": the same
     email the weekly run sends, to the logged-in user's own address."""
@@ -6431,6 +6538,7 @@ def unsubscribe_ideas_email(token, kind):
 
 @api_bp.route("/brand-profile/quick-prompts/generate", methods=["POST"])
 @login_required_api
+@limit_by_user("ai_user")
 def generate_brand_quick_prompts():
     """Studio Chat's regenerate button: writes genuinely NEW "Start from an
     idea" cards from the user's whole brand profile (see
@@ -6510,6 +6618,7 @@ def update_brand_profile():
 
 @api_bp.route("/brand-profile/rescan", methods=["POST"])
 @login_required_api
+@limit_by_user("ai_user")
 def rescan_brand_profile():
     """Manually re-runs the website scrape + brand analysis (see
     services/brand_profile_service.py::run_brand_analysis) - unlike

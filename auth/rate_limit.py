@@ -23,6 +23,11 @@ RULES = {
     "reset_ip": (10, 60 * 60),
     "reset_email": (5, 60 * 60),
     "totp_user": (6, 10 * 60),  # wrong authenticator codes per account
+    # Per signed-in account: a stolen or scripted account can't run up the AI
+    # bill or send floods of email. Far above what a person does by hand.
+    "ai_user": (150, 60 * 60),  # AI calls (generate, refine, research, ideas from a link...)
+    "media_user": (40, 60 * 60),  # image and video generation
+    "email_user": (30, 60 * 60),  # emails sent on the user's behalf (approvals, "send me one now")
 }
 
 
@@ -61,6 +66,24 @@ def reset(rule: str, value: str | None) -> None:
 
 def too_many(message: str = "Too many attempts. Please wait a few minutes and try again."):
     return jsonify({"success": False, "error": message, "code": "rate_limited"}), 429
+
+
+def limit_by_user(rule: str):
+    """Decorator (after login_required_api): at most RULES[rule] requests per signed-in account."""
+
+    def wrap(view):
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            from auth.utils import get_current_user_id
+
+            user_id = get_current_user_id()
+            if user_id and hit(rule, f"user:{user_id}"):
+                return too_many("You've made a lot of requests in the last hour. Please wait a little and try again.")
+            return view(*args, **kwargs)
+
+        return wrapped
+
+    return wrap
 
 
 def limit_by_ip(rule: str):

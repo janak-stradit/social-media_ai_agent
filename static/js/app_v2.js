@@ -301,6 +301,7 @@ $(document).ready(function () {
             const shown = Math.max(p.goal, Math.min(p.done, 7));
             $('#goalPillDots').html(Array.from({ length: shown }, (_, i) => `<i class="${i < p.done ? 'on' : ''}"></i>`).join(''));
             $('#goalPillText').text(p.goal_met ? `Goal reached: ${p.done} this week` : `${p.done} of ${p.goal} this week`);
+            window.__weekProgress = p;  // for the "scheduled" card's goal line
             $('#goalPill').removeClass('d-none').toggleClass('is-met', !!p.goal_met)
                 .attr('aria-label', `${p.done} of ${p.goal} posts created this week. Open your Content Calendar.`);
         });
@@ -585,6 +586,7 @@ $(document).ready(function () {
                 if (!ideas.length) return;
 
                 _brandProfileIdeaPool = ideas;
+                window.setBriefExamples(ideas);
                 // Pool is newest-first (regenerated ideas are prepended), so lead with the latest
                 renderQuickPromptCards(ideas.slice(0, QUICK_PROMPT_CARD_COUNT));
 
@@ -785,6 +787,150 @@ $(document).ready(function () {
     }
 
     // The brief goes into the box of a new conversation, with its platforms ticked
+    // ── Start from a link or PDF (POST /api/repurpose) ───────────────────
+    // The page or document is read, the AI suggests 3-5 post angles, and the
+    // chosen one is loaded into the brief like a saved brief.
+    const LONE_URL = /^https?:\/\/\S+$/i;
+    let repurposeAngles = [];
+
+    function openRepurpose(url) {
+        $('#repurposeUrl').val(url || '');
+        $('#repurposeFile').val('');
+        $('#repurposeFileLabel').text('Upload a PDF (up to 15 MB)');
+        $('#repurposeStatus, #repurposeResult').addClass('d-none').empty();
+        $('#repurposeForm').removeClass('d-none');
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('repurposeModal')).show();
+        if (url) runRepurpose({ url: url });
+        else setTimeout(() => $('#repurposeUrl').trigger('focus'), 300);
+    }
+
+    function runRepurpose(source) {
+        const isFile = source instanceof File;
+        const started = Date.now();
+        $('#repurposeResult').addClass('d-none').empty();
+        $('#repurposeGo, #repurposeFile').prop('disabled', true);
+        const $status = $('#repurposeStatus').removeClass('d-none is-error');
+        const tick = () => {
+            const s = Math.round((Date.now() - started) / 1000);
+            $status.html(`<span class="spinner-border spinner-border-sm me-2"></span>${isFile ? 'Reading your PDF' : 'Reading the page'} and finding post ideas... ${s}s`);
+        };
+        tick();
+        const clock = setInterval(tick, 1000);
+        let request;
+        if (isFile) {
+            const form = new FormData();
+            form.append('file', source);
+            request = $.ajax({ url: '/api/repurpose', type: 'POST', data: form, processData: false, contentType: false });
+        } else {
+            request = $.ajax({ url: '/api/repurpose', type: 'POST', contentType: 'application/json', data: JSON.stringify(source) });
+        }
+        request.done(function (r) {
+            $status.addClass('d-none');
+            repurposeAngles = r.angles || [];
+            const formats = { text: 'Text post', image: 'With an image', carousel: 'Carousel' };
+            $('#repurposeResult').removeClass('d-none').html(`
+                <div class="repurpose-source"><strong>${escapeHtml(r.title || 'Your content')}</strong>
+                    ${r.summary ? `<p>${escapeHtml(r.summary)}</p>` : ''}</div>
+                <div class="repurpose-angles">${repurposeAngles.map((a, i) => `
+                    <div class="repurpose-angle">
+                        <div class="repurpose-angle-head"><strong>${escapeHtml(a.title)}</strong>
+                            <span class="repurpose-format">${formats[a.format] || 'Text post'}</span></div>
+                        <p>${escapeHtml(a.brief)}</p>
+                        <button type="button" class="btn btn-sm btn-dark" data-repurpose-use="${i}">Use this</button>
+                    </div>`).join('')}</div>`);
+        }).fail(function (xhr) {
+            $status.addClass('is-error').text((xhr.responseJSON || {}).error || 'Could not read that. Please try again.');
+        }).always(function () {
+            clearInterval(clock);
+            $('#repurposeGo, #repurposeFile').prop('disabled', false);
+        });
+    }
+
+    $('#repurposeBtn').on('click', () => openRepurpose(''));
+    $('#repurposeForm').on('submit', function (e) {
+        e.preventDefault();
+        const url = $('#repurposeUrl').val().trim();
+        if (!url) { $('#repurposeUrl').trigger('focus'); return; }
+        runRepurpose({ url: url });
+    });
+    $('#repurposeFile').on('change', function () {
+        const file = this.files && this.files[0];
+        if (!file) return;
+        $('#repurposeFileLabel').text(file.name);
+        runRepurpose(file);
+    });
+    $(document).on('click', '[data-repurpose-use]', function () {
+        const angle = repurposeAngles[Number($(this).data('repurpose-use'))];
+        if (!angle) return;
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('repurposeModal')).hide();
+        loadBriefIntoComposer(angle.brief, null);
+        if (angle.format !== 'text') {  // tick Image when the idea wants a visual and it's available
+            const $image = $('input[name="outputOptions"][value="image"]');
+            if ($image.length && !$image.prop('disabled')) $image.prop('checked', true).trigger('change');
+        }
+    });
+    // A link pasted on its own into the brief: offer to read it
+    storyInput.on('input', function () {
+        $('#repurposeHint').toggleClass('d-none', !LONE_URL.test(storyInput.val().trim()));
+    });
+    $('#repurposeHint').on('click', function () {
+        const url = storyInput.val().trim();
+        $(this).addClass('d-none');
+        storyInput.val('').trigger('input');
+        openRepurpose(url);
+    });
+
+    // ── Smart defaults: the composer starts with last time's platforms and
+    // outputs (people keep what's pre-selected), and says so.
+    const SETUP_KEY = 'avir_last_setup';
+    function rememberSetup(platforms) {
+        if (!platforms || !platforms.length) return;
+        const outputs = $('input[name="outputOptions"]:checked').map(function () { return this.value; }).get();
+        try { localStorage.setItem(SETUP_KEY, JSON.stringify({ platforms: platforms, outputs: outputs })); } catch (e) { /* storage blocked */ }
+    }
+    function restoreSetup() {
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem(SETUP_KEY) || 'null'); } catch (e) { return; }
+        if (!saved || !Array.isArray(saved.platforms) || !saved.platforms.length) return;
+        if ($('.platform-chips-inline input[type="checkbox"]:checked').length) return;  // something was chosen already
+        $('.platform-chips-inline input[type="checkbox"]').each(function () {
+            if (saved.platforms.includes(this.value)) $(this).prop('checked', true).trigger('change');
+        });
+        (saved.outputs || []).forEach(function (value) {
+            const $o = $(`input[name="outputOptions"][value="${value}"]`);
+            if ($o.length && !$o.prop('disabled')) $o.prop('checked', true).trigger('change');
+        });
+        $('#lastSetupNote').removeClass('d-none');
+    }
+    // Any change by hand: the note no longer applies
+    $(document).on('change', '.platform-chips-inline input, input[name="outputOptions"]', function (e) {
+        if (e.originalEvent) $('#lastSetupNote').addClass('d-none');
+    });
+    setTimeout(restoreSetup, 600);  // after the plan/quota checks have enabled or disabled outputs
+
+    // ── Examples in the empty brief: from the user's own brand when there is
+    // one (recognition is easier than inventing from a blank box)
+    const GENERIC_EXAMPLES = [
+        'Announce our new service with 3 key benefits',
+        'Share a customer success story with one clear result',
+        'Give 3 practical tips our customers can use this week',
+        'Invite people to our upcoming event or webinar',
+    ];
+    let briefExamples = GENERIC_EXAMPLES.slice();
+    let exampleIndex = 0;
+    function rotateBriefExample() {
+        const $box = $('#storyInput');
+        if ($box.val() || $box.prop('disabled')) return;
+        $box.attr('placeholder', `What would you like to post about? e.g. ${briefExamples[exampleIndex % briefExamples.length]}`);
+        exampleIndex += 1;
+    }
+    window.setBriefExamples = function (ideas) {
+        const titles = (ideas || []).map(i => (i && (i.title || i.prompt) || '').trim()).filter(t => t && t.length <= 90);
+        if (titles.length) { briefExamples = titles.slice(0, 8); exampleIndex = 0; rotateBriefExample(); }
+    };
+    rotateBriefExample();
+    setInterval(rotateBriefExample, 4500);
+
     function loadBriefIntoComposer(text, platforms) {
         if ($('#chatThread').children().length) startNewChat(true);
         storyInput.val(text).trigger('input').trigger('focus');
@@ -1187,7 +1333,7 @@ $(document).ready(function () {
                 showToast('Analysis failed: ' + (xhr.responseJSON?.error || 'Error'), 'error');
             },
             complete: function () {
-                btn.prop('disabled', false).html('<i class="fas fa-brain"></i><span class="d-none d-md-inline ms-1">Analyze</span>');
+                btn.prop('disabled', false).html('<i class="fas fa-brain"></i><span class="d-none d-md-inline ms-1">Research first</span>');
             }
         });
     };
@@ -1476,6 +1622,7 @@ $(document).ready(function () {
         $('.platform-chips-inline input[type="checkbox"]:checked').each(function () {
             platforms.push($(this).val());
         });
+        rememberSetup(platforms);
 
         const tone = $('#toneSelect').val();
         const brandVoice = $('#brandVoiceSelect').val() || 'Standard Enterprise';
@@ -1614,7 +1761,7 @@ $(document).ready(function () {
         const headerIcon = attention ? 'fa-triangle-exclamation text-warning' : 'fa-scale-balanced text-success';
         const headerText = attention
             ? `${attention} compliance item${attention > 1 ? 's' : ''} need${attention > 1 ? '' : 's'} your attention`
-            : flags.length ? `${flags.length} compliance issue${flags.length > 1 ? 's' : ''} auto-fixed` : 'Compliance checked - no issues';
+            : flags.length ? `${flags.length} compliance issue${flags.length > 1 ? 's' : ''} auto-fixed` : 'Compliance checked';
         const flagsHtml = flags.map(f => `
             <li class="mb-1">
                 <span class="badge ${f.auto_fixed ? 'bg-success-subtle text-success' : 'bg-warning-subtle text-warning'} me-1">${f.auto_fixed ? 'Fixed' : 'Action needed'}</span>
@@ -1623,16 +1770,19 @@ $(document).ready(function () {
             </li>`).join('');
         const disclaimersHtml = (compliance.disclaimers_added || []).map(d =>
             `<li class="mb-1"><span class="badge bg-primary-subtle text-primary me-1">Disclaimer added</span>${escapeHtml(d)}</li>`).join('');
+        const added = (compliance.disclaimers_added || []).length;
+        const extra = [`${compliance.rules_checked} rules`, added ? `disclaimer added` : ''].filter(Boolean).join(' · ');
+        // One line when all is well; open by itself when something needs the user
         return `
-            <div class="post-box-card compliance-card">
-                <div class="post-box-header">
-                    <span class="post-box-title"><i class="fas ${headerIcon} me-1"></i>${headerText}</span>
-                    <span class="text-muted small">${compliance.rules_checked} rules checked</span>
+            <details class="compliance-line${attention ? ' needs-attention' : ''}"${attention || compliance.stale ? ' open' : ''}>
+                <summary><i class="fas ${attention ? 'fa-triangle-exclamation' : 'fa-circle-check'} me-1"></i>${headerText}
+                    <span class="compliance-extra">${extra}</span><i class="fas fa-chevron-down compliance-caret"></i></summary>
+                <div class="compliance-body">
+                    ${flagsHtml || disclaimersHtml ? `<ul class="list-unstyled small mb-1">${flagsHtml}${disclaimersHtml}</ul>` : ''}
+                    ${compliance.stale ? '<div class="compliance-stale"><i class="fas fa-clock-rotate-left me-1"></i>Checked before your edit. The caption is checked again when you send it for approval.</div>' : ''}
+                    <div class="text-muted" style="font-size: 0.7rem;">Guidance only, not legal advice.</div>
                 </div>
-                ${flagsHtml || disclaimersHtml ? `<ul class="list-unstyled small mb-1">${flagsHtml}${disclaimersHtml}</ul>` : ''}
-                ${compliance.stale ? '<div class="compliance-stale"><i class="fas fa-clock-rotate-left me-1"></i>Checked before your edit. The caption is checked again when you send it for approval.</div>' : ''}
-                <div class="text-muted" style="font-size: 0.7rem;">Guidance only, not legal advice.</div>
-            </div>`;
+            </details>`;
     }
 
     // Renders a finished image/video card - shared by triggerMediaGenInChat
@@ -2327,20 +2477,26 @@ $(document).ready(function () {
 
                     ${buildComplianceHtml(pData.compliance)}
 
-                    <!-- Hashtags Card -->
-                    <div class="post-box-card">
-                        <div class="post-box-header">
-                            <span class="post-box-title"><i class="fas fa-hashtag me-1"></i>Curated Hashtags</span>
-                            <span class="post-box-actions">
-                                ${editActionsHtml(msgId, p, post, 'tags')}
-                                <button class="btn-copy-sm btn-copy-text" id="${tagsCardId}_copy" data-text="${escapeAttr(post.tags.join(' '))}">
-                                    <i class="fas fa-copy me-1"></i>Copy Tags
-                                </button>
-                            </span>
+                    <!-- Hashtags: one line (the first few), all of them and Edit / Copy on click -->
+                    <details class="hashtag-line">
+                        <summary>
+                            <i class="fas fa-hashtag me-1"></i><strong>${post.tags.length} hashtag${post.tags.length === 1 ? '' : 's'}</strong>
+                            <span class="hashtag-peek">${escapeHtml(post.tags.slice(0, 3).join(' '))}${post.tags.length > 3 ? ` +${post.tags.length - 3} more` : ''}</span>
+                            <i class="fas fa-chevron-down compliance-caret"></i>
+                        </summary>
+                        <div class="post-box-card hashtag-body">
+                            <div class="post-box-header">
+                                <span class="post-box-title"><i class="fas fa-hashtag me-1"></i>Hashtags</span>
+                                <span class="post-box-actions">
+                                    ${editActionsHtml(msgId, p, post, 'tags')}
+                                    <button class="btn-copy-sm btn-copy-text" id="${tagsCardId}_copy" data-text="${escapeAttr(post.tags.join(' '))}">
+                                        <i class="fas fa-copy me-1"></i>Copy Tags
+                                    </button>
+                                </span>
+                            </div>
+                            <div class="hashtags-container" id="${tagsCardId}">${tagsHtml}</div>
                         </div>
-
-                        <div class="hashtags-container" id="${tagsCardId}">${tagsHtml}</div>
-                    </div>
+                    </details>
                     </div>`;
     }
 
@@ -2754,21 +2910,14 @@ $(document).ready(function () {
             ${agentBreakdownHtml}
             ${tabsHtml}
             ${panelsHtml}
-            <div class="assistant-card-footer">
-                ${approvalButtonHtml(msgId)}
-                <button class="btn btn-sm btn-outline-secondary btn-preview-post" data-msg="${msgId}" title="See it as it will look on each platform">
-                    <i class="fas fa-eye me-1"></i>Preview post
-                </button>
-                ${scheduleButtonHtml(msgId)}
-                <button class="btn btn-sm btn-outline-primary btn-regenerate" data-msg="${msgId}"
+            ${actionRowHtml(msgId, `
+                <button class="dropdown-item btn-regenerate" data-msg="${msgId}"
                     title="${historyObj.refine ? 'Apply the same change again, as a new version' : 'Write the caption again, as a new version. Your image is kept.'}">
-                    <i class="fas fa-sync-alt me-1"></i>${historyObj.refine ? 'Redo this change' : 'Rewrite caption'}
+                    <i class="fas fa-sync-alt me-2"></i>${historyObj.refine ? 'Redo this change' : 'Rewrite caption'}
                 </button>
-                <button class="btn btn-sm btn-outline-secondary btn-refine-base" data-msg="${msgId}"
-                    title="Your next message will edit this version">
-                    <i class="fas fa-wand-magic-sparkles me-1"></i>${refineBaseMsgId === msgId ? 'Refining this version' : 'Refine this version'}
-                </button>
-            </div>
+                <button class="dropdown-item btn-refine-base" data-msg="${msgId}" title="Your next message will edit this version">
+                    <i class="fas fa-wand-magic-sparkles me-2"></i>${refineBaseMsgId === msgId ? 'Refining this version' : 'Refine this version'}
+                </button>`)}
         `;
 
         elem.find('.assistant-card').html(cardContent);
@@ -3471,16 +3620,10 @@ $(document).ready(function () {
             ${meta.occasion_auto ? `<div class="preset-brief"><i class="fas fa-calendar-day me-1"></i>Made for the next festival, <strong>${escapeHtml(meta.occasion)}</strong>. For another occasion, type e.g. <em>/festive Eid</em>.</div>` : ''}
             <div class="preset-grid${h.platforms.length > 1 ? ' multi' : ''}">${tiles}</div>
             ${adHtml}${carHtml}
-            <div class="assistant-card-footer">
-                ${approvalButtonHtml(msgId)}
-                <button class="btn btn-sm btn-outline-secondary btn-preview-post" data-msg="${msgId}" title="See it as it will look on each platform">
-                    <i class="fas fa-eye me-1"></i>Preview post
-                </button>
-                ${scheduleButtonHtml(msgId)}
-                <button class="btn btn-sm btn-outline-primary btn-preset-regen" data-msg="${msgId}" title="Create these images again, as a new version (uses today's images)"><i class="fas fa-sync-alt me-1"></i>New images</button>
-                <button class="btn btn-sm btn-outline-secondary btn-refine-base" data-msg="${msgId}" title="Your next message will edit this version">
-                    <i class="fas fa-wand-magic-sparkles me-1"></i>${refineBaseMsgId === msgId ? 'Refining this version' : 'Refine this version'}</button>
-            </div>
+            ${actionRowHtml(msgId, `
+                <button class="dropdown-item btn-preset-regen" data-msg="${msgId}" title="Create these images again, as a new version (uses today's images)"><i class="fas fa-sync-alt me-2"></i>New images</button>
+                <button class="dropdown-item btn-refine-base" data-msg="${msgId}" title="Your next message will edit this version">
+                    <i class="fas fa-wand-magic-sparkles me-2"></i>${refineBaseMsgId === msgId ? 'Refining this version' : 'Refine this version'}</button>`)}
             <div class="preset-tip"><i class="fas fa-lightbulb me-1"></i>Want a change? Just type it - e.g. "make the background darker".</div>`);
 
         elem.find('.gen-prev, .gen-next').on('click', function () {
@@ -3510,6 +3653,26 @@ $(document).ready(function () {
         });
     }
 
+    // The row under a post: ONE main action (Schedule), the other real choices
+    // as quiet buttons, and edits tucked into "More" - fewer equal options
+    // make the next step obvious.
+    function actionRowHtml(msgId, moreItems) {
+        return `
+            <div class="assistant-card-footer action-row">
+                ${scheduleButtonHtml(msgId)}
+                ${approvalButtonHtml(msgId)}
+                <button class="btn btn-sm btn-quiet btn-preview-post" data-msg="${msgId}" title="See it as it will look on each platform">
+                    <i class="fas fa-eye me-1"></i>Preview
+                </button>
+                <div class="dropdown action-more">
+                    <button class="btn btn-sm btn-quiet" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="More actions">
+                        <i class="fas fa-ellipsis me-1"></i>More
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-end">${moreItems}</div>
+                </div>
+            </div>`;
+    }
+
     // "Send for approval" (static/js/approval_send.js): after sending, the
     // button becomes a link to the request
     function approvalButtonHtml(msgId) {
@@ -3524,7 +3687,7 @@ $(document).ready(function () {
             return `<a class="btn btn-sm btn-outline-secondary btn-plan-locked" href="/settings#plan"
                        title="Approvals are on the ${escapeAttr(plan)} plan and above"><i class="fas fa-lock me-1"></i>Send for approval<span class="plan-chip">${escapeHtml(plan)}</span></a>`;
         }
-        return `<button class="btn btn-sm btn-outline-primary btn-send-approval" data-msg="${msgId}"><i class="fas fa-paper-plane me-1"></i>Send for approval</button>`;
+        return `<button class="btn btn-sm btn-quiet btn-send-approval" data-msg="${msgId}"><i class="fas fa-paper-plane me-1"></i>Send for approval</button>`;
     }
 
     function openApproval(msgId) {
@@ -3555,14 +3718,39 @@ $(document).ready(function () {
             const when = new Date(planned.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
             return `<a class="btn btn-sm btn-outline-success btn-scheduled" href="/calendar" title="Open the calendar to move or cancel it"><i class="fas fa-calendar-check me-1"></i>Scheduled · ${escapeHtml(when)}</a>`;
         }
-        if (!window.SCHEDULING_ENABLED) {  // switched on with STUDIO_SCHEDULING=true (config.py)
-            return `<span class="coming-soon btn-schedule-soon" title="Coming soon">
-                    <button class="btn btn-sm btn-outline-success" disabled>
-                        <i class="fas fa-calendar-plus me-1"></i>Schedule<span class="soon-tag">Soon</span>
-                    </button>
-                </span>`;
-        }
-        return `<button class="btn btn-sm btn-outline-success btn-schedule-post" data-msg="${msgId}" title="Publish it by itself at a time you choose"><i class="fas fa-calendar-plus me-1"></i>Schedule</button>`;
+        if (!window.SCHEDULING_ENABLED) return '';  // switched off with STUDIO_SCHEDULING=false: no dead-end button
+        return `<button class="btn btn-sm btn-primary-action btn-schedule-post" data-msg="${msgId}" title="Publish it by itself at a time you choose"><i class="fas fa-calendar-plus me-1"></i>Schedule post</button>`;
+    }
+
+    // After scheduling: a clear "done" moment - when and where it goes out,
+    // where the week stands, and one obvious next step.
+    function showScheduledCard(msgId, post) {
+        const names = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube' };
+        const where = (post.platforms || []).map(p => names[p] || p);
+        const when = new Date(post.scheduled_at_iso).toLocaleString(undefined, { weekday: 'long', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        const p = window.__weekProgress;
+        const goalLine = !p ? '' : p.goal_met
+            ? `<div class="sched-goal is-met"><i class="fas fa-trophy me-1"></i>Weekly goal reached: ${p.done} posts this week${p.streak_weeks > 1 ? ` &middot; ${p.streak_weeks}-week streak` : ''}</div>`
+            : `<div class="sched-goal"><span class="sched-goal-dots">${Array.from({ length: p.goal }, (_, i) => `<i class="${i < p.done ? 'on' : ''}"></i>`).join('')}</span>
+                   ${p.done} of ${p.goal} posts this week &middot; <strong>${p.remaining} to go</strong></div>`;
+        const $card = $(`
+            <div class="sched-success" role="status">
+                <div class="sched-success-head"><span class="sched-check"><i class="fas fa-check"></i></span>
+                    <div><strong>Scheduled</strong>
+                        <div class="sched-when">${escapeHtml(when)}${where.length ? ' on ' + escapeHtml(where.join(', ')) : ''}. It goes out by itself.</div></div></div>
+                ${goalLine}
+                <div class="sched-actions">
+                    <button type="button" class="btn btn-sm btn-primary-action sched-next"><i class="fas fa-plus me-1"></i>Start the next post</button>
+                    <a class="btn btn-sm btn-quiet" href="/calendar"><i class="fas fa-calendar-days me-1"></i>See calendar</a>
+                </div>
+            </div>`);
+        $(`#${msgId} .sched-success`).remove();
+        $(`#${msgId} .action-row`).after($card);
+        $card.find('.sched-next').on('click', function () {
+            startNewChat(true);
+            $('#storyInput').trigger('focus');
+        });
+        try { $card[0].scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { /* old browsers */ }
     }
 
     function refreshScheduleButton(msgId) {
@@ -3583,6 +3771,7 @@ $(document).ready(function () {
                 h.scheduled = h.scheduled || {};
                 h.scheduled[h.currentIndex] = { id: post.id, at: post.scheduled_at_iso };
                 refreshScheduleButton(msgId);
+                showScheduledCard(msgId, post);
             },
         });
     }
@@ -3663,9 +3852,17 @@ $(document).ready(function () {
                 image_path: imagePath,
                 image_prompt: mediaType === 'image' ? mediaPrompt : undefined,
                 video_prompt: mediaType === 'video' ? mediaPrompt : undefined,
-                share_with_platforms: shareWith.length ? shareWith : undefined
+                share_with_platforms: shareWith.length ? shareWith : undefined,
+                background: true  // made in the background; this page checks /api/media-jobs/<id>
             }),
             success: function (res) {
+                if (res.job_id) { followMediaJob(res.job_id, showMediaResult); return; }
+                showMediaResult(res);
+            },
+            error: function (xhr) { showMediaError(xhr); }
+        });
+
+        function showMediaResult(res) {
                 const slot = $('#' + targetSlotId);
                 if (res.success && res.url) {
                     // Record the media on the message's own content, so a
@@ -3714,8 +3911,9 @@ $(document).ready(function () {
                     slot.html(failHtml);
                     shareWith.forEach(p => $(`#${msgId}_media_image_${p}`).html(failHtml));
                 }
-            },
-            error: function (xhr) {
+        }
+
+        function showMediaError(xhr) {
                 const body = xhr.responseJSON || {};
                 if (xhr.status === 403 && body.code === 'image_limit_reached') {
                     const card = imageLimitCardHtml(body.quota || window.__imageQuota || {});
@@ -3740,8 +3938,29 @@ $(document).ready(function () {
                 `;
                 $('#' + targetSlotId).html(errHtml);
                 shareWith.forEach(p => $(`#${msgId}_media_image_${p}`).html(errHtml));
-            }
-        });
+        }
+    }
+
+    // A background render (services/media_jobs.py): checked every few seconds
+    // until it is done. A dropped connection is retried; the result is also
+    // saved on the post, so reopening the conversation later shows it.
+    function followMediaJob(jobId, done) {
+        let misses = 0;
+        (function check() {
+            $.getJSON(`/api/media-jobs/${encodeURIComponent(jobId)}`)
+                .done(function (job) {
+                    misses = 0;
+                    if (job.status === 'done') return done(job.result || { success: false });
+                    if (job.status === 'failed') return done({ success: false, error: job.error || 'The image or video could not be made.' });
+                    setTimeout(check, 3000);
+                })
+                .fail(function (xhr) {
+                    if (xhr.status === 404 || ++misses > 20) {
+                        return done({ success: false, error: 'Lost track of this one. Reopen the conversation in a minute to see it.' });
+                    }
+                    setTimeout(check, 5000);
+                });
+        })();
     }
 
     // ── Copy to Clipboard ──────────────────────────────────────────────
@@ -3889,16 +4108,14 @@ $(document).ready(function () {
     }
 
     function archiveRun(runId) {
-        $.ajax({
+        const $card = $(`.history-card[data-id="${runId}"]`);
+        window.withUndo({
+            message: 'Conversation archived.',
             url: `/api/conversations/${runId}/archive`,
-            type: 'POST',
-            success: function () {
-                showToast('Conversation archived', 'info');
-                renderHistory();
-            },
-            error: function () {
-                showToast('Failed to archive conversation', 'error');
-            }
+            hide: () => $card.slideUp(150),
+            restore: () => $card.slideDown(150),
+            done: () => renderHistory(),
+            failed: () => showToast('Failed to archive conversation', 'error'),
         });
     }
 
@@ -4621,19 +4838,15 @@ $(document).ready(function () {
     }
 
     window.cancelScheduledPostItem = function (postId) {
-        if (!confirm('Are you sure you want to cancel this scheduled post?')) return;
-        $.ajax({
+        // Undo instead of "Are you sure?" (static/js/undo.js)
+        const $row = $(`[onclick="cancelScheduledPostItem(${postId})"]`).closest('tr, .sp-item, .sp-row, li');
+        window.withUndo({
+            message: 'Scheduled post cancelled.',
             url: `/api/social/scheduled/${postId}/cancel`,
-            type: 'POST',
-            success: function (r) {
-                if (r.success) {
-                    showToast('Scheduled post cancelled', 'info');
-                    loadScheduledPosts();
-                }
-            },
-            error: function () {
-                showToast('Failed to cancel scheduled post', 'error');
-            }
+            hide: () => $row.fadeOut(150),
+            restore: () => $row.fadeIn(150),
+            done: () => loadScheduledPosts(),
+            failed: () => showToast('Failed to cancel scheduled post', 'error'),
         });
     };
 

@@ -12,4 +12,10 @@ from logging_setup import logging_config
 
 logconfig_dict = logging_config()
 accesslog = None
+
+# Threads per worker. A request mostly waits on the AI service (25-70 s for a
+# post) rather than using the CPU, so many threads share one worker well:
+# 2 workers x 16 = 32 requests at the same moment (was 2 x 4 = 8). Each
+# thread may hold a database connection: db.py sizes the pool to match.
+threads = int(os.getenv("GUNICORN_THREADS", "16"))
 errorlog = "-"
