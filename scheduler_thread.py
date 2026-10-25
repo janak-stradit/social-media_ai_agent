@@ -176,6 +176,20 @@ def run_scheduler(app_root_path):
                 run_monthly_recap()
             except Exception as e:
                 logger.warning(f"Error running the monthly recap: {e}")
+            # How published posts are doing (likes, comments, reach) - services/metrics_service.py
+            try:
+                from services.metrics_service import refresh_due
+
+                refresh_due()
+            except Exception as e:
+                logger.warning(f"Error refreshing post metrics: {e}")
+            # Billing: renewal and plan-ending reminders (email + bell), once each
+            try:
+                from services.billing_notice_service import run_billing_reminders
+
+                run_billing_reminders()
+            except Exception as e:
+                logger.warning(f"Error running billing reminders: {e}")
             # Timely nudges for the header bell (emailed too with NUDGE_EMAILS=true)
             try:
                 from services.nudge_service import run_nudges
@@ -183,6 +197,13 @@ def run_scheduler(app_root_path):
                 run_nudges()
             except Exception as e:
                 logger.warning(f"Error running nudges: {e}")
+            # Instagram Login tokens are renewed before they run out (services/social_oauth_service.py)
+            try:
+                from services.social_oauth_service import refresh_instagram_tokens
+
+                refresh_instagram_tokens()
+            except Exception as e:
+                logger.warning(f"Error renewing Instagram tokens: {e}")
             # A bell notification a week before a social connection expires (LinkedIn's last 60 days)
             try:
                 from services.social_oauth_service import notify_expiring

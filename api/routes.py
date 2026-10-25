@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import secrets
 import threading
 import time
 import typing
@@ -21,6 +22,7 @@ from agents.reviewer_agent import ReviewerAgent
 from agents.story_agent import StoryAgent
 from agents.strategy_agent import StrategyAgent
 from agents.vision_agent import VisionAgent
+from auth.rate_limit import limit_by_user
 from auth.utils import admin_required_api, get_current_user_id, login_required_api
 from config import Config
 from services import storage_service
@@ -79,6 +81,8 @@ try:
         update_brand_asset_filename,
         update_scheduled_post_status,
         update_user_credit_limit,
+        format_money,
+        user_currency,
         update_user_profile,
     )
 
@@ -202,6 +206,23 @@ def allowed_file(filename):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in current_app.config["ALLOWED_EXTENSIONS"]
 
 
+def is_real_image(file) -> bool:
+    """The upload really is an image (not a script or page renamed .png):
+    Pillow must recognise and check it. The stream is rewound afterwards."""
+    from PIL import Image, UnidentifiedImageError
+
+    try:
+        file.stream.seek(0)
+        with Image.open(file.stream) as img:
+            img.verify()
+            ok = (img.format or "").upper() in ("PNG", "JPEG", "GIF", "WEBP", "MPO")
+    except (UnidentifiedImageError, OSError, ValueError, SyntaxError):
+        ok = False
+    finally:
+        file.stream.seek(0)
+    return ok
+
+
 # Initialize agents
 refine_llm = LLMService()
 story_agent = StoryAgent()
@@ -220,6 +241,7 @@ def health_check():
 
 @api_bp.route("/models/info", methods=["GET"])
 @login_required_api
+@admin_required_api
 def get_models_info():
     """Return 100% dynamic live runtime AI model status, active providers, and agent purpose mappings"""
     user_id = get_current_user_id()
@@ -383,6 +405,8 @@ def upload_image():
         return jsonify({"error": "No file selected"}), 400
 
     if file and allowed_file(filename):
+        if not is_real_image(file):
+            return jsonify({"error": "That file isn't a valid image. Upload a PNG, JPG, GIF or WebP picture."}), 400
         secure_name = secure_filename(filename)
         unique_name = f"{uuid.uuid4()}_{secure_name}"
         filepath = os.path.join(current_app.config["UPLOAD_FOLDER"], unique_name)
@@ -457,6 +481,7 @@ def _partial_research(text: str) -> dict:
 
 @api_bp.route("/analyze-story", methods=["POST"])
 @login_required_api
+@limit_by_user("ai_user")
 def analyze_story():
     """Analyze story text"""
     data = request.get_json()
@@ -557,8 +582,64 @@ def _scrub_brand_voice_leak(text: str, brand_voice: str | None, company_name: st
     return corrected, (n1 + n2) > 0
 
 
+def _audit(action: str, target_user_id: int | None = None, details: dict | None = None) -> None:
+    """Record an admin's change in the audit log (db.AuditLog): who, what, from where."""
+    if not DB_AVAILABLE:
+        return
+    from auth.rate_limit import client_ip
+    from db import log_audit
+
+    log_audit(action, actor_user_id=get_current_user_id(), target_user_id=target_user_id, details=details, ip=client_ip())
+
+
+def _credit_blocked(stats: dict) -> bool:
+    """The Free plan's spending cap is used up. Paid plans are limited by their
+    monthly allowances instead (db.get_plan_usage), not by credit."""
+    return bool(stats.get("credit_capped", True)) and stats.get("remaining_credits", 0.0) <= 0.0
+
+
+def _plan_limit_message(what: str, plan_name: str | None) -> str:
+    return (f"You've used all the {what} in your {plan_name or 'current'} plan for this month. "
+            "Upgrade your plan or ask your admin for a top-up pack.")
+
+
+def _feature_locked(user_id, feature: str, what: str):
+    """A 403 "upgrade" response when the user's plan doesn't include a
+    feature (db.plan_features), else None."""
+    if user_id is None or not DB_AVAILABLE:
+        return None
+    from db import cheapest_plan_with, get_user_features
+
+    features = get_user_features(user_id)
+    if features.get(feature):
+        return None
+    upgrade = cheapest_plan_with(feature)
+    plan_name = upgrade["name"] if upgrade else "a higher"
+    return jsonify({
+        "success": False, "code": "plan_feature_locked", "feature": feature, "upgrade_plan": upgrade["slug"] if upgrade else None,
+        "error": f"{what} is available on the {plan_name} plan and above. Your plan is {features.get('plan_name') or 'Free'}.",
+    }), 403
+
+
+def _posts_blocked(user_id):
+    """A 403 response when the user's plan has no posts left this month, else None."""
+    if user_id is None or not DB_AVAILABLE:
+        return None
+    from db import get_plan_usage
+
+    usage = get_plan_usage(user_id)
+    if not usage or usage["is_admin"] or usage["posts"]["remaining"] is None or usage["posts"]["remaining"] > 0:
+        return None
+    return jsonify({"success": False, "code": "plan_posts_exhausted", "plan_usage": usage,
+                    "error": _plan_limit_message("posts", usage["plan"]["name"])}), 403
+
+
 def _image_limit_message(quota: dict) -> str:
-    """Shown when a user has used all of today's images (daily limit, midnight UTC)."""
+    """Shown when a user has used all of today's images (daily limit, midnight UTC),
+    or all of this month's plan allowance and packs."""
+    if quota.get("blocked_by") == "month":
+        name = (quota.get("plan") or "").title() or None
+        return _plan_limit_message("images", name)
     secs = max(0, int(quota.get("resets_in_seconds") or 0))
     hours, minutes = secs // 3600, (secs % 3600) // 60
     when = f"{hours} h {minutes} m" if hours else f"{minutes} m"
@@ -603,7 +684,9 @@ def _video_quota_or_block(user_id):
 def _video_block_code(quota) -> str | None:
     if not quota["enabled"]:
         return "video_not_enabled"  # still "coming soon" for this user (Admin -> Users switches it on)
-    if not quota["unlimited"] and quota["remaining"] <= 0:
+    if quota.get("blocked_by") == "month":
+        return "video_pack_needed"  # no included videos left and no video pack
+    if not quota["unlimited"] and quota["remaining"] is not None and quota["remaining"] <= 0:
         return "video_limit_reached"
     return None
 
@@ -611,6 +694,10 @@ def _video_block_code(quota) -> str | None:
 def _video_block_message(quota) -> str:
     if not quota["enabled"]:
         return "Video is coming soon for your account. Ask your admin if you need it switched on."
+    if quota.get("blocked_by") == "month":
+        return "You have no videos left. Videos come in packs - ask your admin for a video pack to make more."
+    if quota.get("limit") == 0:
+        return "Your plan doesn't include video. Upgrade your plan to make videos."
     return _image_limit_message(quota).replace(" image", " video")
 
 
@@ -672,6 +759,7 @@ def generate_progress(progress_id):
 
 @api_bp.route("/generate", methods=["POST"])
 @login_required_api
+@limit_by_user("ai_user")
 def generate_content():
     """
     Main endpoint to generate complete social media content with Multi-Turn Refinement, A/B Hook Variations & Critic Self-Correction
@@ -693,6 +781,9 @@ def generate_content():
     platforms = data.get("platforms", ["facebook", "instagram", "linkedin"])
     tone = data.get("tone")
     brand_voice = data.get("brand_voice", "Standard Enterprise")
+    from services.language_service import normalize as _normalize_language
+
+    language = _normalize_language(data.get("language"))  # Style -> Language (services/language_service.py)
     # Off by default: the strategy output (posting schedule/forecast) isn't
     # shown anywhere, and it was the slowest LLM call of the whole pipeline.
     include_strategy = data.get("include_strategy", False)
@@ -737,12 +828,12 @@ def generate_content():
     if DB_AVAILABLE and user_id:
         try:
             stats = get_user_usage_stats(user_id)
-            if stats.get("remaining_credits", 0.0) <= 0.0:
-                limit_val = stats.get("credit_limit", 10.0)
+            if _credit_blocked(stats):
+                limit_val = stats.get("credit_limit", Config.DEFAULT_CREDIT_USD)
                 return (
                     jsonify(
                         {
-                            "error": f"Credit limit reached (${limit_val:.2f}). Please request a credit extension from admin.",
+                            "error": f"Credit limit reached ({format_money(limit_val, stats.get('currency', 'USD'))}). Please request a credit extension from admin.",
                             "credit_limit_exceeded": True,
                             "credit_limit": limit_val,
                             "used_credits": stats.get("used_credits", 0.0),
@@ -754,6 +845,10 @@ def generate_content():
                 )
         except Exception as _cred_err:
             current_app.logger.warning(f"[Credits] Check error: {_cred_err}")
+        # A new post counts against the plan's monthly posts (refining one doesn't: /api/refine)
+        blocked = _posts_blocked(user_id)
+        if blocked:
+            return blocked
 
     # Multi-Turn Refinement Context Integration
     if previous_context:
@@ -780,7 +875,28 @@ def generate_content():
         retrieved_memories = memory_service.retrieve_context(story, user_id=user_id, n_results=3)
         mem_prompt = memory_service.format_memory_prompt(retrieved_memories)
 
-        # Step 1: Analyze story
+        # Hashtags only need the post's themes, which the brief already gives:
+        # they start now, alongside the research, instead of after it (each AI
+        # call can take 10-30s, so waiting for one another is what makes it slow).
+        # Not with an attached image (its colours feed the hashtags).
+        early_hashtags, early_pool = None, None
+        if generate_text and platforms and not (image_path and os.path.exists(image_path)):
+            from concurrent.futures import ThreadPoolExecutor
+
+            early_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gen-tags")
+            early_hashtags = early_pool.submit(
+                hashtag_agent.generate_hashtags_batch, platforms, {"themes": [story[:300]], "emotions": []}, None,
+                memory_context=mem_prompt, brand_profile_block=brand_profile_block, language=language,
+            )
+            early_pool.shutdown(wait=False)  # the thread finishes the call; nothing else runs on it
+            _progress("hashtag", "active")
+
+        # Step 1: Analyze story. The research runs in the background: the
+        # caption is written from the brief (caption_input), not from the
+        # research, so it starts straight away and appears on the page within
+        # seconds. The research is collected below, before the steps that use
+        # it (strategy, image/video prompts, the saved run).
+        research_future = None
         if "STRATEGY SYNTHESIS:" in story_prompt:
             caption_input = story_prompt
             story_analysis = {"themes": ["Strategy", "Industry"], "emotions": ["Professional"]}
@@ -790,31 +906,19 @@ def generate_content():
             caption_input = extract_prompt_for_type(story_prompt, "text")
             story_usage = None
         else:
-            story_analysis, story_usage = story_agent.analyze(
+            from concurrent.futures import ThreadPoolExecutor
+
+            research_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gen-research")
+            research_future = research_pool.submit(
+                story_agent.analyze,
                 story_prompt, memory_context=mem_prompt, return_usage=True, brand_profile_block=brand_profile_block,
                 # Live: the pipeline card shows the research while it's written
                 on_partial=(lambda text: _progress("research", json.dumps(_partial_research(text))))
                 if progress_store.valid_id(progress_id) else None,
             )
+            research_pool.shutdown(wait=False)
+            story_analysis, story_usage = None, None
             caption_input = extract_prompt_for_type(story_prompt, "text")
-
-        if story_usage:
-            total_tokens += story_usage.get("total_tokens", 0)
-            total_cost_usd += story_usage.get("cost_usd", 0.0)
-        _progress("story", "done")
-
-        agents_executed.append(
-            {
-                "agent": "StoryAgent",
-                "name": "Story & Memory Agent",
-                "role": (
-                    "Reused the research already shown to you"
-                    if isinstance(precomputed_analysis, dict) and precomputed_analysis
-                    else "Analyzed narrative themes, emotional tone & retrieved brand memories"
-                ),
-                "status": "completed",
-            }
-        )
 
         # Step 2: Analyze image if provided
         vision_analysis = None
@@ -862,17 +966,24 @@ def generate_content():
                     has_project_context,
                     brand_profile_block,
                     on_partial=_draft if progress_store.valid_id(progress_id) else None,
+                    language=language,
                 )
 
             def _all_hashtags():
                 # Every platform's set in one call (see HashtagAgent.generate_hashtags_batch)
+                if early_hashtags is not None:  # started with the research (above)
+                    try:
+                        return early_hashtags.result()
+                    except Exception as tag_err:  # noqa: BLE001 - try once more with the research
+                        logger.warning(f"Early hashtags failed, retrying: {tag_err}")
                 try:
                     return hashtag_agent.generate_hashtags_batch(
                         platforms,
-                        story_analysis,
+                        research_future.result()[0] if research_future is not None else story_analysis,
                         vision_analysis,
                         memory_context=mem_prompt,
                         brand_profile_block=brand_profile_block,
+                        language=language,
                     )
                 except Exception as tag_err:  # a post without hashtags beats no post at all
                     logger.warning(f"Hashtags failed: {tag_err}")
@@ -927,6 +1038,28 @@ def generate_content():
                     "status": "completed",
                 }
             )
+
+        # The research (started in the background in step 1) - needed from here on
+        if research_future is not None:
+            story_analysis, story_usage = research_future.result()
+
+        if story_usage:
+            total_tokens += story_usage.get("total_tokens", 0)
+            total_cost_usd += story_usage.get("cost_usd", 0.0)
+        _progress("story", "done")
+
+        agents_executed.append(
+            {
+                "agent": "StoryAgent",
+                "name": "Story & Memory Agent",
+                "role": (
+                    "Reused the research already shown to you"
+                    if isinstance(precomputed_analysis, dict) and precomputed_analysis
+                    else "Analyzed narrative themes, emotional tone & retrieved brand memories"
+                ),
+                "status": "completed",
+            }
+        )
 
         # Step 5: Generate strategy
         strategies = {}
@@ -984,6 +1117,7 @@ def generate_content():
                             reviewer_feedback=quality_evaluations[platform]["reviewer_feedback"],
                             brand_voice=brand_voice,
                             brand_profile_block=brand_profile_block,
+                            language=language,
                         )
                     except Exception as ref_err:  # keep the original caption
                         logger.warning(f"Rewrite for {platform} failed: {ref_err}")
@@ -1072,6 +1206,7 @@ def generate_content():
             # for users without a compliance profile.
             rules = active_rules_for_user(user_id)
             if rules:
+                _progress("compliance", "active")
                 flag_total = 0
                 # Every platform's caption reviewed in one call (check_captions)
                 try:
@@ -1084,6 +1219,7 @@ def generate_content():
                     checked, c_usage = {}, {}
                 total_tokens += c_usage.get("total_tokens", 0)
                 total_cost_usd += c_usage.get("cost_usd", 0.0)
+                _progress("compliance", "done")
                 for platform, result in checked.items():
                     if result:
                         captions[platform]["primary_caption"] = result.pop("caption")
@@ -1112,6 +1248,7 @@ def generate_content():
                 "checks_total": checks_total,
                 "refinements_applied": refinements_count,
                 "brand_voice_applied": brand_voice,
+                "language": language,
             },
             "content": {},
             "agents_executed": agents_executed,
@@ -1268,8 +1405,20 @@ Return ONLY this JSON:
  "video_prompt": "", "image_ref": null, "image_platforms": [], "change_summary": "<one short sentence describing what changed>"}"""
 
 
+def _refine_language_line(code) -> str:
+    """Refining keeps the post in its language (services/language_service.py)."""
+    from services.language_service import LANGUAGES, normalize
+
+    code = normalize(code)
+    if code == "en":
+        return ""
+    return (f"POST LANGUAGE: the post is in {LANGUAGES[code][1]}. Write every changed caption and hashtag in that "
+            "language too, unless the instruction asks for another language.\n\n")
+
+
 @api_bp.route("/refine", methods=["POST"])
 @login_required_api
+@limit_by_user("ai_user")
 def refine_post():
     """Apply a Studio Chat follow-up to an existing post.
 
@@ -1293,12 +1442,12 @@ def refine_post():
     if DB_AVAILABLE and user_id:
         try:
             stats = get_user_usage_stats(user_id)
-            if stats.get("remaining_credits", 0.0) <= 0.0:
-                limit_val = stats.get("credit_limit", 10.0)
+            if _credit_blocked(stats):
+                limit_val = stats.get("credit_limit", Config.DEFAULT_CREDIT_USD)
                 return (
                     jsonify(
                         {
-                            "error": f"Credit limit reached (${limit_val:.2f}). Please request a credit extension from admin.",
+                            "error": f"Credit limit reached ({format_money(limit_val, stats.get('currency', 'USD'))}). Please request a credit extension from admin.",
                             "credit_limit_exceeded": True,
                         }
                     ),
@@ -1337,7 +1486,8 @@ def refine_post():
         f"CURRENT POST:\n" + "\n\n".join(post_lines) + "\n\n"
         + (versions_block + "\n\n" if versions_block else "")
         + f"USER'S SELECTED OUTPUT TYPES: {', '.join(data.get('selected_outputs') or []) or '(none)'}\n\n"
-        f"USER'S FOLLOW-UP MESSAGE: {instruction}"
+        + _refine_language_line(data.get("language"))
+        + f"USER'S FOLLOW-UP MESSAGE: {instruction}"
     )
 
     try:
@@ -1764,6 +1914,7 @@ def admin_reset_image_preset(slug):
 
 @api_bp.route("/presets/run", methods=["POST"])
 @login_required_api
+@limit_by_user("media_user")
 def run_image_preset():
     """Runs an image command on the user's product photo. Every image counts
     toward the daily limit, and all of a command's images are checked against
@@ -1810,18 +1961,20 @@ def run_image_preset():
     quota = None
     if DB_AVAILABLE and user_id is not None:
         stats = get_user_usage_stats(user_id)
-        if stats.get("remaining_credits", 0.0) <= 0.0:
+        if _credit_blocked(stats):
             return jsonify({"success": False, "credit_limit_exceeded": True,
-                            "error": f"Credit limit reached (${stats.get('credit_limit', 10.0):.2f}). "
+                            "error": f"Credit limit reached ({format_money(stats.get('credit_limit', Config.DEFAULT_CREDIT_USD), stats.get('currency', 'USD'))}). "
                                      "Please request a credit extension from admin."}), 402
         from db import get_image_quota
 
         quota = get_image_quota(user_id)
         if not quota["unlimited"] and quota["remaining"] < len(outputs):
             need = len(outputs)
+            month_short = quota.get("month_remaining") is not None and quota["month_remaining"] < need
             msg = (_image_limit_message(quota) if quota["remaining"] <= 0 else
-                   f"/{preset['id']} needs {need} images and you have {quota['remaining']} left today. "
-                   "Choose fewer sizes, or try again after midnight UTC.")
+                   f"/{preset['id']} needs {need} images and you have {quota['remaining']} left "
+                   + ("in your plan this month. Choose fewer sizes, or ask your admin for an image pack."
+                      if month_short else "today. Choose fewer sizes, or try again after midnight UTC."))
             return jsonify({"success": False, "code": "image_limit_reached", "error": msg, "quota": quota}), 403
 
     brand = {}
@@ -2249,6 +2402,7 @@ def get_history_run(run_id):
 
 @api_bp.route("/generate/<platform>", methods=["POST"])
 @login_required_api
+@limit_by_user("ai_user")
 def generate_for_platform(platform):
     """Generate content for a specific platform"""
     if platform not in ["facebook", "instagram", "linkedin"]:
@@ -2376,6 +2530,7 @@ def schedule_campaign():
 
 @api_bp.route("/generate-media", methods=["POST"])
 @login_required_api
+@limit_by_user("media_user")
 def generate_media():
     """
     Generate image or video for a given platform and caption.
@@ -2416,12 +2571,12 @@ def generate_media():
     if DB_AVAILABLE and user_id:
         try:
             stats = get_user_usage_stats(user_id)
-            if stats.get("remaining_credits", 0.0) <= 0.0:
-                limit_val = stats.get("credit_limit", 10.0)
+            if _credit_blocked(stats):
+                limit_val = stats.get("credit_limit", Config.DEFAULT_CREDIT_USD)
                 return (
                     jsonify(
                         {
-                            "error": f"Credit limit reached (${limit_val:.2f}). Please request a credit extension from admin.",
+                            "error": f"Credit limit reached ({format_money(limit_val, stats.get('currency', 'USD'))}). Please request a credit extension from admin.",
                             "credit_limit_exceeded": True,
                             "credit_limit": limit_val,
                             "used_credits": stats.get("used_credits", 0.0),
@@ -2477,7 +2632,9 @@ def generate_media():
     if blocked:
         return blocked
 
-    try:
+    def _work() -> dict:
+        """The render itself: run here, or in the background (services/media_jobs.py)."""
+        nonlocal tone  # the request's "context" can replace it below
         caption_to_use = extract_prompt_for_type(caption, media_type)
         if media_type == "video":
             if video_prompt:
@@ -2559,19 +2716,48 @@ def generate_media():
             log_event("video.generate" if media_type == "video" else "image.generate", run_id=run_id,
                       platform=platform, status="failed", error=str(result.get("error"))[:200])
 
-        return jsonify(result)
+        return result
 
+    # Studio Chat asks for the background: the request returns at once with a
+    # job id, and the page checks /api/media-jobs/<id> until it is done
+    if data.get("background") and DB_AVAILABLE and user_id is not None:
+        from services import media_jobs
+
+        try:
+            job_id = media_jobs.start(user_id, media_type, platform, _work, current_app._get_current_object())
+        except media_jobs.TooManyJobs as err:
+            return jsonify({"success": False, "error": str(err), "code": "too_many_jobs"}), 429
+        return jsonify({"success": True, "job_id": job_id, "status": "running"}), 202
+
+    try:
+        return jsonify(_work())
     except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
 
 
+@api_bp.route("/media-jobs/<job_id>", methods=["GET"])
+@login_required_api
+def media_job_status(job_id):
+    """An image or video being made in the background: {status, result, error}."""
+    from services import media_jobs
+
+    job = media_jobs.get(get_current_user_id(), job_id) if DB_AVAILABLE else None
+    if not job:
+        return jsonify({"success": False, "error": "Not found"}), 404
+    return jsonify({"success": True, **job})
+
+
 @api_bp.route("/send-approval-email", methods=["POST"])
 @login_required_api
+@limit_by_user("email_user")
 def send_approval_email():
     """Sends an HTML notification email (with the generated asset attached,
     if it's an image) when a piece of content is approved on the Analysis
     Dashboard. Fails soft with an error payload rather than a 500 if SMTP
     isn't configured, since approval itself should still succeed either way."""
+    locked = _feature_locked(get_current_user_id(), "approvals", "Approval emails")
+    if locked:
+        return locked
     data = request.get_json(silent=True) or {}
 
     try:
@@ -2671,6 +2857,7 @@ def list_approval_requests_route():
 
 @api_bp.route("/approval-requests", methods=["POST"])
 @login_required_api
+@limit_by_user("email_user")
 def create_approval_request_route():
     """Creates a review request for a pipeline's generated content and emails
     the reviewer a link to open it in the dashboard (sign-in required) - this
@@ -2678,6 +2865,9 @@ def create_approval_request_route():
     external reviewer's decision + comments become the record of truth."""
     if not DB_AVAILABLE:
         return jsonify({"error": "Database not available"}), 503
+    locked = _feature_locked(get_current_user_id(), "approvals", "Sending posts for approval")
+    if locked:
+        return locked
 
     data = request.get_json(silent=True) or {}
     pipeline_client_id = str(data.get("pipeline_client_id") or "").strip()
@@ -2870,6 +3060,10 @@ def publish_approved_item(request_id):
             return jsonify({"success": False, "error": str(err)}), 400
         from datetime import datetime, timezone
 
+        from db import register_published_post  # so its results can be fetched (services/metrics_service.py)
+
+        register_published_post(user_id, platform, result.get("post_id"), result.get("permalink"), item.get("caption"),
+                                "approval", request_id)
         updated = update_approval_item(request_id, index, {
             "published": {"at": datetime.now(timezone.utc).isoformat(), "permalink": result.get("permalink"),
                           "media_id": result.get("post_id"), "post_id": result.get("post_id"), "account": result.get("account"),
@@ -3046,7 +3240,7 @@ def create_brand_asset_route():
     file = request.files["image"]
     if not file.filename:
         return jsonify({"error": "No file selected"}), 400
-    if not allowed_file(file.filename):
+    if not allowed_file(file.filename) or not is_real_image(file):
         return jsonify({"error": "Invalid file type"}), 400
 
     key = _brand_asset_key_from_label(label)
@@ -3077,7 +3271,7 @@ def upload_brand_asset_route(key):
     file = request.files["image"]
     if not file.filename:
         return jsonify({"error": "No file selected"}), 400
-    if not allowed_file(file.filename):
+    if not allowed_file(file.filename) or not is_real_image(file):
         return jsonify({"error": "Invalid file type"}), 400
 
     ext = file.filename.rsplit(".", 1)[1].lower()
@@ -3124,6 +3318,7 @@ def delete_brand_asset_route(key):
 
 @api_bp.route("/credit-requests", methods=["POST"])
 @login_required_api
+@limit_by_user("email_user")
 def request_credit_extension():
     """Submit a credit extension request to the admin."""
     if not DB_AVAILABLE:
@@ -3138,6 +3333,9 @@ def request_credit_extension():
         requested_amount = float(data.get("requested_amount", 10.0))
         if requested_amount <= 0:
             return jsonify({"error": "Requested amount must be greater than 0"}), 400
+        # Users who see rupees ask in rupees; credits are kept in USD
+        if data.get("currency") == "INR":
+            requested_amount = round(requested_amount / Config.USD_INR_RATE, 2)
     except (ValueError, TypeError):
         return jsonify({"error": "Invalid requested amount"}), 400
 
@@ -3697,14 +3895,19 @@ def _heyroute_image_models(fresh: bool = False) -> list[str]:
 @api_bp.route("/me/image-quota", methods=["GET"])
 @login_required_api
 def my_image_quota():
-    """Today's image usage for Studio Chat's "Images today: 1 of 2", and
-    whether the Video option is switched on for this user (video_quota.enabled)."""
+    """Today's image usage for Studio Chat's "Images today: 1 of 2", whether
+    the Video option is switched on for this user (video_quota.enabled), and
+    what the user's plan includes (features; upgrade_plans names the lowest
+    plan for each feature they don't have)."""
     if not DB_AVAILABLE:
         return jsonify({"success": True, "quota": None, "video_quota": None})
-    from db import get_image_quota, get_video_quota
+    from db import cheapest_plan_with, get_image_quota, get_user_features, get_video_quota
 
     user_id = get_current_user_id()
-    return jsonify({"success": True, "quota": get_image_quota(user_id), "video_quota": get_video_quota(user_id)})
+    features = get_user_features(user_id)
+    upgrades = {f: (cheapest_plan_with(f) or {}).get("name") for f in ("approvals", "video") if not features.get(f)}
+    return jsonify({"success": True, "quota": get_image_quota(user_id), "video_quota": get_video_quota(user_id),
+                    "features": features, "upgrade_plans": upgrades})
 
 
 @api_bp.route("/admin/image-settings", methods=["GET"])
@@ -3789,6 +3992,8 @@ def admin_set_image_access(target_user_id):
         return jsonify({"success": False, "error": "User not found"}), 404
     if "video_enabled" in data:
         set_user_video_access(target_user_id, bool(data["video_enabled"]))
+    _audit("access.updated", target_user_id, {"daily_image_limit": limit, "image_model": model,
+                                              "video_enabled": data.get("video_enabled")})
     return jsonify({"success": True, "quota": get_image_quota(target_user_id),
                     "video_quota": get_video_quota(target_user_id)})
 
@@ -3808,8 +4013,13 @@ def admin_set_user_active(target_user_id):
         return jsonify({"error": "is_active (bool) is required"}), 400
 
     res = set_user_active(target_user_id, bool(data["is_active"]))
+    if res and not data["is_active"]:  # a deactivated account is signed out everywhere
+        from db import bump_session_version
+
+        bump_session_version(target_user_id)
     if not res:
         return jsonify({"error": "User not found"}), 404
+    _audit("user.activated" if data["is_active"] else "user.deactivated", target_user_id)
     return jsonify({"success": True, "user": res})
 
 
@@ -3877,6 +4087,7 @@ def admin_hard_delete_user(target_user_id):
         res = hard_delete_user(target_user_id)
         if not res:
             return jsonify({"error": "User not found"}), 404
+        _audit("user.deleted", target_user_id, {"email": target.email})
         return jsonify({"success": True, "deleted": res})
     except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e), "success": False}), 500
@@ -3940,6 +4151,8 @@ def admin_update_user_credits(target_user_id):
         )
         if not res:
             return jsonify({"error": "User not found"}), 404
+        _audit("credits.set" if new_limit is not None else "credits.add", target_user_id,
+               {"new_limit": new_limit, "add_amount": add_amount, "credit_limit_after": res.get("credit_limit")})
 
         return jsonify({"success": True, "user": res, "message": "User credit limit updated successfully."})
     except Exception as e:  # noqa: BLE001
@@ -3975,6 +4188,7 @@ def _email_credit_decision(res: dict, approved: bool) -> bool:
             approved=approved,
             requested_amount=float(res.get("requested_amount") or 0),
             credit_limit=res.get("new_credit_limit") if approved else res.get("credit_limit"),
+            currency=user_currency(res.get("user_id")),
             dashboard_url=f"{(Config.APP_BASE_URL or request.host_url).rstrip('/')}/dashboard",
         )
         return True
@@ -3995,6 +4209,8 @@ def admin_approve_request(req_id):
         if not res:
             return jsonify({"error": "Pending request not found"}), 404
 
+        _audit("credit_request.approved", res.get("user_id"),
+               {"request_id": req_id, "amount": res.get("requested_amount"), "credit_limit_after": res.get("new_credit_limit")})
         emailed = _email_credit_decision(res, approved=True)
         return jsonify({"success": True, "result": res, "email_sent": emailed,
                         "message": "Credit extension approved and limit increased."})
@@ -4014,6 +4230,7 @@ def admin_reject_request(req_id):
         if not res:
             return jsonify({"error": "Pending request not found"}), 404
 
+        _audit("credit_request.rejected", res.get("user_id"), {"request_id": req_id, "amount": res.get("requested_amount")})
         emailed = _email_credit_decision(res, approved=False)
         return jsonify({"success": True, "result": res, "email_sent": emailed,
                         "message": "Credit extension request rejected."})
@@ -4661,7 +4878,9 @@ def social_oauth_providers():
     addresses to register in each platform's app."""
     from services import social_oauth_service as oauth
 
-    out = {"success": True, "providers": oauth.providers()}
+    providers = dict(oauth.providers())
+    providers["youtube"] = bool(os.getenv("YOUTUBE_CLIENT_ID") and os.getenv("YOUTUBE_CLIENT_SECRET"))
+    out = {"success": True, "providers": providers}
     user = get_user_by_id(get_current_user_id()) if DB_AVAILABLE else None
     if user and user.is_admin:
         out["redirect_uris"] = {p: oauth.redirect_uri(p, _oauth_base_url()) for p in oauth.PROVIDERS}
@@ -5040,6 +5259,8 @@ def verify_social_account_endpoint(platform):
 
 
 @api_bp.route("/competitor-posts", methods=["GET"])
+@login_required_api
+@limit_by_user("ai_user")
 def competitor_posts():
     target = request.args.get("target")
     if not target:
@@ -5066,6 +5287,8 @@ def competitor_posts():
 
 
 @api_bp.route("/platform-posts", methods=["GET"])
+@login_required_api
+@limit_by_user("ai_user")
 def platform_posts():
     platform = request.args.get("platform")
     competitor = request.args.get("competitor") or ""
@@ -5102,6 +5325,7 @@ def platform_posts():
 
 
 @api_bp.route("/competitor-posts-db", methods=["GET"])
+@login_required_api
 def competitor_posts_db():
     platform = request.args.get("platform")
     competitor = request.args.get("competitor")
@@ -5173,6 +5397,7 @@ def _is_storyline_worthy(post: dict) -> bool:
 
 @api_bp.route("/generate-suggested-collections", methods=["POST"])
 @login_required_api
+@limit_by_user("ai_user")
 def generate_suggested_collections():
     """Group already-scraped competitor posts (last 15 days, per get_competitor_posts)
     by semantic similarity into "storyline" suggestions, labeled with a theme and
@@ -5280,6 +5505,7 @@ def festive_storylines():
 
 
 @api_bp.route("/stradit-projects", methods=["GET"])
+@login_required_api
 def get_stradit_projects():
     try:
         from services.stradit_service import StradITService
@@ -5293,6 +5519,7 @@ def get_stradit_projects():
 
 @api_bp.route("/generate-channel-storyline", methods=["POST"])
 @login_required_api
+@limit_by_user("ai_user")
 def generate_channel_storyline():
     data = request.get_json()
     if not data:
@@ -5335,6 +5562,7 @@ def opportunity_suggestions():
 
 @api_bp.route("/generate-opportunity-suggestions", methods=["POST"])
 @login_required_api
+@limit_by_user("ai_user")
 def generate_opportunity_suggestions():
     data = request.get_json()
     if not data:
@@ -5580,7 +5808,7 @@ def idea_feed():
     # Writing a feed is an LLM call: not without credit
     try:
         stats = get_user_usage_stats(user_id)
-        if stats.get("remaining_credits", 0.0) <= 0.0:
+        if _credit_blocked(stats):
             return jsonify({"error": "Credit limit reached. Please request a credit extension.", "credit_limit_exceeded": True}), 402
     except Exception as _cred_err:
         current_app.logger.warning(f"[Credits] Check error: {_cred_err}")
@@ -5646,6 +5874,7 @@ def update_my_notifications():
 
 @api_bp.route("/me/notifications/recap-email/send-now", methods=["POST"])
 @login_required_api
+@limit_by_user("email_user")
 def send_my_recap_email_now():
     """Settings -> Notifications -> "Send me last month's recap now": the
     same email the monthly run sends, to the logged-in user's own address."""
@@ -5702,6 +5931,82 @@ def content_calendar():
     return jsonify({"success": True, **calendar_month(get_current_user_id(), year, month, tz)})
 
 
+@api_bp.route("/analytics", methods=["GET"])
+@login_required_api
+def post_analytics_route():
+    """How the user's published posts did over ?days= (default 30): totals,
+    per platform and top posts (services/metrics_service.py)."""
+    if not DB_AVAILABLE:
+        return jsonify({"success": True, "analytics": None})
+    from datetime import datetime, timedelta, timezone
+
+    from db import post_analytics
+
+    try:
+        days = max(1, min(365, int(request.args.get("days", 30))))
+    except ValueError:
+        days = 30
+    data = post_analytics(get_current_user_id(), datetime.now(timezone.utc) - timedelta(days=days))
+    data.pop("all_posts", None)
+    return jsonify({"success": True, "days": days, "analytics": data})
+
+
+@api_bp.route("/repurpose", methods=["POST"])
+@login_required_api
+@limit_by_user("ai_user")
+def repurpose_content():
+    """Turn a link or a PDF into post ideas (services/repurpose_service.py).
+    JSON {url} or a form upload "file" (PDF) -> {title, source, summary,
+    angles: [{title, brief, format}]}; the composer loads the chosen brief."""
+    from services import repurpose_service as repurpose
+
+    user_id = get_current_user_id()
+    if DB_AVAILABLE and user_id is not None:
+        stats = get_user_usage_stats(user_id)
+        if _credit_blocked(stats):
+            return jsonify({"success": False, "credit_limit_exceeded": True,
+                            "error": f"Credit limit reached ({format_money(stats.get('credit_limit', Config.DEFAULT_CREDIT_USD), stats.get('currency', 'USD'))}). "
+                                     "Please request a credit extension from admin."}), 402
+    try:
+        upload = request.files.get("file")
+        if upload:
+            doc = repurpose.read_pdf(upload.read(repurpose.MAX_PDF_BYTES + 1), upload.filename or "document.pdf")
+        else:
+            doc = repurpose.read_url((request.get_json(silent=True) or {}).get("url"))
+        ideas = repurpose.to_angles(doc)
+    except repurpose.RepurposeError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    except requests.exceptions.RequestException:
+        return jsonify({"success": False, "error": "Couldn't reach that page. Check the link and try again."}), 502
+    except Exception as err:  # noqa: BLE001 - the AI call
+        logger.warning(f"Repurpose failed: {err}")
+        return jsonify({"success": False, "error": "The AI service didn't answer. Please try again."}), 502
+    usage = ideas.pop("usage", {})
+    log_event("repurpose", user_id=user_id, kind="pdf" if upload else "url", angles=len(ideas["angles"]),
+              tokens=usage.get("total_tokens", 0))
+    return jsonify({"success": True, "title": doc["title"], "source": doc["source"], **ideas})
+
+
+@api_bp.route("/languages", methods=["GET"])
+@login_required_api
+def post_languages():
+    """The composer's Language menu (services/language_service.py)."""
+    from services.language_service import options
+
+    return jsonify({"success": True, "languages": options()})
+
+
+@api_bp.route("/best-times", methods=["GET"])
+@login_required_api
+def best_times_route():
+    """When to post on each platform, in the user's clock (?tz=minutes ahead of UTC)."""
+    if not DB_AVAILABLE:
+        return jsonify({"success": True, "platforms": {}})
+    from services.best_time_service import best_times
+
+    return jsonify({"success": True, "platforms": best_times(get_current_user_id(), _tz_minutes())})
+
+
 @api_bp.route("/me/goal", methods=["GET"])
 @login_required_api
 def my_weekly_goal():
@@ -5732,6 +6037,401 @@ def set_my_weekly_goal():
     return jsonify({"success": True, "progress": week_progress(user_id, _tz_minutes())})
 
 
+@api_bp.route("/plans", methods=["GET"])
+@login_required_api
+def plans_list():
+    """Every pricing plan, for Settings -> Plan & usage (prices in INR and USD)."""
+    if not DB_AVAILABLE:
+        return jsonify({"success": True, "plans": []})
+    from db import list_plans, user_currency
+
+    return jsonify({"success": True, "plans": list_plans(), "currency": user_currency(get_current_user_id())})
+
+
+@api_bp.route("/me/plan", methods=["GET"])
+@login_required_api
+def my_plan():
+    """The user's plan and what is left of it this month (Settings -> Plan & usage)."""
+    if not DB_AVAILABLE:
+        return jsonify({"success": True, "usage": None})
+    from db import get_plan_usage, user_currency
+
+    user_id = get_current_user_id()
+    return jsonify({"success": True, "usage": get_plan_usage(user_id), "currency": user_currency(user_id)})
+
+
+# ── Billing: Razorpay (services/billing_service.py) ────────────────────────
+
+
+@api_bp.route("/billing/options", methods=["GET"])
+@login_required_api
+def billing_options():
+    """What can be bought online, at this user's prices: rupees through
+    Razorpay for Indian brands (GST shown separately), dollars through Stripe
+    for everyone else."""
+    from db import list_plans, user_currency
+    from services import billing_service
+
+    user_id = get_current_user_id()
+    currency = user_currency(user_id)
+    items = []
+    candidates = [f"plan:{p['slug']}:{period}" for p in list_plans() for period in ("month", "year")]
+    for item in candidates + [f"pack:{key}" for key in billing_service.PACKS]:
+        try:
+            items.append(billing_service.price_item(user_id, item, currency))
+        except billing_service.BillingError:
+            pass
+    from db import current_subscription
+
+    return jsonify({"success": True, "enabled": billing_service.enabled(currency), "currency": currency,
+                    "subscription": current_subscription(user_id),
+                    "provider": "stripe" if currency == "USD" else "razorpay",
+                    "gst_rate": Config.GST_RATE if currency == "INR" else 0, "items": items})
+
+
+@api_bp.route("/billing/stripe/checkout", methods=["POST"])
+@login_required_api
+def billing_stripe_checkout():
+    """Body: {item}. A Stripe Checkout Session at the server's USD price; the browser goes to its url."""
+    from services import billing_service
+
+    item = str((request.get_json() or {}).get("item") or "")[:48]
+    try:
+        session = billing_service.create_stripe_session(get_current_user_id(), item, Config.APP_BASE_URL or request.host_url)
+    except billing_service.BillingError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    return jsonify({"success": True, **session})
+
+
+@api_bp.route("/billing/stripe/confirm", methods=["POST"])
+@login_required_api
+def billing_stripe_confirm():
+    """Back from Stripe: body {session_id}. Applied only if Stripe says it was paid."""
+    from db import get_plan_usage
+    from services import billing_service
+
+    user_id = get_current_user_id()
+    try:
+        applied = billing_service.confirm_stripe_session(user_id, str((request.get_json() or {}).get("session_id") or ""))
+    except billing_service.BillingError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    return jsonify({"success": True, "applied": applied, "already_applied": applied is None, "usage": get_plan_usage(user_id)})
+
+
+@api_bp.route("/billing/stripe/webhook", methods=["POST"])
+def billing_stripe_webhook():
+    """Stripe -> us, signed (Stripe-Signature) with the endpoint's secret."""
+    from services import billing_service
+
+    status = billing_service.handle_stripe_webhook(request.get_data(), request.headers.get("Stripe-Signature", ""))
+    if status == "bad_signature":
+        current_app.logger.warning("Stripe webhook with a bad signature was refused")
+        return jsonify({"success": False}), 400
+    return jsonify({"success": True, "status": status})
+
+
+@api_bp.route("/billing/checkout", methods=["POST"])
+@login_required_api
+def billing_checkout():
+    """Body: {item}. Creates a Razorpay order at the server's price."""
+    from services import billing_service
+
+    item = str((request.get_json() or {}).get("item") or "")[:48]
+    try:
+        order = billing_service.create_order(get_current_user_id(), item)
+    except billing_service.BillingError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    return jsonify({"success": True, **order})
+
+
+@api_bp.route("/billing/verify", methods=["POST"])
+@login_required_api
+def billing_verify():
+    """The checkout window's result: applied only when Razorpay's signature
+    checks out and the order belongs to this user."""
+    from db import get_payment, get_plan_usage
+    from services import billing_service
+
+    data = request.get_json() or {}
+    order_id = str(data.get("razorpay_order_id") or "")
+    payment_id = str(data.get("razorpay_payment_id") or "")
+    payment = get_payment(order_id)
+    if not payment or payment["user_id"] != get_current_user_id():
+        return jsonify({"success": False, "error": "Unknown order."}), 404
+    if not billing_service.valid_checkout_signature(order_id, payment_id, str(data.get("razorpay_signature") or "")):
+        _audit("payment.bad_signature", payment["user_id"], {"order_id": order_id})
+        return jsonify({"success": False, "error": "The payment could not be confirmed."}), 400
+    applied = billing_service.fulfil(order_id, payment_id, "checkout")
+    return jsonify({"success": True, "applied": applied, "already_applied": applied is None,
+                    "usage": get_plan_usage(payment["user_id"])})
+
+
+@api_bp.route("/billing/razorpay/webhook", methods=["POST"])
+def billing_razorpay_webhook():
+    """Razorpay -> us, signed with the webhook secret. Always 200 for a valid
+    signature (so Razorpay stops retrying), 400 otherwise."""
+    from services import billing_service
+
+    status = billing_service.handle_webhook(request.get_data(), request.headers.get("X-Razorpay-Signature", ""),
+                                            request.headers.get("X-Razorpay-Event-Id"))
+    if status == "bad_signature":
+        current_app.logger.warning("Razorpay webhook with a bad signature was refused")
+        return jsonify({"success": False}), 400
+    return jsonify({"success": True, "status": status})
+
+
+@api_bp.route("/me/billing-profile", methods=["GET"])
+@login_required_api
+def my_billing_profile():
+    """Name, GSTIN, address and state printed on the user's GST invoices."""
+    from db import get_billing_profile
+    from services.invoice_service import STATES
+
+    return jsonify({"success": True, "profile": get_billing_profile(get_current_user_id()), "states": sorted(STATES.values())})
+
+
+@api_bp.route("/me/billing-profile", methods=["PUT"])
+@login_required_api
+def save_my_billing_profile():
+    from db import save_billing_profile
+    from services.invoice_service import STATES, valid_gstin
+
+    data = request.get_json() or {}
+    gstin = str(data.get("gstin") or "").strip().upper()
+    state = str(data.get("state") or "").strip()
+    if gstin:
+        if not valid_gstin(gstin):
+            return jsonify({"success": False, "error": "That GSTIN doesn't look right (15 characters, e.g. 24ABCDE1234F1Z5)."}), 400
+        state = STATES[gstin[:2]]  # the GSTIN decides the state
+    if state and state not in STATES.values():
+        return jsonify({"success": False, "error": "Choose a state from the list."}), 400
+    profile = save_billing_profile(get_current_user_id(), str(data.get("name") or "").strip()[:160],
+                                   gstin, str(data.get("address") or "").strip()[:400], state)
+    return jsonify({"success": True, "profile": profile})
+
+
+@api_bp.route("/admin/payments", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_payments():
+    from db import list_payments
+
+    try:
+        user = int(request.args["user"]) if request.args.get("user") else None
+    except ValueError:
+        return jsonify({"success": False, "error": "user must be a number"}), 400
+    return jsonify({"success": True, "payments": list_payments(200, user)})
+
+
+@api_bp.route("/admin/subscriptions", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_subscriptions():
+    from db import list_subscriptions
+
+    return jsonify({"success": True, "subscriptions": list_subscriptions()})
+
+
+@api_bp.route("/admin/users/<int:target_user_id>/subscription/cancel", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_cancel_subscription(target_user_id):
+    """Stop a user's automatic renewal (their paid time is kept)."""
+    from services import billing_service
+
+    try:
+        subscription = billing_service.cancel_subscription(target_user_id, actor_user_id=get_current_user_id())
+    except billing_service.BillingError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    return jsonify({"success": True, "subscription": subscription})
+
+
+@api_bp.route("/admin/payments/<order_id>/refund", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_refund_payment(order_id):
+    """Body: {amount} in rupees / dollars, or empty for everything not yet refunded."""
+    from services import billing_service
+
+    raw = (request.get_json() or {}).get("amount")
+    try:
+        amount = None if raw in (None, "") else int(round(float(raw) * 100))
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "The amount must be a number."}), 400
+    try:
+        result = billing_service.refund(order_id, amount, get_current_user_id())
+    except billing_service.BillingError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    return jsonify({"success": True, **result})
+
+
+@api_bp.route("/billing/subscribe", methods=["POST"])
+@login_required_api
+def billing_subscribe():
+    """Body: {plan, period: month|year}. Starts automatic renewal: Razorpay
+    window details for INR, a Stripe Checkout url for USD."""
+    from db import user_currency
+    from services import billing_service
+
+    data = request.get_json() or {}
+    user_id = get_current_user_id()
+    try:
+        started = billing_service.start_subscription(user_id, str(data.get("plan") or ""), str(data.get("period") or ""),
+                                                     user_currency(user_id), Config.APP_BASE_URL or request.host_url)
+    except billing_service.BillingError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    return jsonify({"success": True, **started})
+
+
+@api_bp.route("/billing/subscribe/verify", methods=["POST"])
+@login_required_api
+def billing_subscribe_verify():
+    """Razorpay's window result for a subscription (signed); applies the first charge."""
+    from db import get_plan_usage
+    from services import billing_service
+
+    data = request.get_json() or {}
+    user_id = get_current_user_id()
+    try:
+        applied = billing_service.verify_razorpay_subscription(
+            user_id, str(data.get("razorpay_subscription_id") or ""), str(data.get("razorpay_payment_id") or ""),
+            str(data.get("razorpay_signature") or ""))
+    except billing_service.BillingError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    return jsonify({"success": True, "applied": applied, "usage": get_plan_usage(user_id)})
+
+
+@api_bp.route("/billing/subscription/cancel", methods=["POST"])
+@login_required_api
+def billing_subscription_cancel():
+    """Stop automatic renewal; the paid time is kept."""
+    from services import billing_service
+
+    try:
+        subscription = billing_service.cancel_subscription(get_current_user_id())
+    except billing_service.BillingError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    return jsonify({"success": True, "subscription": subscription})
+
+
+@api_bp.route("/billing/history", methods=["GET"])
+@login_required_api
+def billing_history():
+    from db import list_user_payments
+
+    return jsonify({"success": True, "payments": list_user_payments(get_current_user_id())})
+
+
+@api_bp.route("/admin/audit-log", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_audit_log():
+    """Newest first. ?user=<id> for one user's changes, ?action=plan for one kind, ?limit=."""
+    from db import list_audit_log
+
+    try:
+        limit = int(request.args.get("limit", 100))
+        user = int(request.args["user"]) if request.args.get("user") else None
+    except ValueError:
+        return jsonify({"success": False, "error": "limit and user must be numbers"}), 400
+    return jsonify({"success": True, "entries": list_audit_log(limit, user, (request.args.get("action") or "").strip() or None)})
+
+
+@api_bp.route("/admin/plans", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_plans():
+    from db import list_plans
+
+    return jsonify({"success": True, "plans": list_plans()})
+
+
+@api_bp.route("/admin/plans/<slug>", methods=["PUT"])
+@login_required_api
+@admin_required_api
+def admin_update_plan(slug):
+    """Change a plan's prices or limits. Limits: whole numbers, or null for unlimited."""
+    from db import PLAN_FIELDS, list_plans, update_plan
+
+    data = request.get_json() or {}
+    fields = {}
+    for key, value in data.items():
+        if key not in PLAN_FIELDS:
+            continue
+        if key in ("name", "best_for", "support"):
+            fields[key] = str(value or "").strip()[:120] or None
+        elif key == "approvals":
+            fields[key] = bool(value)
+        elif value is None or value == "":
+            fields[key] = None
+        else:
+            try:
+                number = float(value) if key.startswith(("price", "annual")) else int(value)
+            except (TypeError, ValueError):
+                return jsonify({"success": False, "error": f"{key} must be a number or empty"}), 400
+            if number < 0:
+                return jsonify({"success": False, "error": f"{key} can't be negative"}), 400
+            fields[key] = number
+    if fields.get("name") is None and "name" in fields:
+        return jsonify({"success": False, "error": "A plan needs a name"}), 400
+    before = next((p for p in list_plans() if p["slug"] == slug), None)
+    plan = update_plan(slug, fields)
+    if not plan:
+        return jsonify({"success": False, "error": "Plan not found"}), 404
+    changes = {k: {"from": (before or {}).get(k), "to": v} for k, v in fields.items() if (before or {}).get(k) != v}
+    _audit("plan.updated", None, {"plan": slug, "changes": changes})
+    return jsonify({"success": True, "plan": plan})
+
+
+@api_bp.route("/admin/users/<int:target_user_id>/plan", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_user_plan(target_user_id):
+    from db import get_plan_usage
+
+    usage = get_plan_usage(target_user_id)
+    if not usage:
+        return jsonify({"success": False, "error": "User not found"}), 404
+    return jsonify({"success": True, "usage": usage})
+
+
+@api_bp.route("/admin/users/<int:target_user_id>/plan", methods=["PUT"])
+@login_required_api
+@admin_required_api
+def admin_set_user_plan(target_user_id):
+    """Body: {plan: "starter"}. Until payments exist, admins assign plans."""
+    from db import assign_plan, get_plan_usage
+
+    slug = str((request.get_json() or {}).get("plan") or "").strip()
+    before = (get_plan_usage(target_user_id) or {}).get("plan", {}).get("slug")
+    if not assign_plan(target_user_id, slug):
+        return jsonify({"success": False, "error": "Unknown user or plan"}), 404
+    if before != slug:
+        _audit("plan.assigned", target_user_id, {"from": before, "to": slug})
+    return jsonify({"success": True, "usage": get_plan_usage(target_user_id)})
+
+
+@api_bp.route("/admin/users/<int:target_user_id>/packs", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_grant_pack(target_user_id):
+    """Body: {kind: "image" | "video", quantity: n, note}. Adds a top-up pack (12 months)."""
+    from db import get_plan_usage, grant_pack
+
+    data = request.get_json() or {}
+    try:
+        quantity = int(data.get("quantity"))
+    except (TypeError, ValueError):
+        quantity = 0
+    if not 1 <= quantity <= 1000:
+        return jsonify({"success": False, "error": "Quantity must be between 1 and 1000"}), 400
+    pack = grant_pack(target_user_id, str(data.get("kind") or ""), quantity, data.get("note"))
+    if not pack:
+        return jsonify({"success": False, "error": "Unknown user, or kind must be image or video"}), 400
+    _audit("pack.granted", target_user_id, {"kind": pack["kind"], "quantity": pack["quantity"], "note": data.get("note")})
+    return jsonify({"success": True, "pack": pack, "usage": get_plan_usage(target_user_id)})
+
+
 @api_bp.route("/me/bell", methods=["GET"])
 @login_required_api
 def my_bell():
@@ -5759,6 +6459,7 @@ def read_my_bell():
 
 @api_bp.route("/me/notifications/ideas-email/send-now", methods=["POST"])
 @login_required_api
+@limit_by_user("email_user")
 def send_my_ideas_email_now():
     """Settings -> Notifications -> "Send me this week's ideas now": the same
     email the weekly run sends, to the logged-in user's own address."""
@@ -5837,6 +6538,7 @@ def unsubscribe_ideas_email(token, kind):
 
 @api_bp.route("/brand-profile/quick-prompts/generate", methods=["POST"])
 @login_required_api
+@limit_by_user("ai_user")
 def generate_brand_quick_prompts():
     """Studio Chat's regenerate button: writes genuinely NEW "Start from an
     idea" cards from the user's whole brand profile (see
@@ -5848,7 +6550,7 @@ def generate_brand_quick_prompts():
 
     try:
         stats = get_user_usage_stats(user_id)
-        if stats.get("remaining_credits", 0.0) <= 0.0:
+        if _credit_blocked(stats):
             return jsonify({"error": "Credit limit reached. Please request a credit extension.", "credit_limit_exceeded": True}), 402
     except Exception as _cred_err:
         current_app.logger.warning(f"[Credits] Check error: {_cred_err}")
@@ -5916,6 +6618,7 @@ def update_brand_profile():
 
 @api_bp.route("/brand-profile/rescan", methods=["POST"])
 @login_required_api
+@limit_by_user("ai_user")
 def rescan_brand_profile():
     """Manually re-runs the website scrape + brand analysis (see
     services/brand_profile_service.py::run_brand_analysis) - unlike

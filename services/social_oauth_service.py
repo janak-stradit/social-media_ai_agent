@@ -15,9 +15,13 @@ Connect, signs in on the platform, approves, and comes back connected:
   facebook  a Facebook Page, and the Instagram account linked to it
   linkedin  the member's own profile, plus the company pages they
             administer when the app has the organisation permissions
+  instagram an Instagram professional account on its own, no Facebook Page
+            needed ("Instagram API with Instagram Login"). Its tokens last
+            60 days and are renewed automatically (refresh_instagram_tokens)
 
 A provider is offered only when its app credentials are set
-(META_APP_ID + META_APP_SECRET, LINKEDIN_CLIENT_ID + LINKEDIN_CLIENT_SECRET);
+(META_APP_ID + META_APP_SECRET, LINKEDIN_CLIENT_ID + LINKEDIN_CLIENT_SECRET,
+INSTAGRAM_APP_ID + INSTAGRAM_APP_SECRET);
 entering details by hand in Settings keeps working either way. Setup:
 docs/social-connect-setup.md.
 
@@ -38,13 +42,17 @@ from config import Config
 
 logger = logging.getLogger(__name__)
 
-PROVIDERS = ("facebook", "linkedin")
+PROVIDERS = ("facebook", "linkedin", "instagram")
 NAMES = {"facebook": "Facebook", "linkedin": "LinkedIn", "instagram": "Instagram"}
 STATE_TTL_SECONDS = 600
 PENDING_TTL_MINUTES = 15
 EXPIRY_WARNING_DAYS = 7
 LINKEDIN_AUTH = "https://www.linkedin.com/oauth/v2"
 LINKEDIN_API = "https://api.linkedin.com"
+INSTAGRAM_AUTH = "https://www.instagram.com/oauth/authorize"
+INSTAGRAM_TOKEN = "https://api.instagram.com/oauth/access_token"
+INSTAGRAM_GRAPH = "https://graph.instagram.com"
+INSTAGRAM_REFRESH_WITHIN_DAYS = 20  # renew a 60-day Instagram token once it has 20 days or less left
 _ORG_ADMIN_SCOPES = ("r_organization_admin", "rw_organization_admin")
 
 
@@ -61,7 +69,8 @@ def _http(method: str, url: str, **kwargs):
 
 def credentials(provider: str) -> tuple[str, str] | None:
     pair = {"facebook": (Config.META_APP_ID, Config.META_APP_SECRET),
-            "linkedin": (Config.LINKEDIN_CLIENT_ID, Config.LINKEDIN_CLIENT_SECRET)}.get(provider)
+            "linkedin": (Config.LINKEDIN_CLIENT_ID, Config.LINKEDIN_CLIENT_SECRET),
+            "instagram": (Config.INSTAGRAM_APP_ID, Config.INSTAGRAM_APP_SECRET)}.get(provider)
     return pair if pair and pair[0] and pair[1] else None
 
 
@@ -91,6 +100,10 @@ def authorize_url(provider: str, state: str, base_url: str) -> str:
         else:
             params["scope"] = Config.META_OAUTH_SCOPES
         return f"https://www.facebook.com/{Config.META_GRAPH_VERSION}/dialog/oauth?{urlencode(params)}"
+    if provider == "instagram":
+        # enable_fb_login=0: sign in with Instagram itself, not through Facebook
+        params.update(scope=Config.INSTAGRAM_OAUTH_SCOPES, enable_fb_login="0")
+        return f"{INSTAGRAM_AUTH}?{urlencode(params)}"
     params["scope"] = Config.LINKEDIN_OAUTH_SCOPES
     return f"{LINKEDIN_AUTH}/authorization?{urlencode(params)}"
 
@@ -210,6 +223,57 @@ def linkedin_options(code: str, base_url: str, now: datetime | None = None) -> l
     return options
 
 
+# ── Instagram on its own: Instagram API with Instagram Login ───────────────
+
+
+def _instagram_body(resp) -> dict:
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {}
+    if isinstance(body, dict) and isinstance(body.get("data"), list) and body["data"]:
+        body = body["data"][0]  # the token answer sometimes comes wrapped in "data"
+    if resp.status_code != 200 or not isinstance(body, dict) or "error" in body or "error_type" in body:
+        error = body.get("error") if isinstance(body, dict) and isinstance(body.get("error"), dict) else {}
+        message = (error.get("message") or (body.get("error_message") if isinstance(body, dict) else None)
+                   or "unexpected answer")
+        raise OAuthError(f"Instagram did not complete the sign-in: {message}.")
+    return body
+
+
+def _instagram_expiry(body: dict, now: datetime | None) -> str | None:
+    seconds = body.get("expires_in")
+    if not seconds:
+        return None
+    return ((now or datetime.now(timezone.utc)) + timedelta(seconds=int(seconds))).isoformat()
+
+
+def instagram_options(code: str, base_url: str, now: datetime | None = None) -> list[dict]:
+    app_id, app_secret = credentials("instagram")
+    code = code.removesuffix("#_")  # Instagram appends "#_" to the code
+    short = _instagram_body(_http("POST", INSTAGRAM_TOKEN, data={
+        "client_id": app_id, "client_secret": app_secret, "grant_type": "authorization_code",
+        "redirect_uri": redirect_uri("instagram", base_url), "code": code}))
+    token = short.get("access_token")
+    if not token:
+        raise OAuthError("Instagram did not complete the sign-in. Please try again.")
+    expires_at = _instagram_expiry(short, now)
+    try:  # the short token lasts an hour; the long-lived one 60 days
+        long = _instagram_body(_http("GET", f"{INSTAGRAM_GRAPH}/access_token", params={
+            "grant_type": "ig_exchange_token", "client_secret": app_secret, "access_token": token}))
+        token, expires_at = long.get("access_token") or token, _instagram_expiry(long, now) or expires_at
+    except OAuthError as err:
+        logger.warning(f"Instagram long-lived token exchange failed, continuing with the short one: {err}")
+    me = _instagram_body(_http("GET", f"{INSTAGRAM_GRAPH}/{Config.META_GRAPH_VERSION}/me",
+                               params={"fields": "user_id,username,account_type", "access_token": token}))
+    account_id = str(me.get("user_id") or short.get("user_id") or me.get("id") or "")
+    if not account_id:
+        raise OAuthError("Instagram did not share your account. Please try again.")
+    username = me.get("username") or ""
+    return [{"id": account_id, "name": f"@{username}" if username else "Instagram", "detail": "Instagram account",
+             "token": token, "expires_at": expires_at}]
+
+
 # ── Connecting ──────────────────────────────────────────────────────────────
 
 
@@ -229,6 +293,10 @@ def connect(user_id: int, provider: str, option: dict) -> list[dict]:
             connected.append({"platform": "instagram", "name": name})
         return connected
     expires = datetime.fromisoformat(option["expires_at"]).astimezone(timezone.utc).replace(tzinfo=None) if option.get("expires_at") else None
+    if provider == "instagram":  # published through graph.instagram.com (instagram_service.graph_url)
+        save_social_account(user_id=user_id, platform="instagram", account_name=option["name"], account_id=option["id"],
+                            access_token=option["token"], connection_type="direct", connected_via="oauth", token_expires_at=expires)
+        return [{"platform": "instagram", "name": option["name"]}]
     save_social_account(user_id=user_id, platform="linkedin", account_name=option["name"], account_id=option["id"],
                         access_token=option["token"], refresh_token=option.get("refresh_token"), connection_type="direct",
                         connected_via="oauth", token_expires_at=expires)
@@ -244,7 +312,7 @@ def finish(user_id: int, provider: str, code: str, base_url: str) -> dict:
     several accounts to choose from, {"choose": <pending id>}."""
     from db import create_oauth_pending
 
-    options = facebook_options(code, base_url) if provider == "facebook" else linkedin_options(code, base_url)
+    options = {"facebook": facebook_options, "instagram": instagram_options, "linkedin": linkedin_options}[provider](code, base_url)
     if len(options) == 1:
         return {"connected": connect(user_id, provider, options[0])}
     return {"choose": create_oauth_pending(user_id, provider, options, PENDING_TTL_MINUTES)}
@@ -295,4 +363,62 @@ def notify_expiring(now: datetime | None = None) -> int:
         if create_notification(acc["user_id"], "social_connection", title, body, "/settings",
                                f"oauth-expiry:{acc['id']}:{expires.date().isoformat()}:{'gone' if gone else 'soon'}"):
             added += 1
+            _email_expiry(acc["user_id"], title, body, name)
     return added
+
+
+def _email_expiry(user_id: int, title: str, body: str, name: str) -> None:
+    """The same reminder by email (an account email, like billing notices).
+    Sent only when SMTP and APP_BASE_URL are set; a failure never stops the check."""
+    if not Config.APP_BASE_URL:
+        return
+    from db import get_user_by_id
+
+    user = get_user_by_id(user_id)
+    if not user:
+        return
+    try:
+        from services.email_service import EmailService
+
+        EmailService().send_billing_email(
+            to_email=user.email, name=user.name or "there", subject=title, headline=title,
+            lines=[body, f"It takes one click: open Settings, then Connect on the {name} card."],
+            button=f"Reconnect {name}", url=Config.APP_BASE_URL.rstrip("/") + "/settings",
+            footer="You get this because a social account is connected to your AVIR AI workspace.",
+        )
+    except Exception as err:  # noqa: BLE001
+        logger.warning(f"Connection reminder email to user {user_id} failed: {err}")
+
+
+def refresh_instagram_tokens(now: datetime | None = None) -> int:
+    """Scheduler: renews Instagram Login tokens (60 days) before they run out,
+    so these connections don't need signing in again. Instagram allows it once
+    a token is a day old and still valid. Returns how many were renewed."""
+    from sqlalchemy.orm import Session
+
+    from db import SocialAccount, engine
+
+    now = (now or datetime.now(timezone.utc)).astimezone(timezone.utc).replace(tzinfo=None)
+    renewed = 0
+    with Session(engine) as session:
+        rows = (session.query(SocialAccount)
+                .filter(SocialAccount.platform == "instagram", SocialAccount.status == "connected",
+                        SocialAccount.token_expires_at.isnot(None), SocialAccount.token_expires_at > now,
+                        SocialAccount.token_expires_at <= now + timedelta(days=INSTAGRAM_REFRESH_WITHIN_DAYS))
+                .all())
+        for acc in rows:
+            if not (acc.access_token or "").startswith("IG"):
+                continue  # a Facebook-linked connection: not renewed this way
+            try:
+                body = _instagram_body(_http("GET", f"{INSTAGRAM_GRAPH}/refresh_access_token", params={
+                    "grant_type": "ig_refresh_token", "access_token": acc.access_token}))
+            except (OAuthError, requests.exceptions.RequestException) as err:
+                logger.warning(f"Instagram token renewal for account {acc.id} failed: {err}")
+                continue
+            if body.get("access_token") and body.get("expires_in"):
+                acc.access_token = body["access_token"]
+                acc.token_expires_at = now + timedelta(seconds=int(body["expires_in"]))
+                renewed += 1
+        session.commit()
+    return renewed
+

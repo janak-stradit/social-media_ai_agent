@@ -39,3 +39,27 @@ def _clean_tables():
         session.execute(delete(db.OpportunitySuggestion))
         session.commit()
     yield
+
+
+@pytest.fixture(autouse=True)
+def _feature_tests_run_on_a_roomy_plan(monkeypatch, request):
+    """New accounts start on the Free plan (3 images a month, no video). Tests
+    of other features make more than that, so their users default to
+    Enterprise (no monthly allowances, the usual daily caps). tests/test_plans.py
+    tests the plans themselves and keeps the real default."""
+    if request.module.__name__.endswith("test_plans"):
+        return
+    from config import Config
+
+    monkeypatch.setattr(Config, "DEFAULT_PLAN", "enterprise")
+
+
+@pytest.fixture(autouse=True)
+def _admins_without_two_step_sign_in(monkeypatch, request):
+    """Admins must turn on two-step sign-in in production; tests of other
+    features use admin accounts without it. tests/test_two_factor.py keeps it on."""
+    if request.module.__name__.endswith("test_two_factor"):
+        return
+    from config import Config
+
+    monkeypatch.setattr(Config, "ADMIN_2FA_REQUIRED", False)

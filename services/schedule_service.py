@@ -160,6 +160,10 @@ def publish(post: dict, upload_folder: str, now: datetime | None = None) -> str:
             out = publish_item(post["user_id"], item, upload_folder)
             results[platform] = {"ok": True, "permalink": out.get("permalink"), "post_id": out.get("post_id"),
                                  "account": out.get("account"), "format": out.get("format"), "at": at}
+            from db import register_published_post  # so its results can be fetched (services/metrics_service.py)
+
+            register_published_post(post["user_id"], platform, out.get("post_id"), out.get("permalink"),
+                                    item.get("caption"), "scheduled", post["id"])
         except PublishError as err:
             results[platform] = {"ok": False, "error": str(err)[:400], "at": at}
         except Exception as err:  # one platform's surprise must not lose the others' results

@@ -93,9 +93,10 @@ EC2 → Launch instance:
 
 - **AMI:** Ubuntu Server 24.04 LTS (x86_64). The image is built for `linux/amd64`, so don't pick
   an ARM (`t4g`) instance.
-- **Type:** `t3.medium` (4 GB), recommended. Each gunicorn worker uses about 0.6–0.7 GB (torch +
-  the embedding model), so 2 workers + scheduler + Chromium fit. For the cheapest setup,
-  `t3.small` (2 GB) with 1 worker works; see [Cost](#cost). Use `t3.large` if traffic grows.
+- **Type:** `t3.medium` (4 GB), recommended. The embedding model (with torch, ~0.6 GB) runs once
+  in its own `embedder` container, so each gunicorn worker needs only ~150–300 MB: 4 workers × 16
+  threads + scheduler + embedder + Chromium fit. For the cheapest setup, `t3.small` (2 GB) with
+  `WEB_CONCURRENCY=2` works; see [Cost](#cost). Use `t3.large` if traffic grows.
   (A 4 GB swap file is added automatically.)
 - **Key pair:** create `socialmedia-deploy` (ED25519, .pem) and download it
 - **Network:** same VPC as RDS, a **public subnet in the same AZ as RDS**, auto-assign public IP,
@@ -285,7 +286,7 @@ Approximate **on-demand prices in us-east-1** (730 hours/month). Mumbai (`ap-sou
 For a beta with few users:
 1. Launch `t3.small` instead of `t3.medium`.
 2. In `deploy/docker-compose.prod.yml` set `WEB_CONCURRENCY: "1"` (1 gunicorn worker; its 4
-   threads still handle several requests at once). Commit and deploy.
+   the 16 threads per worker still handle many requests at once). Commit and deploy.
 3. `db.t4g.micro`, Single-AZ, 20 GB.
 
 Move up to `t3.medium` when `free -m` on the server shows swap regularly in use or pages get slow.

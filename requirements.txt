@@ -1,5 +1,7 @@
 flask
 flask-cors
+# Bearer tokens for API clients (auth/jwt_tokens.py)
+PyJWT==2.10.1
 huggingface-hub==0.24.0
 transformers==4.42.0
 torch==2.3.1
@@ -10,6 +12,7 @@ openai==2.52.0
 python-dotenv==1.0.1
 gunicorn==22.0.0
 redis==5.0.0
+pypdf==5.1.0
 requests==2.32.0
 httpx<0.28
 sqlalchemy>=2.0
@@ -21,6 +24,8 @@ gtts
 moviepy
 google-genai
 sentence-transformers==3.0.1
+# Pinned: newer sklearn DLLs get blocked by Windows Smart App Control on dev machines
+scikit-learn==1.5.2
 # Headless-browser fallback for onboarding website scans (bot-protected /
 # JavaScript-rendered sites). Needs its browser too: `playwright install chromium`.
 playwright==1.47.0

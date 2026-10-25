@@ -43,8 +43,11 @@ class InstagramError(RuntimeError):
     """A failure the user can act on (message shown as is)."""
 
 
-def graph_url(path: str) -> str:
-    return f"https://graph.facebook.com/{Config.META_GRAPH_VERSION}/{path.lstrip('/')}"
+def graph_url(path: str, token: str | None = None) -> str:
+    """Instagram Login tokens ("IG...") work on graph.instagram.com; Facebook
+    Page tokens ("EAA...") on graph.facebook.com. The endpoints are the same."""
+    host = "graph.instagram.com" if (token or "").startswith("IG") else "graph.facebook.com"
+    return f"https://{host}/{Config.META_GRAPH_VERSION}/{path.lstrip('/')}"
 
 
 def _error_text(resp) -> str:
@@ -59,13 +62,14 @@ def _error_text(resp) -> str:
     if code in (4, 17, 32, 613) or sub == 2207042:
         return "Instagram's publishing limit for this account has been reached - try again later."
     if code == 10 or code == 200:
-        return ("The Meta app is missing a permission (instagram_content_publish). "
+        return ("The Meta app is missing a permission (instagram_content_publish, or "
+                "instagram_business_content_publish with Instagram Login). "
                 "See docs/instagram-publishing.md - " + message)
     return f"Instagram: {message}"
 
 
 def _call(method: str, path: str, token: str, **params) -> dict:
-    resp = requests.request(method, graph_url(path), params={**params, "access_token": token} if method == "GET" else None,
+    resp = requests.request(method, graph_url(path, token), params={**params, "access_token": token} if method == "GET" else None,
                             data={**params, "access_token": token} if method != "GET" else None, timeout=30)
     if not resp.ok:
         raise InstagramError(_error_text(resp))

@@ -58,6 +58,18 @@
             </button>
         </form>
 
+        <!-- Second step, shown when the account has two-step sign-in on (/api/auth/2fa/verify) -->
+        <form id="twoFactorForm" class="d-none" novalidate style="display: none;">
+            <div class="auth-form-group">
+                <label class="auth-form-label" for="twoFactorCode">Code from your authenticator app</label>
+                <input id="twoFactorCode" type="text" class="auth-form-input" inputmode="numeric" pattern="[0-9]*"
+                       maxlength="7" autocomplete="one-time-code" placeholder="123 456" required>
+                <div style="color: #6B7280; font-size: 12px; margin-top: 6px;">Open the app where you added AVIR AI and type the 6-digit code.</div>
+            </div>
+            <div id="twoFactorError" class="alert-inline alert-inline-danger" style="margin-bottom: 12px; display: none;" role="alert"></div>
+            <button id="twoFactorSubmit" type="submit" class="btn-primary-blue">Verify and log in</button>
+        </form>
+
         <div class="auth-footer-links">
             <a href="/forgot-password" class="auth-link-bold" style="font-size: 13px;">Forgot my password?</a>
 
@@ -87,6 +99,26 @@
 
     const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
+    $('#twoFactorForm').on('submit', function (e) {
+        e.preventDefault();
+        const $btn = $('#twoFactorSubmit').prop('disabled', true);
+        $('#twoFactorError').hide();
+        $.ajax({
+            url: '/api/auth/2fa/verify', type: 'POST', contentType: 'application/json',
+            data: JSON.stringify({ code: $('#twoFactorCode').val() }),
+            success: function () { window.location.href = '/dashboard'; },
+            error: function (xhr) {
+                const body = xhr.responseJSON || {};
+                $('#twoFactorError').text(body.error || 'That code did not work.').show();
+                $btn.prop('disabled', false);
+                if (xhr.status === 401 && /expired/i.test(body.error || '')) {
+                    $('#twoFactorForm').hide();
+                    $('#authForm').show();
+                }
+            }
+        });
+    });
+
     $('#authForm').on('submit', function (e) {
         e.preventDefault();
         $('#authError').hide();
@@ -114,7 +146,11 @@
             contentType: 'application/json',
             data: JSON.stringify({ email: email, password: password }),
             success: function (res) {
-                if (res.success) {
+                if (res.success && res.two_factor_required) {
+                    $('#authForm').hide();
+                    $('#twoFactorForm').removeClass('d-none').show();
+                    $('#twoFactorCode').val('').focus();
+                } else if (res.success) {
                     window.location.href = '/dashboard';
                 } else {
                     $submitBtn.prop('disabled', false);

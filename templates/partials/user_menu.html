@@ -2,7 +2,7 @@
     .header-actions so the menu is identical everywhere. Filled in and
     opened/closed by static/js/user_menu.js (no Bootstrap JS needed).
     IDs match what app_v2.js already updates (headerUser*, dropHeader*,
-    drop*Li, dropRequestCreditBtn, dropHeaderModelInfoBtn, logoutBtn). -#}
+    drop*Li, dropRequestCreditBtn, logoutBtn). -#}
 {%- set p = request.path -%}
 {#- Header bell: timely nudges (services/nudge_service.py), each opening
     Studio Chat with an idea loaded. Filled in by static/js/user_menu.js. -#}
@@ -49,11 +49,12 @@
         <div class="um-section-label">Usage &amp; Credits</div>
         <div class="um-credit-card">
             <div class="um-credit-row">
-                <span class="um-credit-label"><i class="fas fa-wallet" aria-hidden="true"></i>Credit balance</span>
+                <span class="um-credit-label"><i class="fas fa-wallet" aria-hidden="true"></i><span id="umCreditLabel">Credit balance</span></span>
                 <strong id="dropHeaderCreditsRemaining">—</strong>
             </div>
-            <div class="um-progress" aria-hidden="true"><span id="umCreditBar" style="width: 0%;"></span></div>
-            <div class="um-credit-row um-credit-sub">
+            <div class="um-progress" id="umCreditProgress" aria-hidden="true"><span id="umCreditBar" style="width: 0%;"></span></div>
+            <a class="um-plan-link d-none" id="umPlanLink" href="/settings#plan">See your plan and usage</a>
+            <div class="um-credit-row um-credit-sub" id="umCreditSub">
                 <span>Limit <span id="dropHeaderCreditLimit">—</span></span>
                 <button type="button" class="um-extend-btn" id="dropRequestCreditBtn">
                     <i class="fas fa-plus" aria-hidden="true"></i>Extend
@@ -89,6 +90,7 @@
             </a>
             <a class="um-link{{ ' active' if p.startswith('/approve') }}" href="/approve" role="menuitem">
                 <i class="fas fa-clipboard-check" aria-hidden="true"></i>Approval Requests
+                <span class="um-tag d-none" id="umApprovalsTag" title="Approvals come with a higher plan">Upgrade</span>
             </a>
             <a class="um-link{{ ' active' if p.startswith('/settings') }}" href="/settings" role="menuitem">
                 <i class="fas fa-plug" aria-hidden="true"></i>Social Accounts &amp; Scheduling
@@ -99,9 +101,6 @@
             <a class="um-link d-none{{ ' active' if p.startswith('/brand-configuration') }}" id="dropBrandConfigLi" href="/brand-configuration" role="menuitem">
                 <i class="fas fa-swatchbook" aria-hidden="true"></i>Brand Configuration
             </a>
-            <button type="button" class="um-link" id="dropHeaderModelInfoBtn" role="menuitem">
-                <i class="fas fa-microchip" aria-hidden="true"></i>AI Models &amp; Purpose Matrix
-            </button>
             <a class="um-link d-none{{ ' active' if p.startswith('/admin') }}" id="dropAdminPortalLi" href="/admin" role="menuitem">
                 <i class="fas fa-user-shield" aria-hidden="true"></i>Admin Control Center
             </a>

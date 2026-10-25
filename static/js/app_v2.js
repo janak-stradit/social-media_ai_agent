@@ -196,7 +196,9 @@ $(document).ready(function () {
     function updateStyleMenuLabel() {
         const tone = $('#toneSelect').val();
         const voice = $('#brandVoiceSelect').val();
+        const language = $('#languageSelect').val();
         const parts = [];
+        if (language && language !== 'en') parts.push($('#languageSelect option:selected').text().split(' ').pop());
         if (voice && voice !== 'Standard Enterprise') parts.push(voice);
         if (tone) parts.push($('#toneSelect option:selected').text());
         $('#styleMenuLabel').text(parts.length ? parts.join(' · ') : 'Style');
@@ -213,8 +215,34 @@ $(document).ready(function () {
     $(document).on('keydown', function (e) {
         if (e.key === 'Escape' && !$('#styleMenuPanel').hasClass('d-none')) { setStyleMenuOpen(false); $('#styleMenuBtn').focus(); }
     });
-    $('#toneSelect, #brandVoiceSelect').on('change', updateStyleMenuLabel);
+    $('#toneSelect, #brandVoiceSelect, #languageSelect').on('change', updateStyleMenuLabel);
     updateStyleMenuLabel();
+
+    // Post language: the menu's choices come from the server; the choice is
+    // remembered in this browser, and every Generate / Refine request carries
+    // it (a prefilter, so each request builder doesn't have to)
+    const LANGUAGE_KEY = 'avir_post_language';
+    $.getJSON('/api/languages').done(function (r) {
+        const $select = $('#languageSelect');
+        $select.html((r.languages || []).map(l => `<option value="${escapeAttr(l.code)}">${escapeHtml(l.name)}</option>`).join(''));
+        let saved = null;
+        try { saved = localStorage.getItem(LANGUAGE_KEY); } catch (e) { /* storage blocked */ }
+        if (saved && $select.find(`option[value="${saved}"]`).length) $select.val(saved);
+        updateStyleMenuLabel();
+    });
+    $('#languageSelect').on('change', function () {
+        try { localStorage.setItem(LANGUAGE_KEY, this.value); } catch (e) { /* storage blocked */ }
+    });
+    $.ajaxPrefilter(function (options) {
+        if (!/^\/api\/(generate|refine)$/.test(options.url || '') || typeof options.data !== 'string') return;
+        try {
+            const body = JSON.parse(options.data);
+            if (body && !body.language) {
+                body.language = $('#languageSelect').val() || 'en';
+                options.data = JSON.stringify(body);
+            }
+        } catch (e) { /* not JSON: leave it */ }
+    });
 
     $('#dockOptionsBtn').on('click', function () {
         const open = !$('#dropZone').hasClass('options-open');
@@ -273,10 +301,29 @@ $(document).ready(function () {
             const shown = Math.max(p.goal, Math.min(p.done, 7));
             $('#goalPillDots').html(Array.from({ length: shown }, (_, i) => `<i class="${i < p.done ? 'on' : ''}"></i>`).join(''));
             $('#goalPillText').text(p.goal_met ? `Goal reached: ${p.done} this week` : `${p.done} of ${p.goal} this week`);
+            window.__weekProgress = p;  // for the "scheduled" card's goal line
             $('#goalPill').removeClass('d-none').toggleClass('is-met', !!p.goal_met)
                 .attr('aria-label', `${p.done} of ${p.goal} posts created this week. Open your Content Calendar.`);
         });
     }
+
+    // The credit request form asks in the user's own currency (rupees for
+    // Indian brands); the server converts rupees to USD (/api/credit-requests)
+    function applyCreditRequestCurrency(currency) {
+        const inr = currency === 'INR';
+        if ($('#creditRequestForm').data('currency') === currency) return;
+        $('#creditRequestForm').data('currency', currency);
+        const presets = inr ? [500, 1000, 2500, 5000] : [10, 25, 50, 100];
+        const symbol = inr ? '₹' : '$';
+        $('#requestedAmountLabel').text(inr ? 'Requested extension amount (₹):' : 'Requested extension amount (USD):');
+        $('#requestedAmountSymbol').text(symbol);
+        $('#requestedAmountInput').attr({ max: inr ? 100000 : 1000, step: 1 }).val(presets[0]);
+        $('#requestedAmountPresets').html(presets.map(v =>
+            `<button type="button" class="preset-btn" data-amount="${v}">+${symbol}${v.toLocaleString(inr ? 'en-IN' : 'en-US')}</button>`).join(''));
+    }
+    $(document).on('click', '#requestedAmountPresets .preset-btn', function () {
+        $('#requestedAmountInput').val($(this).data('amount'));
+    });
 
     function loadUserUsageMetrics() {
         loadGoalPill();
@@ -285,25 +332,29 @@ $(document).ready(function () {
             type: 'GET',
             success: function (r) {
                 if (r.success) {
+                    window.avirSetMoney(r);
+                    applyCreditRequestCurrency(r.currency);
                     const formattedTokens = Number(r.total_tokens || 0).toLocaleString() + ' Tokens';
-                    const formattedCost = '$' + Number(r.total_cost_usd || 0).toFixed(4);
-                    const rem = Number(r.remaining_credits || 0).toFixed(2);
-                    const lim = Number(r.credit_limit || 10).toFixed(2);
-                    const used = Number(r.used_credits || 0).toFixed(2);
+                    const formattedCost = window.avirMoney(r.total_cost_usd, r.currency === 'INR' ? 2 : 4);
+                    const rem = window.avirMoney(r.remaining_credits);
+                    const lim = window.avirMoney(r.credit_limit);
+                    const used = window.avirMoney(r.used_credits);
 
                     $('#headerTokens').text(Number(r.total_tokens || 0).toLocaleString());
                     $('#headerCost').text(formattedCost);
                     $('#dropHeaderTokens').text(formattedTokens);
                     $('#dropHeaderCost').text(formattedCost);
 
-                    $('#headerCreditsRemaining').text('$' + rem);
-                    $('#headerCreditLimit').text('$' + lim);
-                    $('#dropHeaderCreditsRemaining').text('$' + rem);
-                    $('#dropHeaderCreditLimit').text('$' + lim);
+                    $('#headerCreditsRemaining').text(rem);
+                    $('#headerCreditLimit').text(lim);
+                    if (r.credit_capped !== false) {  // paid plans show the plan there instead (user_menu.js)
+                        $('#dropHeaderCreditsRemaining').text(rem);
+                        $('#dropHeaderCreditLimit').text(lim);
+                    }
 
-                    $('#modalCreditLimit').text('$' + lim);
-                    $('#modalUsedCredits').text('$' + used);
-                    $('#modalRemainingCredits').text('$' + rem);
+                    $('#modalCreditLimit').text(lim);
+                    $('#modalUsedCredits').text(used);
+                    $('#modalRemainingCredits').text(rem);
 
                     // Update credit pill badge class
                     const pill = $('#headerCreditPill');
@@ -311,7 +362,7 @@ $(document).ready(function () {
                         pill.removeClass('warn danger');
                         if (r.remaining_credits <= 0) {
                             pill.addClass('danger');
-                        } else if (r.remaining_credits < 2.0) {
+                        } else if (r.remaining_credits < Number(r.credit_limit || 0) * 0.2) {
                             pill.addClass('warn');
                         }
                     }
@@ -327,7 +378,7 @@ $(document).ready(function () {
                     // Show pending request notice if user has pending request
                     if (r.has_pending_request && r.pending_request) {
                         $('#pendingRequestNotice').removeClass('d-none');
-                        $('#pendingReqAmount').text('$' + Number(r.pending_request.requested_amount || 10).toFixed(2));
+                        $('#pendingReqAmount').text(window.avirMoney(r.pending_request.requested_amount));
                     } else {
                         $('#pendingRequestNotice').addClass('d-none');
                     }
@@ -335,10 +386,6 @@ $(document).ready(function () {
             }
         });
     }
-
-    $('#dropHeaderModelInfoBtn').on('click', function () {
-        openModelArchitectureModal();
-    });
 
     // Admin Management Portal is now a plain link to /admin (see
     // templates/admin.html) - no click handler needed.
@@ -366,8 +413,6 @@ $(document).ready(function () {
         const hash = window.location.hash;
         if (hash === '#request-credit') {
             $('#dropRequestCreditBtn').trigger('click');
-        } else if (hash === '#ai-models') {
-            openModelArchitectureModal();
         } else {
             return;
         }
@@ -541,6 +586,7 @@ $(document).ready(function () {
                 if (!ideas.length) return;
 
                 _brandProfileIdeaPool = ideas;
+                window.setBriefExamples(ideas);
                 // Pool is newest-first (regenerated ideas are prepended), so lead with the latest
                 renderQuickPromptCards(ideas.slice(0, QUICK_PROMPT_CARD_COUNT));
 
@@ -741,6 +787,150 @@ $(document).ready(function () {
     }
 
     // The brief goes into the box of a new conversation, with its platforms ticked
+    // ── Start from a link or PDF (POST /api/repurpose) ───────────────────
+    // The page or document is read, the AI suggests 3-5 post angles, and the
+    // chosen one is loaded into the brief like a saved brief.
+    const LONE_URL = /^https?:\/\/\S+$/i;
+    let repurposeAngles = [];
+
+    function openRepurpose(url) {
+        $('#repurposeUrl').val(url || '');
+        $('#repurposeFile').val('');
+        $('#repurposeFileLabel').text('Upload a PDF (up to 15 MB)');
+        $('#repurposeStatus, #repurposeResult').addClass('d-none').empty();
+        $('#repurposeForm').removeClass('d-none');
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('repurposeModal')).show();
+        if (url) runRepurpose({ url: url });
+        else setTimeout(() => $('#repurposeUrl').trigger('focus'), 300);
+    }
+
+    function runRepurpose(source) {
+        const isFile = source instanceof File;
+        const started = Date.now();
+        $('#repurposeResult').addClass('d-none').empty();
+        $('#repurposeGo, #repurposeFile').prop('disabled', true);
+        const $status = $('#repurposeStatus').removeClass('d-none is-error');
+        const tick = () => {
+            const s = Math.round((Date.now() - started) / 1000);
+            $status.html(`<span class="spinner-border spinner-border-sm me-2"></span>${isFile ? 'Reading your PDF' : 'Reading the page'} and finding post ideas... ${s}s`);
+        };
+        tick();
+        const clock = setInterval(tick, 1000);
+        let request;
+        if (isFile) {
+            const form = new FormData();
+            form.append('file', source);
+            request = $.ajax({ url: '/api/repurpose', type: 'POST', data: form, processData: false, contentType: false });
+        } else {
+            request = $.ajax({ url: '/api/repurpose', type: 'POST', contentType: 'application/json', data: JSON.stringify(source) });
+        }
+        request.done(function (r) {
+            $status.addClass('d-none');
+            repurposeAngles = r.angles || [];
+            const formats = { text: 'Text post', image: 'With an image', carousel: 'Carousel' };
+            $('#repurposeResult').removeClass('d-none').html(`
+                <div class="repurpose-source"><strong>${escapeHtml(r.title || 'Your content')}</strong>
+                    ${r.summary ? `<p>${escapeHtml(r.summary)}</p>` : ''}</div>
+                <div class="repurpose-angles">${repurposeAngles.map((a, i) => `
+                    <div class="repurpose-angle">
+                        <div class="repurpose-angle-head"><strong>${escapeHtml(a.title)}</strong>
+                            <span class="repurpose-format">${formats[a.format] || 'Text post'}</span></div>
+                        <p>${escapeHtml(a.brief)}</p>
+                        <button type="button" class="btn btn-sm btn-dark" data-repurpose-use="${i}">Use this</button>
+                    </div>`).join('')}</div>`);
+        }).fail(function (xhr) {
+            $status.addClass('is-error').text((xhr.responseJSON || {}).error || 'Could not read that. Please try again.');
+        }).always(function () {
+            clearInterval(clock);
+            $('#repurposeGo, #repurposeFile').prop('disabled', false);
+        });
+    }
+
+    $('#repurposeBtn').on('click', () => openRepurpose(''));
+    $('#repurposeForm').on('submit', function (e) {
+        e.preventDefault();
+        const url = $('#repurposeUrl').val().trim();
+        if (!url) { $('#repurposeUrl').trigger('focus'); return; }
+        runRepurpose({ url: url });
+    });
+    $('#repurposeFile').on('change', function () {
+        const file = this.files && this.files[0];
+        if (!file) return;
+        $('#repurposeFileLabel').text(file.name);
+        runRepurpose(file);
+    });
+    $(document).on('click', '[data-repurpose-use]', function () {
+        const angle = repurposeAngles[Number($(this).data('repurpose-use'))];
+        if (!angle) return;
+        bootstrap.Modal.getOrCreateInstance(document.getElementById('repurposeModal')).hide();
+        loadBriefIntoComposer(angle.brief, null);
+        if (angle.format !== 'text') {  // tick Image when the idea wants a visual and it's available
+            const $image = $('input[name="outputOptions"][value="image"]');
+            if ($image.length && !$image.prop('disabled')) $image.prop('checked', true).trigger('change');
+        }
+    });
+    // A link pasted on its own into the brief: offer to read it
+    storyInput.on('input', function () {
+        $('#repurposeHint').toggleClass('d-none', !LONE_URL.test(storyInput.val().trim()));
+    });
+    $('#repurposeHint').on('click', function () {
+        const url = storyInput.val().trim();
+        $(this).addClass('d-none');
+        storyInput.val('').trigger('input');
+        openRepurpose(url);
+    });
+
+    // ── Smart defaults: the composer starts with last time's platforms and
+    // outputs (people keep what's pre-selected), and says so.
+    const SETUP_KEY = 'avir_last_setup';
+    function rememberSetup(platforms) {
+        if (!platforms || !platforms.length) return;
+        const outputs = $('input[name="outputOptions"]:checked').map(function () { return this.value; }).get();
+        try { localStorage.setItem(SETUP_KEY, JSON.stringify({ platforms: platforms, outputs: outputs })); } catch (e) { /* storage blocked */ }
+    }
+    function restoreSetup() {
+        let saved = null;
+        try { saved = JSON.parse(localStorage.getItem(SETUP_KEY) || 'null'); } catch (e) { return; }
+        if (!saved || !Array.isArray(saved.platforms) || !saved.platforms.length) return;
+        if ($('.platform-chips-inline input[type="checkbox"]:checked').length) return;  // something was chosen already
+        $('.platform-chips-inline input[type="checkbox"]').each(function () {
+            if (saved.platforms.includes(this.value)) $(this).prop('checked', true).trigger('change');
+        });
+        (saved.outputs || []).forEach(function (value) {
+            const $o = $(`input[name="outputOptions"][value="${value}"]`);
+            if ($o.length && !$o.prop('disabled')) $o.prop('checked', true).trigger('change');
+        });
+        $('#lastSetupNote').removeClass('d-none');
+    }
+    // Any change by hand: the note no longer applies
+    $(document).on('change', '.platform-chips-inline input, input[name="outputOptions"]', function (e) {
+        if (e.originalEvent) $('#lastSetupNote').addClass('d-none');
+    });
+    setTimeout(restoreSetup, 600);  // after the plan/quota checks have enabled or disabled outputs
+
+    // ── Examples in the empty brief: from the user's own brand when there is
+    // one (recognition is easier than inventing from a blank box)
+    const GENERIC_EXAMPLES = [
+        'Announce our new service with 3 key benefits',
+        'Share a customer success story with one clear result',
+        'Give 3 practical tips our customers can use this week',
+        'Invite people to our upcoming event or webinar',
+    ];
+    let briefExamples = GENERIC_EXAMPLES.slice();
+    let exampleIndex = 0;
+    function rotateBriefExample() {
+        const $box = $('#storyInput');
+        if ($box.val() || $box.prop('disabled')) return;
+        $box.attr('placeholder', `What would you like to post about? e.g. ${briefExamples[exampleIndex % briefExamples.length]}`);
+        exampleIndex += 1;
+    }
+    window.setBriefExamples = function (ideas) {
+        const titles = (ideas || []).map(i => (i && (i.title || i.prompt) || '').trim()).filter(t => t && t.length <= 90);
+        if (titles.length) { briefExamples = titles.slice(0, 8); exampleIndex = 0; rotateBriefExample(); }
+    };
+    rotateBriefExample();
+    setInterval(rotateBriefExample, 4500);
+
     function loadBriefIntoComposer(text, platforms) {
         if ($('#chatThread').children().length) startNewChat(true);
         storyInput.val(text).trigger('input').trigger('focus');
@@ -1143,7 +1333,7 @@ $(document).ready(function () {
                 showToast('Analysis failed: ' + (xhr.responseJSON?.error || 'Error'), 'error');
             },
             complete: function () {
-                btn.prop('disabled', false).html('<i class="fas fa-brain"></i><span class="d-none d-md-inline ms-1">Analyze</span>');
+                btn.prop('disabled', false).html('<i class="fas fa-brain"></i><span class="d-none d-md-inline ms-1">Research first</span>');
             }
         });
     };
@@ -1168,7 +1358,7 @@ $(document).ready(function () {
     function setAgentStep(msgId, step, state) {
         const $item = $(`#${msgId}_step_${step}`);
         if (!$item.length || $item.data('state') === state) return;
-        $item.data('state', state).removeClass('active completed');
+        $item.data('state', state).removeClass('active completed d-none');
         const $icon = $item.find('.agent-step-icon');
         if (state === 'active') {
             $item.addClass('active');
@@ -1222,6 +1412,9 @@ $(document).ready(function () {
                     <div class="caption-preview-text"></div>
                 </div>`);
             $list.removeClass('d-none').append($item);
+            // The post is what people wait for: fold the research away and bring the draft into view
+            $(`#${msgId}_pipeline_research`).addClass('is-folded');
+            try { $item[0].scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { /* old browsers */ }
         }
         if (!$item.hasClass('is-draft')) return;  // already finished
         smoothText($item.find('.caption-preview-text')[0], text);
@@ -1235,7 +1428,9 @@ $(document).ready(function () {
         if (!$step.length) return;
         let $live = $(`#${msgId}_pipeline_research`);
         if (!$live.length) {
-            $live = $(`<div class="research-live writing pipeline-research" id="${msgId}_pipeline_research" aria-live="polite"></div>`);
+            $live = $(`<div class="research-live writing pipeline-research" id="${msgId}_pipeline_research" aria-live="polite"
+                            title="Click to show or hide the research"></div>`);
+            $live.on('click', function () { $(this).toggleClass('is-folded'); });
             $step.after($live);
         }
         if ($step.hasClass('completed') || $step.data('state') === 'done') $live.removeClass('writing');
@@ -1260,6 +1455,12 @@ $(document).ready(function () {
     function pollGenerationProgress(msgId, progressId) {
         let stopped = false;
         let timer = null;
+        // A running clock, so a long AI answer never looks like a frozen page
+        const started = Date.now();
+        const clock = setInterval(function () {
+            const s = Math.round((Date.now() - started) / 1000);
+            $(`#${msgId}_timer`).text(s < 20 ? `Working... ${s}s` : `Working... ${s}s (usually 30-60s)`);
+        }, 1000);
         (function poll() {
             if (stopped) return;
             $.getJSON(`/api/generate/progress/${encodeURIComponent(progressId)}`)
@@ -1280,6 +1481,7 @@ $(document).ready(function () {
         return function stop() {
             stopped = true;
             clearTimeout(timer);
+            clearInterval(clock);
         };
     }
 
@@ -1420,6 +1622,7 @@ $(document).ready(function () {
         $('.platform-chips-inline input[type="checkbox"]:checked').each(function () {
             platforms.push($(this).val());
         });
+        rememberSetup(platforms);
 
         const tone = $('#toneSelect').val();
         const brandVoice = $('#brandVoiceSelect').val() || 'Standard Enterprise';
@@ -1558,7 +1761,7 @@ $(document).ready(function () {
         const headerIcon = attention ? 'fa-triangle-exclamation text-warning' : 'fa-scale-balanced text-success';
         const headerText = attention
             ? `${attention} compliance item${attention > 1 ? 's' : ''} need${attention > 1 ? '' : 's'} your attention`
-            : flags.length ? `${flags.length} compliance issue${flags.length > 1 ? 's' : ''} auto-fixed` : 'Compliance checked - no issues';
+            : flags.length ? `${flags.length} compliance issue${flags.length > 1 ? 's' : ''} auto-fixed` : 'Compliance checked';
         const flagsHtml = flags.map(f => `
             <li class="mb-1">
                 <span class="badge ${f.auto_fixed ? 'bg-success-subtle text-success' : 'bg-warning-subtle text-warning'} me-1">${f.auto_fixed ? 'Fixed' : 'Action needed'}</span>
@@ -1567,16 +1770,19 @@ $(document).ready(function () {
             </li>`).join('');
         const disclaimersHtml = (compliance.disclaimers_added || []).map(d =>
             `<li class="mb-1"><span class="badge bg-primary-subtle text-primary me-1">Disclaimer added</span>${escapeHtml(d)}</li>`).join('');
+        const added = (compliance.disclaimers_added || []).length;
+        const extra = [`${compliance.rules_checked} rules`, added ? `disclaimer added` : ''].filter(Boolean).join(' · ');
+        // One line when all is well; open by itself when something needs the user
         return `
-            <div class="post-box-card compliance-card">
-                <div class="post-box-header">
-                    <span class="post-box-title"><i class="fas ${headerIcon} me-1"></i>${headerText}</span>
-                    <span class="text-muted small">${compliance.rules_checked} rules checked</span>
+            <details class="compliance-line${attention ? ' needs-attention' : ''}"${attention || compliance.stale ? ' open' : ''}>
+                <summary><i class="fas ${attention ? 'fa-triangle-exclamation' : 'fa-circle-check'} me-1"></i>${headerText}
+                    <span class="compliance-extra">${extra}</span><i class="fas fa-chevron-down compliance-caret"></i></summary>
+                <div class="compliance-body">
+                    ${flagsHtml || disclaimersHtml ? `<ul class="list-unstyled small mb-1">${flagsHtml}${disclaimersHtml}</ul>` : ''}
+                    ${compliance.stale ? '<div class="compliance-stale"><i class="fas fa-clock-rotate-left me-1"></i>Checked before your edit. The caption is checked again when you send it for approval.</div>' : ''}
+                    <div class="text-muted" style="font-size: 0.7rem;">Guidance only, not legal advice.</div>
                 </div>
-                ${flagsHtml || disclaimersHtml ? `<ul class="list-unstyled small mb-1">${flagsHtml}${disclaimersHtml}</ul>` : ''}
-                ${compliance.stale ? '<div class="compliance-stale"><i class="fas fa-clock-rotate-left me-1"></i>Checked before your edit. The caption is checked again when you send it for approval.</div>' : ''}
-                <div class="text-muted" style="font-size: 0.7rem;">Guidance only, not legal advice.</div>
-            </div>`;
+            </details>`;
     }
 
     // Renders a finished image/video card - shared by triggerMediaGenInChat
@@ -1702,7 +1908,7 @@ $(document).ready(function () {
                     <i class="fas fa-network-wired text-primary me-1"></i>Multi-Agent Execution Pipeline
                 </div>
                 <div class="d-flex align-items-center">
-                    <span class="assistant-run-tag me-2">Active Agents</span>
+                    <span class="assistant-run-tag gen-timer me-2" id="${msgId}_timer" aria-live="off">Working...</span>
                     <button class="btn btn-sm btn-outline-danger py-0 px-2 cancel-generation-btn" onclick="cancelGeneration('${msgId}')" title="Cancel generation"><i class="fas fa-times me-1"></i>Cancel</button>
                 </div>
             </div>
@@ -1731,7 +1937,7 @@ $(document).ready(function () {
                 <div class="agent-step-item" id="${msgId}_step_hashtag">
                     <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
                     <span class="agent-step-name"><i class="fas fa-hashtag me-1 text-warning"></i>Hashtag Agent</span>
-                    <span class="agent-step-desc">Curating broad, niche &amp; brand hashtags (runs alongside captions)</span>
+                    <span class="agent-step-desc">Curating broad, niche &amp; brand hashtags (runs alongside the research and captions)</span>
                 </div>
 
                 <div class="agent-step-item" id="${msgId}_step_reviewer">
@@ -1744,6 +1950,13 @@ $(document).ready(function () {
                     <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
                     <span class="agent-step-name"><i class="fas fa-user-shield me-1 text-indigo"></i>Brand Guardrail</span>
                     <span class="agent-step-desc">Verifying the brand-voice persona was never used as the company name</span>
+                </div>
+
+                <!-- Shown only when the user has industry/market rules (server step "compliance") -->
+                <div class="agent-step-item d-none" id="${msgId}_step_compliance">
+                    <div class="agent-step-icon"><i class="fas fa-circle-notch text-muted"></i></div>
+                    <span class="agent-step-name"><i class="fas fa-scale-balanced me-1 text-indigo"></i>Compliance Check</span>
+                    <span class="agent-step-desc">Checking the caption against your industry's advertising rules</span>
                 </div>
             </div>
         `;
@@ -2153,7 +2366,7 @@ $(document).ready(function () {
 
         // This card's Image option follows today's image limit too
         if (window.__imageQuota) window.applyImageQuota(window.__imageQuota);
-        window.applyVideoAccess(window.__videoEnabled);  // and its Video option, the user's video access
+        window.applyVideoAccess(window.__videoEnabled || !!window.__videoLock, window.__videoLock);  // and its Video option, the user's video access
         $(`#${msgId}_researchGenerateBtn`).on('click', function () {
             const platforms = [];
             $(`#${msgId}_researchPlatforms input:checked`).each(function () { platforms.push($(this).val()); });
@@ -2264,20 +2477,26 @@ $(document).ready(function () {
 
                     ${buildComplianceHtml(pData.compliance)}
 
-                    <!-- Hashtags Card -->
-                    <div class="post-box-card">
-                        <div class="post-box-header">
-                            <span class="post-box-title"><i class="fas fa-hashtag me-1"></i>Curated Hashtags</span>
-                            <span class="post-box-actions">
-                                ${editActionsHtml(msgId, p, post, 'tags')}
-                                <button class="btn-copy-sm btn-copy-text" id="${tagsCardId}_copy" data-text="${escapeAttr(post.tags.join(' '))}">
-                                    <i class="fas fa-copy me-1"></i>Copy Tags
-                                </button>
-                            </span>
+                    <!-- Hashtags: one line (the first few), all of them and Edit / Copy on click -->
+                    <details class="hashtag-line">
+                        <summary>
+                            <i class="fas fa-hashtag me-1"></i><strong>${post.tags.length} hashtag${post.tags.length === 1 ? '' : 's'}</strong>
+                            <span class="hashtag-peek">${escapeHtml(post.tags.slice(0, 3).join(' '))}${post.tags.length > 3 ? ` +${post.tags.length - 3} more` : ''}</span>
+                            <i class="fas fa-chevron-down compliance-caret"></i>
+                        </summary>
+                        <div class="post-box-card hashtag-body">
+                            <div class="post-box-header">
+                                <span class="post-box-title"><i class="fas fa-hashtag me-1"></i>Hashtags</span>
+                                <span class="post-box-actions">
+                                    ${editActionsHtml(msgId, p, post, 'tags')}
+                                    <button class="btn-copy-sm btn-copy-text" id="${tagsCardId}_copy" data-text="${escapeAttr(post.tags.join(' '))}">
+                                        <i class="fas fa-copy me-1"></i>Copy Tags
+                                    </button>
+                                </span>
+                            </div>
+                            <div class="hashtags-container" id="${tagsCardId}">${tagsHtml}</div>
                         </div>
-
-                        <div class="hashtags-container" id="${tagsCardId}">${tagsHtml}</div>
-                    </div>
+                    </details>
                     </div>`;
     }
 
@@ -2577,7 +2796,7 @@ $(document).ready(function () {
         // Only real numbers - nothing is shown when a value isn't known (e.g. history items)
         const hasUsage = usage && usage.total_tokens;
         const totalTokens = hasUsage ? Number(usage.total_tokens).toLocaleString() : '';
-        const costUsd = hasUsage ? '$' + Number(usage.cost_usd || 0).toFixed(4) : '';
+        const costUsd = hasUsage ? window.avirMoney(usage.cost_usd, (window.__avirMoney || {}).currency === 'INR' ? 2 : 4) : '';
         const memCount = usage?.memories_referenced || 0;
         const agentsCount = agentsExecuted?.length || 0;
         const checksTotal = qualitySummary?.checks_total || 0;
@@ -2691,21 +2910,14 @@ $(document).ready(function () {
             ${agentBreakdownHtml}
             ${tabsHtml}
             ${panelsHtml}
-            <div class="assistant-card-footer">
-                ${approvalButtonHtml(msgId)}
-                <button class="btn btn-sm btn-outline-secondary btn-preview-post" data-msg="${msgId}" title="See it as it will look on each platform">
-                    <i class="fas fa-eye me-1"></i>Preview post
-                </button>
-                ${scheduleButtonHtml(msgId)}
-                <button class="btn btn-sm btn-outline-primary btn-regenerate" data-msg="${msgId}"
+            ${actionRowHtml(msgId, `
+                <button class="dropdown-item btn-regenerate" data-msg="${msgId}"
                     title="${historyObj.refine ? 'Apply the same change again, as a new version' : 'Write the caption again, as a new version. Your image is kept.'}">
-                    <i class="fas fa-sync-alt me-1"></i>${historyObj.refine ? 'Redo this change' : 'Rewrite caption'}
+                    <i class="fas fa-sync-alt me-2"></i>${historyObj.refine ? 'Redo this change' : 'Rewrite caption'}
                 </button>
-                <button class="btn btn-sm btn-outline-secondary btn-refine-base" data-msg="${msgId}"
-                    title="Your next message will edit this version">
-                    <i class="fas fa-wand-magic-sparkles me-1"></i>${refineBaseMsgId === msgId ? 'Refining this version' : 'Refine this version'}
-                </button>
-            </div>
+                <button class="dropdown-item btn-refine-base" data-msg="${msgId}" title="Your next message will edit this version">
+                    <i class="fas fa-wand-magic-sparkles me-2"></i>${refineBaseMsgId === msgId ? 'Refining this version' : 'Refine this version'}
+                </button>`)}
         `;
 
         elem.find('.assistant-card').html(cardContent);
@@ -2946,6 +3158,10 @@ $(document).ready(function () {
     }
 
     function imageLimitText(q) {
+        if (q.blocked_by === 'month') {
+            return `You've used all the images in your ${q.plan ? q.plan.charAt(0).toUpperCase() + q.plan.slice(1) : ''} plan for this month. `
+                + 'Upgrade your plan or ask your admin for an image pack.';
+        }
         return `You've used your ${q.limit} image${q.limit === 1 ? '' : 's'} for today. `
             + `Your limit resets in ${resetsInText(q.resets_in_seconds)} (midnight UTC). For more, contact your admin.`;
     }
@@ -3013,22 +3229,46 @@ $(document).ready(function () {
 
     // Video is "coming soon" unless an admin switched it on for this user
     // (Admin -> Users -> Image access -> Video); admins always have it.
-    window.applyVideoAccess = function (enabled) {
-        window.__videoEnabled = !!enabled;
+    // lock: null (usable), or {tag, title} - the plan has no video ("Starter"),
+    // or no videos are left ("0 left"); title explains it on hover
+    window.applyVideoAccess = function (enabled, lock) {
+        window.__videoEnabled = !!enabled && !lock;
+        window.__videoLock = lock || null;
         $('.video-gate').each(function () {
             const $input = $(this).find('input');
-            $(this).toggleClass('coming-soon', !enabled).attr('title', enabled ? null : 'Coming soon');
-            $(this).find('.soon-tag').toggleClass('d-none', !!enabled);
-            if (!enabled && $input.prop('checked')) $input.prop('checked', false).trigger('change');
-            $input.prop('disabled', !enabled);
+            const usable = !!enabled && !lock;
+            const tag = !enabled ? 'Soon' : (lock ? lock.tag : '');
+            $(this).toggleClass('coming-soon', !usable)
+                .attr('title', usable ? null : (!enabled ? 'Coming soon' : lock.title));
+            $(this).find('.soon-tag').text(tag).toggleClass('d-none', usable);
+            if (!usable && $input.prop('checked')) $input.prop('checked', false).trigger('change');
+            $input.prop('disabled', !usable);
         });
     };
+
+    // What the Video option should say for this user's plan and video credits
+    function videoLock(r) {
+        const v = r && r.video_quota;
+        if (!v || !v.enabled) return null;
+        if (r.features && r.features.video === false) {
+            const plan = (r.upgrade_plans || {}).video || 'a higher';
+            return { tag: plan, title: `Video is on the ${plan} plan and above` };
+        }
+        if (v.blocked_by === 'month') return { tag: '0 left', title: 'No videos left - ask your admin for a video pack' };
+        return null;
+    }
 
     function loadImageQuota() {
         // kept so an emailed idea waits for it before ticking Image / Video (openEmailedIdea)
         window.__quotaLoaded = $.getJSON('/api/me/image-quota').done(function (r) {
+            window.__planFeatures = (r && r.features) || null;
+            window.__upgradePlans = (r && r.upgrade_plans) || {};
             window.applyImageQuota(r && r.quota);
-            window.applyVideoAccess(!!(r && r.video_quota && r.video_quota.enabled));
+            window.applyVideoAccess(!!(r && r.video_quota && r.video_quota.enabled), videoLock(r));
+            // approval buttons drawn before the plan was known
+            $('.btn-send-approval').each(function () {
+                if (window.__planFeatures && !window.__planFeatures.approvals) $(this).replaceWith(approvalButtonHtml($(this).data('msg')));
+            });
         });
     }
     window.loadImageQuota = loadImageQuota;
@@ -3380,16 +3620,10 @@ $(document).ready(function () {
             ${meta.occasion_auto ? `<div class="preset-brief"><i class="fas fa-calendar-day me-1"></i>Made for the next festival, <strong>${escapeHtml(meta.occasion)}</strong>. For another occasion, type e.g. <em>/festive Eid</em>.</div>` : ''}
             <div class="preset-grid${h.platforms.length > 1 ? ' multi' : ''}">${tiles}</div>
             ${adHtml}${carHtml}
-            <div class="assistant-card-footer">
-                ${approvalButtonHtml(msgId)}
-                <button class="btn btn-sm btn-outline-secondary btn-preview-post" data-msg="${msgId}" title="See it as it will look on each platform">
-                    <i class="fas fa-eye me-1"></i>Preview post
-                </button>
-                ${scheduleButtonHtml(msgId)}
-                <button class="btn btn-sm btn-outline-primary btn-preset-regen" data-msg="${msgId}" title="Create these images again, as a new version (uses today's images)"><i class="fas fa-sync-alt me-1"></i>New images</button>
-                <button class="btn btn-sm btn-outline-secondary btn-refine-base" data-msg="${msgId}" title="Your next message will edit this version">
-                    <i class="fas fa-wand-magic-sparkles me-1"></i>${refineBaseMsgId === msgId ? 'Refining this version' : 'Refine this version'}</button>
-            </div>
+            ${actionRowHtml(msgId, `
+                <button class="dropdown-item btn-preset-regen" data-msg="${msgId}" title="Create these images again, as a new version (uses today's images)"><i class="fas fa-sync-alt me-2"></i>New images</button>
+                <button class="dropdown-item btn-refine-base" data-msg="${msgId}" title="Your next message will edit this version">
+                    <i class="fas fa-wand-magic-sparkles me-2"></i>${refineBaseMsgId === msgId ? 'Refining this version' : 'Refine this version'}</button>`)}
             <div class="preset-tip"><i class="fas fa-lightbulb me-1"></i>Want a change? Just type it - e.g. "make the background darker".</div>`);
 
         elem.find('.gen-prev, .gen-next').on('click', function () {
@@ -3419,14 +3653,41 @@ $(document).ready(function () {
         });
     }
 
+    // The row under a post: ONE main action (Schedule), the other real choices
+    // as quiet buttons, and edits tucked into "More" - fewer equal options
+    // make the next step obvious.
+    function actionRowHtml(msgId, moreItems) {
+        return `
+            <div class="assistant-card-footer action-row">
+                ${scheduleButtonHtml(msgId)}
+                ${approvalButtonHtml(msgId)}
+                <button class="btn btn-sm btn-quiet btn-preview-post" data-msg="${msgId}" title="See it as it will look on each platform">
+                    <i class="fas fa-eye me-1"></i>Preview
+                </button>
+                <div class="dropdown action-more">
+                    <button class="btn btn-sm btn-quiet" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="More actions">
+                        <i class="fas fa-ellipsis me-1"></i>More
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-end">${moreItems}</div>
+                </div>
+            </div>`;
+    }
+
     // "Send for approval" (static/js/approval_send.js): after sending, the
     // button becomes a link to the request
     function approvalButtonHtml(msgId) {
         const h = window.chatHistory[msgId] || {};
         const sent = h.approval && h.approval[h.currentIndex];
-        return sent
-            ? `<a class="btn btn-sm btn-outline-success" href="/approve/${sent}" target="_blank" rel="noopener"><i class="fas fa-check me-1"></i>Sent for approval · View</a>`
-            : `<button class="btn btn-sm btn-outline-primary btn-send-approval" data-msg="${msgId}"><i class="fas fa-paper-plane me-1"></i>Send for approval</button>`;
+        if (sent) {
+            return `<a class="btn btn-sm btn-outline-success" href="/approve/${sent}" target="_blank" rel="noopener"><i class="fas fa-check me-1"></i>Sent for approval · View</a>`;
+        }
+        // Approvals come with some plans only (see /api/me/image-quota features)
+        if (window.__planFeatures && !window.__planFeatures.approvals) {
+            const plan = (window.__upgradePlans || {}).approvals || 'a higher';
+            return `<a class="btn btn-sm btn-outline-secondary btn-plan-locked" href="/settings#plan"
+                       title="Approvals are on the ${escapeAttr(plan)} plan and above"><i class="fas fa-lock me-1"></i>Send for approval<span class="plan-chip">${escapeHtml(plan)}</span></a>`;
+        }
+        return `<button class="btn btn-sm btn-quiet btn-send-approval" data-msg="${msgId}"><i class="fas fa-paper-plane me-1"></i>Send for approval</button>`;
     }
 
     function openApproval(msgId) {
@@ -3457,14 +3718,39 @@ $(document).ready(function () {
             const when = new Date(planned.at).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
             return `<a class="btn btn-sm btn-outline-success btn-scheduled" href="/calendar" title="Open the calendar to move or cancel it"><i class="fas fa-calendar-check me-1"></i>Scheduled · ${escapeHtml(when)}</a>`;
         }
-        if (!window.SCHEDULING_ENABLED) {  // switched on with STUDIO_SCHEDULING=true (config.py)
-            return `<span class="coming-soon btn-schedule-soon" title="Coming soon">
-                    <button class="btn btn-sm btn-outline-success" disabled>
-                        <i class="fas fa-calendar-plus me-1"></i>Schedule<span class="soon-tag">Soon</span>
-                    </button>
-                </span>`;
-        }
-        return `<button class="btn btn-sm btn-outline-success btn-schedule-post" data-msg="${msgId}" title="Publish it by itself at a time you choose"><i class="fas fa-calendar-plus me-1"></i>Schedule</button>`;
+        if (!window.SCHEDULING_ENABLED) return '';  // switched off with STUDIO_SCHEDULING=false: no dead-end button
+        return `<button class="btn btn-sm btn-primary-action btn-schedule-post" data-msg="${msgId}" title="Publish it by itself at a time you choose"><i class="fas fa-calendar-plus me-1"></i>Schedule post</button>`;
+    }
+
+    // After scheduling: a clear "done" moment - when and where it goes out,
+    // where the week stands, and one obvious next step.
+    function showScheduledCard(msgId, post) {
+        const names = { linkedin: 'LinkedIn', facebook: 'Facebook', instagram: 'Instagram', youtube: 'YouTube' };
+        const where = (post.platforms || []).map(p => names[p] || p);
+        const when = new Date(post.scheduled_at_iso).toLocaleString(undefined, { weekday: 'long', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+        const p = window.__weekProgress;
+        const goalLine = !p ? '' : p.goal_met
+            ? `<div class="sched-goal is-met"><i class="fas fa-trophy me-1"></i>Weekly goal reached: ${p.done} posts this week${p.streak_weeks > 1 ? ` &middot; ${p.streak_weeks}-week streak` : ''}</div>`
+            : `<div class="sched-goal"><span class="sched-goal-dots">${Array.from({ length: p.goal }, (_, i) => `<i class="${i < p.done ? 'on' : ''}"></i>`).join('')}</span>
+                   ${p.done} of ${p.goal} posts this week &middot; <strong>${p.remaining} to go</strong></div>`;
+        const $card = $(`
+            <div class="sched-success" role="status">
+                <div class="sched-success-head"><span class="sched-check"><i class="fas fa-check"></i></span>
+                    <div><strong>Scheduled</strong>
+                        <div class="sched-when">${escapeHtml(when)}${where.length ? ' on ' + escapeHtml(where.join(', ')) : ''}. It goes out by itself.</div></div></div>
+                ${goalLine}
+                <div class="sched-actions">
+                    <button type="button" class="btn btn-sm btn-primary-action sched-next"><i class="fas fa-plus me-1"></i>Start the next post</button>
+                    <a class="btn btn-sm btn-quiet" href="/calendar"><i class="fas fa-calendar-days me-1"></i>See calendar</a>
+                </div>
+            </div>`);
+        $(`#${msgId} .sched-success`).remove();
+        $(`#${msgId} .action-row`).after($card);
+        $card.find('.sched-next').on('click', function () {
+            startNewChat(true);
+            $('#storyInput').trigger('focus');
+        });
+        try { $card[0].scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { /* old browsers */ }
     }
 
     function refreshScheduleButton(msgId) {
@@ -3485,6 +3771,7 @@ $(document).ready(function () {
                 h.scheduled = h.scheduled || {};
                 h.scheduled[h.currentIndex] = { id: post.id, at: post.scheduled_at_iso };
                 refreshScheduleButton(msgId);
+                showScheduledCard(msgId, post);
             },
         });
     }
@@ -3528,8 +3815,9 @@ $(document).ready(function () {
     // so the badge is updated again when each one is done - see addMediaCost)
     function costBadgeInner(usage) {
         const media = Number(usage.media_cost_usd || 0);
-        return `<i class="fas fa-bolt text-warning me-1"></i>${Number(usage.total_tokens || 0).toLocaleString()} tok | $${Number(usage.cost_usd || 0).toFixed(4)}`
-            + (media > 0 ? `<span class="cost-media-note"> · incl. ${usage.media_count > 1 ? usage.media_count + ' images' : 'image'} $${media.toFixed(2)}</span>` : '');
+        const inr = (window.__avirMoney || {}).currency === 'INR';
+        return `<i class="fas fa-bolt text-warning me-1"></i>${Number(usage.total_tokens || 0).toLocaleString()} tok | ${window.avirMoney(usage.cost_usd, inr ? 2 : 4)}`
+            + (media > 0 ? `<span class="cost-media-note"> · incl. ${usage.media_count > 1 ? usage.media_count + ' images' : 'image'} ${window.avirMoney(media)}</span>` : '');
     }
 
     // The server already adds the image's cost to the saved run (credits);
@@ -3564,9 +3852,17 @@ $(document).ready(function () {
                 image_path: imagePath,
                 image_prompt: mediaType === 'image' ? mediaPrompt : undefined,
                 video_prompt: mediaType === 'video' ? mediaPrompt : undefined,
-                share_with_platforms: shareWith.length ? shareWith : undefined
+                share_with_platforms: shareWith.length ? shareWith : undefined,
+                background: true  // made in the background; this page checks /api/media-jobs/<id>
             }),
             success: function (res) {
+                if (res.job_id) { followMediaJob(res.job_id, showMediaResult); return; }
+                showMediaResult(res);
+            },
+            error: function (xhr) { showMediaError(xhr); }
+        });
+
+        function showMediaResult(res) {
                 const slot = $('#' + targetSlotId);
                 if (res.success && res.url) {
                     // Record the media on the message's own content, so a
@@ -3615,8 +3911,9 @@ $(document).ready(function () {
                     slot.html(failHtml);
                     shareWith.forEach(p => $(`#${msgId}_media_image_${p}`).html(failHtml));
                 }
-            },
-            error: function (xhr) {
+        }
+
+        function showMediaError(xhr) {
                 const body = xhr.responseJSON || {};
                 if (xhr.status === 403 && body.code === 'image_limit_reached') {
                     const card = imageLimitCardHtml(body.quota || window.__imageQuota || {});
@@ -3625,7 +3922,7 @@ $(document).ready(function () {
                     window.applyImageQuota(body.quota);
                     return;
                 }
-                if (xhr.status === 403 && (body.code === 'video_limit_reached' || body.code === 'video_not_enabled')) {
+                if (xhr.status === 403 && ['video_limit_reached', 'video_not_enabled', 'video_pack_needed'].includes(body.code)) {
                     $('#' + targetSlotId).html(`
                         <div class="alert alert-warning py-2 px-3 small mt-2">
                             <i class="fas fa-hourglass-half me-1"></i>${escapeHtml(body.error || 'Video is not available right now.')}
@@ -3641,8 +3938,29 @@ $(document).ready(function () {
                 `;
                 $('#' + targetSlotId).html(errHtml);
                 shareWith.forEach(p => $(`#${msgId}_media_image_${p}`).html(errHtml));
-            }
-        });
+        }
+    }
+
+    // A background render (services/media_jobs.py): checked every few seconds
+    // until it is done. A dropped connection is retried; the result is also
+    // saved on the post, so reopening the conversation later shows it.
+    function followMediaJob(jobId, done) {
+        let misses = 0;
+        (function check() {
+            $.getJSON(`/api/media-jobs/${encodeURIComponent(jobId)}`)
+                .done(function (job) {
+                    misses = 0;
+                    if (job.status === 'done') return done(job.result || { success: false });
+                    if (job.status === 'failed') return done({ success: false, error: job.error || 'The image or video could not be made.' });
+                    setTimeout(check, 3000);
+                })
+                .fail(function (xhr) {
+                    if (xhr.status === 404 || ++misses > 20) {
+                        return done({ success: false, error: 'Lost track of this one. Reopen the conversation in a minute to see it.' });
+                    }
+                    setTimeout(check, 5000);
+                });
+        })();
     }
 
     // ── Copy to Clipboard ──────────────────────────────────────────────
@@ -3790,16 +4108,14 @@ $(document).ready(function () {
     }
 
     function archiveRun(runId) {
-        $.ajax({
+        const $card = $(`.history-card[data-id="${runId}"]`);
+        window.withUndo({
+            message: 'Conversation archived.',
             url: `/api/conversations/${runId}/archive`,
-            type: 'POST',
-            success: function () {
-                showToast('Conversation archived', 'info');
-                renderHistory();
-            },
-            error: function () {
-                showToast('Failed to archive conversation', 'error');
-            }
+            hide: () => $card.slideUp(150),
+            restore: () => $card.slideDown(150),
+            done: () => renderHistory(),
+            failed: () => showToast('Failed to archive conversation', 'error'),
         });
     }
 
@@ -4017,7 +4333,7 @@ $(document).ready(function () {
             url: '/api/credit-requests',
             type: 'POST',
             contentType: 'application/json',
-            data: JSON.stringify({ requested_amount: amount, reason: reason }),
+            data: JSON.stringify({ requested_amount: amount, reason: reason, currency: $('#creditRequestForm').data('currency') || 'USD' }),
             success: function (r) {
                 if (r.success) {
                     showToast(r.message || 'Credit extension request submitted to admin!', 'success');
@@ -4522,19 +4838,15 @@ $(document).ready(function () {
     }
 
     window.cancelScheduledPostItem = function (postId) {
-        if (!confirm('Are you sure you want to cancel this scheduled post?')) return;
-        $.ajax({
+        // Undo instead of "Are you sure?" (static/js/undo.js)
+        const $row = $(`[onclick="cancelScheduledPostItem(${postId})"]`).closest('tr, .sp-item, .sp-row, li');
+        window.withUndo({
+            message: 'Scheduled post cancelled.',
             url: `/api/social/scheduled/${postId}/cancel`,
-            type: 'POST',
-            success: function (r) {
-                if (r.success) {
-                    showToast('Scheduled post cancelled', 'info');
-                    loadScheduledPosts();
-                }
-            },
-            error: function () {
-                showToast('Failed to cancel scheduled post', 'error');
-            }
+            hide: () => $row.fadeOut(150),
+            restore: () => $row.fadeIn(150),
+            done: () => loadScheduledPosts(),
+            failed: () => showToast('Failed to cancel scheduled post', 'error'),
         });
     };
 
@@ -4582,109 +4894,6 @@ $(document).ready(function () {
         });
     });
 
-    // ── AI Models & Purpose Inspector Handler ─────────────────────────────
-    $('#headerModelInfoBtn').on('click', function () {
-        openModelArchitectureModal();
-    });
-
-    function openModelArchitectureModal() {
-        const modalElem = document.getElementById('modelArchitectureModal');
-        if (modalElem) {
-            const modal = bootstrap.Modal.getOrCreateInstance(modalElem);
-            modal.show();
-            loadModelsInfoData();
-        }
-    }
-
-    function loadModelsInfoData() {
-        $.ajax({
-            url: '/api/models/info',
-            type: 'GET',
-            success: function (r) {
-                if (!r.success || !r.models) return;
-
-                const summary = r.summary || {};
-                const categoryIcons = {
-                    llm: { icon: 'fa-brain', class: 'cat-llm' },
-                    vision: { icon: 'fa-eye', class: 'cat-vision' },
-                    image: { icon: 'fa-image', class: 'cat-image' },
-                    video: { icon: 'fa-video', class: 'cat-video' },
-                    memory: { icon: 'fa-database', class: 'cat-memory' }
-                };
-
-                let html = `
-                    <div class="col-12 mb-2">
-                        <div class="runtime-metrics-bar p-3 bg-slate-50 border rounded-3 d-flex flex-wrap align-items-center justify-content-between gap-3">
-                            <div class="d-flex align-items-center gap-2">
-                                <span class="badge bg-success-subtle text-success border border-success-subtle px-2.5 py-1.5 font-bold fs-8">
-                                    <i class="fas fa-circle-check me-1"></i>Runtime Active
-                                </span>
-                                <span class="text-slate-600 font-semibold fs-7">
-                                    AWS Region: <strong class="text-navy">${escapeHtml(summary.aws_region || 'us-east-1')}</strong>
-                                </span>
-                            </div>
-                            <div class="d-flex gap-4 fs-7">
-                                <div><span class="text-slate-500">User Runs:</span> <strong class="text-navy">${summary.total_user_runs || 0}</strong></div>
-                                <div><span class="text-slate-500">Tokens:</span> <strong class="text-navy font-monospace">${Number(summary.total_tokens_used || 0).toLocaleString()}</strong></div>
-                                <div><span class="text-slate-500">Cost USD:</span> <strong class="text-emerald font-monospace">$${Number(summary.total_cost_usd || 0).toFixed(4)}</strong></div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-
-                r.models.forEach(m => {
-                    const iconMeta = categoryIcons[m.category] || { icon: 'fa-microchip', class: 'cat-llm' };
-                    const agentTags = (m.agents || []).map(a => `<span class="agent-pill-tag">${a}</span>`).join(' ');
-
-                    const statusBadges = {
-                        ACTIVE: '<span class="badge bg-success text-white"><i class="fas fa-circle me-1 fs-9"></i>ACTIVE</span>',
-                        ONLINE: '<span class="badge bg-primary text-white"><i class="fas fa-signal me-1 fs-9"></i>ONLINE</span>',
-                        STANDBY: '<span class="badge bg-secondary text-white"><i class="fas fa-pause me-1 fs-9"></i>STANDBY</span>'
-                    };
-
-                    html += `
-                        <div class="col-md-6 col-lg-4">
-                            <div class="model-purpose-card">
-                                <div class="d-flex align-items-center justify-content-between mb-3">
-                                    <div class="d-flex align-items-center gap-3">
-                                        <div class="cat-icon-box ${iconMeta.class}">
-                                            <i class="fas ${iconMeta.icon}"></i>
-                                        </div>
-                                        <div>
-                                            <h6 class="font-bold text-navy mb-0">${escapeHtml(m.purpose)}</h6>
-                                            <small class="text-primary font-semibold">${escapeHtml(m.provider)}</small>
-                                        </div>
-                                    </div>
-                                    ${statusBadges[m.status] || '<span class="badge bg-info text-white">ONLINE</span>'}
-                                </div>
-                                <div class="mb-3">
-                                    <span class="small text-slate-500 d-block mb-1">Active Model Slug:</span>
-                                    <span class="slug-badge"><i class="fas fa-code-branch me-1 text-slate-400"></i>${escapeHtml(m.model_name)}</span>
-                                </div>
-                                <p class="small text-slate-600 mb-3 flex-grow-1" style="font-size: 12px; line-height: 1.5;">${escapeHtml(m.description)}</p>
-                                <div class="pt-2 border-top">
-                                    <small class="text-slate-500 font-semibold d-block mb-2">Assigned Agents &amp; Services:</small>
-                                    <div class="d-flex gap-1 flex-wrap">
-                                        ${agentTags}
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    `;
-                });
-
-                $('#modelsInfoCardsContainer').html(html);
-            },
-            error: function () {
-                $('#modelsInfoCardsContainer').html(`
-                    <div class="col-12 text-center py-5 text-danger">
-                        <i class="fas fa-triangle-exclamation fa-2x mb-2"></i>
-                        <p>Failed to load dynamic AI Model architecture information.</p>
-                    </div>
-                `);
-            }
-        });
-    }
 
 
 

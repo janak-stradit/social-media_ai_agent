@@ -1,13 +1,40 @@
 from functools import wraps
 
-from flask import jsonify, redirect, request, session, url_for
+from flask import g, has_request_context, jsonify, redirect, request, session, url_for
 
 from db import get_user_by_id
 
 
 def get_current_user_id() -> int | None:
+    """The signed-in user: from a verified API bearer token (app.py
+    _bearer_token_sign_in), else from the browser's session cookie."""
+    token_user_id = g.get("token_user_id") if has_request_context() else None
+    if token_user_id is not None:
+        return token_user_id
     user_id = session.get("user_id")
     return int(user_id) if user_id is not None else None
+
+
+def start_session(user_id: int) -> None:
+    """Signs this browser in as the user (after session.clear()). The cookie
+    carries the account's session version, so raising it signs it out."""
+    from db import get_session_version
+
+    session["user_id"] = user_id
+    session["sv"] = get_session_version(user_id) or 0
+    session.permanent = True
+
+
+def session_is_current() -> bool:
+    """False when the signed-in account was deleted or its sessions were ended
+    since this cookie was issued (app.py checks it on every request)."""
+    user_id = get_current_user_id()
+    if not user_id:
+        return True
+    from db import get_session_version
+
+    version = get_session_version(user_id)
+    return version is not None and int(session.get("sv", 0)) == version
 
 
 def login_required_api(view):
@@ -20,6 +47,14 @@ def login_required_api(view):
     return wrapped
 
 
+def admin_needs_2fa(user) -> bool:
+    """An admin who hasn't turned on two-step sign-in, while it is required."""
+    from config import Config
+
+    return bool(Config.ADMIN_2FA_REQUIRED and getattr(user, "is_admin", False)
+                and getattr(user, "totp_enabled_at", None) is None)
+
+
 def admin_required_api(view):
     @wraps(view)
     def wrapped(*args, **kwargs):
@@ -29,6 +64,9 @@ def admin_required_api(view):
         user = get_user_by_id(user_id)
         if not user or not getattr(user, "is_admin", False):
             return jsonify({"error": "Admin access required", "success": False}), 403
+        if admin_needs_2fa(user):
+            return jsonify({"error": "Turn on two-step sign-in (Settings -> Security) to use admin tools.",
+                            "code": "admin_2fa_required", "success": False}), 403
         return view(*args, **kwargs)
 
     return wrapped
@@ -89,6 +127,8 @@ def admin_required_page(view):
         user = get_user_by_id(user_id) if user_id else None
         if not user or not getattr(user, "is_admin", False):
             return redirect(url_for("index"))
+        if admin_needs_2fa(user):
+            return redirect("/settings#security")
         return view(*args, **kwargs)
 
     return wrapped

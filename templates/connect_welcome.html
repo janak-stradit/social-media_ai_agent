@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Connect {{ name }} - AVIR AI</title>
+    <link rel="icon" href="{{ url_for('static', filename='img/favicon.svg') }}" type="image/svg+xml">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* One-click connect: a short "you're about to sign in on <network>" step
+           before the network's own sign-in (services/social_oauth_service.py) */
+        :root { --ink: #0f172a; --sub: #64748b; --line: #e2e8f0; --bg: #f5f3ef; --card: #fff; --brand: #ea580c; }
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px;
+               background: var(--bg); font-family: Inter, system-ui, sans-serif; color: var(--ink); }
+        .card { width: 100%; max-width: 420px; background: var(--card); border: 1px solid var(--line);
+                border-radius: 18px; overflow: hidden; box-shadow: 0 10px 30px rgba(15, 23, 42, .06); }
+        .hero { display: flex; align-items: center; justify-content: center; gap: 18px; padding: 34px 20px;
+                background: radial-gradient(circle at 15% 30%, #fde3d3 0, transparent 45%),
+                            radial-gradient(circle at 85% 70%, #fde3d3 0, transparent 45%), #f4efe9; }
+        .logo { width: 68px; height: 68px; border-radius: 16px; display: grid; place-items: center;
+                font-size: 32px; color: #fff; box-shadow: 0 6px 16px rgba(0, 0, 0, .12); }
+        .logo.avir { background: none; overflow: hidden; }
+        .logo.avir img { width: 100%; height: 100%; display: block; }
+        .logo.facebook { background: #1877f2; }
+        .logo.instagram { background: linear-gradient(45deg, #f09433, #dc2743 50%, #bc1888); }
+        .logo.linkedin { background: #0a66c2; }
+        .logo.youtube { background: #ff0000; }
+        .dots { display: flex; gap: 5px; }
+        .dots span { width: 6px; height: 6px; border-radius: 50%; background: #94a3b8; animation: pulse 1.2s infinite; }
+        .dots span:nth-child(2) { animation-delay: .2s; } .dots span:nth-child(3) { animation-delay: .4s; }
+        @keyframes pulse { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
+        .body { padding: 26px 28px 28px; text-align: center; }
+        h1 { font-size: 1.45rem; line-height: 1.3; margin: 0 0 6px; }
+        .by { color: var(--sub); font-size: .85rem; margin-bottom: 20px; }
+        .points { text-align: left; border: 1px solid var(--line); border-radius: 12px; padding: 6px 14px; margin-bottom: 18px; }
+        .points div { display: flex; gap: 12px; align-items: flex-start; padding: 9px 0; font-size: .9rem; }
+        .points i { color: var(--brand); margin-top: 3px; width: 16px; text-align: center; }
+        .hint { color: var(--sub); font-size: .8rem; margin-bottom: 14px; }
+        .go { display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 14px;
+              border: 0; border-radius: 10px; background: var(--ink); color: #fff; font: 600 1rem Inter, sans-serif;
+              text-decoration: none; cursor: pointer; }
+        .go:hover { background: #1e293b; }
+        .back { display: inline-block; margin-top: 14px; color: var(--sub); font-size: .85rem; }
+        @media (prefers-color-scheme: dark) {
+            :root { --ink: #f1f5f9; --sub: #94a3b8; --line: #334155; --bg: #0b1120; --card: #111827; }
+            .hero { background: #1f2937; } .go { background: #f1f5f9; color: #0f172a; } .go:hover { background: #e2e8f0; }
+        }
+    </style>
+</head>
+<body>
+    <main class="card">
+        <div class="hero" aria-hidden="true">
+            <div class="logo avir"><img src="{{ url_for('static', filename='img/favicon.svg') }}" alt="AVIR AI"></div>
+            <div class="dots"><span></span><span></span><span></span></div>
+            <div class="logo {{ provider_icon }}"><i class="fab fa-{{ fa_icon }}"></i></div>
+        </div>
+        <div class="body">
+            <h1>AVIR AI wants to connect to your {{ name }}</h1>
+            <div class="by">You sign in on {{ name }} itself. AVIR AI never sees your password.</div>
+            <div class="points">
+                {% for icon, text in points %}
+                <div><i class="fas fa-{{ icon }}"></i><span>{{ text }}</span></div>
+                {% endfor %}
+            </div>
+            <div class="hint" id="hint">Taking you to {{ name }} to sign in...</div>
+            <a class="go" id="go" href="{{ start_url }}"><i class="fab fa-{{ fa_icon }}"></i>Continue with {{ name }}</a>
+            <a class="back" href="/settings">Cancel</a>
+        </div>
+    </main>
+    <script>
+        // Like other connect pages: carry on to the sign-in by itself after a moment
+        (function () {
+            var go = document.getElementById('go');
+            var timer = setTimeout(function () {
+                go.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i>Connecting';
+                window.location.href = go.getAttribute('href');
+            }, 1800);
+            document.querySelector('.back').addEventListener('click', function () { clearTimeout(timer); });
+        })();
+    </script>
+</body>
+</html>

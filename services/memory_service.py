@@ -9,6 +9,9 @@ from db import MemoryEmbedding, Session, engine
 
 logger = logging.getLogger(__name__)
 
+# The most recent memories one search compares (per user); older ones still exist
+MAX_MEMORIES_SEARCHED = 500
+
 
 def cosine_similarity(v1, v2):
     dot_product = np.dot(v1, v2)
@@ -41,12 +44,14 @@ class MemoryService:
             if not embedding_vector:
                 return
 
+            owner = str((metadata or {}).get("user_id") or "")
             with Session(engine) as session:
                 emb = MemoryEmbedding(
                     id=str(content_id),
                     content=text,
                     metadata_json=json.dumps(metadata or {}),
-                    embedding_array=json.dumps(embedding_vector)
+                    embedding_array=json.dumps(embedding_vector),
+                    user_id=int(owner) if owner.isdigit() else 0,
                 )
                 session.merge(emb)
                 session.commit()
@@ -91,7 +96,8 @@ class MemoryService:
                     id=doc_id,
                     content=doc_text,
                     metadata_json=json.dumps(meta),
-                    embedding_array=json.dumps(embedding_vector)
+                    embedding_array=json.dumps(embedding_vector),
+                    user_id=int(user_id) if str(user_id or "").isdigit() else 0,
                 )
                 session.merge(emb)
                 session.commit()
@@ -111,14 +117,22 @@ class MemoryService:
             query_vector = np.array(query_embedding)
 
             with Session(engine) as session:
-                all_memories = session.query(MemoryEmbedding).all()
+                # Only this user's memories, filtered by the database (indexed),
+                # and only the most recent ones - the search stays fast however
+                # many users and posts there are
+                owner = int(user_id) if str(user_id or "").isdigit() else 0
+                all_memories = (
+                    session.query(MemoryEmbedding)
+                    .filter(MemoryEmbedding.user_id == owner)
+                    .order_by(MemoryEmbedding.created_at.desc())
+                    .limit(MAX_MEMORIES_SEARCHED)
+                    .all()
+                )
                 scored_memories = []
                 for mem in all_memories:
                     try:
                         meta = json.loads(mem.metadata_json or "{}")
-                        if user_id and meta.get("user_id") != str(user_id):
-                            continue
-                            
+
                         mem_vec = np.array(json.loads(mem.embedding_array))
                         score = cosine_similarity(query_vector, mem_vec)
                         scored_memories.append((score, mem.content, meta))

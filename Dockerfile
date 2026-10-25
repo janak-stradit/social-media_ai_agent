@@ -69,10 +69,11 @@ EXPOSE 5000
 # Web server (logging and other settings that belong with the code: gunicorn.conf.py).
 # --timeout 1900: a generation (LLM + image/video) can run for minutes - a
 # minimax-h3 video is given 1800 s (media_service._heyroute_video_timeout);
-# gunicorn's default 30 s would kill it. Workers come from WEB_CONCURRENCY (default 2).
+# gunicorn's default 30 s would kill it. Workers come from WEB_CONCURRENCY (default 2);
+# threads per worker from GUNICORN_THREADS (default 16, gunicorn.conf.py).
 # The scheduler runs in its own container (command: python scripts/run_scheduler.py),
 # so the web container must run with SCHEDULER_ENABLED=false (set in the compose file).
-CMD ["gunicorn", "--worker-class", "gthread", "--threads", "4", \
+CMD ["gunicorn", "--worker-class", "gthread", \
      "--timeout", "1900", "--graceful-timeout", "60", \
      "--bind", "0.0.0.0:5000", "--config", "gunicorn.conf.py", \
      "app:create_app(\"production\")"]

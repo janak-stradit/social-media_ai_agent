@@ -41,6 +41,11 @@ jobs:
       - name: Bandit (security scan)
         run: bandit -c pyproject.toml -r .
 
+      - name: pip-audit (known vulnerabilities in dependencies)
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt --progress-spinner off
+
   frontend-lint:
     name: Frontend Lint
     runs-on: ubuntu-latest

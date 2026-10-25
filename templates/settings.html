@@ -51,7 +51,7 @@
             <button class="bc-nav-item active" id="connected-accounts-tab" data-bs-toggle="tab" data-bs-target="#connected-accounts-pane" type="button" role="tab" aria-controls="connected-accounts-pane" aria-selected="true">
                 <i class="fas fa-link"></i>Connected Accounts
             </button>
-            <button class="bc-nav-item" id="setup-guides-tab" data-bs-toggle="tab" data-bs-target="#setup-guides-pane" type="button" role="tab" aria-controls="setup-guides-pane" aria-selected="false">
+            <button class="bc-nav-item d-none" id="setup-guides-tab" data-bs-toggle="tab" data-bs-target="#setup-guides-pane" type="button" role="tab" aria-controls="setup-guides-pane" aria-selected="false">
                 <i class="fas fa-book-open"></i>Connection Guides
             </button>
             <button class="bc-nav-item" id="scheduled-posts-tab" data-bs-toggle="tab" data-bs-target="#scheduled-posts-pane" type="button" role="tab" aria-controls="scheduled-posts-pane" aria-selected="false">
@@ -59,6 +59,12 @@
             </button>
             <button class="bc-nav-item" id="notifications-tab" data-bs-toggle="tab" data-bs-target="#notifications-pane" type="button" role="tab" aria-controls="notifications-pane" aria-selected="false">
                 <i class="fas fa-bell"></i>Notifications
+            </button>
+            <button class="bc-nav-item" id="security-tab" data-bs-toggle="tab" data-bs-target="#security-pane" type="button" role="tab" aria-controls="security-pane" aria-selected="false">
+                <i class="fas fa-shield-halved"></i>Security
+            </button>
+            <button class="bc-nav-item" id="plan-tab" data-bs-toggle="tab" data-bs-target="#plan-pane" type="button" role="tab" aria-controls="plan-pane" aria-selected="false">
+                <i class="fas fa-gem"></i>Plan &amp; usage
             </button>
         </nav>
     </aside>
@@ -106,139 +112,32 @@
                 <div class="tab-pane fade show active" id="connected-accounts-pane" role="tabpanel" aria-labelledby="connected-accounts-tab">
                   <div class="brand-config-card settings-pane-card">
                     <h6><div class="card-icon-circle"><i class="fas fa-link"></i></div> Connected Accounts</h6>
-                    <div class="brand-config-card-desc" id="accountsIntro">Add the credentials for each platform you publish to, then verify the connection.</div>
+                    <div class="brand-config-card-desc" id="accountsIntro">Connect the accounts you post to. Click Connect, sign in on the platform and approve - nothing to copy.</div>
                     <!-- What the last one-click sign-in did (settings.js: showOAuthResult) -->
                     <div class="oauth-banner d-none" id="oauthBanner" role="status"></div>
-                    <div class="row g-4">
-                        <!-- Facebook Account Card -->
-                        <div class="col-md-4">
-                            <div class="social-account-card card-facebook">
-                                <div class="d-flex align-items-center justify-content-between mb-3">
-                                    <div class="d-flex align-items-center gap-2">
-                                        <div class="platform-icon-circle bg-fb"><i class="fab fa-facebook-f"></i></div>
-                                        <div>
-                                            <h6 class="mb-0 font-bold text-navy">Facebook Page</h6>
-                                            <small class="text-slate-500">Meta Graph API</small>
-                                        </div>
-                                    </div>
-                                    <span class="status-badge badge-disconnected" id="fbStatusBadge"><i class="fas fa-circle-xmark me-1"></i>Not Connected</span>
-                                </div>
-                                <div class="account-details-box mb-3">
-                                    <div class="small text-slate-500 mb-1">Connected Page: <strong class="text-navy" id="fbAccountName">—</strong></div>
-                                    <div class="small text-slate-500">Page ID: <span class="font-monospace text-slate-600" id="fbAccountId">—</span></div>
-                                </div>
-                                <!-- One-click sign-in: shown when the Facebook app is set up (settings.js: setupOAuth) -->
-                                <a class="oauth-connect-btn oauth-facebook d-none" data-oauth="facebook" href="/api/social/oauth/facebook/start">
-                                    <i class="fab fa-facebook me-2"></i>Connect with Facebook
-                                </a>
-                                <div class="d-flex gap-2">
-                                    <button type="button" class="btn-xs-outline-info flex-fill justify-content-center" onclick="openConnectModal('facebook')">
-                                        <i class="fas fa-key me-1"></i><span data-manual="facebook">Configure</span>
-                                    </button>
-                                    <button type="button" class="btn-xs-outline-info" onclick="testLiveAccountConnection('facebook')">
-                                        <i class="fas fa-network-wired me-1"></i>Verify API
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
+                    <!-- One simple card per network (settings.js renderSocialCards) -->
+                    <div class="social-cards" id="socialCards" aria-live="polite"></div>
 
-                        <!-- Instagram Business Card -->
-                        <div class="col-md-4">
-                            <div class="social-account-card card-instagram">
-                                <div class="d-flex align-items-center justify-content-between mb-3">
-                                    <div class="d-flex align-items-center gap-2">
-                                        <div class="platform-icon-circle bg-ig"><i class="fab fa-instagram"></i></div>
-                                        <div>
-                                            <h6 class="mb-0 font-bold text-navy">Instagram Business</h6>
-                                            <small class="text-slate-500">Instagram Graph API</small>
-                                        </div>
-                                    </div>
-                                    <span class="status-badge badge-disconnected" id="igStatusBadge"><i class="fas fa-circle-xmark me-1"></i>Not Connected</span>
-                                </div>
-                                <div class="account-details-box mb-3">
-                                    <div class="small text-slate-500 mb-1">Connected Handle: <strong class="text-navy" id="igAccountName">—</strong></div>
-                                    <div class="small text-slate-500">Business ID: <span class="font-monospace text-slate-600" id="igAccountId">—</span></div>
-                                </div>
-                                <!-- One-click sign-in: shown when the Facebook app is set up (settings.js: setupOAuth) -->
-                                <a class="oauth-connect-btn oauth-facebook d-none" data-oauth="facebook" href="/api/social/oauth/facebook/start">
-                                    <i class="fab fa-facebook me-2"></i>Connect through Facebook
-                                </a>
-                                <div class="d-flex gap-2">
-                                    <button type="button" class="btn-xs-outline-info flex-fill justify-content-center" onclick="openConnectModal('instagram')">
-                                        <i class="fas fa-key me-1"></i><span data-manual="facebook">Configure</span>
-                                    </button>
-                                    <button type="button" class="btn-xs-outline-info" onclick="testLiveAccountConnection('instagram')">
-                                        <i class="fas fa-network-wired me-1"></i>Verify API
-                                    </button>
-                                </div>
-                                <button type="button" class="btn-xs-outline-info w-100 justify-content-center mt-2" id="igFromFacebookBtn">
-                                    <i class="fab fa-facebook me-1"></i>Use the account linked to my Facebook Page
-                                </button>
-                                <div class="small text-slate-500 mt-2">Needs an Instagram Business or Creator account linked to your Facebook Page.</div>
-                            </div>
+                    <!-- Manual set-up for developers: access tokens, MCP, verification -->
+                    <details class="social-advanced" id="socialAdvanced">
+                        <summary><i class="fas fa-code me-2"></i>Advanced: connect with an access token (for developers)</summary>
+                        <p class="small text-slate-500 mt-2 mb-3">Only needed if one-click connect isn't available for a platform yet, or for a custom set-up such as LinkedIn through your own MCP server.</p>
+                        <div class="social-advanced-grid">
+                            <div><strong>Facebook Page</strong><span class="small text-slate-500" data-adv-detail="facebook">—</span>
+                                <span class="d-flex gap-2 mt-2"><button type="button" class="btn-xs-outline-info" onclick="openConnectModal('facebook')"><i class="fas fa-key me-1"></i>Enter details</button>
+                                <button type="button" class="btn-xs-outline-info" onclick="testLiveAccountConnection('facebook')"><i class="fas fa-network-wired me-1"></i>Verify</button></span></div>
+                            <div><strong>Instagram</strong><span class="small text-slate-500" data-adv-detail="instagram">—</span>
+                                <span class="d-flex gap-2 mt-2"><button type="button" class="btn-xs-outline-info" onclick="openConnectModal('instagram')"><i class="fas fa-key me-1"></i>Enter details</button>
+                                <button type="button" class="btn-xs-outline-info" onclick="testLiveAccountConnection('instagram')"><i class="fas fa-network-wired me-1"></i>Verify</button></span></div>
+                            <div><strong>LinkedIn</strong><span class="small text-slate-500" data-adv-detail="linkedin">—</span>
+                                <span class="d-flex gap-2 mt-2"><button type="button" class="btn-xs-outline-info" onclick="openConnectModal('linkedin')"><i class="fas fa-key me-1"></i>Enter details</button>
+                                <button type="button" class="btn-xs-outline-info" onclick="testLiveAccountConnection('linkedin')"><i class="fas fa-network-wired me-1"></i>Verify</button></span></div>
+                            <div><strong>YouTube</strong><span class="small text-slate-500" data-adv-detail="youtube">—</span>
+                                <span class="d-flex gap-2 mt-2"><button type="button" class="btn-xs-outline-info" onclick="openConnectModal('youtube')"><i class="fas fa-key me-1"></i>Enter details</button>
+                                <button type="button" class="btn-xs-outline-info" onclick="testLiveAccountConnection('youtube')"><i class="fas fa-network-wired me-1"></i>Verify</button></span></div>
                         </div>
-
-                        <!-- LinkedIn Account Card -->
-                        <div class="col-md-4">
-                            <div class="social-account-card card-linkedin">
-                                <div class="d-flex align-items-center justify-content-between mb-3">
-                                    <div class="d-flex align-items-center gap-2">
-                                        <div class="platform-icon-circle bg-li"><i class="fab fa-linkedin-in"></i></div>
-                                        <div>
-                                            <h6 class="mb-0 font-bold text-navy">LinkedIn Account</h6>
-                                            <small class="text-slate-500">Community API / MCP</small>
-                                        </div>
-                                    </div>
-                                    <span class="status-badge badge-disconnected" id="liStatusBadge"><i class="fas fa-circle-xmark me-1"></i>Not Connected</span>
-                                </div>
-                                <div class="account-details-box mb-3">
-                                    <div class="small text-slate-500 mb-1">Member / Org: <strong class="text-navy" id="liAccountName">—</strong></div>
-                                    <div class="small text-slate-500">Author URN: <span class="font-monospace text-slate-600" id="liAccountId">—</span></div>
-                                    <div class="small mt-1 d-none" id="liExpiryNote"></div>
-                                </div>
-                                <!-- One-click sign-in: shown when the Linkedin app is set up (settings.js: setupOAuth) -->
-                                <a class="oauth-connect-btn oauth-linkedin d-none" data-oauth="linkedin" href="/api/social/oauth/linkedin/start">
-                                    <i class="fab fa-linkedin me-2"></i>Connect with LinkedIn
-                                </a>
-                                <div class="d-flex gap-2">
-                                    <button type="button" class="btn-xs-outline-info flex-fill justify-content-center" onclick="openConnectModal('linkedin')">
-                                        <i class="fas fa-key me-1"></i><span data-manual="linkedin">Configure</span>
-                                    </button>
-                                    <button type="button" class="btn-xs-outline-info" onclick="testLiveAccountConnection('linkedin')">
-                                        <i class="fas fa-network-wired me-1"></i>Verify API
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- YouTube Account Card -->
-                        <div class="col-md-4">
-                            <div class="social-account-card card-youtube">
-                                <div class="d-flex align-items-center justify-content-between mb-3">
-                                    <div class="d-flex align-items-center gap-2">
-                                        <div class="platform-icon-circle bg-yt"><i class="fab fa-youtube"></i></div>
-                                        <div>
-                                            <h6 class="mb-0 font-bold text-navy">YouTube Account</h6>
-                                            <small class="text-slate-500">YouTube Data API v3</small>
-                                        </div>
-                                    </div>
-                                    <span class="status-badge badge-disconnected" id="ytStatusBadge"><i class="fas fa-circle-xmark me-1"></i>Not Connected</span>
-                                </div>
-                                <div class="account-details-box mb-3">
-                                    <div class="small text-slate-500 mb-1">Channel Name: <strong class="text-navy" id="ytAccountName">—</strong></div>
-                                    <div class="small text-slate-500">Channel ID: <span class="font-monospace text-slate-600" id="ytAccountId">—</span></div>
-                                </div>
-                                <div class="d-flex gap-2">
-                                    <button type="button" class="btn-xs-outline-info flex-fill justify-content-center" onclick="openConnectModal('youtube')">
-                                        <i class="fas fa-key me-1"></i>Configure
-                                    </button>
-                                    <button type="button" class="btn-xs-outline-info" onclick="testLiveAccountConnection('youtube')">
-                                        <i class="fas fa-network-wired me-1"></i>Verify API
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+                        <button type="button" class="btn btn-link btn-sm p-0 mt-3" id="openGuidesBtn"><i class="fas fa-book-open me-1"></i>Step-by-step guides for getting tokens</button>
+                    </details>
                   </div>
                 </div>
 
@@ -441,6 +340,85 @@
                   </div>
                 </div>
 
+                <!-- ── TAB 6: SECURITY - two-step sign-in (settings.js loadTwoFactor) ── -->
+                <div class="tab-pane fade" id="security-pane" role="tabpanel" aria-labelledby="security-tab">
+                  <div class="brand-config-card settings-pane-card">
+                    <h6><div class="card-icon-circle"><i class="fas fa-shield-halved"></i></div> Two-step sign-in</h6>
+                    <div class="brand-config-card-desc" id="tfaStatus">Loading...</div>
+                    <div class="alert-inline alert-inline-warning d-none mb-3" id="tfaRequired">Admins must turn this on to use the Admin Control Center.</div>
+
+                    <div id="tfaOff" class="d-none">
+                        <button type="button" class="btn btn-sm btn-primary" id="tfaStartBtn"><i class="fas fa-mobile-screen me-1"></i>Set up two-step sign-in</button>
+                    </div>
+                    <div id="tfaSetup" class="d-none">
+                        <ol class="small text-slate-600 ps-3 mb-3">
+                            <li>Open an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password...).</li>
+                            <li>Scan this code, or type the key by hand.</li>
+                            <li>Enter the 6-digit code the app shows.</li>
+                        </ol>
+                        <div class="d-flex flex-wrap gap-4 align-items-start">
+                            <div id="tfaQr" class="tfa-qr" aria-label="QR code to scan with your authenticator app"></div>
+                            <div>
+                                <div class="small text-slate-500 mb-1">Key</div>
+                                <code class="tfa-key" id="tfaKey"></code>
+                                <div class="d-flex gap-2 mt-3">
+                                    <input type="text" class="form-control form-control-sm" id="tfaCode" inputmode="numeric" maxlength="7" placeholder="123 456" autocomplete="one-time-code" aria-label="6-digit code" style="max-width: 140px;">
+                                    <button type="button" class="btn btn-sm btn-success" id="tfaEnableBtn">Turn on</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="tfaOn" class="d-none">
+                        <div class="d-flex gap-2 align-items-center">
+                            <input type="text" class="form-control form-control-sm" id="tfaOffCode" inputmode="numeric" maxlength="7" placeholder="Current code" aria-label="Current 6-digit code" style="max-width: 140px;">
+                            <button type="button" class="btn btn-sm btn-outline-danger" id="tfaDisableBtn">Turn off</button>
+                        </div>
+                        <div class="small text-slate-500 mt-2">You'll need a code from the app to turn it off.</div>
+                    </div>
+                  </div>
+                  <!-- Ends every other signed-in browser (auth/routes.py end_other_sessions) -->
+                  <div class="brand-config-card settings-pane-card mt-4">
+                    <h6><div class="card-icon-circle"><i class="fas fa-right-from-bracket"></i></div> Signed-in devices</h6>
+                    <div class="brand-config-card-desc">Lost a phone, or signed in on a shared computer? Sign out everywhere except this browser.
+                        Changing your password or two-step sign-in does this too.</div>
+                    <button type="button" class="btn btn-sm btn-outline-danger" id="endSessionsBtn"><i class="fas fa-right-from-bracket me-1"></i>Sign out everywhere else</button>
+                  </div>
+                </div>
+
+                <!-- ── TAB 5: PLAN & USAGE (settings.js loadPlan; PRICING.md) ── -->
+                <div class="tab-pane fade" id="plan-pane" role="tabpanel" aria-labelledby="plan-tab">
+                  <div class="brand-config-card settings-pane-card">
+                    <h6><div class="card-icon-circle"><i class="fas fa-gem"></i></div> Plan &amp; usage</h6>
+                    <div class="brand-config-card-desc" id="planSummary">Loading your plan...</div>
+                    <div class="plan-meters" id="planMeters"></div>
+                    <!-- Top-up packs, shown when online payment is on (billing_service.py) -->
+                    <div id="packShop" class="d-none">
+                        <h6 class="mt-4 mb-2 plan-compare-title">Top up</h6>
+                        <div class="pack-shop" id="packShopItems"></div>
+                    </div>
+                    <h6 class="mt-4 mb-2 plan-compare-title">Compare plans</h6>
+                    <div class="table-responsive">
+                        <table class="plan-compare" id="planCompare"></table>
+                    </div>
+                    <!-- Payments and their invoices (settings.js loadBillingHistory) -->
+                    <div id="billingHistory" class="d-none">
+                        <h6 class="mt-4 mb-2 plan-compare-title">Payments &amp; invoices</h6>
+                        <div class="table-responsive"><table class="plan-compare" id="billingHistoryTable"></table></div>
+                    </div>
+                    <!-- Details printed on GST invoices -->
+                    <h6 class="mt-4 mb-2 plan-compare-title">Billing details</h6>
+                    <div class="billing-form">
+                        <input type="text" class="form-control form-control-sm" id="billName" maxlength="160" placeholder="Name or company on invoices" aria-label="Name or company">
+                        <input type="text" class="form-control form-control-sm" id="billGstin" maxlength="15" placeholder="GSTIN (optional, for businesses)" aria-label="GSTIN">
+                        <select class="form-select form-select-sm" id="billState" aria-label="State"><option value="">State (for GST)</option></select>
+                        <textarea class="form-control form-control-sm" id="billAddress" rows="2" maxlength="400" placeholder="Billing address" aria-label="Billing address"></textarea>
+                        <button type="button" class="btn btn-sm btn-outline-primary" id="billSaveBtn">Save billing details</button>
+                    </div>
+                    <div class="small text-slate-500 mt-1">Used on invoices issued from now on. With a GSTIN, the state comes from it and you can claim the GST back.</div>
+                    <div class="small text-slate-500 mt-3" id="planNote">Online payment is coming soon. To change your plan or buy a top-up pack, contact your admin.</div>
+                  </div>
+                </div>
+
                 <!-- ── TAB 4: NOTIFICATIONS (weekly ideas email) ── -->
                 <div class="tab-pane fade" id="notifications-pane" role="tabpanel" aria-labelledby="notifications-tab">
                   <div class="brand-config-card settings-pane-card">
@@ -594,6 +572,23 @@
 </div>
 
 <!-- ═══════════════════════ PLATFORM CONNECT FORM MODAL ═══════════════════════ -->
+<!-- Connect clicked before one-click sign-in is switched on for that network (settings.js: explainNotReady) -->
+<div class="modal fade" id="notReadyModal" tabindex="-1" aria-labelledby="notReadyTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content credit-modal-light">
+            <div class="modal-header credit-modal-header-light">
+                <h5 class="modal-title" id="notReadyTitle">One-click connect isn't switched on yet</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="notReadyBody"></div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-link btn-sm me-auto" id="notReadyManual">Use an access token instead</button>
+                <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">OK</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- One-click connect found several accounts: which one should posts go to? (settings.js) -->
 <div class="modal fade" id="oauthChooseModal" tabindex="-1" aria-labelledby="oauthChooseTitle" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
@@ -706,35 +701,6 @@
     </div>
 </div>
 
-<!-- ═══════════════════════ AI MODELS & PURPOSE ARCHITECTURE MODAL ═══════════════════════ -->
-<div class="modal fade" id="modelArchitectureModal" tabindex="-1" aria-labelledby="modelArchitectureModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-xl modal-dialog-centered">
-        <div class="modal-content model-modal-light">
-            <div class="modal-header model-modal-header-light">
-                <div class="d-flex align-items-center gap-3">
-                    <div class="model-icon-badge"><i class="fas fa-microchip"></i></div>
-                    <div>
-                        <h5 class="modal-title text-navy font-bold mb-0" id="modelArchitectureModalLabel">Active AI Models &amp; Purpose Matrix</h5>
-                        <small class="text-slate-500 font-medium">Real-time model engine assignments for text generation, vision, images, videos &amp; RAG memory</small>
-                    </div>
-                </div>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body p-4">
-                <div class="row g-4" id="modelsInfoCardsContainer">
-                    <div class="col-12 text-center py-5 text-slate-400">
-                        <i class="fas fa-spinner fa-spin fa-2x mb-2"></i>
-                        <p>Loading AI Model configurations...</p>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer model-modal-footer-light">
-                <button type="button" class="btn-cancel-light" data-bs-dismiss="modal">Close Inspector</button>
-            </div>
-        </div>
-    </div>
-</div>
-
 <!-- ═══════════════════════ TOAST ═══════════════════════ -->
 <div class="toast-container position-fixed bottom-0 end-0 p-3">
     <div id="toast" class="ent-toast" role="alert">
@@ -744,8 +710,12 @@
 
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="{{ url_for('static', filename='js/undo.js') }}"></script>
 <script src="{{ url_for('static', filename='js/settings.js') }}"></script>
 {% include 'partials/guide_assets.html' %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<!-- Razorpay's own checkout window: card and UPI details go to Razorpay, never to this server -->
+<script src="https://checkout.razorpay.com/v1/checkout.js" defer></script>
 <script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
 </body>
 </html>

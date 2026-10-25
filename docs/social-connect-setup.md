@@ -147,3 +147,42 @@ API. LinkedIn retires a version about a year after its release.
 | "LinkedIn did not share your profile" | The LinkedIn app is missing the OpenID Connect product |
 | "Invalid scope" on LinkedIn's page | A scope in `LINKEDIN_OAUTH_SCOPES` has not been granted to the app |
 | "could not be verified" | The sign-in took longer than 10 minutes, or was finished in another browser. Click Connect again |
+
+## Instagram without a Facebook Page (Instagram Login)
+
+Creators and small businesses often have an Instagram business or creator
+account but no Facebook Page. **Connect with Instagram** signs them in on
+Instagram itself ("Instagram API with Instagram Login").
+
+1. In the same Meta app, add the **Instagram** product and open
+   **API setup with Instagram login**.
+2. Under **Set up Instagram business login**, add this return address:
+
+   ```
+   https://<your-domain>/api/social/oauth/instagram/callback
+   ```
+
+3. Copy the **Instagram app ID** and **Instagram app secret** shown there.
+   They are different from the Meta App ID and secret:
+
+   ```
+   INSTAGRAM_APP_ID=...
+   INSTAGRAM_APP_SECRET=...
+   ```
+
+4. Ask for `instagram_business_basic` and `instagram_business_content_publish`
+   in App Review (Advanced Access). Until then it works for Instagram accounts
+   added as testers in the app's roles.
+
+How it behaves:
+
+- When it's set up, the Instagram card's main button is **Connect with
+  Instagram**. A user whose Facebook Page is already connected can still use
+  **Use the one linked to my Page**.
+- These tokens start with `IG` and are used with `graph.instagram.com`
+  (`instagram_service.graph_url`, `metrics_service._graph`). Page tokens keep
+  using `graph.facebook.com`.
+- They last 60 days. The hourly scheduler renews each one when 20 days or
+  less are left (`refresh_instagram_tokens`), so users don't have to sign in
+  again. If renewal fails, the usual reminders (bell and email) still go out
+  before it expires.

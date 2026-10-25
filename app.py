@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -163,7 +164,116 @@ def create_app(config_name="development"):
     app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 0
     app.config["TEMPLATES_AUTO_RELOAD"] = True
     app.config.from_object(config_map[config_name])
-    CORS(app, supports_credentials=True)
+    # A forgeable session key lets anyone sign in as any user (admins included)
+    if config_name == "production" and app.config["SECRET_KEY"] in ("", "dev-secret-key", None):
+        raise RuntimeError("SECRET_KEY must be set to a long random value in production.")
+    # Cross-site requests with the user's cookies only from origins listed in
+    # CORS_ORIGINS (comma-separated). The app itself is same-origin and needs none;
+    # allowing every origin with credentials let any website act as the user.
+    cors_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
+    if cors_origins:
+        CORS(app, supports_credentials=True, origins=cors_origins)
+
+    @app.before_request
+    def _same_site_changes_only():
+        """Cross-site request forgery guard: a request that changes something
+        (POST/PUT/PATCH/DELETE) sent by a browser from another website is
+        refused. Browsers always say where such requests come from (Origin,
+        else Referer); requests with neither (mail apps' one-click
+        unsubscribe, payment webhooks, scripts) are let through and rely on
+        their own checks."""
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return None
+        source = request.headers.get("Origin") or request.headers.get("Referer")
+        if not source or source == "null":
+            return None
+        from urllib.parse import urlsplit
+
+        source_host = urlsplit(source).netloc.lower()
+        allowed = {request.host.lower()} | {urlsplit(o).netloc.lower() for o in cors_origins}
+        if source_host in allowed:
+            return None
+        app.logger.warning(f"Blocked a cross-site {request.method} {request.path} from {source_host}")
+        return jsonify({"success": False, "error": "This request came from another website and was blocked."}), 403
+
+    @app.before_request
+    def _end_revoked_sessions():
+        """A session ended elsewhere (password reset, "Sign out everywhere",
+        two-step sign-in change, account deactivated or deleted) stops working
+        on its next request. auth/utils.py session_is_current."""
+        if not session.get("user_id") or request.path.startswith("/static/"):
+            return None
+        from auth.utils import session_is_current
+
+        try:
+            current = session_is_current()
+        except Exception as err:  # noqa: BLE001 - a database hiccup must not sign everyone out
+            app.logger.warning(f"Session check skipped: {err}")
+            return None
+        if current:
+            return None
+        session.clear()
+        if request.path.startswith("/api/"):
+            return jsonify({"success": False, "error": "You were signed out. Please sign in again.",
+                            "code": "session_ended"}), 401
+        from flask import redirect
+
+        return redirect("/login")
+
+    @app.before_request
+    def _bearer_token_sign_in():
+        """API clients without the session cookie sign in with
+        `Authorization: Bearer <access token>` (auth/jwt_tokens.py). A token
+        that is sent but not valid (forged, expired, or its sessions ended) is
+        refused outright rather than treated as signed out."""
+        if not request.path.startswith("/api/"):
+            return None
+        from auth.jwt_tokens import bearer_token, user_id_from_token
+
+        token = bearer_token(request.headers.get("Authorization"))
+        if not token:
+            return None
+        user_id = user_id_from_token(token)
+        if user_id is None:
+            return jsonify({"success": False, "error": "Your access token is invalid or expired. Sign in again.",
+                            "code": "invalid_token"}), 401
+        g.token_user_id = user_id
+        return None
+
+    @app.after_request
+    def _hide_internal_errors(response):
+        """A server error never shows its raw text (database messages, file
+        paths, provider responses) to the browser: it is logged with the
+        request id, and the reply carries that id instead."""
+        if response.status_code != 500 or not request.path.startswith("/api/") or not response.is_json:
+            return response
+        body = response.get_json(silent=True)
+        if not isinstance(body, dict) or not body.get("error"):
+            return response
+        ref = getattr(g, "request_id", "")
+        app.logger.error(f"500 on {request.method} {request.path}: {str(body['error'])[:500]}")
+        body["error"] = f"Something went wrong on our side. Please try again. (Reference: {ref})"
+        response.set_data(json.dumps(body))
+        return response
+
+    @app.after_request
+    def _security_headers(response):
+        """Basic browser protections on every response."""
+        headers = response.headers
+        headers.setdefault("X-Content-Type-Options", "nosniff")  # no guessing file types
+        headers.setdefault("X-Frame-Options", "SAMEORIGIN")  # no clickjacking in other sites' frames
+        headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+        headers.setdefault("Content-Security-Policy",
+                           "frame-ancestors 'self'; object-src 'none'; base-uri 'self'")
+        # Other sites' windows can't reach this one (payment pop-ups still work)
+        headers.setdefault("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
+        headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
+        if request.path.startswith("/api/"):  # API answers (often personal) are never cached
+            headers.setdefault("Cache-Control", "no-store")
+        if request.is_secure or request.headers.get("X-Forwarded-Proto") == "https":
+            headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+        return response
 
     # Ensure upload directory exists
     os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
@@ -207,6 +317,58 @@ def create_app(config_name="development"):
     @login_required_page
     def settings_route():
         return render_template("settings.html")
+
+    @app.route("/connect/<provider>")
+    @login_required_page
+    def connect_welcome(provider):
+        """The short "AVIR AI wants to connect to your Facebook" page shown
+        before the network's own sign-in (services/social_oauth_service.py)."""
+        from flask import redirect
+
+        from services import social_oauth_service as oauth
+
+        pages = {
+            "facebook": ("Facebook", "facebook", "facebook-f", "/api/social/oauth/facebook/start", [
+                ("flag", "Choose the Facebook Page posts go to. Its linked Instagram account connects with it."),
+                ("pen-to-square", "AVIR AI can publish the posts you approve or schedule, nothing else."),
+                ("rotate-left", "Disconnect any time in Settings, or in Facebook's Business Integrations.")]),
+            "instagram": ("Instagram", "instagram", "instagram", "/api/social/oauth/instagram/start", [
+                ("user-check", "For Instagram business and creator accounts. No Facebook Page needed."),
+                ("pen-to-square", "AVIR AI can publish the posts you approve or schedule, nothing else."),
+                ("rotate-left", "Disconnect any time in Settings, or in Instagram's settings.")]),
+            "linkedin": ("LinkedIn", "linkedin", "linkedin-in", "/api/social/oauth/linkedin/start", [
+                ("user", "Post as yourself, or as a company page you manage."),
+                ("pen-to-square", "AVIR AI can publish the posts you approve or schedule, nothing else."),
+                ("rotate-left", "Disconnect any time in Settings, or in LinkedIn's settings.")]),
+            "youtube": ("YouTube", "youtube", "youtube", "/api/auth/youtube", [
+                ("video", "Upload the videos you create to your channel."),
+                ("pen-to-square", "AVIR AI only uploads what you choose to publish."),
+                ("rotate-left", "Disconnect any time in Settings, or in your Google account.")]),
+        }
+        if provider not in pages:
+            return redirect("/settings")
+        set_up = (bool(os.getenv("YOUTUBE_CLIENT_ID") and os.getenv("YOUTUBE_CLIENT_SECRET"))
+                  if provider == "youtube" else oauth.enabled(provider))
+        if not set_up:
+            return redirect("/settings")
+        name, icon, fa_icon, start_url, points = pages[provider]
+        return render_template("connect_welcome.html", name=name, provider_icon=icon, fa_icon=fa_icon,
+                               start_url=start_url, points=points)
+
+    @app.route("/invoices/<path:number>")
+    @login_required_page
+    def invoice_page(number):
+        """A GST invoice or credit note, printable (services/invoice_service.py).
+        Only for the customer it was issued to, and admins."""
+        from db import get_invoice, get_user_by_id
+        from services.invoice_service import STATE_CODES
+
+        user_id = session.get("user_id")
+        invoice = get_invoice(number)
+        user = get_user_by_id(user_id) if user_id else None
+        if not invoice or not user or (invoice["user_id"] != user.id and not user.is_admin):
+            abort(404)
+        return render_template("invoice.html", inv=invoice, state_codes=STATE_CODES)
 
     @app.route("/calendar")
     @login_required_page
@@ -633,4 +795,6 @@ if __name__ == "__main__":
     if os.name == "nt":
         _quiet_windows_reload_error()
     app = create_app()
-    app.run(host="0.0.0.0", port=5000, debug=True)  # nosec B201 B104
+    # The debug server runs code from its error pages: only this machine can reach
+    # it unless DEV_HOST=0.0.0.0 is set (e.g. to try the app from a phone on the same Wi-Fi)
+    app.run(host=os.getenv("DEV_HOST", "127.0.0.1"), port=5000, debug=True)  # nosec B201

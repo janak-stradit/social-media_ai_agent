@@ -19,11 +19,16 @@ def test_health_check(client):
     assert resp.get_json()["status"] == "healthy"
 
 
-@pytest.mark.parametrize("path", ["/", "/settings", "/competitor-dashboard"])
+def test_landing_page_is_public(client):
+    assert client.get("/").status_code == 200
+
+
+@pytest.mark.parametrize("path", ["/dashboard", "/settings", "/competitor-dashboard", "/calendar", "/admin"])
 def test_protected_pages_redirect_when_logged_out(client, path):
+    # signed-out visitors are sent to the landing page (which links to log in)
     resp = client.get(path, follow_redirects=False)
     assert resp.status_code == 302
-    assert "login" in resp.headers["Location"]
+    assert resp.headers["Location"] in ("/", "http://localhost/")
 
 
 def test_login_page_is_public(client):

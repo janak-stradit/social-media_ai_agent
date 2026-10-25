@@ -16,7 +16,8 @@ class HashtagAgent:
         self.memory = MemoryService()
 
     def generate_hashtags(
-        self, platform, story_analysis, vision_analysis=None, count=None, memory_context=None, brand_profile_block=None
+        self, platform, story_analysis, vision_analysis=None, count=None, memory_context=None, brand_profile_block=None,
+        language=None,
     ):
         """Generate platform-optimized hashtags.
         brand_profile_block (see services/brand_profile_service.py): a Studio
@@ -38,6 +39,9 @@ class HashtagAgent:
         - {company_rule}
 
         Return JSON with: hashtags (list), engagement_prediction (score 1-10)"""
+        from services.language_service import instruction
+
+        system_prompt += instruction(language, "hashtags")
 
         user_prompt = self._user_prompt(story_analysis, vision_analysis, trending, memory_context, brand_profile_block)
 
@@ -102,7 +106,8 @@ class HashtagAgent:
         return user_prompt
 
     def generate_hashtags_batch(
-        self, platforms, story_analysis, vision_analysis=None, memory_context=None, brand_profile_block=None
+        self, platforms, story_analysis, vision_analysis=None, memory_context=None, brand_profile_block=None,
+        language=None,
     ):
         """Every platform's hashtag set in ONE call - same inputs and rules as
         generate_hashtags(). Each AI call carries ~4k tokens of fixed provider
@@ -112,7 +117,7 @@ class HashtagAgent:
         platforms = list(platforms)
         if len(platforms) <= 1:
             return {p: self.generate_hashtags(p, story_analysis, vision_analysis, memory_context=memory_context,
-                                              brand_profile_block=brand_profile_block) for p in platforms}
+                                              brand_profile_block=brand_profile_block, language=language) for p in platforms}
         trending = self.memory.get_trending_hashtags(category=story_analysis.get("themes", ["general"])[0])
         per_platform = "\n".join(
             f"        - {p}: exactly {self.PLATFORM_HASHTAG_LIMITS.get(p, 10)} hashtags" for p in platforms
@@ -128,6 +133,9 @@ class HashtagAgent:
 
         Return JSON with one key per platform above:
         {{"<platform>": {{"hashtags": [list], "engagement_prediction": <score 1-10>}}}}"""
+        from services.language_service import instruction
+
+        system_prompt += instruction(language, "hashtags")
         user_prompt = self._user_prompt(story_analysis, vision_analysis, trending, memory_context, brand_profile_block)
         try:
             batch, usage = self.llm.generate_json(system_prompt, user_prompt, return_usage=True, reasoning_effort="minimal")
@@ -141,7 +149,8 @@ class HashtagAgent:
             tags = entry.get("hashtags") if entry else None
             if not isinstance(tags, list) or not tags:
                 results[platform] = self.generate_hashtags(platform, story_analysis, vision_analysis,
-                                                           memory_context=memory_context, brand_profile_block=brand_profile_block)
+                                                           memory_context=memory_context, brand_profile_block=brand_profile_block,
+                                                           language=language)
                 continue
             result = {"hashtags": [str(t) for t in tags], "engagement_prediction": entry.get("engagement_prediction"),
                       "_usage": {}}

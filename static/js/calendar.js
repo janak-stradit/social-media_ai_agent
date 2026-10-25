@@ -368,5 +368,77 @@
     $('calNext').addEventListener('click', function () { if (shownMonth) shift(1); });
     $('calToday').addEventListener('click', function () { load(null); });
 
+    // ── How published posts did ───────────────────────────────────────
+    function number(n) { return Number(n || 0).toLocaleString(); }
+    function loadResults() {
+        fetch('/api/analytics?days=30', { credentials: 'same-origin' })
+            .then((r) => r.json())
+            .then(function (r) {
+                const a = r && r.analytics;
+                const kpis = $('calKpis');
+                const top = $('calTopPosts');
+                kpis.textContent = '';
+                top.textContent = '';
+                if (!a || !a.posts) {
+                    top.appendChild(el('p', 'cal-results-empty',
+                        'Nothing published through AVIR AI yet. Once you schedule or publish posts, their likes, comments and reach show up here.'));
+                    return;
+                }
+                [['Posts published', a.posts], ['Likes', a.totals.likes], ['Comments', a.totals.comments],
+                 ['Shares', a.totals.shares], ['Reach', a.totals.reach],
+                 ['Engagement rate', a.engagement_rate === null ? '–' : a.engagement_rate + '%']].forEach(function (k) {
+                    const tile = el('div', 'cal-kpi');
+                    tile.append(el('strong', '', typeof k[1] === 'number' ? number(k[1]) : k[1]), el('span', '', k[0]));
+                    kpis.appendChild(tile);
+                });
+                top.appendChild(el('h3', '', 'Top posts'));
+                a.top_posts.forEach(function (p) {
+                    const row = el(p.permalink ? 'a' : 'div', 'cal-top-post');
+                    if (p.permalink) { row.href = p.permalink; row.target = '_blank'; row.rel = 'noopener noreferrer'; }
+                    const name = el('span', 'cal-top-title');
+                    name.append(icon('fab ' + (PLATFORM_ICONS[p.platform] || 'fa-share-nodes')), el('span', '', p.title || 'Post'));
+                    const m = p.metrics || {};
+                    const stats = el('span', 'cal-top-stats',
+                        `${number(m.likes)} likes · ${number(m.comments)} comments` + (m.reach ? ` · ${number(m.reach)} reached` : ''));
+                    row.append(name, stats);
+                    if (p.error && !p.updated_at) row.title = p.error;
+                    top.appendChild(row);
+                });
+                top.appendChild(el('p', 'cal-results-note', 'Numbers update every few hours for 30 days after a post goes out. Some platforms only share reach with business accounts.'));
+            })
+            .catch(function () { /* the section stays empty */ });
+    }
+
+    // ── Best times to post ────────────────────────────────────────────
+    function loadBestTimes() {
+        fetch('/api/best-times?tz=' + tz, { credentials: 'same-origin' })
+            .then((r) => r.json())
+            .then(function (r) {
+                const box = $('calBestTimes');
+                box.textContent = '';
+                const platforms = Object.entries((r && r.platforms) || {});
+                if (!platforms.length) return;
+                box.appendChild(el('h3', '', 'Best times to post'));
+                const list = el('div', 'cal-best-list');
+                platforms.forEach(function ([platform, best]) {
+                    const row = el('div', 'cal-best-item');
+                    const name = el('span', 'cal-top-title');
+                    name.append(icon('fab ' + (PLATFORM_ICONS[platform] || 'fa-share-nodes')), el('span', '', PLATFORM_NAMES[platform] || platform));
+                    const when = el('span', 'cal-best-when', best.label);
+                    const why = el('small', '', best.source === 'your_posts'
+                        ? `From your ${best.posts} published posts`
+                        : 'A common starting point - your own best times appear after about 8 posts');
+                    const text = el('span', 'cal-best-text');
+                    text.append(when, why);
+                    row.append(name, text);
+                    list.appendChild(row);
+                });
+                box.appendChild(list);
+            })
+            .catch(function () { /* the list stays empty */ });
+    }
+
     load(null);
+    loadResults();
+    loadBestTimes();
 })();
