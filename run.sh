@@ -33,7 +33,7 @@ case "${1:-dev}" in
         exec "$PYTHON" app.py
         ;;
     prod)
-        SCHEDULER_ENABLED=false exec "$PYTHON" -m gunicorn --worker-class gthread --threads 4 \
+        SCHEDULER_ENABLED=false exec "$PYTHON" -m gunicorn --worker-class gthread \
             --timeout 1900 --graceful-timeout 60 --bind 0.0.0.0:5000 --config gunicorn.conf.py \
             'app:create_app("production")'
         ;;

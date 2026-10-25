@@ -236,6 +236,10 @@
                     <textarea id="storyInput" class="chat-textarea" rows="2"
                         placeholder="What would you like to post about?"></textarea>
                 </div>
+                <!-- A pasted link on its own: offer to read it (services/repurpose_service.py) -->
+                <button type="button" class="repurpose-hint d-none" id="repurposeHint">
+                    <i class="fas fa-wand-magic-sparkles me-1"></i>Turn this link into post ideas
+                </button>
 
                 <!-- 2. One toolbar: where it goes, what to make, how it sounds, then Generate -->
                 <div class="composer-bar">
@@ -249,6 +253,11 @@
                         <i class="fas fa-paperclip"></i>
                     </button>
                     <input type="file" id="imageInput" accept="image/*" class="d-none">
+
+                    <!-- Repurpose: a link or PDF becomes post ideas (app_v2.js openRepurpose) -->
+                    <button type="button" class="btn-chat-attach" id="repurposeBtn" title="Start from a link or PDF" aria-label="Start from a link or PDF">
+                        <i class="fas fa-link"></i>
+                    </button>
 
                     <!-- Saved briefs (app_v2.js): starred under a sent message, loaded again from here -->
                     <div class="saved-briefs">
@@ -267,6 +276,8 @@
                         <!-- Platform Selection -->
                         <div class="config-group" id="tourPlatforms">
                             <span class="config-label">Post to</span>
+                            <!-- Shown when the composer starts with last time's choices (app_v2.js restoreSetup) -->
+                            <span class="last-setup-note d-none" id="lastSetupNote" title="Your choices from last time - change them any time">Same as last time</span>
                             <div class="platform-chips-inline">
                                 <label class="platform-chip-sm" for="fbCheck">
                                     <input type="checkbox" value="facebook" id="fbCheck">
@@ -353,9 +364,10 @@
                     </div>
 
                     <div class="chat-actions-group">
-                        <button type="button" class="btn-chat-secondary" onclick="analyzeStory()" id="analyzeBtn" title="Check your brief before generating">
+                        <!-- Optional: see the research before writing. Quiet, so Generate is the one main action -->
+                        <button type="button" class="btn-chat-quiet" onclick="analyzeStory()" id="analyzeBtn" title="See the research for your brief before writing the post">
                             <i class="fas fa-brain"></i>
-                            <span class="d-none d-md-inline ms-1">Analyze</span>
+                            <span class="d-none d-md-inline ms-1">Research first</span>
                         </button>
 
                         <button type="button" id="generateBtn" class="btn-chat-send" onclick="generateContent()" title="Send & Generate Content">
@@ -377,6 +389,40 @@
 </div>
 
 <!-- ═══════════════════════ CREDIT EXTENSION REQUEST MODAL ═══════════════════════ -->
+<!-- Start from a link or PDF (app_v2.js: openRepurpose) -->
+<div class="modal fade" id="repurposeModal" tabindex="-1" aria-labelledby="repurposeTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content credit-modal-light">
+            <div class="modal-header credit-modal-header-light">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="credit-icon-badge"><i class="fas fa-link"></i></div>
+                    <div>
+                        <h5 class="modal-title text-navy font-bold mb-0" id="repurposeTitle">Start from a link or PDF</h5>
+                        <small class="text-slate-500 font-medium">A blog post, product page, brochure or report becomes ready-to-use post ideas</small>
+                    </div>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <form id="repurposeForm" class="repurpose-form" novalidate>
+                    <label class="form-label small fw-semibold" for="repurposeUrl">Link</label>
+                    <div class="d-flex gap-2">
+                        <input type="url" class="form-control" id="repurposeUrl" placeholder="https://yourcompany.com/blog/your-article" autocomplete="off">
+                        <button type="submit" class="btn btn-dark text-nowrap" id="repurposeGo">Read it</button>
+                    </div>
+                    <div class="repurpose-or"><span>or</span></div>
+                    <label class="repurpose-drop" for="repurposeFile">
+                        <i class="fas fa-file-pdf me-2"></i><span id="repurposeFileLabel">Upload a PDF (up to 15 MB)</span>
+                        <input type="file" id="repurposeFile" accept="application/pdf,.pdf" class="d-none">
+                    </label>
+                </form>
+                <div class="repurpose-status d-none" id="repurposeStatus" role="status"></div>
+                <div class="repurpose-result d-none" id="repurposeResult" aria-live="polite"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="modal fade" id="creditRequestModal" tabindex="-1" aria-labelledby="creditRequestModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content credit-modal-light">
@@ -931,6 +977,7 @@
 <!-- "Schedule" is shown as "Soon" until STUDIO_SCHEDULING=true (config.py) -->
 <script>window.SCHEDULING_ENABLED = {{ 'true' if config.STUDIO_SCHEDULING else 'false' }};</script>
 <script src="{{ url_for('static', filename='js/post_preview.js') }}"></script>
+<script src="{{ url_for('static', filename='js/undo.js') }}"></script>
 <script src="{{ url_for('static', filename='js/app_v2.js') }}"></script>
 <script src="{{ url_for('static', filename='js/approval_send.js') }}"></script>
 {% include 'partials/guide_assets.html' %}

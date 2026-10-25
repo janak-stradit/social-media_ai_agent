@@ -93,7 +93,7 @@ class Config:
     # The "Schedule" button in Studio Chat and the Image Library. Off: the
     # button is shown as "Soon" and can't be clicked. The scheduling itself
     # (calendar, Settings > Scheduled posts, the scheduler) is unaffected.
-    STUDIO_SCHEDULING = os.getenv("STUDIO_SCHEDULING", "false").lower() == "true"
+    STUDIO_SCHEDULING = os.getenv("STUDIO_SCHEDULING", "true").lower() == "true"  # "Schedule post" under each post
     # One-click "Connect with Facebook / LinkedIn" in Settings
     # (services/social_oauth_service.py, docs/social-connect-setup.md). Each
     # button appears once its app's ID and secret are set; until then accounts
@@ -284,6 +284,10 @@ class Config:
 
     # Redis (for Celery)
     REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    # The shared embedding service (scripts/embedding_server.py): one copy of
+    # the model for every web worker. Empty: each process loads its own.
+    EMBEDDING_URL = os.getenv("EMBEDDING_URL", "")
+    EMBEDDING_TOKEN = os.getenv("EMBEDDING_TOKEN", "")
 
 
 class DevelopmentConfig(Config):

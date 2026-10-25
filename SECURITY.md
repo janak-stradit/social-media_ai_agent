@@ -23,6 +23,13 @@ server, and what to build before payments go live. Updated October 2026.
 | Website scanner | Refuses private and internal addresses (no reaching the server's own network) | `services/website_scraper_service.py` |
 | Email links | Unsubscribe and idea links are signed or random, and checked against the user | `services/idea_digest_service.py` |
 | Database | Queries through SQLAlchemy (no hand-built SQL from user input); RDS not public | `db.py`, `DEPLOYMENT.md` |
+| Ending sessions | Each session carries the account's session version; a password reset, two-step sign-in change, admin deactivation or **Settings → Security → Sign out everywhere else** raises it, and every other browser is signed out on its next request | `auth/utils.py`, `app.py` |
+| API access | Every data route needs a signed-in account (the competitor-post routes, which scrape and call the AI, used to be open) | `api/routes.py` |
+| Cost and spam limits per account | At most 150 AI calls, 40 image/video generations and 30 emails sent on the user's behalf per hour | `auth/rate_limit.py` (`limit_by_user`) |
+| Server errors | A 500 never shows its raw text (database messages, paths) to the browser; it is logged and the reply carries a reference id | `app.py` |
+| Passwords (new) | Common passwords (also with digits added) and passwords containing the user's email name or name are refused at sign-up and reset | `auth/routes.py` (`password_problem`) |
+| Uploads (content) | Images are opened and checked, so a script renamed `.png` is refused | `api/routes.py` (`is_real_image`) |
+| More headers | `Cross-Origin-Opener-Policy`, `X-Permitted-Cross-Domain-Policies`, and `Cache-Control: no-store` on API answers | `app.py` |
 
 ## 2. Set on the server
 
@@ -84,4 +91,4 @@ owner is told when signing in is paused after repeated wrong passwords),
 `pip-audit` in GitHub Actions plus Dependabot (`.github/dependabot.yml`), and the
 local debug server only listening on this machine (`DEV_HOST` to change it).
 
-Tests for these protections: `tests/test_security.py`.
+Tests for these protections: `tests/test_security.py`, `tests/test_security_layers.py`.

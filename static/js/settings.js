@@ -205,6 +205,16 @@ $(document).ready(function () {
         if (tab && window.bootstrap) bootstrap.Tab.getOrCreateInstance(tab).show();
     });
 
+    // ── Security tab: sign out every other browser ──────────────────────
+    $('#endSessionsBtn').on('click', function () {
+        if (!window.confirm('Sign out on every other device and browser? You stay signed in here.')) return;
+        const $btn = $(this).prop('disabled', true);
+        $.post('/api/auth/sessions/end-others')
+            .done(() => showToast('Signed out everywhere else.', 'success'))
+            .fail(xhr => showToast((xhr.responseJSON || {}).error || 'Could not do that. Please try again.', 'error'))
+            .always(() => $btn.prop('disabled', false));
+    });
+
     // ── Notifications tab: weekly ideas email on/off + "send me one now" ──
     function ideasEmailMeta(s) {
         const last = s.last_sent_at
@@ -927,19 +937,15 @@ $(document).ready(function () {
     };
 
     window.cancelScheduledPostItem = function (postId) {
-        if (!confirm('Are you sure you want to cancel this scheduled post?')) return;
-        $.ajax({
+        // Undo instead of "Are you sure?" (static/js/undo.js)
+        const $row = $(`[onclick="cancelScheduledPostItem(${postId})"]`).closest('tr, .sp-item, .sp-row, li');
+        window.withUndo({
+            message: 'Scheduled post cancelled.',
             url: `/api/social/scheduled/${postId}/cancel`,
-            type: 'POST',
-            success: function (r) {
-                if (r.success) {
-                    showToast('Scheduled post cancelled', 'info');
-                    loadScheduledPosts();
-                }
-            },
-            error: function () {
-                showToast('Failed to cancel scheduled post', 'error');
-            }
+            hide: () => $row.fadeOut(150),
+            restore: () => $row.fadeIn(150),
+            done: () => loadScheduledPosts(),
+            failed: () => showToast('Failed to cancel scheduled post', 'error'),
         });
     };
 

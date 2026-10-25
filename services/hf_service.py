@@ -2,7 +2,6 @@ import base64
 import logging
 
 import requests
-from transformers import pipeline
 
 from config import Config
 
@@ -156,6 +155,9 @@ class HuggingFaceService:
         try:
             if self.caption_pipeline is None:
                 # Use Salesforce/blip-image-captioning-base as a high-quality lightweight local model
+                # Only for VISION_PROVIDER=local: importing transformers loads PyTorch (~0.5 GB)
+                from transformers import pipeline
+
                 self.caption_pipeline = pipeline("image-to-text", model="Salesforce/blip-image-captioning-base")
             result = self.caption_pipeline(image_path, max_new_tokens=50)
             if isinstance(result, list) and len(result) > 0:

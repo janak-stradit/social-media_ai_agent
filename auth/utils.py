@@ -10,6 +10,28 @@ def get_current_user_id() -> int | None:
     return int(user_id) if user_id is not None else None
 
 
+def start_session(user_id: int) -> None:
+    """Signs this browser in as the user (after session.clear()). The cookie
+    carries the account's session version, so raising it signs it out."""
+    from db import get_session_version
+
+    session["user_id"] = user_id
+    session["sv"] = get_session_version(user_id) or 0
+    session.permanent = True
+
+
+def session_is_current() -> bool:
+    """False when the signed-in account was deleted or its sessions were ended
+    since this cookie was issued (app.py checks it on every request)."""
+    user_id = get_current_user_id()
+    if not user_id:
+        return True
+    from db import get_session_version
+
+    version = get_session_version(user_id)
+    return version is not None and int(session.get("sv", 0)) == version
+
+
 def login_required_api(view):
     @wraps(view)
     def wrapped(*args, **kwargs):

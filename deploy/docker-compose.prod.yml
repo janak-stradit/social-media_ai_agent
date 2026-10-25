@@ -1,6 +1,6 @@
 # Production containers on EC2. Run by deploy/remote_deploy.sh:
 #   APP_IMAGE=<ecr-registry>/<repo>:sha-<commit> docker compose -f docker-compose.prod.yml up -d
-# Both containers use the same image; state lives on the host under /opt/socialmedia.
+# The app containers use the same image; state lives on the host under /opt/socialmedia.
 name: socialmedia
 
 x-app: &app
@@ -31,14 +31,38 @@ services:
       SCHEDULER_ENABLED: "false"
       # Names the source of each log line (LOG_FORMAT / LOG_LEVEL come from .env)
       SERVICE_NAME: "avir-web"
-      # gunicorn workers: ~0.6-0.7 GB each. 2 on t3.medium; use "1" on t3.small.
-      WEB_CONCURRENCY: "2"
-      # Signup captcha state shared by all gunicorn workers (auth/captcha.py);
-      # without it a challenge issued by one worker fails in another.
+      # gunicorn workers x 16 threads (gunicorn.conf.py). With the embedding
+      # model in its own container, a worker needs ~150-300 MB (it was
+      # ~0.7 GB): 4 on t3.medium (4 GB), 2 on t3.small (2 GB).
+      WEB_CONCURRENCY: "4"
+      # Database connections per worker (db.py): 4 x (10 + 5) + the scheduler
+      # stays under a db.t4g.micro's ~110-connection limit
+      DB_POOL_SIZE: "10"
+      DB_MAX_OVERFLOW: "5"
+      # Signup captcha, rate limits and generation progress shared by all
+      # gunicorn workers (auth/captcha.py, services/progress_store.py)
       REDIS_URL: "redis://redis:6379/0"
+      # One shared copy of the embedding model (scripts/embedding_server.py)
+      EMBEDDING_URL: "http://embedder:8001"
     depends_on:
       - redis
+      - embedder
     stop_grace_period: 90s
+
+  embedder:
+    # The embedding model (with PyTorch, ~0.6 GB) loaded once for every web
+    # worker and the scheduler. Only reachable inside this Docker network.
+    <<: *app
+    command: ["gunicorn", "--workers", "1", "--threads", "4", "--timeout", "120",
+              "--bind", "0.0.0.0:8001", "--chdir", "scripts", "embedding_server:app"]
+    environment:
+      SERVICE_NAME: "avir-embedder"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8001/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    stop_grace_period: 20s
 
   redis:
     # Short-lived captcha data only - no persistence, capped memory
@@ -56,4 +80,10 @@ services:
     command: ["python", "scripts/run_scheduler.py"]
     environment:
       SERVICE_NAME: "avir-scheduler"
+      DB_POOL_SIZE: "8"
+      DB_MAX_OVERFLOW: "4"
+      EMBEDDING_URL: "http://embedder:8001"
+      REDIS_URL: "redis://redis:6379/0"
+    depends_on:
+      - embedder
     stop_grace_period: 30s

@@ -1,34 +1,76 @@
 import json
 import logging
+import threading
 
 import numpy as np
-from sentence_transformers import SentenceTransformer
+import requests
 
+from config import Config
 from db import CompetitorPostEmbedding, Session, engine
 
 logger = logging.getLogger(__name__)
 
+MODEL_NAME = "all-MiniLM-L6-v2"  # the same model ChromaDB used; stored vectors depend on it
+_model = None
+_model_failed = False
+_model_lock = threading.Lock()
+
+
+def _local_model():
+    """The model, loaded once per process (it is ~0.5 GB with PyTorch).
+    Only used when EMBEDDING_URL isn't set - then the shared embedding service
+    (scripts/embedding_server.py) holds the one copy for every web worker."""
+    global _model, _model_failed  # pylint: disable=global-statement
+    if _model is None and not _model_failed:
+        with _model_lock:
+            if _model is None and not _model_failed:
+                try:
+                    from sentence_transformers import SentenceTransformer
+
+                    _model = SentenceTransformer(MODEL_NAME)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"Embedding model unavailable: {e}")
+                    _model_failed = True
+    return _model
+
+
+def encode(texts: list[str]) -> list[list[float]]:
+    """Vectors for the texts: from the shared embedding service when
+    EMBEDDING_URL is set, otherwise from the model in this process.
+    [] when neither works (callers then simply skip memory search)."""
+    if not texts:
+        return []
+    url = (getattr(Config, "EMBEDDING_URL", "") or "").rstrip("/")
+    if url:
+        try:
+            headers = {"X-Embedding-Token": Config.EMBEDDING_TOKEN} if getattr(Config, "EMBEDDING_TOKEN", "") else {}
+            resp = requests.post(f"{url}/embed", json={"texts": texts}, headers=headers, timeout=15)
+            if resp.status_code == 200:
+                return resp.json().get("vectors") or []
+            logger.warning(f"Embedding service answered {resp.status_code}")
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Embedding service unreachable: {e}")
+        return []
+    model = _local_model()
+    if model is None:
+        return []
+    return model.encode(texts).tolist()
+
 
 class EmbeddingService:
-    """Local semantic similarity for competitor posts and memory, backed by
-    SentenceTransformers and PostgreSQL instead of ChromaDB. Runs entirely
-    offline (no external LLM/API call)."""
+    """Semantic similarity for competitor posts and memory, backed by
+    SentenceTransformers and PostgreSQL. Runs without any external AI call:
+    the model runs in this process, or in the shared embedding service."""
 
     def __init__(self):
         self.enabled = True
-        try:
-            # Load the same model ChromaDB uses by default
-            self.model = SentenceTransformer("all-MiniLM-L6-v2")
-        except Exception as e:
-            logger.warning(f"Initialization warning: {e}")
-            self.enabled = False
 
     def get_embedding(self, text: str) -> list[float]:
         if not self.enabled or not text:
             return []
         try:
-            vector = self.model.encode(text)
-            return vector.tolist()
+            vectors = encode([text])
+            return vectors[0] if vectors else []
         except Exception as e:
             logger.warning(f"Error generating embedding: {e}")
             return []
@@ -37,8 +79,7 @@ class EmbeddingService:
         if not self.enabled or not texts:
             return []
         try:
-            vectors = self.model.encode(texts)
-            return vectors.tolist()
+            return encode(texts)
         except Exception as e:
             logger.warning(f"Error generating embeddings: {e}")
             return []
@@ -54,21 +95,18 @@ class EmbeddingService:
                 text = f"{p.get('title') or ''}\n{(p.get('text') or '')[:500]}".strip()
                 if not url or not text:
                     continue
-                
+
                 meta = {
                     "competitor": p.get("_source_competitor") or p.get("competitor") or "",
                     "platform": p.get("platform") or "",
                 }
-                
+
                 embedding_vector = self.get_embedding(text)
                 if not embedding_vector:
                     continue
-                    
+
                 emb = CompetitorPostEmbedding(
-                    id=url,
-                    content=text,
-                    metadata_json=json.dumps(meta),
-                    embedding_array=json.dumps(embedding_vector)
+                    id=url, content=text, metadata_json=json.dumps(meta), embedding_array=json.dumps(embedding_vector)
                 )
                 session.merge(emb)
             try:
@@ -154,8 +192,7 @@ class EmbeddingService:
             dup_groups.setdefault(dup_find(i), []).append(i)
 
         representatives = [
-            max(idxs, key=lambda i: len(url_to_post[got_ids[i]].get("text") or ""))
-            for idxs in dup_groups.values()
+            max(idxs, key=lambda i: len(url_to_post[got_ids[i]].get("text") or "")) for idxs in dup_groups.values()
         ]
 
         rep_count = len(representatives)

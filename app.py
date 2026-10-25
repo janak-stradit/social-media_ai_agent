@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import re
@@ -195,6 +196,46 @@ def create_app(config_name="development"):
         app.logger.warning(f"Blocked a cross-site {request.method} {request.path} from {source_host}")
         return jsonify({"success": False, "error": "This request came from another website and was blocked."}), 403
 
+    @app.before_request
+    def _end_revoked_sessions():
+        """A session ended elsewhere (password reset, "Sign out everywhere",
+        two-step sign-in change, account deactivated or deleted) stops working
+        on its next request. auth/utils.py session_is_current."""
+        if not session.get("user_id") or request.path.startswith("/static/"):
+            return None
+        from auth.utils import session_is_current
+
+        try:
+            current = session_is_current()
+        except Exception as err:  # noqa: BLE001 - a database hiccup must not sign everyone out
+            app.logger.warning(f"Session check skipped: {err}")
+            return None
+        if current:
+            return None
+        session.clear()
+        if request.path.startswith("/api/"):
+            return jsonify({"success": False, "error": "You were signed out. Please sign in again.",
+                            "code": "session_ended"}), 401
+        from flask import redirect
+
+        return redirect("/login")
+
+    @app.after_request
+    def _hide_internal_errors(response):
+        """A server error never shows its raw text (database messages, file
+        paths, provider responses) to the browser: it is logged with the
+        request id, and the reply carries that id instead."""
+        if response.status_code != 500 or not request.path.startswith("/api/") or not response.is_json:
+            return response
+        body = response.get_json(silent=True)
+        if not isinstance(body, dict) or not body.get("error"):
+            return response
+        ref = getattr(g, "request_id", "")
+        app.logger.error(f"500 on {request.method} {request.path}: {str(body['error'])[:500]}")
+        body["error"] = f"Something went wrong on our side. Please try again. (Reference: {ref})"
+        response.set_data(json.dumps(body))
+        return response
+
     @app.after_request
     def _security_headers(response):
         """Basic browser protections on every response."""
@@ -203,7 +244,13 @@ def create_app(config_name="development"):
         headers.setdefault("X-Frame-Options", "SAMEORIGIN")  # no clickjacking in other sites' frames
         headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         headers.setdefault("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
-        headers.setdefault("Content-Security-Policy", "frame-ancestors 'self'; object-src 'none'; base-uri 'self'")
+        headers.setdefault("Content-Security-Policy",
+                           "frame-ancestors 'self'; object-src 'none'; base-uri 'self'")
+        # Other sites' windows can't reach this one (payment pop-ups still work)
+        headers.setdefault("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
+        headers.setdefault("X-Permitted-Cross-Domain-Policies", "none")
+        if request.path.startswith("/api/"):  # API answers (often personal) are never cached
+            headers.setdefault("Cache-Control", "no-store")
         if request.is_secure or request.headers.get("X-Forwarded-Proto") == "https":
             headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
         return response

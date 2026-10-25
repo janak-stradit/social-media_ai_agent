@@ -54,8 +54,15 @@ if not DATABASE_URL:
 IS_SQLITE = DATABASE_URL.startswith("sqlite")
 SCHEMA = "social_media_agent"
 
+# Connections per process: enough for every web thread (gunicorn.conf.py
+# GUNICORN_THREADS, 16) plus background threads. 2 web workers + the
+# scheduler stay well under a small RDS instance's connection limit.
+_POOL = {} if IS_SQLITE else {"pool_size": int(os.getenv("DB_POOL_SIZE", "16")),
+                              "max_overflow": int(os.getenv("DB_MAX_OVERFLOW", "8")), "pool_recycle": 1800}
+
 engine = create_engine(
     DATABASE_URL,
+    **_POOL,
     pool_pre_ping=not IS_SQLITE,
     connect_args={"check_same_thread": False} if IS_SQLITE else {},
     echo=False,
@@ -93,6 +100,10 @@ class User(Base):
     # deactivates any account later, e.g. for abuse) - login_required_page checks
     # this after onboarding_completed. Individual/Small/Medium default active.
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # Raised to end every signed-in session of the account at once (password
+    # reset, two-step sign-in changes, "Sign out everywhere", admin deactivation):
+    # each session cookie carries the version it started with (auth/utils.py).
+    session_version: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
 
     # Forgot-password flow (auth/routes.py forgot_password/reset_password).
     # Only a SHA-256 hash of the emailed token is stored, so a leaked row
@@ -827,6 +838,23 @@ class IdeaLink(Base):
     opened_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # first click
 
 
+class MediaJob(Base):
+    """An image or video being made in the background (services/media_jobs.py)."""
+
+    __tablename__ = "media_jobs"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    media_type: Mapped[str] = mapped_column(String(10), nullable=False)
+    platform: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    status: Mapped[str] = mapped_column(String(10), nullable=False, default="running")  # running | done | failed
+    result_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
 class Notification(Base):
     """One item under the header bell (services/nudge_service.py): an
     occasion coming up, a trending topic or a reminder, with a link that
@@ -995,6 +1023,9 @@ class MemoryEmbedding(Base):
     metadata_json: Mapped[str] = mapped_column(Text, nullable=True)
     embedding_array: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    # Whose memory it is (0: not tied to a user). Searched in the database, so
+    # a generation reads only its own user's memories (services/memory_service.py).
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
 
 
 class CompetitorPostEmbedding(Base):
@@ -1054,6 +1085,7 @@ def init_db():
             f"ALTER TABLE {usr_tbl} ADD COLUMN company_website VARCHAR(500)",
             f"ALTER TABLE {usr_tbl} ADD COLUMN onboarding_completed BOOLEAN DEFAULT FALSE",
             f"ALTER TABLE {usr_tbl} ADD COLUMN is_active BOOLEAN DEFAULT TRUE",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN session_version INTEGER DEFAULT 0",
             f"ALTER TABLE {usr_tbl} ADD COLUMN password_reset_token_hash VARCHAR(64)",
             f"ALTER TABLE {usr_tbl} ADD COLUMN password_reset_sent_at TIMESTAMP",
             f"ALTER TABLE {usr_tbl} ADD COLUMN brand_scan_status VARCHAR(16)",
@@ -1083,6 +1115,8 @@ def init_db():
             f"ALTER TABLE {usr_tbl} ADD COLUMN guide_state TEXT",
             f"ALTER TABLE {usr_tbl} ADD COLUMN recap_email_enabled BOOLEAN",
             f"ALTER TABLE {usr_tbl} ADD COLUMN recap_email_last_month VARCHAR(7)",
+            f"ALTER TABLE {_tbl('memory_embeddings')} ADD COLUMN user_id INTEGER",
+            f"CREATE INDEX IF NOT EXISTS ix_memory_embeddings_user_id ON {_tbl('memory_embeddings')} (user_id)",
         ]:
             try:
                 with engine.begin() as sub_conn:
@@ -1228,11 +1262,40 @@ def init_db():
         logger.warning(f"Could not check admin passwords: {check_err}")
 
     try:
+        filled = _backfill_memory_owners()
+        if filled:
+            logger.info(f"Set the owner of {filled} stored memor{'y' if filled == 1 else 'ies'}.")
+    except Exception as mem_err:  # noqa: BLE001 - start-up must not fail on it
+        logger.warning(f"Warning backfilling memory owners: {mem_err}")
+
+    try:
         made = _backfill_conversations()
         if made:
             logger.info(f"Grouped {made} earlier run(s) into conversations.")
     except Exception as conv_err:  # noqa: BLE001 - start-up must not fail on it
         logger.warning(f"Warning backfilling conversations: {conv_err}")
+
+
+def _backfill_memory_owners() -> int:
+    """Memories saved before memory_embeddings.user_id existed get it from their
+    metadata (0 when they belong to no user). Runs once per memory."""
+    import json as _json
+
+    filled = 0
+    with Session(engine) as session:
+        while True:
+            rows = session.query(MemoryEmbedding).filter(MemoryEmbedding.user_id.is_(None)).limit(500).all()
+            if not rows:
+                break
+            for row in rows:
+                try:
+                    owner = str((_json.loads(row.metadata_json or "{}") or {}).get("user_id") or "")
+                except (ValueError, TypeError, AttributeError):
+                    owner = ""
+                row.user_id = int(owner) if owner.isdigit() else 0
+                filled += 1
+            session.commit()
+    return filled
 
 
 def _serialize_run(row: RunHistory, truncate_story: bool = False) -> dict:
@@ -1376,6 +1439,24 @@ def create_sales_contact_request(user_id: int, company_name: str, phone: str | N
         session.commit()
         session.refresh(row)
         return {"id": row.id, "company_name": row.company_name, "phone": row.phone, "message": row.message}
+
+
+def get_session_version(user_id: int) -> int | None:
+    """The account's current session version, or None when the account is gone."""
+    with Session(engine) as session:
+        row = session.query(User.session_version).filter(User.id == user_id).first()
+        return None if row is None else int(row[0] or 0)
+
+
+def bump_session_version(user_id: int) -> int:
+    """Ends every signed-in session of the account. Returns the new version."""
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if not user:
+            return 0
+        user.session_version = int(user.session_version or 0) + 1
+        session.commit()
+        return user.session_version
 
 
 def set_user_active(user_id: int, is_active: bool) -> dict | None:

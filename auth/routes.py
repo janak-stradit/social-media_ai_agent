@@ -18,7 +18,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 
 from auth.captcha import consume_pass_token
 from auth.rate_limit import RULES, client_ip, count, hit, limit_by_ip, reset, too_many
-from auth.utils import get_current_user_id
+from auth.utils import get_current_user_id, start_session
 from config import Config
 from db import (
     create_user,
@@ -44,6 +44,32 @@ VERIFICATION_TOKEN_TTL = timedelta(hours=24)
 RESEND_COOLDOWN = timedelta(seconds=60)
 PASSWORD_RESET_TTL = timedelta(hours=1)
 MIN_PASSWORD_LENGTH = 8  # sign-up and password reset; existing shorter passwords still work
+
+# The passwords attackers try first (from public breach lists). Checked as-is
+# and with trailing digits/symbols removed, so "Password123!" is caught too.
+_COMMON_PASSWORDS = frozenset("""
+password passw0rd p@ssword p@ssw0rd 12345678 123456789 1234567890 qwerty qwertyuiop qwerty123 iloveyou
+letmein welcome welcome1 admin administrator abc12345 abcd1234 football baseball monkey dragon sunshine
+princess trustno1 superman batman master shadow michael jordan liverpool chelsea arsenal india123
+login starwars whatever freedom hello123 changeme default secret computer internet google facebook
+instagram linkedin avirai stradit 11111111 00000000 88888888 12341234 11223344 asdfghjk asdfasdf
+zxcvbnm zxcvbnm1 1q2w3e4r 1qaz2wsx q1w2e3r4 aaaaaaaa
+""".split())
+
+
+def password_problem(password: str, email: str = "", name: str = "") -> str | None:
+    """Why a new password isn't good enough, or None. Length plus the
+    commonest guesses; the password must not be the email or the name."""
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return f"Password must be at least {MIN_PASSWORD_LENGTH} characters"
+    lowered = password.lower()
+    core = lowered.rstrip("0123456789!@#$%^&*._-")
+    if lowered in _COMMON_PASSWORDS or (len(core) >= 4 and core in _COMMON_PASSWORDS) or len(set(lowered)) <= 2:
+        return "That password is too easy to guess. Try a longer phrase, e.g. three unrelated words."
+    local = (email or "").split("@")[0].lower()
+    if (len(local) >= 4 and local in lowered) or (name and len(name) >= 4 and name.lower().replace(" ", "") in lowered):
+        return "Don't use your name or email address in your password."
+    return None
 
 
 def _as_utc(dt):
@@ -133,8 +159,9 @@ def register():
 
     if not name or not email or not password:
         return jsonify({"success": False, "error": "Name, email, and password are required"}), 400
-    if len(password) < MIN_PASSWORD_LENGTH:
-        return jsonify({"success": False, "error": f"Password must be at least {MIN_PASSWORD_LENGTH} characters"}), 400
+    problem = password_problem(password, email, name)
+    if problem:
+        return jsonify({"success": False, "error": problem}), 400
     if get_user_by_email(email):
         return jsonify({"success": False, "error": "An account with this email already exists"}), 409
 
@@ -154,8 +181,7 @@ def register():
         mark_user_email_verified(user["id"])
         mark_invitation_accepted(invitation["id"])
         session.clear()
-        session["user_id"] = user["id"]
-        session.permanent = True
+        start_session(user["id"])
         _claim_lead_preview(data.get("preview_token"), user["id"], email)
         return jsonify({"success": True, "redirect": url_for("onboarding_page")})
 
@@ -202,8 +228,7 @@ def login():
         # Password was right; the authenticator code comes next (/api/auth/2fa/verify)
         session["pending_2fa"] = {"user_id": user.id, "at": int(time.time())}
         return jsonify({"success": True, "two_factor_required": True})
-    session["user_id"] = user.id
-    session.permanent = True
+    start_session(user.id)
     return jsonify({"success": True, "user": _user_payload(user)})
 
 
@@ -260,8 +285,7 @@ def verify_two_factor():
     mark_totp_used(user_id, counter)
     reset("totp_user", str(user_id))
     session.clear()
-    session["user_id"] = user_id
-    session.permanent = True
+    start_session(user_id)
     user = get_user_by_id(user_id)
     return jsonify({"success": True, "user": _user_payload(user)})
 
@@ -323,6 +347,7 @@ def two_factor_enable():
         return jsonify({"success": False, "error": "That code isn't right. Check the app and try again."}), 400
     set_totp(user_id, state["secret"], enabled=True, last_counter=counter)
     log_audit("2fa.enabled", actor_user_id=user_id, target_user_id=user_id, ip=client_ip())
+    _end_other_sessions(user_id)  # sessions from before two-step sign-in are ended
     return jsonify({"success": True, "enabled": True})
 
 
@@ -340,6 +365,7 @@ def two_factor_disable():
         return jsonify({"success": False, "error": "That code isn't right. Check the app and try again."}), 400
     set_totp(user_id, None, enabled=False)
     log_audit("2fa.disabled", actor_user_id=user_id, target_user_id=user_id, ip=client_ip())
+    _end_other_sessions(user_id)
     return jsonify({"success": True, "enabled": False})
 
 
@@ -366,8 +392,7 @@ def verify_email(token):
 
     mark_user_email_verified(user.id)
     session.clear()
-    session["user_id"] = user.id
-    session.permanent = True
+    start_session(user.id)
     return redirect(url_for("onboarding_page"))
 
 
@@ -451,11 +476,37 @@ def reset_password():
         return jsonify(
             {"success": False, "error": "This reset link is invalid or has expired. Request a new one."}
         ), 400
+    problem = password_problem(password, user.email, user.name or "")
+    if problem:
+        return jsonify({"success": False, "error": problem}), 400
 
     reset_user_password(user.id, generate_password_hash(password))
-    # Drop any session in this browser; the user signs in fresh with the
-    # new password.
+    # A new password ends every signed-in session (someone who knew the old
+    # one is signed out too); this browser signs in fresh.
+    from db import bump_session_version
+
+    bump_session_version(user.id)
     session.clear()
+    return jsonify({"success": True})
+
+
+def _end_other_sessions(user_id: int) -> None:
+    """Every other signed-in browser of the account is signed out; this one stays."""
+    from db import bump_session_version
+
+    session["sv"] = bump_session_version(user_id)
+
+
+@auth_bp.route("/sessions/end-others", methods=["POST"])
+def end_other_sessions():
+    """Settings -> Security -> "Sign out everywhere else" (a lost phone, a shared computer)."""
+    from db import log_audit
+
+    user_id = get_current_user_id()
+    if not user_id:
+        return jsonify({"success": False, "error": "Authentication required"}), 401
+    _end_other_sessions(user_id)
+    log_audit("sessions.ended", actor_user_id=user_id, target_user_id=user_id, ip=client_ip())
     return jsonify({"success": True})
 
 

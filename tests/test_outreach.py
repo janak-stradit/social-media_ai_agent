@@ -309,7 +309,7 @@ def test_signing_up_from_a_preview_brings_the_brand_and_posts(admin, fake_ai, mo
     assert to_signup.headers["Location"].endswith(f"/signup?invite={invite_token}&preview={preview_token}")
     signup = client.get(f"/signup?invite={invite_token}&preview={preview_token}").get_data(as_text=True)
     assert "Your 3 posts for <strong>Synkrama Technologies</strong> are saved" in signup
-    r = client.post("/api/auth/register", json={"name": "Rohit Tiwari", "email": contact["email"], "password": "secret123",
+    r = client.post("/api/auth/register", json={"name": "Rohit Tiwari", "email": contact["email"], "password": "violet-harbour-42",
                                                 "invite_token": invite_token, "preview_token": preview_token}).get_json()
     assert r["success"]
     user = db.get_user_by_email(contact["email"])
