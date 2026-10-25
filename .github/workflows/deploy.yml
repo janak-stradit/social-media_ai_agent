@@ -69,7 +69,7 @@ jobs:
 
       # Checks out the exact commit that triggered this run (github.sha).
       - name: Check out ${{ env.DEPLOY_BRANCH }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Check required secrets
         env:
