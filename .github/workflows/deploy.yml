@@ -90,7 +90,7 @@ jobs:
           grep -Eq '^[[:space:]]*(export[[:space:]]+)?SECRET_KEY=' <<< "$ENV_FILE" || { echo "::error::ENV_FILE has no SECRET_KEY line"; exit 1; }
 
       - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
+        uses: aws-actions/configure-aws-credentials@v6
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ secrets.AWS_REGION }}
