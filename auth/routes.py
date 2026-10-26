@@ -293,7 +293,16 @@ def _check_two_factor_code(user_id: int, code):
     if hit("totp_user", str(user_id)):
         return too_many("Too many wrong codes. Wait a few minutes and sign in again.")
     state = get_totp_state(user_id)
-    counter = two_factor.check_code(two_factor.decrypt_secret(state["secret"]), code, state["last_counter"])
+    secret = two_factor.decrypt_secret(state["secret"])
+    if state["secret"] and secret is None:
+        # Encrypted with a different SECRET_KEY: no code can ever match, so say so
+        # instead of "wrong code". Fix: restore the old SECRET_KEY, or reset it with
+        # scripts/reset_two_factor.py
+        current_app.logger.error(f"2FA secret of user {user_id} can't be decrypted - SECRET_KEY changed?")
+        log_audit("login.2fa_undecryptable", target_user_id=user_id, ip=client_ip())
+        return jsonify({"success": False, "error": "Two-step sign-in can't be checked right now because the server's "
+                        "security key changed. Ask your administrator to reset two-step sign-in for your account."}), 503
+    counter = two_factor.check_code(secret, code, state["last_counter"])
     if counter is None:
         log_audit("login.2fa_failed", target_user_id=user_id, ip=client_ip())
         return jsonify({"success": False, "error": "That code isn't right. Check the app and try again."}), 401
