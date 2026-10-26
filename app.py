@@ -73,7 +73,10 @@ def _static_fingerprint(static_folder: str, filename: str) -> str | None:
     return digest
 # Pages search engines may index (see sitemap.xml); every other page gets
 # X-Robots-Tag: noindex - they're behind login or one-off (reset links etc.)
-_INDEXABLE_PATHS = ("/", "/signup", "/login")
+# Legal pages (legal/*.md): public paths, linked from the site footer and sign-up
+LEGAL_PATHS = ("/terms", "/privacy", "/refund-policy", "/acceptable-use", "/cookies", "/data-deletion",
+               "/subprocessors", "/contact")
+_INDEXABLE_PATHS = ("/", "/signup", "/login", "/legal", *LEGAL_PATHS)
 
 
 def _site_url() -> str:
@@ -706,6 +709,27 @@ def create_app(config_name="development"):
             return redirect(url_for("index"))
         return render_template("landing.html", site_url=_site_url())
 
+    def legal_page(slug=None):
+        """Terms, privacy and the other policies (services/legal_pages.py). No login."""
+        from flask import abort
+
+        from config import Config
+        from services import legal_pages
+
+        pages = legal_pages.pages()
+        if slug is None and request.path != "/legal":
+            slug = request.path.strip("/")
+        page = legal_pages.page(slug) if slug else None
+        if slug and not page:
+            abort(404)
+        return render_template("legal.html", pages=pages, page=page, site_url=_site_url(),
+                               company=Config.LEGAL_COMPANY_NAME)
+
+    app.add_url_rule("/legal", "legal_index", legal_page)
+    app.add_url_rule("/legal/<slug>", "legal_slug", legal_page)
+    for legal_path in LEGAL_PATHS:
+        app.add_url_rule(legal_path, f"legal_{legal_path.strip('/').replace('-', '_')}", legal_page)
+
     @app.route("/logout")
     def logout_route():
         session.clear()
@@ -749,7 +773,8 @@ def create_app(config_name="development"):
         # lastmod = when the landing page itself last changed (its file in this build)
         stamp = os.path.getmtime(os.path.join(app.root_path, "templates", "landing.html"))
         lastmod = time.strftime("%Y-%m-%d", time.gmtime(stamp))
-        pages = [("/", "weekly", "1.0"), ("/signup", "monthly", "0.8"), ("/login", "monthly", "0.5")]
+        pages = [("/", "weekly", "1.0"), ("/signup", "monthly", "0.8"), ("/login", "monthly", "0.5"),
+                 ("/legal", "yearly", "0.3"), *((path, "yearly", "0.3") for path in LEGAL_PATHS)]
         urls = "".join(
             f"<url><loc>{site}{path}</loc><lastmod>{lastmod}</lastmod>"
             f"<changefreq>{freq}</changefreq><priority>{prio}</priority></url>"

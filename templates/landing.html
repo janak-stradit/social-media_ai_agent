@@ -524,6 +524,9 @@
         .stradit-mark { --h: 16px; display: inline-block; width: calc(var(--h) * 378 / 78); height: var(--h); overflow: hidden; }
         .stradit-mark img { display: block; height: calc(var(--h) * 160 / 78); width: auto; max-width: none; margin: calc(var(--h) * -17 / 78) 0 0 calc(var(--h) * -46 / 78); }
         .footer-legal { margin-top: 40px; padding-top: 20px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 1rem; flex-wrap: wrap; font-size: 0.82rem; }
+        .footer-legal-links { display: flex; flex-wrap: wrap; gap: 0.4rem 1.1rem; }
+        .footer-legal-links a { color: inherit; text-decoration: none; }
+        .footer-legal-links a:hover { text-decoration: underline; }
 
         /* ── Motion ──────────────────────────────────────────────── */
         @keyframes blink { 50% { opacity: 0; } }
@@ -1018,6 +1021,15 @@
             </div>
             <div class="footer-legal">
                 <span>&copy; 2026 StradIT. All rights reserved.</span>
+                <nav class="footer-legal-links" aria-label="Legal">
+                    <a href="/terms">Terms</a>
+                    <a href="/privacy">Privacy</a>
+                    <a href="/refund-policy">Refunds</a>
+                    <a href="/cookies">Cookies</a>
+                    <a href="/acceptable-use">Acceptable use</a>
+                    <a href="/data-deletion">Data deletion</a>
+                    <a href="/contact">Contact</a>
+                </nav>
             </div>
         </div>
     </footer>

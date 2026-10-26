@@ -3,7 +3,7 @@
   receipt        - every applied payment, with its invoice link
   renewal_soon   - RENEWAL_REMINDER_DAYS before an automatic renewal charges
   expiry_soon    - EXPIRY_REMINDER_DAYS before a plan paid once runs out
-  renewal_failed - a renewal charge failed (Razorpay / Stripe webhook)
+  renewal_failed - a renewal charge failed (Stripe webhook)
 
 Each notice is sent once (db.Notification dedupe_key). Billing emails are
 account emails: they go out whatever the user's marketing email settings,
@@ -28,7 +28,7 @@ def _money(amount: int, currency: str) -> str:
 
 def _date(value) -> str:
     when = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
-    return when.strftime("%-d %B %Y")
+    return f"{when.day} {when:%B %Y}"  # not %-d: Linux-only
 
 
 def notify(

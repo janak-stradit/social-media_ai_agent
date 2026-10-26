@@ -864,6 +864,14 @@
                                         <input type="text" id="bpVisualStyle" class="form-control form-control-sm" placeholder="e.g. minimal, modern, high-contrast">
                                     </div>
                                 </div>
+                                <!-- Sets Studio Chat's post languages (services/language_service.py) -->
+                                <div class="bp-form-row">
+                                    <label class="guideline-field-label" for="bpCountry">Country</label>
+                                    <select id="bpCountry" class="form-control form-control-sm form-select">
+                                        <option value="">Not set - use my markets / browser</option>
+                                    </select>
+                                    <div class="form-text" id="bpCountryLanguages"></div>
+                                </div>
                                 <div class="bp-form-row">
                                     <label class="guideline-field-label">Target Audience</label>
                                     <textarea id="bpTargetAudience" class="form-control form-control-sm" rows="2"></textarea>

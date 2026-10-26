@@ -1,19 +1,21 @@
 """GST invoices, credit notes and refunds (services/invoice_service.py,
-services/billing_service.py). Payment providers are faked."""
+services/billing_service.py). Stripe is faked."""
 
 import hashlib
 import hmac
 import json
+import time
 import uuid
 from datetime import datetime
 
 import pytest
+from sqlalchemy.orm import Session
 
 import db
 from config import Config
 from services import billing_service, invoice_service
 
-KEY_SECRET, WEBHOOK_SECRET = "test_key_secret", "test_webhook_secret"
+WHSEC = "whsec_test"
 
 
 @pytest.fixture
@@ -27,13 +29,11 @@ def app():
 
 @pytest.fixture
 def providers(monkeypatch):
-    """Fake Razorpay and Stripe: orders, sessions and refunds all succeed."""
-    monkeypatch.setattr(Config, "RAZORPAY_KEY_ID", "rzp_test_key")
-    monkeypatch.setattr(Config, "RAZORPAY_KEY_SECRET", KEY_SECRET)
-    monkeypatch.setattr(Config, "RAZORPAY_WEBHOOK_SECRET", WEBHOOK_SECRET)
+    """Fake Stripe: Checkout sessions are paid at once; refunds succeed."""
     monkeypatch.setattr(Config, "STRIPE_SECRET_KEY", "sk_test")
+    monkeypatch.setattr(Config, "STRIPE_WEBHOOK_SECRET", WHSEC)
     monkeypatch.setattr(Config, "INVOICE_SELLER_STATE", "Gujarat")
-    calls = []
+    calls, sessions = [], {}
 
     class Response:
         ok, status_code = True, 200
@@ -44,23 +44,37 @@ def providers(monkeypatch):
         def json(self):
             return self._body
 
-    def post(url, auth=None, json=None, data=None, timeout=None):
-        calls.append((url, json or data))
-        if url.endswith("/orders"):
-            return Response({"id": f"order_{uuid.uuid4().hex[:12]}"})
-        return Response({"id": f"rfnd_{uuid.uuid4().hex[:8]}"})
+    def post(url, auth=None, data=None, timeout=None):
+        calls.append((url, data))
+        if url.endswith("/checkout/sessions"):
+            sid = f"cs_{uuid.uuid4().hex[:12]}"
+            sessions[sid] = {
+                "id": sid,
+                "url": f"https://checkout.stripe.com/{sid}",
+                "status": "complete",
+                "payment_status": "paid",
+                "amount_total": data["line_items[0][price_data][unit_amount]"],
+                "payment_intent": f"pi_{sid}",
+            }
+            return Response(sessions[sid])
+        return Response({"id": f"re_{uuid.uuid4().hex[:8]}"})
+
+    def get(url, auth=None, timeout=None):
+        return Response(sessions[url.rsplit("/", 1)[1]])
 
     monkeypatch.setattr(billing_service.requests, "post", post)
+    monkeypatch.setattr(billing_service.requests, "get", get)
     return calls
 
 
 def _user(plan=None, state=None, gstin=None):
-    from sqlalchemy.orm import Session
-
     user = db.create_user("Priya", f"{uuid.uuid4().hex[:10]}@example.com", "hash")
     with Session(db.engine) as session:  # a fully set-up account, so its pages open
         session.query(db.User).filter(db.User.id == user["id"]).update(
             {"email_verified": True, "onboarding_completed": True}
+        )
+        session.add(  # an Indian brand: pays in INR and gets GST invoices
+            db.UserBrandProfile(user_id=user["id"], website="https://x.in", compliance_regions=json.dumps(["India"]))
         )
         session.commit()
     if plan:
@@ -78,21 +92,11 @@ def _login(app, user):
 
 
 def _buy(app, user, item):
-    """Checkout + a correctly signed result -> the applied purchase."""
+    """Stripe Checkout, paid, and back -> (the payment, the applied purchase)."""
     client = _login(app, user)
-    order = client.post("/api/billing/checkout", json={"item": item}).get_json()
-    sig = hmac.new(
-        KEY_SECRET.encode(), f"{order['order_id']}|pay_{order['order_id']}".encode(), hashlib.sha256
-    ).hexdigest()
-    res = client.post(
-        "/api/billing/verify",
-        json={
-            "razorpay_order_id": order["order_id"],
-            "razorpay_payment_id": f"pay_{order['order_id']}",
-            "razorpay_signature": sig,
-        },
-    )
-    return order, res.get_json()
+    session_id = client.post("/api/billing/stripe/checkout", json={"item": item}).get_json()["session_id"]
+    res = client.post("/api/billing/stripe/confirm", json={"session_id": session_id})
+    return db.get_payment(session_id), res.get_json()
 
 
 def test_gst_split_by_state(monkeypatch):
@@ -145,7 +149,7 @@ def test_full_refund_takes_back_the_pack_and_issues_a_credit_note(app, providers
     res = admin.post(f"/api/admin/payments/{order['order_id']}/refund", json={}).get_json()
     assert res["status"] == "refunded" and res["refunded"] == order["amount"]
     assert res["credit_note"].startswith("CN/") and res["taken_back"]["pack_units_removed"] == 10
-    assert providers[-1][0].endswith(f"/payments/pay_{order['order_id']}/refund")
+    assert providers[-1][0].endswith("/refunds") and providers[-1][1]["payment_intent"] == order["payment_id"]
     assert db.get_plan_usage(user["id"])["images"]["pack_remaining"] == 0
     note = db.get_invoice(res["credit_note"])
     assert (
@@ -173,36 +177,24 @@ def test_full_plan_refund_ends_the_paid_time(app, providers):
     assert db.get_plan_usage(user["id"])["plan"]["slug"] != "growth"
 
 
-def test_refund_made_in_razorpays_dashboard_syncs_once(app, providers):
+def test_refund_made_in_stripes_dashboard_syncs_once(app, providers):
     user = _user()
     order, _ = _buy(app, user, "pack:image10")
 
-    def webhook(event_id):
-        body = json.dumps(
-            {
-                "event": "refund.processed",
-                "payload": {
-                    "payment": {
-                        "entity": {
-                            "id": f"pay_{order['order_id']}",
-                            "order_id": order["order_id"],
-                            "amount": order["amount"],
-                            "amount_refunded": order["amount"],
-                        }
-                    }
-                },
-            }
-        ).encode()
-        sig = hmac.new(WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
+    def webhook():
+        charge = {"id": "ch_1", "payment_intent": order["payment_id"], "amount_refunded": order["amount"]}
+        body = json.dumps({"id": f"evt_{uuid.uuid4().hex[:8]}", "type": "charge.refunded", "data": {"object": charge}})
+        stamp = str(int(time.time()))
+        sig = hmac.new(WHSEC.encode(), f"{stamp}.{body}".encode(), hashlib.sha256).hexdigest()
         return app.test_client().post(
-            "/api/billing/razorpay/webhook",
+            "/api/billing/stripe/webhook",
             data=body,
             content_type="application/json",
-            headers={"X-Razorpay-Signature": sig, "X-Razorpay-Event-Id": event_id},
+            headers={"Stripe-Signature": f"t={stamp},v1={sig}"},
         )
 
-    assert webhook("evt_r1").get_json()["status"] == "refund_recorded"
-    assert webhook("evt_r2").get_json()["status"] == "refund_known"  # a second event for the same refund
+    assert webhook().get_json()["status"] == "refund_recorded"
+    assert webhook().get_json()["status"] == "refund_known"  # a second event for the same refund
     assert len([i for i in db.invoices_for_order(order["order_id"]) if i["kind"] == "credit_note"]) == 1
 
 

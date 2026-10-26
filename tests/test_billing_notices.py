@@ -44,7 +44,7 @@ def _bell(user):
 def test_every_payment_gets_a_receipt_with_its_invoice(outbox):
     user = _user()
     order = f"order_{uuid.uuid4().hex[:8]}"
-    db.create_payment(user["id"], "razorpay", order, "pack:image10", "10 images", 153282, 23382, "INR")
+    db.create_payment(user["id"], "stripe", order, "pack:image10", "10 images", 153282, 23382, "INR")
     applied = billing_service.fulfil(order, "pay_1", "test")
     assert outbox[0]["to_email"] == user["email"] and "₹1,532.82" in outbox[0]["subject"]
     assert outbox[0]["url"] == f"https://app.example/invoices/{applied['invoice']}"
@@ -55,7 +55,7 @@ def test_renewal_reminder_three_days_before_once(outbox):
     user = _user()
     _ends_in(user, 2.5)
     sub_id = f"sub_{uuid.uuid4().hex[:8]}"
-    db.create_subscription(user["id"], "razorpay", sub_id, "growth", "month", 471882, "INR")
+    db.create_subscription(user["id"], "stripe", sub_id, "growth", "month", 471882, "INR")
     db.update_subscription(sub_id, status="active")
 
     billing_notice_service.run_billing_reminders()

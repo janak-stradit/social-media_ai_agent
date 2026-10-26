@@ -135,16 +135,23 @@ class Config:
     JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "")
     JWT_ACCESS_TTL_SECONDS = int(os.getenv("JWT_ACCESS_TTL_SECONDS", str(60 * 60)))
     JWT_REFRESH_TTL_SECONDS = int(os.getenv("JWT_REFRESH_TTL_SECONDS", str(30 * 24 * 60 * 60)))
-    # Razorpay (INR payments; services/billing_service.py). Test keys start
-    # rzp_test_. The webhook secret is set on the webhook in the Razorpay
-    # dashboard (URL: <APP_BASE_URL>/api/billing/razorpay/webhook). Buying is
-    # hidden until the key id and secret are set.
-    RAZORPAY_KEY_ID = os.getenv("RAZORPAY_KEY_ID", "")
-    RAZORPAY_KEY_SECRET = os.getenv("RAZORPAY_KEY_SECRET", "")
-    RAZORPAY_WEBHOOK_SECRET = os.getenv("RAZORPAY_WEBHOOK_SECRET", "")
+    # Legal pages (legal/*.md, services/legal_pages.py): the company details
+    # filled into them. LEGAL_GRIEVANCE_OFFICER is required for Indian users
+    # (IT Rules 2021). Change LEGAL_UPDATED and LEGAL_VERSION together whenever
+    # a policy changes; each sign-up records the version it agreed to.
+    LEGAL_COMPANY_NAME = os.getenv("LEGAL_COMPANY_NAME") or os.getenv("INVOICE_SELLER_NAME") or "StradIT"
+    LEGAL_ADDRESS = os.getenv("LEGAL_ADDRESS") or os.getenv("INVOICE_SELLER_ADDRESS", "")
+    LEGAL_EMAIL = os.getenv("LEGAL_EMAIL") or "sales@stradit.com"
+    LEGAL_GRIEVANCE_OFFICER = os.getenv("LEGAL_GRIEVANCE_OFFICER") or "the Grievance Officer"
+    LEGAL_GRIEVANCE_EMAIL = os.getenv("LEGAL_GRIEVANCE_EMAIL", "")
+    LEGAL_JURISDICTION = os.getenv("LEGAL_JURISDICTION") or "Gujarat, India"
+    LEGAL_UPDATED = os.getenv("LEGAL_UPDATED") or "26 October 2026"
+    LEGAL_VERSION = os.getenv("LEGAL_VERSION") or "2026-10-26"
+    # GST added to INR prices (services/billing_service.py)
     GST_RATE = float(os.getenv("GST_RATE", "0.18"))
-    # Stripe (USD payments; services/billing_service.py). Test keys start
-    # sk_test_. Webhook endpoint in the Stripe dashboard:
+    # Stripe: the only payment gateway, for every country - INR for Indian
+    # brands, USD for everyone else (services/billing_service.py). Buying is
+    # hidden until the secret key is set. Test keys start sk_test_. Webhook endpoint in the Stripe dashboard:
     # <APP_BASE_URL>/api/billing/stripe/webhook (event checkout.session.completed,
     # checkout.session.async_payment_succeeded); its signing secret starts whsec_.
     # GST invoices (services/invoice_service.py): the seller's details printed on

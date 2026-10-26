@@ -1,24 +1,21 @@
-"""Buying plans and top-up packs: Razorpay for INR, Stripe for USD.
+"""Buying plans and top-up packs, for every country, through Stripe.
+
+Indian brands pay in INR with GST added (db.user_currency); everyone else
+pays in USD without it.
 
 How a purchase works
   1. The browser asks for an item ("plan:growth:month", "pack:image10").
-     The server looks up its price (plans table / PACKS below), adds GST and
-     creates a Razorpay order. The browser never sends an amount.
-  2. Razorpay's own checkout window takes the payment (cards, UPI, net
-     banking); card details never reach this server.
-  3. The browser sends back Razorpay's payment id and signature. The
-     signature (HMAC-SHA256 of "order_id|payment_id" with the key secret)
-     proves Razorpay confirmed the payment; then the purchase is applied.
-  4. Razorpay's webhook reports the same payment server-to-server (signed
-     with the webhook secret), in case the browser closed before step 3.
+     The server looks up its price (plans table / PACKS below), adds GST for
+     INR and creates a Stripe Checkout Session at that amount. The browser
+     never sends an amount.
+  2. Stripe's own page takes the payment; card details never reach this
+     server.
+  3. When Stripe sends the browser back, the server asks Stripe directly
+     whether the session was paid (confirm_stripe_session).
+  4. Stripe's signed webhook reports the same payment server-to-server, in
+     case the browser closed before step 3.
 Each payment is applied once (db.claim_payment_for_fulfilment), whichever of
 steps 3 and 4 arrives first, and recorded in the audit log.
-
-Stripe (USD) follows the same rules with Stripe Checkout: the server creates a
-Checkout Session at its own price and sends the browser to Stripe's page;
-afterwards the server asks Stripe directly whether the session was paid
-(confirm_stripe_session), and Stripe's signed webhook reports it too. No GST
-is added to USD prices.
 """
 
 import hashlib
@@ -34,7 +31,6 @@ from config import Config
 
 logger = logging.getLogger(__name__)
 
-RAZORPAY_API = "https://api.razorpay.com/v1"
 STRIPE_API = "https://api.stripe.com/v1"
 STRIPE_SIGNATURE_TOLERANCE = 5 * 60  # seconds; older webhook signatures are refused (replays)
 PERIOD_DAYS = {"month": 30, "year": 365}
@@ -52,10 +48,8 @@ class BillingError(Exception):
     """A purchase that can't go ahead; the message is safe to show the user."""
 
 
-def enabled(currency: str = "INR") -> bool:
-    if currency == "USD":
-        return bool(Config.STRIPE_SECRET_KEY)
-    return bool(Config.RAZORPAY_KEY_ID and Config.RAZORPAY_KEY_SECRET)
+def enabled() -> bool:
+    return bool(Config.STRIPE_SECRET_KEY)
 
 
 def _paise(amount: float) -> int:
@@ -100,58 +94,6 @@ def price_item(user_id: int, item: str, currency: str = "INR") -> dict:
     }
 
 
-def create_order(user_id: int, item: str) -> dict:
-    """Create a Razorpay order for an item and remember it. Returns what the
-    checkout window needs."""
-    from db import create_payment, get_user_by_id
-
-    if not enabled():
-        raise BillingError("Online payment isn't available yet.")
-    priced = price_item(user_id, item)
-    response = requests.post(
-        f"{RAZORPAY_API}/orders",
-        auth=(Config.RAZORPAY_KEY_ID, Config.RAZORPAY_KEY_SECRET),
-        json={
-            "amount": priced["amount"],
-            "currency": "INR",
-            "receipt": f"u{user_id}-{item}"[:40],
-            "notes": {"user_id": str(user_id), "item": item},
-        },
-        timeout=20,
-    )
-    if not response.ok:
-        logger.warning(f"Razorpay order failed: {response.status_code} {response.text[:200]}")
-        raise BillingError("Payment could not be started. Please try again.")
-    order = response.json()
-    create_payment(
-        user_id, "razorpay", order["id"], item, priced["description"], priced["amount"], priced["tax"], "INR"
-    )
-    user = get_user_by_id(user_id)
-    return {
-        "order_id": order["id"],
-        "key_id": Config.RAZORPAY_KEY_ID,
-        "amount": priced["amount"],
-        "currency": "INR",
-        "description": priced["description"],
-        "tax": priced["tax"],
-        "prefill": {"name": user.name if user else "", "email": user.email if user else ""},
-    }
-
-
-def valid_checkout_signature(order_id: str, payment_id: str, signature: str) -> bool:
-    expected = hmac.new(
-        Config.RAZORPAY_KEY_SECRET.encode(), f"{order_id}|{payment_id}".encode(), hashlib.sha256
-    ).hexdigest()
-    return bool(signature) and hmac.compare_digest(expected, signature)
-
-
-def valid_webhook_signature(body: bytes, signature: str) -> bool:
-    if not Config.RAZORPAY_WEBHOOK_SECRET:
-        return False
-    expected = hmac.new(Config.RAZORPAY_WEBHOOK_SECRET.encode(), body, hashlib.sha256).hexdigest()
-    return bool(signature) and hmac.compare_digest(expected, signature)
-
-
 def fulfil(order_id: str, payment_id: str | None, source: str, paid_amount: int | None = None) -> dict | None:
     """Apply a paid order (once): extend the plan or add the pack. Returns
     what was applied, or None when it was already applied or is unknown."""
@@ -162,7 +104,7 @@ def fulfil(order_id: str, payment_id: str | None, source: str, paid_amount: int 
         logger.warning(f"Payment for unknown order {order_id} ({source})")
         return None
     if paid_amount is not None and int(paid_amount) != int(payment["amount"]):
-        # Razorpay reports a different amount than the order was created for: don't apply it
+        # Stripe reports a different amount than the order was created for: don't apply it
         logger.error(f"SECURITY: order {order_id} paid {paid_amount}, expected {payment['amount']} - not applied")
         log_audit(
             "payment.amount_mismatch",
@@ -258,8 +200,8 @@ def apply_refund(order_id: str, refunded_total: int, source: str, actor_user_id:
 
 
 def refund(order_id: str, amount: int | None, actor_user_id: int) -> dict:
-    """Admin: refund an order (all of it when amount is None) through its
-    provider, then record it. Raises BillingError."""
+    """Admin: refund an order (all of it when amount is None) through
+    Stripe, then record it. Raises BillingError."""
     from db import get_payment
 
     payment = get_payment(order_id)
@@ -269,81 +211,30 @@ def refund(order_id: str, amount: int | None, actor_user_id: int) -> dict:
     amount = left if amount is None else int(amount)
     if not 0 < amount <= left:
         raise BillingError(f"The refund must be between 1 and {left} (smallest currency unit).")
-    if payment["provider"] == "razorpay":
-        response = requests.post(
-            f"{RAZORPAY_API}/payments/{payment['payment_id']}/refund",
-            auth=(Config.RAZORPAY_KEY_ID, Config.RAZORPAY_KEY_SECRET),
-            json={"amount": amount, "notes": {"order_id": order_id}},
-            timeout=20,
-        )
-    else:
-        response = requests.post(
-            f"{STRIPE_API}/refunds",
-            auth=(Config.STRIPE_SECRET_KEY, ""),
-            data={"payment_intent": payment["payment_id"], "amount": amount, "metadata[order_id]": order_id},
-            timeout=20,
-        )
+    response = requests.post(
+        f"{STRIPE_API}/refunds",
+        auth=(Config.STRIPE_SECRET_KEY, ""),
+        data={"payment_intent": payment["payment_id"], "amount": amount, "metadata[order_id]": order_id},
+        timeout=20,
+    )
     if not response.ok:
         logger.warning(f"Refund failed for {order_id}: {response.status_code} {response.text[:200]}")
-        raise BillingError("The payment provider refused the refund. Check its dashboard for details.")
+        raise BillingError("Stripe refused the refund. Check its dashboard for details.")
     result = apply_refund(order_id, (payment["refunded_amount"] or 0) + amount, "admin", actor_user_id)
     return result or {"refunded": 0}
 
 
-def handle_webhook(body: bytes, signature: str, event_id: str | None) -> str:
-    """Razorpay webhook: verify, ignore repeats, apply paid orders. Returns a
-    short status for the log."""
-    from db import mark_payment_failed, record_payment_event
-
-    if not valid_webhook_signature(body, signature):
-        return "bad_signature"
-    if event_id and not record_payment_event(event_id):
-        return "duplicate"
-    event = json.loads(body or b"{}")
-    kind = event.get("event")
-    payment = ((event.get("payload") or {}).get("payment") or {}).get("entity") or {}
-    order_id, payment_id = payment.get("order_id"), payment.get("id")
-    subscription = ((event.get("payload") or {}).get("subscription") or {}).get("entity") or {}
-    if kind == "subscription.charged" and subscription.get("id") and payment_id:
-        applied = charge_subscription(
-            subscription["id"], f"rzp_sub:{payment_id}", payment.get("amount"), "razorpay_webhook"
-        )
-        return "applied" if applied else "already_applied"
-    if kind == "subscription.pending" and subscription.get("id"):
-        _renewal_failed(subscription["id"], "the bank declined it or the mandate wasn't approved")
-        return "renewal_failed"
-    if kind in ("subscription.cancelled", "subscription.completed", "subscription.halted") and subscription.get("id"):
-        subscription_ended(
-            subscription["id"],
-            {"subscription.cancelled": "cancelled", "subscription.completed": "ended", "subscription.halted": "ended"}[
-                kind
-            ],
-        )
-        return "subscription_updated"
-    if kind in ("payment.captured", "order.paid") and order_id:
-        return "applied" if fulfil(order_id, payment_id, "webhook", payment.get("amount")) else "already_applied"
-    if kind == "payment.failed" and order_id:
-        mark_payment_failed(order_id, payment_id)
-        return "failed"
-    if kind in ("refund.processed", "refund.created") and order_id and payment.get("amount_refunded") is not None:
-        return (
-            "refund_recorded"
-            if apply_refund(order_id, int(payment["amount_refunded"]), "razorpay_webhook")
-            else "refund_known"
-        )
-    return "ignored"
+# ── Stripe Checkout ──────────────────────────────────────────────────────────
 
 
-# ── Stripe (USD) ──────────────────────────────────────────────────────────
-
-
-def create_stripe_session(user_id: int, item: str, base_url: str) -> dict:
-    """A Stripe Checkout Session at the server's USD price. Returns {url} to send the browser to."""
+def create_stripe_session(user_id: int, item: str, base_url: str, currency: str = "USD") -> dict:
+    """A Stripe Checkout Session at the server's price in the user's currency
+    (INR includes GST). Returns {url} to send the browser to."""
     from db import create_payment, get_user_by_id
 
-    if not enabled("USD"):
+    if not enabled():
         raise BillingError("Online payment isn't available yet.")
-    priced = price_item(user_id, item, "USD")
+    priced = price_item(user_id, item, currency)
     user = get_user_by_id(user_id)
     base = base_url.rstrip("/")
     response = requests.post(
@@ -352,9 +243,9 @@ def create_stripe_session(user_id: int, item: str, base_url: str) -> dict:
         data={
             "mode": "payment",
             "line_items[0][quantity]": 1,
-            "line_items[0][price_data][currency]": "usd",
+            "line_items[0][price_data][currency]": currency.lower(),
             "line_items[0][price_data][unit_amount]": priced["amount"],
-            "line_items[0][price_data][product_data][name]": f"AVIR AI - {priced['description']}",
+            "line_items[0][price_data][product_data][name]": _product_name(priced["description"], priced["tax"]),
             "client_reference_id": str(user_id),
             "metadata[user_id]": str(user_id),
             "metadata[item]": item,
@@ -368,8 +259,15 @@ def create_stripe_session(user_id: int, item: str, base_url: str) -> dict:
         logger.warning(f"Stripe session failed: {response.status_code} {response.text[:200]}")
         raise BillingError("Payment could not be started. Please try again.")
     session = response.json()
-    create_payment(user_id, "stripe", session["id"], item, priced["description"], priced["amount"], 0, "USD")
+    create_payment(
+        user_id, "stripe", session["id"], item, priced["description"], priced["amount"], priced["tax"], currency
+    )
     return {"url": session["url"], "session_id": session["id"]}
+
+
+def _product_name(description: str, tax: int) -> str:
+    """What Stripe's page shows; GST is already in the INR amount."""
+    return f"AVIR AI - {description}" + (f" (incl. {round(Config.GST_RATE * 100)}% GST)" if tax else "")
 
 
 def _stripe_session_paid(session: dict) -> bool:
@@ -409,7 +307,7 @@ def _remember_stripe_subscription(payment: dict, session: dict) -> None:
     if session.get("mode") != "subscription" or not sub_id or get_subscription(sub_id):
         return
     _, slug, period = payment["item"].split(":")
-    create_subscription(payment["user_id"], "stripe", sub_id, slug, period, payment["amount"], "USD")
+    create_subscription(payment["user_id"], "stripe", sub_id, slug, period, payment["amount"], payment["currency"])
     from db import update_subscription
 
     update_subscription(sub_id, status="active")
@@ -485,18 +383,12 @@ def handle_stripe_webhook(body: bytes, signature: str) -> str:
 
 # ── Automatic renewal (subscriptions) ─────────────────────────────────────
 #
-# Razorpay (INR): a Razorpay "plan" per AVIR plan, period and price (created
-# once, remembered in app_settings), then a subscription the user authorises
-# in Razorpay's window (cards, UPI AutoPay). Every charge - the first one too -
-# arrives as the signed subscription.charged webhook.
-# Stripe (USD): Checkout in subscription mode. The first period is applied
-# like a one-time payment when the user comes back; every renewal arrives as
-# the signed invoice.paid webhook.
-# Each charge is a Payment ("rzp_sub:<payment id>" / the Stripe invoice id),
-# applied once through fulfil(), so it extends the plan, gets an invoice and is
-# audited. Cancelling stops future charges; the paid time is kept.
-
-SUBSCRIPTION_CYCLES = {"month": 120, "year": 10}  # Razorpay needs a total number of charges
+# Stripe Checkout in subscription mode, in the user's currency. The first
+# period is applied like a one-time payment when the user comes back; every
+# renewal arrives as the signed invoice.paid webhook. Each charge is a Payment
+# (the Stripe invoice id), applied once through fulfil(), so it extends the
+# plan, gets an invoice and is audited. Cancelling stops future charges; the
+# paid time is kept.
 
 
 def _subscription_price(user_id: int, plan_slug: str, period: str, currency: str) -> dict:
@@ -505,70 +397,17 @@ def _subscription_price(user_id: int, plan_slug: str, period: str, currency: str
     return price_item(user_id, f"plan:{plan_slug}:{period}", currency)
 
 
-def _razorpay_plan_id(plan_slug: str, period: str, amount: int, description: str) -> str:
-    """Razorpay's plan for this AVIR plan, period and price (new price -> new Razorpay plan)."""
-    from db import get_setting, save_setting
-
-    key = f"razorpay_plan:{plan_slug}:{period}:{amount}"
-    known = get_setting(key, "")
-    if known:
-        return known
-    response = requests.post(
-        f"{RAZORPAY_API}/plans",
-        auth=(Config.RAZORPAY_KEY_ID, Config.RAZORPAY_KEY_SECRET),
-        json={
-            "period": "monthly" if period == "month" else "yearly",
-            "interval": 1,
-            "item": {"name": f"AVIR AI - {description}", "amount": amount, "currency": "INR"},
-        },
-        timeout=20,
-    )
-    if not response.ok:
-        logger.warning(f"Razorpay plan failed: {response.status_code} {response.text[:200]}")
-        raise BillingError("Automatic renewal could not be started. Please try again.")
-    plan_id = response.json()["id"]
-    save_setting(key, plan_id)
-    return plan_id
-
-
 def start_subscription(user_id: int, plan_slug: str, period: str, currency: str, base_url: str) -> dict:
-    """Start an automatically renewing plan. INR: returns what Razorpay's window
-    needs; USD: returns {url} of Stripe Checkout."""
-    from db import create_payment, create_subscription, current_subscription, get_user_by_id
+    """Start an automatically renewing plan. Returns {url} of Stripe Checkout."""
+    from db import create_payment, current_subscription, get_user_by_id
 
-    if not enabled(currency):
+    if not enabled():
         raise BillingError("Online payment isn't available yet.")
     if current_subscription(user_id):
         raise BillingError("You already have automatic renewal on. Cancel it first to switch plans.")
     priced = _subscription_price(user_id, plan_slug, period, currency)
     description = f"{priced['description'].replace(', 1 ' + period, '')}, renews every {period}"
     user = get_user_by_id(user_id)
-    if currency == "INR":
-        plan_id = _razorpay_plan_id(plan_slug, period, priced["amount"], description)
-        response = requests.post(
-            f"{RAZORPAY_API}/subscriptions",
-            auth=(Config.RAZORPAY_KEY_ID, Config.RAZORPAY_KEY_SECRET),
-            json={
-                "plan_id": plan_id,
-                "total_count": SUBSCRIPTION_CYCLES[period],
-                "customer_notify": 1,
-                "notes": {"user_id": str(user_id), "plan": plan_slug, "period": period},
-            },
-            timeout=20,
-        )
-        if not response.ok:
-            logger.warning(f"Razorpay subscription failed: {response.status_code} {response.text[:200]}")
-            raise BillingError("Automatic renewal could not be started. Please try again.")
-        sub = response.json()
-        create_subscription(user_id, "razorpay", sub["id"], plan_slug, period, priced["amount"], "INR")
-        return {
-            "provider": "razorpay",
-            "subscription_id": sub["id"],
-            "key_id": Config.RAZORPAY_KEY_ID,
-            "description": description,
-            "amount": priced["amount"],
-            "prefill": {"name": user.name if user else "", "email": user.email if user else ""},
-        }
     base = base_url.rstrip("/")
     response = requests.post(
         f"{STRIPE_API}/checkout/sessions",
@@ -576,10 +415,10 @@ def start_subscription(user_id: int, plan_slug: str, period: str, currency: str,
         data={
             "mode": "subscription",
             "line_items[0][quantity]": 1,
-            "line_items[0][price_data][currency]": "usd",
+            "line_items[0][price_data][currency]": currency.lower(),
             "line_items[0][price_data][unit_amount]": priced["amount"],
             "line_items[0][price_data][recurring][interval]": period,
-            "line_items[0][price_data][product_data][name]": f"AVIR AI - {description}",
+            "line_items[0][price_data][product_data][name]": _product_name(description, priced["tax"]),
             "client_reference_id": str(user_id),
             "metadata[user_id]": str(user_id),
             "metadata[item]": priced["item"],
@@ -596,7 +435,9 @@ def start_subscription(user_id: int, plan_slug: str, period: str, currency: str,
         raise BillingError("Automatic renewal could not be started. Please try again.")
     session = response.json()
     # the first period is paid through this session, applied on return like a one-time purchase
-    create_payment(user_id, "stripe", session["id"], priced["item"], description, priced["amount"], 0, "USD")
+    create_payment(
+        user_id, "stripe", session["id"], priced["item"], description, priced["amount"], priced["tax"], currency
+    )
     return {"provider": "stripe", "url": session["url"], "session_id": session["id"]}
 
 
@@ -625,22 +466,6 @@ def charge_subscription(provider_subscription_id: str, charge_id: str, amount: i
     return fulfil(charge_id, charge_id, source, amount)
 
 
-def verify_razorpay_subscription(user_id: int, subscription_id: str, payment_id: str, signature: str) -> dict | None:
-    """The result of Razorpay's window for a subscription: signature is an
-    HMAC of "payment_id|subscription_id". Applies the first charge."""
-    from db import get_subscription
-
-    sub = get_subscription(subscription_id)
-    if not sub or sub["user_id"] != user_id:
-        raise BillingError("Unknown subscription.")
-    expected = hmac.new(
-        Config.RAZORPAY_KEY_SECRET.encode(), f"{payment_id}|{subscription_id}".encode(), hashlib.sha256
-    ).hexdigest()
-    if not signature or not hmac.compare_digest(expected, signature):
-        raise BillingError("The payment could not be confirmed.")
-    return charge_subscription(subscription_id, f"rzp_sub:{payment_id}", None, "subscription_checkout")
-
-
 def cancel_subscription(user_id: int, actor_user_id: int | None = None) -> dict:
     """Stop automatic renewal at the end of the paid period. Raises BillingError."""
     from db import current_subscription, log_audit, update_subscription
@@ -648,20 +473,12 @@ def cancel_subscription(user_id: int, actor_user_id: int | None = None) -> dict:
     sub = current_subscription(user_id)
     if not sub or sub["status"] != "active":
         raise BillingError("Automatic renewal isn't on.")
-    if sub["provider"] == "razorpay":
-        response = requests.post(
-            f"{RAZORPAY_API}/subscriptions/{sub['provider_subscription_id']}/cancel",
-            auth=(Config.RAZORPAY_KEY_ID, Config.RAZORPAY_KEY_SECRET),
-            json={"cancel_at_cycle_end": 1},
-            timeout=20,
-        )
-    else:
-        response = requests.post(
-            f"{STRIPE_API}/subscriptions/{sub['provider_subscription_id']}",
-            auth=(Config.STRIPE_SECRET_KEY, ""),
-            data={"cancel_at_period_end": "true"},
-            timeout=20,
-        )
+    response = requests.post(
+        f"{STRIPE_API}/subscriptions/{sub['provider_subscription_id']}",
+        auth=(Config.STRIPE_SECRET_KEY, ""),
+        data={"cancel_at_period_end": "true"},
+        timeout=20,
+    )
     if not response.ok:
         logger.warning(
             f"Cancel failed for {sub['provider_subscription_id']}: {response.status_code} {response.text[:200]}"

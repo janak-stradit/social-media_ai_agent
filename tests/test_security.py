@@ -86,7 +86,7 @@ def test_a_successful_sign_in_clears_the_count(app):
 
 def test_new_passwords_need_eight_characters(app):
     res = app.test_client().post(
-        "/api/auth/register", json={"name": "A", "email": "short@example.com", "password": "abc1234"}
+        "/api/auth/register", json={"name": "A", "email": "short@example.com", "password": "abc1234", "accept_terms": True}
     )
     assert res.status_code == 400 and "8 characters" in res.get_json()["error"]
 

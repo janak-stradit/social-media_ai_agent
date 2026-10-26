@@ -413,8 +413,7 @@ $(document).ready(function () {
             .always(() => $btn.prop('disabled', false));
     });
 
-    // ── Buying: Razorpay (INR) or Stripe (USD). Plan rows get Buy buttons, packs a Top up list ──
-    let billingProvider = 'razorpay';
+    // ── Buying through Stripe, in INR (GST added) or USD. Plan rows get Buy buttons, packs a Top up list ──
     function minorToText(amount, currency) {
         return currency === 'USD'
             ? '$' + (amount / 100).toLocaleString('en-US', { minimumFractionDigits: amount % 100 ? 2 : 0, maximumFractionDigits: 2 })
@@ -423,12 +422,10 @@ $(document).ready(function () {
     function loadBilling(plans, usage, currency) {
         $.getJSON('/api/billing/options').done(function (r) {
             const on = !!r.enabled;
-            billingProvider = r.provider;
+            const gst = r.gst_rate ? `Prices include ${Math.round(r.gst_rate * 100)}% GST at checkout. ` : '';
             $('#planNote').text(!on
                 ? 'Online payment is coming soon. To change your plan or buy a top-up pack, contact your admin.'
-                : (r.provider === 'stripe'
-                    ? 'Payments are handled by Stripe. You will go to Stripe\'s secure page to pay, then come back here.'
-                    : 'Prices include 18% GST at checkout. Payments are handled by Razorpay (cards, UPI, net banking).'));
+                : gst + 'Payments are handled by Stripe. You will go to Stripe\'s secure page to pay, then come back here.');
             if (!on) return;
             const byItem = {};
             (r.items || []).forEach(i => { byItem[i.item] = i; });
@@ -466,29 +463,12 @@ $(document).ready(function () {
             }
         });
     }
-    // Automatic renewal: Razorpay subscription window (INR) or Stripe Checkout in subscription mode (USD)
+    // Automatic renewal: Stripe Checkout in subscription mode, back to /settings?checkout=success
     $(document).on('click', '.subscribe-btn', function () {
         const $btn = $(this).prop('disabled', true);
         $.ajax({ url: '/api/billing/subscribe', type: 'POST', contentType: 'application/json',
             data: JSON.stringify({ plan: $btn.data('plan'), period: $btn.data('period') }) })
-            .done(function (r) {
-                if (r.provider === 'stripe') { window.location.href = r.url; return; }
-                if (!window.Razorpay) {
-                    showToast('The payment window could not load. Check your connection and try again.', 'error');
-                    return $btn.prop('disabled', false);
-                }
-                const checkout = new window.Razorpay({
-                    key: r.key_id, subscription_id: r.subscription_id, name: 'AVIR AI', description: r.description,
-                    prefill: r.prefill, theme: { color: '#c2410c' },
-                    handler: function (result) {
-                        $.ajax({ url: '/api/billing/subscribe/verify', type: 'POST', contentType: 'application/json', data: JSON.stringify(result) })
-                            .done(() => { showToast('Automatic renewal is on. Your plan is active.', 'success'); loadPlan(); })
-                            .fail(xhr => showToast((xhr.responseJSON || {}).error || 'We could not confirm the payment. If money was taken, it will be applied within a few minutes.', 'error'));
-                    },
-                    modal: { ondismiss: () => $btn.prop('disabled', false) }
-                });
-                checkout.open();
-            })
+            .done(r => { window.location.href = r.url; })
             .fail(xhr => { showToast((xhr.responseJSON || {}).error || 'Automatic renewal could not be started.', 'error'); $btn.prop('disabled', false); });
     });
     $(document).on('click', '#cancelRenewalBtn', function () {
@@ -500,37 +480,10 @@ $(document).ready(function () {
 
     $(document).on('click', '.buy-btn', function () {
         const $btn = $(this).prop('disabled', true);
-        const item = $btn.data('item');
-        if (billingProvider === 'stripe') {
-            // Stripe Checkout is a page of its own: go there, and come back to /settings?checkout=success
-            $.ajax({ url: '/api/billing/stripe/checkout', type: 'POST', contentType: 'application/json', data: JSON.stringify({ item: item }) })
-                .done(r => { window.location.href = r.url; })
-                .fail(xhr => { showToast((xhr.responseJSON || {}).error || 'Payment could not be started.', 'error'); $btn.prop('disabled', false); });
-            return;
-        }
-        $.ajax({ url: '/api/billing/checkout', type: 'POST', contentType: 'application/json', data: JSON.stringify({ item: item }) })
-            .done(function (order) {
-                if (!window.Razorpay) {
-                    showToast('The payment window could not load. Check your connection and try again.', 'error');
-                    return $btn.prop('disabled', false);
-                }
-                const checkout = new window.Razorpay({
-                    key: order.key_id, order_id: order.order_id, amount: order.amount, currency: order.currency,
-                    name: 'AVIR AI', description: order.description, prefill: order.prefill, theme: { color: '#c2410c' },
-                    handler: function (result) {
-                        $.ajax({ url: '/api/billing/verify', type: 'POST', contentType: 'application/json', data: JSON.stringify(result) })
-                            .done(() => { showToast(`Payment received: ${order.description}.`, 'success'); loadPlan(); })
-                            .fail(xhr => showToast((xhr.responseJSON || {}).error || 'We could not confirm the payment. If money was taken, it will be applied within a few minutes.', 'error'));
-                    },
-                    modal: { ondismiss: () => $btn.prop('disabled', false) }
-                });
-                checkout.on('payment.failed', () => showToast('The payment did not go through. You have not been charged.', 'error'));
-                checkout.open();
-            })
-            .fail(function (xhr) {
-                showToast((xhr.responseJSON || {}).error || 'Payment could not be started.', 'error');
-                $btn.prop('disabled', false);
-            });
+        // Stripe Checkout is a page of its own: go there, and come back to /settings?checkout=success
+        $.ajax({ url: '/api/billing/stripe/checkout', type: 'POST', contentType: 'application/json', data: JSON.stringify({ item: $btn.data('item') }) })
+            .done(r => { window.location.href = r.url; })
+            .fail(xhr => { showToast((xhr.responseJSON || {}).error || 'Payment could not be started.', 'error'); $btn.prop('disabled', false); });
     });
     // Back from Stripe: confirm the payment with the server (which asks Stripe), then tidy the address
     (function confirmStripeReturn() {

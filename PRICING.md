@@ -50,7 +50,7 @@ On top of the AI cost:
 | Cost | Rate used here |
 |---|---|
 | Card payments in USD (Stripe or similar, international cards) | about 4% of the price |
-| Payments in INR (Razorpay: 2% plus 18% GST on that fee) | about 2.4% of the price |
+| Payments in INR (Stripe, domestic cards; confirm the rate on the Stripe account) | about 2.4% of the price |
 | GST on Indian sales | 18%, **added on top** of the INR prices below and paid to the government, so it is not counted as our revenue |
 | Exchange rate | ₹95 per $1 (the rate was about ₹95–96 in September 2026; review every quarter) |
 | Hosting, email, support | not included; small per user, covered by the margin |
@@ -245,8 +245,7 @@ How users judge value:
   it back. Show a GST-inclusive price on the checkout page.
 - **Annual plans matter more in India.** Offer annual billing at the price of
   10 months (two months free).
-- **Payments:** Razorpay (UPI, cards, net banking) for INR; Stripe for USD.
-  UPI AutoPay suits monthly plans in India.
+- **Payments:** Stripe for every country, in INR for India and USD elsewhere.
 - **Review rupee prices every quarter** against the exchange rate; a weaker
   rupee raises our cost per image and video.
 
@@ -379,8 +378,7 @@ To add:
 4. **Usage check** in one place before every generation: monthly allowance
    first, then packs, then the daily cap. The existing image-quota and
    video-quota checks in `api/routes.py` are where it plugs in.
-5. **Payments**: Razorpay for INR (subscriptions plus UPI AutoPay) and Stripe
-   for USD; webhooks update the subscription; GST invoice for Indian
+5. **Payments**: Stripe for every country (INR and USD); webhooks update the subscription; GST invoice for Indian
    customers.
 6. **Screens**: a public pricing page (INR or USD by country, with a switch),
    a Billing page in Settings (plan, usage bars, invoices, buy packs), and
@@ -389,7 +387,7 @@ To add:
    plan from the cost history.
 
 Suggested order: plans and usage counting first (with plans assigned by
-admins, no payments), then Razorpay, then Stripe, then packs.
+admins, no payments), then Stripe, then packs.
 
 ---
 

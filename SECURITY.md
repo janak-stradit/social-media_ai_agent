@@ -48,18 +48,17 @@ server, and what to build before payments go live. Updated October 2026.
 - **Redis** running (as in `deploy/docker-compose.prod.yml`), so the attempt
   limits are shared by every web worker.
 
-## 3. Payments (Razorpay for INR, Stripe for USD) - built
+## 3. Payments (Stripe, for every country: INR and USD) - built
 
 All five payment rules are in `services/billing_service.py`, with tests in
 `tests/test_billing.py`:
 
-1. **Hosted checkout only**: Razorpay's own window (cards, UPI) and Stripe's
-   Checkout page take the payment; card details never reach our server.
-2. **Signatures checked**: the Razorpay checkout result (HMAC of order and
-   payment id with the key secret) and every webhook (`X-Razorpay-Signature`;
-   `Stripe-Signature`, which must also be under 5 minutes old). After Stripe
-   Checkout the server asks Stripe directly whether the session was paid. A bad
-   signature changes nothing and is logged.
+1. **Hosted checkout only**: Stripe's Checkout page takes the payment; card
+   details never reach our server.
+2. **Signatures checked**: every webhook (`Stripe-Signature`, which must also
+   be under 5 minutes old). After Stripe Checkout the server asks Stripe
+   directly whether the session was paid. A bad signature changes nothing and
+   is logged.
 3. **Server prices only**: the order amount comes from the plans table and the
    pack list plus GST; a webhook reporting a different amount is refused and
    logged as a security event.
@@ -69,14 +68,14 @@ All five payment rules are in `services/billing_service.py`, with tests in
 5. **Audit log**: every payment (`payment.received`), refused signature and
    amount mismatch.
 
-Refunds go back through the provider (admin only, Admin -> Payments), issue a
-credit note and are recorded in the audit log; refunds made in the providers'
-dashboards sync through the signed webhooks, once. Every payment gets a GST
+Refunds go back through Stripe (admin only, Admin -> Payments), issue a
+credit note and are recorded in the audit log; refunds made in Stripe's
+dashboard sync through the signed webhooks, once. Every payment gets a GST
 invoice (`services/invoice_service.py`), visible only to its customer and admins.
 
-Automatic renewal (Razorpay Subscriptions incl. UPI AutoPay; Stripe subscriptions)
-follows the same rules: the subscription's price is set by the server, the
-first charge's signature is checked, every renewal arrives as a signed webhook
+Automatic renewal (Stripe subscriptions) follows the same rules: the
+subscription's price is set by the server, the first charge is confirmed with
+Stripe, every renewal arrives as a signed webhook
 and is applied once (with its own invoice), and a renewal for a different
 amount is refused.
 
