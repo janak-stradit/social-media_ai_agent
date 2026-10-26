@@ -75,3 +75,24 @@ def test_disconnecting_an_account_deletes_its_tokens():
     with Session(db.engine) as session:
         acc = session.query(db.SocialAccount).filter_by(user_id=user["id"], platform="linkedin").one()
         assert acc.status == "disconnected" and acc.access_token is None and acc.refresh_token is None
+
+
+@pytest.mark.parametrize("path", ["/", "/login", "/signup", "/legal", "/privacy"])
+def test_the_cookie_banner_is_on_every_page(client, path):
+    html = client.get(path).data
+    for marker in (b'id="cookieConsent"', b'id="ccAll"', b'id="ccNecessary"', b'id="ccCustomize"'):
+        assert marker in html, marker
+
+
+def test_every_page_template_includes_the_banner_except_the_invoice():
+    import pathlib
+
+    for template in pathlib.Path("templates").glob("*.html"):
+        has = "partials/cookie_consent.html" in template.read_text(encoding="utf-8")
+        assert has == (template.name != "invoice.html"), template.name
+
+
+def test_cookie_policy_lists_the_consent_cookie_and_how_to_change_it(client):
+    html = legal_pages.page("cookies")["html"]
+    assert "cookie_consent" in html and "Necessary only" in html and "Cookie settings" in html
+    assert b"data-cookie-settings" in client.get("/").data

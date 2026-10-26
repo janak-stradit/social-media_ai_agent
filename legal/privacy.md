@@ -89,7 +89,7 @@ Depending on where you live, you can ask to see, correct, download or delete you
 
 ## 12. Cookies
 
-We use only the cookies needed to sign you in and keep the Service secure, and your browser's storage for preferences. See the [Cookie Policy](/cookies).
+We use the cookies needed to sign you in and keep the Service secure, and optional analytics or marketing cookies only if you allow them in the cookie banner. See the [Cookie Policy](/cookies).
 
 ## 13. Changes
 
