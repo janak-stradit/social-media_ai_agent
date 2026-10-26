@@ -198,7 +198,7 @@ $(document).ready(function () {
         const voice = $('#brandVoiceSelect').val();
         const language = $('#languageSelect').val();
         const parts = [];
-        if (language && language !== 'en') parts.push($('#languageSelect option:selected').text().split(' ').pop());
+        if (language && language !== 'en') parts.push($('#languageSelect option:selected').data('short'));
         if (voice && voice !== 'Standard Enterprise') parts.push(voice);
         if (tone) parts.push($('#toneSelect option:selected').text());
         $('#styleMenuLabel').text(parts.length ? parts.join(' · ') : 'Style');
@@ -220,16 +220,59 @@ $(document).ready(function () {
 
     // Post language: the menu's choices come from the server; the choice is
     // remembered in this browser, and every Generate / Refine request carries
-    // it (a prefilter, so each request builder doesn't have to)
+    // it (a prefilter, so each request builder doesn't have to). The list is
+    // English + the user's country's languages: the Country on the brand
+    // profile page, else its markets, else the browser's country.
     const LANGUAGE_KEY = 'avir_post_language';
-    $.getJSON('/api/languages').done(function (r) {
-        const $select = $('#languageSelect');
-        $select.html((r.languages || []).map(l => `<option value="${escapeAttr(l.code)}">${escapeHtml(l.name)}</option>`).join(''));
-        let saved = null;
-        try { saved = localStorage.getItem(LANGUAGE_KEY); } catch (e) { /* storage blocked */ }
-        if (saved && $select.find(`option[value="${saved}"]`).length) $select.val(saved);
-        updateStyleMenuLabel();
-    });
+    function loadLanguages() {
+        $.getJSON('/api/languages', { detected: detectCountry() }).done(function (r) {
+            const $select = $('#languageSelect');
+            const current = $select.val();
+            $select.html((r.languages || []).map(l =>
+                `<option value="${escapeAttr(l.code)}" data-short="${escapeAttr(l.short)}">${escapeHtml(l.name)}</option>`).join(''));
+            let saved = current;
+            try { saved = localStorage.getItem(LANGUAGE_KEY) || current; } catch (e) { /* storage blocked */ }
+            // A language the country doesn't have falls back to English
+            $select.val(saved && $select.find(`option[value="${saved}"]`).length ? saved : 'en');
+            updateStyleMenuLabel();
+        });
+    }
+    // The browser's country, for users without brand markets: the time zone
+    // (more telling than the browser language, which is often en-US
+    // everywhere), then the locale's region. The server ignores codes it
+    // doesn't know.
+    const TIMEZONE_COUNTRIES = {
+        'Asia/Kolkata': 'IN', 'Asia/Calcutta': 'IN', 'Asia/Karachi': 'PK', 'Asia/Dhaka': 'BD',
+        'Asia/Kathmandu': 'NP', 'Asia/Colombo': 'LK', 'Asia/Dubai': 'AE', 'Asia/Riyadh': 'SA',
+        'Asia/Qatar': 'QA', 'Asia/Kuwait': 'KW', 'Asia/Bahrain': 'BH', 'Asia/Muscat': 'OM',
+        'Asia/Amman': 'JO', 'Asia/Beirut': 'LB', 'Asia/Baghdad': 'IQ', 'Asia/Tehran': 'IR',
+        'Asia/Jerusalem': 'IL', 'Europe/Istanbul': 'TR', 'Africa/Cairo': 'EG',
+        'America/Toronto': 'CA', 'America/Vancouver': 'CA', 'America/Montreal': 'CA', 'America/Edmonton': 'CA',
+        'America/Winnipeg': 'CA', 'America/Halifax': 'CA', 'America/Mexico_City': 'MX', 'America/Sao_Paulo': 'BR',
+        'America/Argentina/Buenos_Aires': 'AR', 'America/Bogota': 'CO', 'America/Santiago': 'CL',
+        'America/Lima': 'PE', 'America/Caracas': 'VE', 'Europe/London': 'GB', 'Europe/Dublin': 'IE',
+        'Europe/Paris': 'FR', 'Europe/Berlin': 'DE', 'Europe/Madrid': 'ES', 'Europe/Lisbon': 'PT',
+        'Europe/Rome': 'IT', 'Europe/Amsterdam': 'NL', 'Europe/Brussels': 'BE', 'Europe/Zurich': 'CH',
+        'Europe/Vienna': 'AT', 'Europe/Stockholm': 'SE', 'Europe/Oslo': 'NO', 'Europe/Copenhagen': 'DK',
+        'Europe/Helsinki': 'FI', 'Europe/Warsaw': 'PL', 'Europe/Prague': 'CZ', 'Europe/Budapest': 'HU',
+        'Europe/Bucharest': 'RO', 'Europe/Athens': 'GR', 'Europe/Kyiv': 'UA', 'Europe/Kiev': 'UA',
+        'Europe/Moscow': 'RU', 'Asia/Shanghai': 'CN', 'Asia/Hong_Kong': 'HK', 'Asia/Taipei': 'TW',
+        'Asia/Tokyo': 'JP', 'Asia/Seoul': 'KR', 'Asia/Singapore': 'SG', 'Asia/Kuala_Lumpur': 'MY',
+        'Asia/Jakarta': 'ID', 'Asia/Bangkok': 'TH', 'Asia/Ho_Chi_Minh': 'VN', 'Asia/Saigon': 'VN',
+        'Asia/Manila': 'PH', 'Pacific/Auckland': 'NZ', 'Africa/Lagos': 'NG', 'Africa/Nairobi': 'KE',
+        'Africa/Dar_es_Salaam': 'TZ', 'Africa/Addis_Ababa': 'ET', 'Africa/Johannesburg': 'ZA',
+        'Africa/Casablanca': 'MA', 'Africa/Algiers': 'DZ', 'Africa/Tunis': 'TN',
+    };
+    function detectCountry() {
+        let zone = '';
+        try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { /* no Intl */ }
+        if (TIMEZONE_COUNTRIES[zone]) return TIMEZONE_COUNTRIES[zone];
+        if (zone.startsWith('Australia/')) return 'AU';
+        if (/^(America\/(New_York|Chicago|Denver|Los_Angeles|Phoenix|Anchorage|Detroit|Boise|Indiana\/)|Pacific\/Honolulu)/.test(zone)) return 'US';
+        const region = (navigator.languages || [navigator.language || '']).map(l => (l.split('-')[1] || '')).find(r => /^[A-Z]{2}$/i.test(r));
+        return region ? region.toUpperCase() : '';
+    }
+    loadLanguages();
     $('#languageSelect').on('change', function () {
         try { localStorage.setItem(LANGUAGE_KEY, this.value); } catch (e) { /* storage blocked */ }
     });

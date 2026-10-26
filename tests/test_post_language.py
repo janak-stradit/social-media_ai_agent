@@ -21,8 +21,8 @@ def test_instructions_name_the_language_and_keep_names_as_they_are():
 
 
 def test_menu_lists_english_first():
-    names = language_service.options()
-    assert names[0] == {"code": "en", "name": "English"} and any(o["code"] == "ta" for o in names)
+    names = language_service.options("IN")
+    assert names[0] == {"code": "en", "name": "English", "short": "English"} and any(o["code"] == "ta" for o in names)
 
 
 def test_caption_and_hashtag_agents_pass_the_language_to_the_model(monkeypatch):
@@ -97,3 +97,79 @@ def test_refine_prompt_keeps_the_language(code, expected):
 
     line = _refine_language_line(code)
     assert (expected in line) if expected else line == ""
+
+
+def test_country_narrows_languages_to_english_plus_its_own():
+    india = [o["code"] for o in language_service.options("in")]
+    assert india[0] == "en" and "hi" in india and "ta" in india and "es" not in india
+    assert [o["code"] for o in language_service.options("AE")][:2] == ["en", "ar"]
+    assert [o["code"] for o in language_service.options("GB")] == ["en"]
+    # no country, or one we don't know: English only, never the whole list
+    assert [o["code"] for o in language_service.options(None)] == ["en"]
+    assert [o["code"] for o in language_service.options("XX")] == ["en"]
+
+
+def test_several_markets_combine_without_repeats():
+    codes = [o["code"] for o in language_service.options(["IN", "AE"])]
+    assert codes[:2] == ["en", "hi"] and "ar" in codes and len(codes) == len(set(codes))
+    assert language_service.countries_for_regions(["India", "UAE/GCC", "Mars"]) == ["IN", "AE"]
+
+
+def test_every_country_language_exists_and_countries_are_sorted():
+    for name, codes in language_service.COUNTRIES.values():
+        assert all(c in language_service.LANGUAGES for c in codes), name
+    names = [c["name"] for c in language_service.countries()]
+    assert names == sorted(names) and "India" in names and "United States" in names
+
+
+def test_languages_route_follows_the_users_country(monkeypatch):
+    import db
+    from app import create_app
+
+    app = create_app("development")
+    app.config.update(TESTING=True)
+    user = db.create_user("Asha", f"{uuid.uuid4().hex[:8]}@example.com", "h")
+    client = app.test_client()
+    with client.session_transaction() as s:
+        s["user_id"] = user["id"]
+
+    def codes(url):
+        return [l["code"] for l in client.get(url).get_json()["languages"]]
+
+    # no brand markets: the browser's country, else English only
+    monkeypatch.setattr(db, "get_user_brand_profile", lambda uid: None)
+    assert codes("/api/languages?detected=BR") == ["en", "pt"]
+    assert codes("/api/languages") == ["en"]
+    # brand markets win over the browser's guess
+    monkeypatch.setattr(db, "get_user_brand_profile", lambda uid: {"compliance_regions": ["UAE/GCC"]})
+    res = client.get("/api/languages?detected=BR").get_json()
+    assert res["countries_chosen"] == ["AE"] and res["source"] == "brand" and "ar" in [l["code"] for l in res["languages"]]
+    # a country picked in the search wins over both
+    assert codes("/api/languages?country=JP&detected=BR") == ["en", "ja"]
+    assert any(c["code"] == "IN" for c in res["countries"])
+
+
+def test_brand_profile_country_is_saved_and_sets_the_languages():
+    import db
+    from app import create_app
+
+    app = create_app("development")
+    app.config.update(TESTING=True)
+    user = db.create_user("Ravi", f"{uuid.uuid4().hex[:8]}@example.com", "h")
+    db.update_user_profile(user["id"], account_type="small")
+    db.save_user_brand_profile(user["id"], "https://example.in", "Acme", "Retail", None, None, [], [], [], [],
+                               website_signals={"regions_detected": ["India"]})
+    client = app.test_client()
+    with client.session_transaction() as s:
+        s["user_id"] = user["id"]
+
+    def codes():
+        return [l["code"] for l in client.get("/api/languages?detected=BR").get_json()["languages"]]
+
+    assert "hi" in codes()  # no Country yet: the India market
+    assert client.put("/api/brand-profile", json={"country": "ae"}).get_json()["success"]
+    assert db.get_user_brand_profile(user["id"])["country"] == "AE"
+    assert codes()[:2] == ["en", "ar"] and "ta" not in codes()
+    # an unknown country clears it, back to the markets
+    client.put("/api/brand-profile", json={"country": "XX"})
+    assert db.get_user_brand_profile(user["id"])["country"] is None and "hi" in codes()

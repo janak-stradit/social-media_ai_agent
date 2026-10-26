@@ -102,6 +102,16 @@
                 <div class="field-error" id="confirmPasswordError"></div>
             </div>
 
+            <!-- Required: the server records the policy version agreed to (Config.LEGAL_VERSION) -->
+            <div class="auth-form-group">
+                <label class="d-flex align-items-start gap-2" for="signupTerms" style="font-size: 12px; color: #4B5563; font-weight: 400;">
+                    <input id="signupTerms" type="checkbox" required style="margin-top: 2px;">
+                    <span>I agree to the <a href="/terms" target="_blank" rel="noopener" class="auth-link-bold">Terms of Service</a>
+                        and the <a href="/privacy" target="_blank" rel="noopener" class="auth-link-bold">Privacy Policy</a>.</span>
+                </label>
+                <div class="field-error" id="termsError"></div>
+            </div>
+
             <div id="signupError" class="alert-inline alert-inline-danger" style="margin-bottom: 12px; display: none;" role="alert"></div>
 
             <button id="signupSubmit" type="submit" class="btn-primary-blue">
@@ -224,6 +234,13 @@
         return true;
     }
 
+    function validateTerms() {
+        const ok = $('#signupTerms').is(':checked');
+        $('#termsError').text(ok ? '' : 'Please agree to the Terms of Service and Privacy Policy.').toggle(!ok);
+        return ok;
+    }
+    $('#signupTerms').on('change', validateTerms);
+
     // Validate on blur (after the user leaves a field) rather than on
     // every keystroke - showing an error before someone's even finished
     // typing is more annoying than helpful.
@@ -266,14 +283,16 @@
         const emailOk = validateEmail();
         const passwordOk = validatePassword();
         const confirmOk = validateConfirmPassword();
-        if (!nameOk || !emailOk || !passwordOk || !confirmOk) {
+        const termsOk = validateTerms();
+        if (!nameOk || !emailOk || !passwordOk || !confirmOk || !termsOk) {
             return;
         }
 
         const payload = {
             name: $('#signupName').val().trim(),
             email: $('#signupEmail').val().trim(),
-            password: $('#signupPassword').val()
+            password: $('#signupPassword').val(),
+            accept_terms: $('#signupTerms').is(':checked')
         };
         if (PREVIEW_TOKEN) payload.preview_token = PREVIEW_TOKEN;
 

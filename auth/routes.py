@@ -159,6 +159,8 @@ def register():
 
     if not name or not email or not password:
         return jsonify({"success": False, "error": "Name, email, and password are required"}), 400
+    if data.get("accept_terms") is not True:
+        return jsonify({"success": False, "error": "Please agree to the Terms of Service and Privacy Policy."}), 400
     problem = password_problem(password, email, name)
     if problem:
         return jsonify({"success": False, "error": problem}), 400
@@ -178,6 +180,7 @@ def register():
         if invitation["email"] != email:
             return jsonify({"success": False, "error": "Please sign up with the email address that was invited."}), 400
         user = create_user(name, email, generate_password_hash(password))
+        _record_terms_accepted(user["id"])
         mark_user_email_verified(user["id"])
         mark_invitation_accepted(invitation["id"])
         session.clear()
@@ -194,12 +197,21 @@ def register():
         }), 400
 
     user = create_user(name, email, generate_password_hash(password))
+    _record_terms_accepted(user["id"])
     _claim_lead_preview(data.get("preview_token"), user["id"], email)
     # No session set here - registration no longer logs the user straight in.
     # They must verify their email first (see /api/auth/verify/<token>), which
     # is where the session actually gets created.
     _send_verification_email(user["id"], email, name)
     return jsonify({"success": True, "pending_verification": True, "email": email})
+
+
+def _record_terms_accepted(user_id: int) -> None:
+    """Which version of the Terms and Privacy Policy (legal/) this sign-up agreed to."""
+    from db import log_audit
+
+    log_audit("terms.accepted", actor_user_id=user_id, target_user_id=user_id,
+              details={"version": Config.LEGAL_VERSION}, ip=client_ip())
 
 
 def _check_password(data: dict):

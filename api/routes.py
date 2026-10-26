@@ -5990,10 +5990,30 @@ def repurpose_content():
 @api_bp.route("/languages", methods=["GET"])
 @login_required_api
 def post_languages():
-    """The composer's Language menu (services/language_service.py)."""
-    from services.language_service import options
+    """The composer's Country search and Language menu (services/language_service.py).
+    Languages are English plus the user's country's: ?country= (a preview,
+    for the brand profile page), else the brand profile's Country, else its markets, else
+    ?detected= (the browser's guess)."""
+    from services.language_service import countries, countries_for_regions, normalize_country, options
 
-    return jsonify({"success": True, "languages": options()})
+    picked = normalize_country(request.args.get("country"))
+    if picked:
+        chosen, source = [picked], "picked"
+    else:
+        chosen, source = [], None
+        user_id = get_current_user_id()
+        if DB_AVAILABLE and user_id:
+            from db import get_user_brand_profile
+
+            profile = get_user_brand_profile(user_id) or {}
+            brand_country = normalize_country(profile.get("country"))
+            chosen = [brand_country] if brand_country else countries_for_regions(
+                profile.get("compliance_regions") or profile.get("regions_detected"))
+            source = "brand" if chosen else None
+        if not chosen and normalize_country(request.args.get("detected")):
+            chosen, source = [normalize_country(request.args.get("detected"))], "detected"
+    return jsonify({"success": True, "countries_chosen": chosen, "source": source,
+                    "languages": options(chosen), "countries": countries()})
 
 
 @api_bp.route("/best-times", methods=["GET"])
@@ -6060,15 +6080,15 @@ def my_plan():
     return jsonify({"success": True, "usage": get_plan_usage(user_id), "currency": user_currency(user_id)})
 
 
-# ── Billing: Razorpay (services/billing_service.py) ────────────────────────
+# ── Billing: Stripe (services/billing_service.py) ────────────────────────
 
 
 @api_bp.route("/billing/options", methods=["GET"])
 @login_required_api
 def billing_options():
-    """What can be bought online, at this user's prices: rupees through
-    Razorpay for Indian brands (GST shown separately), dollars through Stripe
-    for everyone else."""
+    """What can be bought online, at this user's prices, all through Stripe:
+    rupees for Indian brands (GST shown separately), dollars for everyone
+    else."""
     from db import list_plans, user_currency
     from services import billing_service
 
@@ -6083,21 +6103,24 @@ def billing_options():
             pass
     from db import current_subscription
 
-    return jsonify({"success": True, "enabled": billing_service.enabled(currency), "currency": currency,
-                    "subscription": current_subscription(user_id),
-                    "provider": "stripe" if currency == "USD" else "razorpay",
+    return jsonify({"success": True, "enabled": billing_service.enabled(), "currency": currency,
+                    "subscription": current_subscription(user_id), "provider": "stripe",
                     "gst_rate": Config.GST_RATE if currency == "INR" else 0, "items": items})
 
 
 @api_bp.route("/billing/stripe/checkout", methods=["POST"])
 @login_required_api
 def billing_stripe_checkout():
-    """Body: {item}. A Stripe Checkout Session at the server's USD price; the browser goes to its url."""
+    """Body: {item}. A Stripe Checkout Session at the server's price in the
+    user's currency; the browser goes to its url."""
+    from db import user_currency
     from services import billing_service
 
+    user_id = get_current_user_id()
     item = str((request.get_json() or {}).get("item") or "")[:48]
     try:
-        session = billing_service.create_stripe_session(get_current_user_id(), item, Config.APP_BASE_URL or request.host_url)
+        session = billing_service.create_stripe_session(user_id, item, Config.APP_BASE_URL or request.host_url,
+                                                        user_currency(user_id))
     except billing_service.BillingError as err:
         return jsonify({"success": False, "error": str(err)}), 400
     return jsonify({"success": True, **session})
@@ -6126,56 +6149,6 @@ def billing_stripe_webhook():
     status = billing_service.handle_stripe_webhook(request.get_data(), request.headers.get("Stripe-Signature", ""))
     if status == "bad_signature":
         current_app.logger.warning("Stripe webhook with a bad signature was refused")
-        return jsonify({"success": False}), 400
-    return jsonify({"success": True, "status": status})
-
-
-@api_bp.route("/billing/checkout", methods=["POST"])
-@login_required_api
-def billing_checkout():
-    """Body: {item}. Creates a Razorpay order at the server's price."""
-    from services import billing_service
-
-    item = str((request.get_json() or {}).get("item") or "")[:48]
-    try:
-        order = billing_service.create_order(get_current_user_id(), item)
-    except billing_service.BillingError as err:
-        return jsonify({"success": False, "error": str(err)}), 400
-    return jsonify({"success": True, **order})
-
-
-@api_bp.route("/billing/verify", methods=["POST"])
-@login_required_api
-def billing_verify():
-    """The checkout window's result: applied only when Razorpay's signature
-    checks out and the order belongs to this user."""
-    from db import get_payment, get_plan_usage
-    from services import billing_service
-
-    data = request.get_json() or {}
-    order_id = str(data.get("razorpay_order_id") or "")
-    payment_id = str(data.get("razorpay_payment_id") or "")
-    payment = get_payment(order_id)
-    if not payment or payment["user_id"] != get_current_user_id():
-        return jsonify({"success": False, "error": "Unknown order."}), 404
-    if not billing_service.valid_checkout_signature(order_id, payment_id, str(data.get("razorpay_signature") or "")):
-        _audit("payment.bad_signature", payment["user_id"], {"order_id": order_id})
-        return jsonify({"success": False, "error": "The payment could not be confirmed."}), 400
-    applied = billing_service.fulfil(order_id, payment_id, "checkout")
-    return jsonify({"success": True, "applied": applied, "already_applied": applied is None,
-                    "usage": get_plan_usage(payment["user_id"])})
-
-
-@api_bp.route("/billing/razorpay/webhook", methods=["POST"])
-def billing_razorpay_webhook():
-    """Razorpay -> us, signed with the webhook secret. Always 200 for a valid
-    signature (so Razorpay stops retrying), 400 otherwise."""
-    from services import billing_service
-
-    status = billing_service.handle_webhook(request.get_data(), request.headers.get("X-Razorpay-Signature", ""),
-                                            request.headers.get("X-Razorpay-Event-Id"))
-    if status == "bad_signature":
-        current_app.logger.warning("Razorpay webhook with a bad signature was refused")
         return jsonify({"success": False}), 400
     return jsonify({"success": True, "status": status})
 
@@ -6268,8 +6241,8 @@ def admin_refund_payment(order_id):
 @api_bp.route("/billing/subscribe", methods=["POST"])
 @login_required_api
 def billing_subscribe():
-    """Body: {plan, period: month|year}. Starts automatic renewal: Razorpay
-    window details for INR, a Stripe Checkout url for USD."""
+    """Body: {plan, period: month|year}. Starts automatic renewal: returns a
+    Stripe Checkout url."""
     from db import user_currency
     from services import billing_service
 
@@ -6281,24 +6254,6 @@ def billing_subscribe():
     except billing_service.BillingError as err:
         return jsonify({"success": False, "error": str(err)}), 400
     return jsonify({"success": True, **started})
-
-
-@api_bp.route("/billing/subscribe/verify", methods=["POST"])
-@login_required_api
-def billing_subscribe_verify():
-    """Razorpay's window result for a subscription (signed); applies the first charge."""
-    from db import get_plan_usage
-    from services import billing_service
-
-    data = request.get_json() or {}
-    user_id = get_current_user_id()
-    try:
-        applied = billing_service.verify_razorpay_subscription(
-            user_id, str(data.get("razorpay_subscription_id") or ""), str(data.get("razorpay_payment_id") or ""),
-            str(data.get("razorpay_signature") or ""))
-    except billing_service.BillingError as err:
-        return jsonify({"success": False, "error": str(err)}), 400
-    return jsonify({"success": True, "applied": applied, "usage": get_plan_usage(user_id)})
 
 
 @api_bp.route("/billing/subscription/cancel", methods=["POST"])
@@ -6606,6 +6561,10 @@ def update_brand_profile():
     for key in ("key_themes", "primary_colors", "content_dos", "content_donts", "fonts"):
         if key in data:
             fields[key] = [item.strip() for item in (data[key] or []) if isinstance(item, str) and item.strip()]
+    if "country" in data:  # sets the composer's post languages
+        from services.language_service import normalize_country
+
+        fields["country"] = normalize_country(data["country"])
 
     try:
         res = update_user_brand_profile_fields(user_id, **fields)

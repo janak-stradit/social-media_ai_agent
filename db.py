@@ -214,6 +214,9 @@ class UserBrandProfile(Base):
     visual_style: Mapped[str | None] = mapped_column(Text, nullable=True)
     fonts: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON list of font-family names
     logo_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # ISO code the user picked on the brand profile page; sets the composer's
+    # post languages (services/language_service.COUNTRIES)
+    country: Mapped[str | None] = mapped_column(String(8), nullable=True)
     # Facts read straight off the site (website_scraper_service) - inputs to
     # the industry/region compliance layer. All JSON.
     schema_types: Mapped[str | None] = mapped_column(Text, nullable=True)  # schema.org @types the site declares
@@ -630,7 +633,7 @@ class Payment(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    provider: Mapped[str] = mapped_column(String(16), nullable=False)  # razorpay
+    provider: Mapped[str] = mapped_column(String(16), nullable=False)  # stripe
     order_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     payment_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     item: Mapped[str] = mapped_column(String(48), nullable=False)  # plan:growth:month, pack:image10, ...
@@ -674,9 +677,9 @@ class PublishedPost(Base):
 
 
 class Subscription(Base):
-    """An automatically renewing plan (Razorpay Subscriptions / Stripe
-    subscriptions). Each charge is also a Payment, applied once, which
-    extends the plan (db.extend_paid_plan) and gets its own invoice."""
+    """An automatically renewing plan (a Stripe subscription). Each charge is
+    also a Payment, applied once, which extends the plan
+    (db.extend_paid_plan) and gets its own invoice."""
 
     __tablename__ = "subscriptions"
     __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
@@ -1147,6 +1150,7 @@ def init_db():
             f"ALTER TABLE {profile_tbl} ADD COLUMN compliance_regions TEXT",
             f"ALTER TABLE {profile_tbl} ADD COLUMN compliance_excluded_rules TEXT",
             f"ALTER TABLE {profile_tbl} ADD COLUMN compliance_confirmed_at TIMESTAMP",
+            f"ALTER TABLE {profile_tbl} ADD COLUMN country VARCHAR(8)",
             f"ALTER TABLE {approval_tbl} ADD COLUMN compliance TEXT",
             f"ALTER TABLE {approval_tbl} ADD COLUMN reviewer_email VARCHAR(255)",
             f"ALTER TABLE {approval_tbl} ADD COLUMN items TEXT",
@@ -1638,6 +1642,7 @@ _BRAND_PROFILE_TEXT_FIELDS = {
     "tagline",
     "visual_style",
     "logo_url",
+    "country",
 }
 _BRAND_PROFILE_LIST_FIELDS = {"key_themes", "primary_colors", "content_dos", "content_donts", "fonts", "core_products"}
 
@@ -2094,6 +2099,7 @@ def get_user_brand_profile(user_id: int) -> dict | None:
             "visual_style": row.visual_style,
             "fonts": json.loads(row.fonts) if row.fonts else [],
             "logo_url": row.logo_url,
+            "country": getattr(row, "country", None),
             **{
                 field: json.loads(getattr(row, field)) if getattr(row, field, None) else empty
                 for field, empty in _WEBSITE_SIGNAL_FIELDS.items()
@@ -2685,7 +2691,7 @@ def record_payment_event(event_id: str) -> bool:
 
 
 def get_payment_by_provider_id(payment_id: str) -> dict | None:
-    """The payment a provider's payment id belongs to (Razorpay pay_..., Stripe pi_...)."""
+    """The payment a provider's payment id belongs to (Stripe pi_...)."""
     with Session(engine) as session:
         row = session.query(Payment).filter(Payment.payment_id == payment_id).first()
         return {c.name: getattr(row, c.name) for c in Payment.__table__.columns} if row else None
@@ -4855,7 +4861,8 @@ def delete_oauth_pending(pending_id: str) -> None:
 
 
 def disconnect_social_account(user_id: int, platform: str) -> bool:
-    """Set social account status to disconnected."""
+    """Set social account status to disconnected and delete its tokens (the
+    Data Deletion page, legal/data-deletion.md, promises this)."""
     with Session(engine) as session:
         acc = (
             session.query(SocialAccount)
@@ -4864,6 +4871,7 @@ def disconnect_social_account(user_id: int, platform: str) -> bool:
         )
         if acc:
             acc.status = "disconnected"
+            acc.access_token = acc.refresh_token = acc.mcp_token = None
             acc.updated_at = datetime.now(timezone.utc)
             session.commit()
             return True

@@ -102,7 +102,7 @@ def _signup(client, token):
     return client.post("/api/auth/register", json={
         "name": "Test User",
         "email": f"captcha-{uuid.uuid4().hex[:8]}@example.com",
-        "password": "violet-harbour-42",
+        "password": "violet-harbour-42", "accept_terms": True,
         "captcha_token": token,
     })
 

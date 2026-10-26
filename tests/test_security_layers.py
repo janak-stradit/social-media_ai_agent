@@ -151,7 +151,7 @@ def test_password_rules(password, ok):
 
 def test_sign_up_refuses_a_common_password(app):
     r = app.test_client().post(
-        "/api/auth/register", json={"name": "Sam", "email": f"{uuid.uuid4().hex[:8]}@x.com", "password": "password1"}
+        "/api/auth/register", json={"name": "Sam", "email": f"{uuid.uuid4().hex[:8]}@x.com", "password": "password1", "accept_terms": True}
     )
     assert r.status_code == 400 and "too easy" in r.get_json()["error"]
 

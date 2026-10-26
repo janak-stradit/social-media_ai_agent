@@ -226,6 +226,37 @@ $(document).ready(function () {
         });
     }
 
+    // Country: picks the post languages Studio Chat offers (English + the
+    // country's). The list loads separately, so the profile's value is set
+    // once both are in.
+    let profileCountry = '';
+    function showCountryLanguages() {
+        const country = $('#bpCountry').val();
+        if (!country) {
+            $('#bpCountryLanguages').text('Post languages follow your markets, or the country your browser is in.');
+            return;
+        }
+        $.getJSON('/api/languages', { country: country }).done(function (r) {
+            const names = (r.languages || []).map(l => l.short);
+            $('#bpCountryLanguages').text('Post languages in Studio Chat: ' + names.join(', '));
+        });
+    }
+    function applyProfileCountry() {
+        const $select = $('#bpCountry');
+        if ($select.find('option').length > 1) $select.val(profileCountry);
+        showCountryLanguages();
+    }
+    $.getJSON('/api/languages').done(function (r) {
+        $('#bpCountry').append((r.countries || []).map(c =>
+            `<option value="${escapeHtml(c.code)}">${escapeHtml(c.name)}</option>`).join(''));
+        applyProfileCountry();
+        initialFormState = getFormState();
+    });
+    $('#bpCountry').on('change', function () {
+        showCountryLanguages();
+        checkDirtyState();
+    });
+
     function populateForm(profile) {
         $('#bpWebsiteUrl').val(profile.website || '');
         if (profile.analyzed_at) {
@@ -237,6 +268,8 @@ $(document).ready(function () {
         $('#bpIndustry').val(profile.industry || '');
         $('#bpTagline').val(profile.tagline || '');
         $('#bpVisualStyle').val(profile.visual_style || '');
+        profileCountry = profile.country || '';
+        applyProfileCountry();
         $('#bpTargetAudience').val(profile.target_audience || '');
         $('#bpVoiceSummary').val(profile.brand_voice_summary || '');
         $('#bpKeyThemes').val((profile.key_themes || []).join('\n'));
@@ -540,6 +573,7 @@ $(document).ready(function () {
             industry: $('#bpIndustry').val().trim(),
             tagline: $('#bpTagline').val().trim(),
             visual_style: $('#bpVisualStyle').val().trim(),
+            country: $('#bpCountry').val() || null,
             target_audience: $('#bpTargetAudience').val().trim(),
             brand_voice_summary: $('#bpVoiceSummary').val().trim(),
             key_themes: linesToList($('#bpKeyThemes').val()),
