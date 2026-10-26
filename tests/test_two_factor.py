@@ -117,3 +117,26 @@ def test_admin_changes_are_in_the_audit_log(app, monkeypatch):
     assert plan_change["details"]["to"] == "growth" and "from" in plan_change["details"]
     assert entries[1]["details"]["note"] == "UPI"
     assert _login(app, user).get("/api/admin/audit-log").status_code == 403
+
+
+def test_a_changed_secret_key_is_reported_and_the_script_resets_it(app, monkeypatch):
+    from config import Config
+
+    user, email = _user(password="correct-horse-battery")
+    secret = _enable(_login(app, user))
+    monkeypatch.setattr(Config, "SECRET_KEY", "a-different-key")  # e.g. a new ENV_FILE on the server
+
+    client = app.test_client()
+    assert client.post("/api/auth/login", json={"email": email, "password": "correct-horse-battery"}).get_json()[
+        "two_factor_required"]
+    code = two_factor._code_at(secret, int(time.time() // two_factor.STEP))
+    res = client.post("/api/auth/2fa/verify", json={"code": code})
+    assert res.status_code == 503 and "security key changed" in res.get_json()["error"]
+
+    from scripts.reset_two_factor import main
+
+    assert main(["reset_two_factor.py", email]) == 0
+    assert db.get_totp_state(user["id"]) == {"enabled": False, "secret": None, "last_counter": None}
+    login = client.post("/api/auth/login", json={"email": email, "password": "correct-horse-battery"}).get_json()
+    assert login["success"] and "two_factor_required" not in login
+    assert main(["reset_two_factor.py", "nobody@example.com"]) == 1
