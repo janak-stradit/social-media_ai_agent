@@ -1,0 +1,130 @@
+{# Cookie consent banner (legal/cookies.md). Included at the end of every page.
+   The choice is kept in the "cookie_consent" cookie for 180 days, e.g.
+   "v1:necessary,analytics". Optional scripts must wait for consent:
+     AvirConsent.allows('analytics')  -> true / false
+     document.addEventListener('avir:consent', e => e.detail.analytics ...)
+   A [data-cookie-settings] link anywhere reopens the choices. Plain JS and
+   scoped CSS, so it works on pages without jQuery or Bootstrap. #}
+<div id="cookieConsent" class="cc-banner" role="dialog" aria-modal="false" aria-labelledby="ccTitle" aria-describedby="ccText" hidden>
+    <div class="cc-inner">
+        <div class="cc-copy">
+            <strong id="ccTitle">Cookies on AVIR AI</strong>
+            <p id="ccText">We use necessary cookies to sign you in and keep your account secure. With your permission we'd also use analytics cookies to see how the site is used, and marketing cookies to measure our ads. See our <a href="/cookies">Cookie Policy</a>.</p>
+            <div class="cc-options" id="ccOptions" hidden>
+                <label class="cc-option">
+                    <input type="checkbox" checked disabled>
+                    <span><b>Necessary</b> - sign-in, security and your preferences. Always on.</span>
+                </label>
+                <label class="cc-option">
+                    <input type="checkbox" id="ccAnalytics">
+                    <span><b>Analytics</b> - how pages are used, so we can improve them.</span>
+                </label>
+                <label class="cc-option">
+                    <input type="checkbox" id="ccMarketing">
+                    <span><b>Marketing</b> - whether our ads led you here.</span>
+                </label>
+            </div>
+        </div>
+        <div class="cc-actions">
+            <button type="button" class="cc-btn cc-quiet" id="ccCustomize" aria-expanded="false" aria-controls="ccOptions">Customize</button>
+            <button type="button" class="cc-btn cc-quiet" id="ccSave" hidden>Save choices</button>
+            <button type="button" class="cc-btn cc-quiet" id="ccNecessary">Necessary only</button>
+            <button type="button" class="cc-btn cc-primary" id="ccAll">Accept all</button>
+        </div>
+    </div>
+</div>
+<style>
+    .cc-banner { position: fixed; left: 16px; right: 16px; bottom: 16px; z-index: 2147483000; display: flex; justify-content: center; pointer-events: none; font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif; }
+    .cc-banner[hidden] { display: none; }
+    .cc-inner { pointer-events: auto; width: 100%; max-width: 980px; background: #fff; color: #1f2937; border: 1px solid #e5e7eb; border-radius: 14px; box-shadow: 0 12px 40px rgba(15, 23, 42, 0.18); padding: 16px 18px; display: flex; gap: 16px; align-items: flex-end; animation: cc-up 0.25s ease-out; }
+    .cc-copy { flex: 1; min-width: 0; font-size: 13.5px; line-height: 1.5; }
+    .cc-copy strong { display: block; font-size: 14.5px; margin-bottom: 4px; color: #111827; }
+    .cc-copy p { margin: 0; color: #4b5563; }
+    .cc-copy a { color: #c2410c; font-weight: 600; }
+    .cc-options { margin-top: 10px; display: grid; gap: 6px; }
+    .cc-options[hidden] { display: none; }
+    .cc-option { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; color: #374151; cursor: pointer; margin: 0; }
+    .cc-option input { margin-top: 3px; accent-color: #c2410c; }
+    .cc-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; flex-shrink: 0; }
+    .cc-btn { border-radius: 9px; padding: 8px 14px; font-size: 13px; font-weight: 600; cursor: pointer; border: 1px solid #d1d5db; background: #fff; color: #1f2937; white-space: nowrap; }
+    .cc-btn[hidden] { display: none; }
+    .cc-btn:focus-visible { outline: 2px solid #c2410c; outline-offset: 2px; }
+    .cc-quiet:hover { background: #f9fafb; }
+    .cc-primary { background: #c2410c; border-color: #c2410c; color: #fff; }
+    .cc-primary:hover { background: #9a3412; }
+    @keyframes cc-up { from { transform: translateY(12px); opacity: 0; } to { transform: none; opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { .cc-inner { animation: none; } }
+    @media (max-width: 720px) {
+        .cc-banner { left: 8px; right: 8px; bottom: 8px; }
+        .cc-inner { flex-direction: column; align-items: stretch; }
+        .cc-actions { justify-content: stretch; }
+        .cc-actions .cc-btn { flex: 1 1 auto; }
+    }
+    @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) .cc-inner { background: #1f2937; color: #e5e7eb; border-color: #374151; }
+        :root:not([data-theme="light"]) .cc-copy strong { color: #f9fafb; }
+        :root:not([data-theme="light"]) .cc-copy p, :root:not([data-theme="light"]) .cc-option { color: #d1d5db; }
+        :root:not([data-theme="light"]) .cc-btn { background: #111827; color: #e5e7eb; border-color: #4b5563; }
+        :root:not([data-theme="light"]) .cc-primary { background: #ea580c; border-color: #ea580c; color: #fff; }
+    }
+</style>
+<script>
+    (function () {
+        var NAME = 'cookie_consent', VERSION = 'v1', MAX_AGE = 180 * 24 * 60 * 60;
+        var OPTIONAL = ['analytics', 'marketing'];
+        var banner = document.getElementById('cookieConsent');
+        if (!banner || window.AvirConsent) return;
+
+        function read() {
+            var match = document.cookie.match(/(?:^|;\s*)cookie_consent=([^;]*)/);
+            if (!match) return null;
+            var value = decodeURIComponent(match[1]).split(':');
+            if (value[0] !== VERSION) return null;  // the policy changed: ask again
+            var given = (value[1] || '').split(',');
+            var choice = { necessary: true };
+            OPTIONAL.forEach(function (k) { choice[k] = given.indexOf(k) !== -1; });
+            return choice;
+        }
+        function save(choice) {
+            var allowed = ['necessary'].concat(OPTIONAL.filter(function (k) { return choice[k]; }));
+            document.cookie = NAME + '=' + encodeURIComponent(VERSION + ':' + allowed.join(',')) + '; Max-Age=' + MAX_AGE
+                + '; Path=/; SameSite=Lax' + (location.protocol === 'https:' ? '; Secure' : '');
+            current = read() || choice;
+            hide();
+            document.dispatchEvent(new CustomEvent('avir:consent', { detail: current }));
+        }
+        function setOptions(open) {
+            document.getElementById('ccOptions').hidden = !open;
+            document.getElementById('ccSave').hidden = !open;
+            document.getElementById('ccCustomize').hidden = open;
+            document.getElementById('ccCustomize').setAttribute('aria-expanded', String(open));
+        }
+        function show(customize) {
+            var choice = current || {};
+            document.getElementById('ccAnalytics').checked = !!choice.analytics;
+            document.getElementById('ccMarketing').checked = !!choice.marketing;
+            setOptions(!!customize);
+            banner.hidden = false;
+        }
+        function hide() { banner.hidden = true; }
+
+        var current = read();
+        window.AvirConsent = {
+            get: function () { return current; },
+            allows: function (kind) { return kind === 'necessary' || !!(current && current[kind]); },
+            open: function () { show(true); }
+        };
+
+        document.getElementById('ccAll').addEventListener('click', function () { save({ analytics: true, marketing: true }); });
+        document.getElementById('ccNecessary').addEventListener('click', function () { save({ analytics: false, marketing: false }); });
+        document.getElementById('ccCustomize').addEventListener('click', function () { setOptions(true); });
+        document.getElementById('ccSave').addEventListener('click', function () {
+            save({ analytics: document.getElementById('ccAnalytics').checked, marketing: document.getElementById('ccMarketing').checked });
+        });
+        document.addEventListener('click', function (e) {
+            var link = e.target.closest && e.target.closest('[data-cookie-settings]');
+            if (link) { e.preventDefault(); show(true); }
+        });
+        if (!current) show(false);
+    })();
+</script>

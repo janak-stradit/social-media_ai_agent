@@ -7,13 +7,24 @@ order: 5
 
 Last updated: {updated}
 
-{product} uses as few cookies as possible. We do not use advertising or cross-site tracking cookies, so we do not show a cookie banner.
+{product} uses as few cookies as possible. When you first visit, a banner at the bottom of the page asks which cookies you allow: **Accept all**, **Necessary only**, or **Customize** to choose each kind. Only necessary cookies are used until you choose, and nothing optional is set if you pick Necessary only.
 
-## Cookies
+## Kinds of cookies
 
-| Name | What it does | How long |
+| Kind | What it is for | Your choice |
 |---|---|---|
-| session | Keeps you signed in and protects your account (signed, secure, not readable by scripts) | Until you sign out, or 7 days |
+| Necessary | Signing you in, keeping your account secure, and remembering your cookie choice | Always on - the Service cannot work without them |
+| Analytics | Counting visits and seeing how pages are used, so we can improve them | Off unless you allow it |
+| Marketing | Measuring whether our ads brought you to the site | Off unless you allow it |
+
+## Cookies we set
+
+| Name | Kind | What it does | How long |
+|---|---|---|---|
+| session | Necessary | Keeps you signed in and protects your account (signed, secure, not readable by scripts) | Until you sign out, or 7 days |
+| cookie_consent | Necessary | Remembers which kinds of cookies you allowed | 180 days |
+
+We do not currently use any analytics or marketing cookies. If we add any, they will be listed here and will load only if you allowed that kind.
 
 ## Browser storage
 
@@ -23,8 +34,10 @@ The Service also saves a few preferences in your browser's local storage, such a
 
 To show fonts, icons and page components, our pages load files from Google Fonts, jsDelivr and cdnjs. These services receive your IP address and browser details when the files load, as any website does. Stripe's payment page has its own [cookie policy](https://stripe.com/cookies-policy/legal).
 
-## Controlling cookies
+## Changing your choice
 
-You can block or delete cookies in your browser. If you block the session cookie you will not be able to sign in.
+Use the **Cookie settings** link at the bottom of our pages at any time to change your choice; it applies straight away. We ask again after 180 days or when this policy changes.
+
+You can also block or delete cookies in your browser. If you block the session cookie you will not be able to sign in.
 
 Questions: {email}.

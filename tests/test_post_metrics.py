@@ -168,7 +168,7 @@ def test_scheduled_publishing_records_the_post(monkeypatch, tmp_path):
     monkeypatch.setattr(
         publish_service,
         "publish_item",
-        lambda uid, item, folder: {"post_id": "fb_scheduled_1", "permalink": "https://fb.com/1", "account": "Page"},
+        lambda uid, item, folder: {"post_id": f"fb_scheduled_{uuid.uuid4().hex[:8]}", "permalink": "https://fb.com/1", "account": "Page"},
     )
     monkeypatch.setattr(schedule_service, "_notify", lambda post, status, results: None)
     monkeypatch.setattr(db, "finish_scheduled_post", lambda *a, **k: None)
