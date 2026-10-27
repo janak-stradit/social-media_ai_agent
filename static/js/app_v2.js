@@ -2997,7 +2997,7 @@ $(document).ready(function () {
         previewState.slide = 0;
         if (!document.getElementById('postPreviewModal')) {
             $('body').append(`
-                <div class="modal fade" id="postPreviewModal" tabindex="-1" aria-labelledby="postPreviewTitle" aria-hidden="true">
+                <div class="modal fade modal-task" id="postPreviewModal" tabindex="-1" aria-labelledby="postPreviewTitle" aria-hidden="true">
                     <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable pp-dialog">
                         <div class="modal-content">
                             <div class="modal-header">

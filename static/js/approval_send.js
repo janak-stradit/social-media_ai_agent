@@ -36,17 +36,17 @@
     function ensureModal() {
         if (document.getElementById('sendApprovalModal')) return;
         $('body').append(`
-            <div class="modal fade" id="sendApprovalModal" tabindex="-1" aria-labelledby="sendApprovalTitle" aria-hidden="true">
+            <div class="modal fade modal-task" id="sendApprovalModal" tabindex="-1" aria-labelledby="sendApprovalTitle" aria-hidden="true">
                 <div class="modal-dialog modal-lg modal-dialog-scrollable modal-dialog-centered">
                     <div class="modal-content sa-modal">
                         <div class="modal-header">
-                            <div>
-                                <h5 class="modal-title" id="sendApprovalTitle"></h5>
-                                <div class="sa-reviewer" id="saReviewer"></div>
-                            </div>
+                            <h5 class="modal-title" id="sendApprovalTitle"></h5>
                             <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                         </div>
-                        <div class="modal-body" id="saBody"></div>
+                        <div class="modal-body">
+                            <div class="sa-reviewer" id="saReviewer"></div>
+                            <div id="saBody"></div>
+                        </div>
                         <div class="modal-footer">
                             <div class="sa-footer-note" id="saFooterNote"></div>
                             <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -55,7 +55,7 @@
                     </div>
                 </div>
             </div>
-            <div class="modal fade" id="saPickerModal" tabindex="-1" aria-labelledby="saPickerTitle" aria-hidden="true">
+            <div class="modal fade modal-task" id="saPickerModal" tabindex="-1" aria-labelledby="saPickerTitle" aria-hidden="true">
                 <div class="modal-dialog modal-lg modal-dialog-scrollable modal-dialog-centered">
                     <div class="modal-content sa-modal">
                         <div class="modal-header">
