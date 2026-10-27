@@ -5781,3 +5781,100 @@ details[open] > summary .compliance-caret { transform: rotate(180deg); }
 .sa-connect-first .sa-connect-wait { margin-top: 14px; font-size: 12px; color: #6b7280; }
 .sa-notice { padding: 8px 10px; }
 .sa-notice > span:not(.sa-plat-tile) { flex: 1; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   MODAL STANDARD (option C), every modal in the app:
+   - Sheet (default): big title, no decorative badge, content, then ONE
+     full-width main button with Cancel as a text link under it. On phones
+     it rises from the bottom of the screen.
+   - Large sheet (.modal.modal-task): the same sheet, 860px wide; only the
+     middle scrolls and the footer (note, Cancel, main button) stays in view.
+   Overrides the older skins (credit / memory / social-modal-light, sa-modal).
+   ══════════════════════════════════════════════════════════════════════ */
+.modal .modal-content {
+  border: 0 !important; border-radius: 20px !important; background: #fff;
+  box-shadow: 0 24px 60px rgba(15, 23, 42, .28); overflow: hidden;
+}
+.modal .modal-header {
+  background: #fff !important; border-bottom: 0 !important; padding: 24px 24px 8px !important;
+  align-items: flex-start; gap: 12px;
+}
+.modal .modal-title { font-size: 1.25rem !important; font-weight: 700; letter-spacing: -0.01em; color: #111827 !important; line-height: 1.3; }
+.modal .modal-header small, .modal .modal-header .modal-subtitle { display: block; margin-top: 4px; font-size: 13px; color: #4b5563; }
+.modal .modal-header [class*="icon-badge"] { display: none !important; }
+.modal .modal-body { padding: 8px 24px 16px !important; }
+.modal .btn-close { width: 36px; height: 36px; padding: 0; margin: -4px -6px 0 auto !important; border-radius: 10px; background-size: 12px; opacity: .6; flex-shrink: 0; }
+.modal .btn-close:hover { opacity: 1; background-color: #f3f4f6; }
+
+/* Sheet footer: the main action full width on top, Cancel as a text link under it */
+.modal:not(.modal-task) .modal-footer {
+  display: flex; flex-direction: column-reverse; align-items: stretch; gap: 4px;
+  padding: 8px 24px 20px !important; border-top: 0 !important; background: #fff !important;
+}
+.modal:not(.modal-task) .modal-footer > * { margin: 0 !important; width: 100%; }
+.modal:not(.modal-task) .modal-footer > .d-flex { flex-direction: column-reverse; gap: 4px; }
+.modal .modal-footer .btn-primary, .modal .modal-footer .btn-submit-emerald, .modal .modal-footer .btn-primary-save {
+  min-height: 46px; border: 0; border-radius: 12px; background: var(--brand-strong) !important; color: #fff !important;
+  font-size: 15px; font-weight: 600; box-shadow: none; transform: none;
+}
+.modal .modal-footer .btn-primary:hover, .modal .modal-footer .btn-submit-emerald:hover, .modal .modal-footer .btn-primary-save:hover { background: var(--brand-hover) !important; }
+.modal .modal-footer .btn-primary:disabled, .modal .modal-footer .btn-submit-emerald:disabled { opacity: .5; }
+.modal:not(.modal-task) .modal-footer [data-bs-dismiss="modal"], .modal:not(.modal-task) .modal-footer .btn-cancel-light {
+  min-height: 40px; border: 0 !important; background: transparent !important; color: #4b5563 !important;
+  font-size: 14px; font-weight: 600; box-shadow: none;
+}
+.modal:not(.modal-task) .modal-footer [data-bs-dismiss="modal"]:hover, .modal:not(.modal-task) .modal-footer .btn-cancel-light:hover { color: #111827 !important; text-decoration: underline; }
+.modal .modal-footer .sa-footer-note, .modal .modal-footer small { font-size: 12.5px; color: #4b5563; text-align: center; }
+
+/* Sheet widths: small by default, medium for .modal-lg */
+.modal:not(.modal-task) .modal-dialog { max-width: 480px; }
+.modal:not(.modal-task) .modal-dialog.modal-lg { max-width: 600px; }
+
+/* Phones: sheets rise from the bottom */
+@media (max-width: 575.98px) {
+  .modal:not(.modal-task) .modal-dialog { margin: 0; max-width: none !important; min-height: 100%; display: flex; align-items: flex-end; }
+  .modal:not(.modal-task) .modal-content { border-radius: 20px 20px 0 0 !important; max-height: 92vh; overflow: auto; }
+  .modal.fade:not(.modal-task) .modal-dialog { transform: translateY(40px); }
+  .modal.show:not(.modal-task) .modal-dialog { transform: none; }
+  .modal:not(.modal-task) .modal-header { padding-top: 22px !important; }
+  .modal:not(.modal-task) .modal-header::before {
+    content: ''; position: absolute; top: 8px; left: 50%; width: 40px; height: 4px; margin-left: -20px; border-radius: 4px; background: #cbd5e1;
+  }
+}
+
+/* Large sheet (.modal-task): the bigger jobs (Schedule, Accounts, Memory map,
+   Create a post...) - the same sheet, wider, with only the middle scrolling
+   and the footer always in view */
+.modal.modal-task .modal-dialog { max-width: 860px !important; margin: 4vh auto !important; height: 92vh; display: flex; align-items: center; }
+.modal.modal-task .modal-content { max-height: 88vh !important; display: flex; flex-direction: column; }
+.modal.modal-task .modal-header { flex-shrink: 0; border-bottom: 1px solid #f1f5f9 !important; padding-bottom: 14px !important; }
+.modal.modal-task .modal-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 20px 24px !important; }
+.modal.modal-task .modal-footer {
+  flex-shrink: 0; display: flex; flex-direction: row; align-items: center; justify-content: flex-end; gap: 10px;
+  padding: 14px 24px !important; border-top: 1px solid #f1f5f9 !important; background: #fcfcfd !important;
+}
+.modal.modal-task .modal-footer > * { margin: 0 !important; }
+.modal.modal-task .modal-footer .sa-footer-note { margin-right: auto !important; text-align: left; font-size: 13px; }
+.modal.modal-task .modal-footer [data-bs-dismiss="modal"], .modal.modal-task .modal-footer .btn-cancel-light {
+  min-height: 42px; padding: 0 16px; border: 1px solid #e5e7eb !important; border-radius: 12px; background: #fff !important;
+  color: #374151 !important; font-size: 14px; font-weight: 600;
+}
+.modal.modal-task .modal-footer .btn-primary, .modal.modal-task .modal-footer .btn-submit-emerald { min-height: 42px; padding: 0 20px; font-size: 14px; }
+.modal.modal-task .modal-footer:not(:has(> :not(.d-none):not(:empty))) { display: none; }
+@media (max-width: 575.98px) {
+  .modal.modal-task .modal-dialog { margin: 0 !important; max-width: none !important; height: 100%; align-items: flex-end; }
+  .modal.modal-task .modal-content { width: 100%; max-height: 94vh !important; border-radius: 20px 20px 0 0 !important; }
+  .modal.modal-task .modal-header { padding-top: 22px !important; }
+  .modal.modal-task .modal-header::before {
+    content: ''; position: absolute; top: 8px; left: 50%; width: 40px; height: 4px; margin-left: -20px; border-radius: 4px; background: #cbd5e1;
+  }
+  .modal.modal-task .modal-footer { flex-wrap: wrap; }
+  .modal.modal-task .modal-footer .sa-footer-note { flex-basis: 100%; text-align: center; }
+  .modal.modal-task .modal-footer .btn-primary, .modal.modal-task .modal-footer .btn-submit-emerald { flex: 1; }
+  .modal.modal-task .modal-body { padding: 16px !important; }
+  .modal.fade.modal-task .modal-dialog { transform: translateY(40px); }
+  .modal.show.modal-task .modal-dialog { transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .modal .modal-dialog { transition: none !important; transform: none !important; } }
+/* the content-heavy ones (accounts grid, memory map, opportunity) get more room */
+.modal.modal-task .modal-dialog.modal-xl { max-width: 1040px !important; }
