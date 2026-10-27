@@ -875,89 +875,262 @@ $(document).ready(function () {
     }
 
     // The brief goes into the box of a new conversation, with its platforms ticked
-    // ── Start from a link or PDF (POST /api/repurpose) ───────────────────
-    // The page or document is read, the AI suggests 3-5 post angles, and the
-    // chosen one is loaded into the brief like a saved brief.
+    // ── Turn your content into posts (POST /api/repurpose) ──────────────
+    // One window, three steps: the source (link, PDF or pasted text), the
+    // wait, and the ideas. The AI suggests 3-5 angles; each can be edited,
+    // starred into the saved briefs, or written - which loads it into the
+    // brief (a carousel idea as /carousel). The last ideas are kept for this
+    // browser tab, so writing one doesn't lose the others.
     const LONE_URL = /^https?:\/\/\S+$/i;
-    let repurposeAngles = [];
+    const RP_KEY = 'avir_repurpose_last';
+    const RP_MIN_TEXT = 200;
+    const RP_FORMATS = {
+        text: { label: 'Text post', icon: 'fa-align-left' },
+        image: { label: 'With an image', icon: 'fa-image' },
+        carousel: { label: 'Carousel', icon: 'fa-clone' },
+    };
+    let rpResult = null;     // {title, source, kind, summary, angles}
+    let rpRequest = null;    // the running request, so Cancel can stop it
+    let rpClock = null;
+    try { rpResult = JSON.parse(sessionStorage.getItem(RP_KEY) || 'null'); } catch (e) { rpResult = null; }
 
-    function openRepurpose(url) {
-        $('#repurposeUrl').val(url || '');
-        $('#repurposeFile').val('');
-        $('#repurposeFileLabel').text('Upload a PDF (up to 15 MB)');
-        $('#repurposeStatus, #repurposeResult').addClass('d-none').empty();
-        $('#repurposeForm').removeClass('d-none');
-        bootstrap.Modal.getOrCreateInstance(document.getElementById('repurposeModal')).show();
-        if (url) runRepurpose({ url: url });
-        else setTimeout(() => $('#repurposeUrl').trigger('focus'), 300);
+    function rpModal() { return bootstrap.Modal.getOrCreateInstance(document.getElementById('repurposeModal')); }
+    function rpRemember() {
+        try { sessionStorage.setItem(RP_KEY, JSON.stringify(rpResult)); } catch (e) { /* storage blocked */ }
     }
+    function rpShowStep(step) {
+        ['rpSource', 'rpWorking', 'rpIdeas'].forEach(id => $('#' + id).toggleClass('d-none', id !== step));
+        $('#rpBackToIdeas').toggleClass('d-none', !(step === 'rpSource' && rpResult));
+    }
+    function rpShowTab(tab) {
+        $('.rp-tab').each(function () {
+            const on = $(this).data('rp-tab') === tab;
+            $(this).toggleClass('active', on).attr('aria-selected', String(on));
+        });
+        $('.rp-pane').each(function () { $(this).toggleClass('d-none', $(this).data('rp-pane') !== tab); });
+        const focus = { link: '#repurposeUrl', text: '#rpText' }[tab];
+        if (focus) setTimeout(() => $(focus).trigger('focus'), 50);
+    }
+    function rpClearError() { $('#rpError').addClass('d-none'); $('#rpFallback').addClass('d-none'); }
+    function rpShowError(message, fallback) {
+        $('#rpErrorText').text(message);
+        const offers = { text: 'Paste the text instead', pdf: 'Upload it as a PDF' };
+        $('#rpFallback').toggleClass('d-none', !offers[fallback]).text(offers[fallback] || '').data('tab', fallback);
+        $('#rpError').removeClass('d-none');
+    }
+
+    // Open the window: on the last ideas when there are some, else on a source tab
+    function openRepurpose(url, tab) {
+        rpClearError();
+        rpModal().show();
+        if (url) { $('#repurposeUrl').val(url); rpShowTab('link'); runRepurpose({ url: url }); return; }
+        if (rpResult && !tab) { rpRenderIdeas(); return; }
+        rpShowStep('rpSource');
+        rpShowTab(tab || 'link');
+    }
+    window.openRepurpose = openRepurpose;
+    window.repurposeFile = function (file) { rpModal().show(); rpShowTab('pdf'); runRepurpose(file); };
 
     function runRepurpose(source) {
         const isFile = source instanceof File;
+        const kind = isFile ? 'pdf' : source.text ? 'text' : 'url';
+        if (isFile && !/\.pdf$/i.test(source.name) && source.type !== 'application/pdf') {
+            rpShowStep('rpSource'); rpShowTab('pdf');
+            return rpShowError('That file isn\'t a PDF. Choose a .pdf file.');
+        }
+        if (isFile && source.size > 15 * 1024 * 1024) {
+            rpShowStep('rpSource'); rpShowTab('pdf');
+            return rpShowError('That PDF is larger than 15 MB. Upload a shorter version.');
+        }
+        rpClearError();
+        let host = '';
+        try { host = kind === 'url' ? new URL(/^https?:/i.test(source.url) ? source.url : 'https://' + source.url).hostname : ''; } catch (e) { host = ''; }
+        $('#rpWorkingTitle').text(kind === 'pdf' ? `Reading ${source.name}` : kind === 'text' ? 'Reading your text' : `Reading ${host || 'the page'}`);
+        rpShowStep('rpWorking');
         const started = Date.now();
-        $('#repurposeResult').addClass('d-none').empty();
-        $('#repurposeGo, #repurposeFile').prop('disabled', true);
-        const $status = $('#repurposeStatus').removeClass('d-none is-error');
         const tick = () => {
             const s = Math.round((Date.now() - started) / 1000);
-            $status.html(`<span class="spinner-border spinner-border-sm me-2"></span>${isFile ? 'Reading your PDF' : 'Reading the page'} and finding post ideas... ${s}s`);
+            $('#rpWorkingSub').text(`Finding the key points and writing post ideas - ${s}s. This usually takes 10-30 seconds.`);
         };
         tick();
-        const clock = setInterval(tick, 1000);
-        let request;
+        clearInterval(rpClock);
+        rpClock = setInterval(tick, 1000);
+
         if (isFile) {
             const form = new FormData();
             form.append('file', source);
-            request = $.ajax({ url: '/api/repurpose', type: 'POST', data: form, processData: false, contentType: false });
+            rpRequest = $.ajax({ url: '/api/repurpose', type: 'POST', data: form, processData: false, contentType: false });
         } else {
-            request = $.ajax({ url: '/api/repurpose', type: 'POST', contentType: 'application/json', data: JSON.stringify(source) });
+            rpRequest = $.ajax({ url: '/api/repurpose', type: 'POST', contentType: 'application/json', data: JSON.stringify(source) });
         }
-        request.done(function (r) {
-            $status.addClass('d-none');
-            repurposeAngles = r.angles || [];
-            const formats = { text: 'Text post', image: 'With an image', carousel: 'Carousel' };
-            $('#repurposeResult').removeClass('d-none').html(`
-                <div class="repurpose-source"><strong>${escapeHtml(r.title || 'Your content')}</strong>
-                    ${r.summary ? `<p>${escapeHtml(r.summary)}</p>` : ''}</div>
-                <div class="repurpose-angles">${repurposeAngles.map((a, i) => `
-                    <div class="repurpose-angle">
-                        <div class="repurpose-angle-head"><strong>${escapeHtml(a.title)}</strong>
-                            <span class="repurpose-format">${formats[a.format] || 'Text post'}</span></div>
-                        <p>${escapeHtml(a.brief)}</p>
-                        <button type="button" class="btn btn-sm btn-dark" data-repurpose-use="${i}">Use this</button>
-                    </div>`).join('')}</div>`);
-        }).fail(function (xhr) {
-            $status.addClass('is-error').text((xhr.responseJSON || {}).error || 'Could not read that. Please try again.');
+        rpRequest.done(function (r) {
+            rpResult = { title: r.title, source: r.source, kind: r.kind || kind, summary: r.summary || '', angles: r.angles || [] };
+            rpRemember();
+            rpRenderIdeas();
+            $('#repurposeUrl, #rpStartUrl').val('');
+            $('#rpText').val('').trigger('input');
+        }).fail(function (xhr, status) {
+            if (status === 'abort') return;
+            const body = xhr.responseJSON || {};
+            rpShowStep('rpSource');
+            rpShowTab(kind === 'pdf' ? 'pdf' : kind === 'text' ? 'text' : 'link');
+            rpShowError(body.error || 'Could not read that. Please try again.', body.fallback);
         }).always(function () {
-            clearInterval(clock);
-            $('#repurposeGo, #repurposeFile').prop('disabled', false);
+            clearInterval(rpClock);
+            rpRequest = null;
+            $('#repurposeFile').val('');
         });
     }
 
-    $('#repurposeBtn').on('click', () => openRepurpose(''));
-    $('#repurposeForm').on('submit', function (e) {
+    function rpSourceLine(r) {
+        if (r.kind === 'pdf') return { icon: 'far fa-file-pdf', sub: r.source };
+        if (r.kind === 'text') return { icon: 'fas fa-align-left', sub: 'Pasted text' };
+        let host = r.source;
+        try { host = new URL(r.source).hostname.replace(/^www\./, ''); } catch (e) { /* keep as is */ }
+        return { icon: 'fas fa-link', sub: host, href: r.source };
+    }
+
+    function rpRenderIdeas() {
+        const r = rpResult;
+        if (!r) return rpShowStep('rpSource');
+        const src = rpSourceLine(r);
+        $('#rpSourceCard').html(`
+            <div class="rp-source-icon"><i class="${src.icon}"></i></div>
+            <div class="rp-source-body">
+                <strong>${escapeHtml(r.title || 'Your content')}</strong>
+                <small>${src.href ? `<a href="${escapeAttr(src.href)}" target="_blank" rel="noopener">${escapeHtml(src.sub)}</a>` : escapeHtml(src.sub || '')}</small>
+                ${r.summary ? `<p>${escapeHtml(r.summary)}</p>` : ''}
+            </div>
+            <button type="button" class="btn-quiet btn btn-sm text-nowrap" id="rpChangeSource">Use other content</button>`);
+        $('#rpIdeasLabel').text(`${r.angles.length} post idea${r.angles.length === 1 ? '' : 's'} - edit one if you like, then write it`);
+        $('#rpIdeaList').html(r.angles.map((a, i) => {
+            const fmt = RP_FORMATS[a.format] || RP_FORMATS.text;
+            const saved = typeof savedBriefFor === 'function' && savedBriefFor(a.brief);
+            return `
+            <div class="rp-idea" data-rp-i="${i}">
+                <div class="rp-idea-head">
+                    <strong>${escapeHtml(a.title)}</strong>
+                    <span class="rp-format"><i class="fas ${fmt.icon}"></i>${fmt.label}</span>
+                </div>
+                <p class="rp-brief">${escapeHtml(a.brief)}</p>
+                <textarea class="form-control rp-brief-edit d-none" rows="4" aria-label="Edit this idea">${escapeHtml(a.brief)}</textarea>
+                <div class="rp-idea-actions">
+                    <button type="button" class="btn-primary-action btn-sm" data-rp-write="${i}"><i class="fas fa-pen-nib me-1"></i>Write this post</button>
+                    <button type="button" class="btn-quiet btn btn-sm" data-rp-edit="${i}"><i class="far fa-pen-to-square me-1"></i>Edit</button>
+                    <button type="button" class="btn-quiet btn btn-sm rp-save${saved ? ' is-saved' : ''}" data-rp-save="${i}"
+                        title="${saved ? 'Saved - remove from saved briefs' : 'Save for later (under the star in the composer)'}">
+                        <i class="${saved ? 'fas' : 'far'} fa-star me-1"></i>${saved ? 'Saved' : 'Save'}</button>
+                </div>
+            </div>`;
+        }).join(''));
+        rpShowStep('rpIdeas');
+    }
+
+    // Read what's in an idea's edit box back into the idea (when it is open)
+    function rpCommitEdit(i) {
+        const $card = $(`.rp-idea[data-rp-i="${i}"]`);
+        const $edit = $card.find('.rp-brief-edit');
+        if ($edit.hasClass('d-none')) return;
+        const text = $edit.val().trim();
+        if (text) {
+            rpResult.angles[i].brief = text;
+            rpRemember();
+            $card.find('.rp-brief').text(text);
+        }
+    }
+
+    // Tabs, forms and the drop zone
+    $(document).on('click', '.rp-tab', function () { rpClearError(); rpShowTab($(this).data('rp-tab')); });
+    $('#rpLinkForm').on('submit', function (e) {
         e.preventDefault();
         const url = $('#repurposeUrl').val().trim();
         if (!url) { $('#repurposeUrl').trigger('focus'); return; }
         runRepurpose({ url: url });
     });
+    $('#rpText').on('input', function () {
+        const n = this.value.trim().length;
+        $('#rpTextGo').prop('disabled', n < RP_MIN_TEXT);
+        $('#rpTextCount').text(n < RP_MIN_TEXT ? `${n} / ${RP_MIN_TEXT} characters minimum` : `${n.toLocaleString()} characters`);
+    });
+    $('#rpTextForm').on('submit', function (e) {
+        e.preventDefault();
+        const text = $('#rpText').val().trim();
+        if (text.length >= RP_MIN_TEXT) runRepurpose({ text: text });
+    });
     $('#repurposeFile').on('change', function () {
         const file = this.files && this.files[0];
-        if (!file) return;
-        $('#repurposeFileLabel').text(file.name);
-        runRepurpose(file);
+        if (file) runRepurpose(file);
     });
-    $(document).on('click', '[data-repurpose-use]', function () {
-        const angle = repurposeAngles[Number($(this).data('repurpose-use'))];
-        if (!angle) return;
-        bootstrap.Modal.getOrCreateInstance(document.getElementById('repurposeModal')).hide();
-        loadBriefIntoComposer(angle.brief, null);
-        if (angle.format !== 'text') {  // tick Image when the idea wants a visual and it's available
+    $('#rpDrop').on('dragover dragenter', function (e) { e.preventDefault(); e.stopPropagation(); $(this).addClass('is-over'); })
+        .on('dragleave', function (e) { e.preventDefault(); $(this).removeClass('is-over'); })
+        .on('drop', function (e) {
+            e.preventDefault(); e.stopPropagation();
+            $(this).removeClass('is-over');
+            const file = (e.originalEvent.dataTransfer.files || [])[0];
+            if (file) runRepurpose(file);
+        });
+    $('#rpFallback').on('click', function () { rpClearError(); rpShowTab($(this).data('tab')); });
+    $('#rpCancel').on('click', function () {
+        if (rpRequest) rpRequest.abort();
+        clearInterval(rpClock);
+        rpShowStep('rpSource');
+    });
+    $(document).on('click', '#rpChangeSource', function () { rpClearError(); rpShowStep('rpSource'); rpShowTab('link'); });
+    $('#rpBackToIdeas').on('click', rpRenderIdeas);
+
+    // An idea: edit, save, write
+    $(document).on('click', '[data-rp-edit]', function () {
+        const i = Number($(this).data('rp-edit'));
+        const $card = $(`.rp-idea[data-rp-i="${i}"]`);
+        const editing = !$card.find('.rp-brief-edit').hasClass('d-none');
+        if (editing) rpCommitEdit(i);
+        $card.find('.rp-brief').toggleClass('d-none', !editing);
+        $card.find('.rp-brief-edit').toggleClass('d-none', editing);
+        $(this).html(editing ? '<i class="far fa-pen-to-square me-1"></i>Edit' : '<i class="fas fa-check me-1"></i>Done');
+        if (!editing) $card.find('.rp-brief-edit').trigger('focus');
+    });
+    $(document).on('click', '[data-rp-save]', function () {
+        const i = Number($(this).data('rp-save'));
+        rpCommitEdit(i);
+        const text = rpResult.angles[i].brief;
+        const existing = savedBriefFor(text);
+        const request = existing
+            ? $.ajax({ url: `/api/briefs/${existing.id}`, type: 'DELETE' })
+            : $.ajax({ url: '/api/briefs', type: 'POST', contentType: 'application/json', data: JSON.stringify({ text: text, platforms: [] }) });
+        request.done(r => {
+            setSavedBriefs(r.briefs);
+            rpRenderIdeas();
+            showToast(existing ? 'Removed from your saved briefs.' : 'Saved. Find it under the star in the composer.', 'success');
+        }).fail(xhr => showToast((xhr.responseJSON || {}).error || 'Could not save the idea.', 'error'));
+    });
+    $(document).on('click', '[data-rp-write]', function () {
+        const i = Number($(this).data('rp-write'));
+        rpCommitEdit(i);
+        const angle = rpResult.angles[i];
+        rpModal().hide();
+        const more = rpResult.angles.length > 1 ? ' Your other ideas are one click away under the import button.' : '';
+        if (angle.format === 'carousel' && typeof presetById === 'function' && presetById('carousel')) {
+            loadBriefIntoComposer('', null, `Carousel idea loaded as /carousel. Press Generate to make the slides.${more}`);
+            choosePreset('carousel', angle.brief);
+            return;
+        }
+        loadBriefIntoComposer(angle.brief, null, `Idea loaded. Choose the platforms and press Generate.${more}`);
+        if (angle.format === 'image' || angle.format === 'carousel') {  // tick Image when it's available
             const $image = $('input[name="outputOptions"][value="image"]');
             if ($image.length && !$image.prop('disabled')) $image.prop('checked', true).trigger('change');
         }
     });
-    // A link pasted on its own into the brief: offer to read it
+
+    // Ways in: the toolbar button, the card on the empty screen, a link pasted on its own
+    $('#repurposeBtn').on('click', () => openRepurpose(''));
+    $('#rpStartForm').on('submit', function (e) {
+        e.preventDefault();
+        const url = $('#rpStartUrl').val().trim();
+        if (!url) { $('#rpStartUrl').trigger('focus'); return; }
+        openRepurpose(url);
+    });
+    $('#rpStartPdf').on('click', () => openRepurpose('', 'pdf'));
+    $('#rpStartText').on('click', () => openRepurpose('', 'text'));
     storyInput.on('input', function () {
         $('#repurposeHint').toggleClass('d-none', !LONE_URL.test(storyInput.val().trim()));
     });
@@ -1019,7 +1192,7 @@ $(document).ready(function () {
     rotateBriefExample();
     setInterval(rotateBriefExample, 4500);
 
-    function loadBriefIntoComposer(text, platforms) {
+    function loadBriefIntoComposer(text, platforms, message) {
         if ($('#chatThread').children().length) startNewChat(true);
         storyInput.val(text).trigger('input').trigger('focus');
         closeSlashMenu();
@@ -1028,7 +1201,7 @@ $(document).ready(function () {
                 $(this).prop('checked', platforms.includes($(this).val())).trigger('change');
             });
         }
-        showToast('Brief loaded. Choose the platforms and press Generate.', 'info');
+        showToast(message || 'Brief loaded. Choose the platforms and press Generate.', 'info');
     }
 
     $.get('/api/briefs').done(r => setSavedBriefs(r.briefs));
@@ -1254,12 +1427,15 @@ $(document).ready(function () {
 
     // ── Drag & Drop Visual Asset ───────────────────────────────────────
     const dropZone = $('#dropZone');
+    const openRepurposeWithFile = file => window.repurposeFile(file);  // a PDF: "Turn your content into posts"
     dropZone.on('dragover', function (e) { e.preventDefault(); $(this).addClass('dragover'); });
     dropZone.on('dragleave', function (e) { e.preventDefault(); $(this).removeClass('dragover'); });
     dropZone.on('drop', function (e) {
         e.preventDefault(); $(this).removeClass('dragover');
         const files = e.originalEvent.dataTransfer.files;
-        if (files.length) handleImageUpload(files[0]);
+        if (!files.length) return;
+        if (files[0].type === 'application/pdf' || /\.pdf$/i.test(files[0].name)) openRepurposeWithFile(files[0]);
+        else handleImageUpload(files[0]);
     });
 
     $('#imageInput').on('change', function () {

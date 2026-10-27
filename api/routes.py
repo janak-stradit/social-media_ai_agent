@@ -5975,9 +5975,10 @@ def post_analytics_route():
 @login_required_api
 @limit_by_user("ai_user")
 def repurpose_content():
-    """Turn a link or a PDF into post ideas (services/repurpose_service.py).
-    JSON {url} or a form upload "file" (PDF) -> {title, source, summary,
-    angles: [{title, brief, format}]}; the composer loads the chosen brief."""
+    """Turn a link, a PDF or pasted text into post ideas (services/repurpose_service.py).
+    JSON {url} or {text}, or a form upload "file" (PDF) -> {title, source, kind,
+    summary, angles: [{title, brief, format}]}; the composer loads the chosen
+    brief. A failure carries {code, fallback} so the window can offer another way."""
     from services import repurpose_service as repurpose
 
     user_id = get_current_user_id()
@@ -5987,24 +5988,28 @@ def repurpose_content():
             return jsonify({"success": False, "credit_limit_exceeded": True,
                             "error": f"Credit limit reached ({format_money(stats.get('credit_limit', Config.DEFAULT_CREDIT_USD), stats.get('currency', 'USD'))}). "
                                      "Please request a credit extension from admin."}), 402
+    data = request.get_json(silent=True) or {}
+    upload = request.files.get("file")
+    kind = "pdf" if upload else "text" if data.get("text") else "url"
     try:
-        upload = request.files.get("file")
         if upload:
             doc = repurpose.read_pdf(upload.read(repurpose.MAX_PDF_BYTES + 1), upload.filename or "document.pdf")
+        elif kind == "text":
+            doc = repurpose.read_text(str(data["text"])[:repurpose.MAX_TEXT_CHARS * 2])
         else:
-            doc = repurpose.read_url((request.get_json(silent=True) or {}).get("url"))
+            doc = repurpose.read_url(data.get("url"))
         ideas = repurpose.to_angles(doc)
     except repurpose.RepurposeError as err:
-        return jsonify({"success": False, "error": str(err)}), 400
+        return jsonify({"success": False, "error": str(err), "code": err.code, "fallback": err.fallback}), 400
     except requests.exceptions.RequestException:
-        return jsonify({"success": False, "error": "Couldn't reach that page. Check the link and try again."}), 502
+        return jsonify({"success": False, "error": "Couldn't reach that page. Check the link and try again.",
+                        "code": "unreachable", "fallback": "text"}), 502
     except Exception as err:  # noqa: BLE001 - the AI call
         logger.warning(f"Repurpose failed: {err}")
         return jsonify({"success": False, "error": "The AI service didn't answer. Please try again."}), 502
     usage = ideas.pop("usage", {})
-    log_event("repurpose", user_id=user_id, kind="pdf" if upload else "url", angles=len(ideas["angles"]),
-              tokens=usage.get("total_tokens", 0))
-    return jsonify({"success": True, "title": doc["title"], "source": doc["source"], **ideas})
+    log_event("repurpose", user_id=user_id, kind=kind, angles=len(ideas["angles"]), tokens=usage.get("total_tokens", 0))
+    return jsonify({"success": True, "title": doc["title"], "source": doc["source"], "kind": kind, **ideas})
 
 
 @api_bp.route("/languages", methods=["GET"])

@@ -5,6 +5,8 @@ post, product page, brochure, report) instead of starting from a blank brief.
                        website reader's SSRF checks (website_scraper_service)
     read_pdf(file)  -> {title, text, source}  the PDF's text (pypdf); scanned
                        PDFs without a text layer can't be read
+    read_text(text) -> {title, text, source}  text the user pasted (for pages
+                       that block reading, or a scanned PDF)
     to_angles(doc)  -> {summary, angles: [{title, brief, format}], usage}
                        one AI call: 3-5 distinct post ideas, each a complete
                        brief the composer can generate from
@@ -38,8 +40,19 @@ URL_ERRORS = {
 }
 
 
+# What the window offers when a source can't be read: paste its text, or
+# upload it as a PDF (static/js/app_v2.js shows the matching button)
+FALLBACKS = {"blocked": "text", "thin_content": "text", "not_html": "pdf", "scanned_pdf": "text"}
+
+
 class RepurposeError(ValueError):
-    """Why the content couldn't be used, in words for the user."""
+    """Why the content couldn't be used, in words for the user. `code` names
+    the reason; `fallback` ("text" | "pdf" | None) is the other way to try."""
+
+    def __init__(self, message: str, code: str | None = None):
+        super().__init__(message)
+        self.code = code
+        self.fallback = FALLBACKS.get(code or "")
 
 
 def read_url(url: str) -> dict:
@@ -52,12 +65,13 @@ def read_url(url: str) -> dict:
         url = f"https://{url}"
     fetched, reason = web._fetch_raw(url, require_html=True)  # pylint: disable=protected-access
     if not fetched:
-        raise RepurposeError(URL_ERRORS.get(reason or "", URL_ERRORS["unreachable"]))
+        code = reason if reason in URL_ERRORS else "unreachable"
+        raise RepurposeError(URL_ERRORS[code], code)
     final_url, html = fetched
     page = web._parse(html)  # pylint: disable=protected-access
     text = page.text(MAX_TEXT_CHARS * 2)
     if len(text) < MIN_TEXT_CHARS:
-        raise RepurposeError(URL_ERRORS["thin_content"])
+        raise RepurposeError(URL_ERRORS["thin_content"], "thin_content")
     title = page.meta("og:title") or page.title() or final_url
     return {"title": title.strip()[:200], "text": text[:MAX_TEXT_CHARS], "source": final_url}
 
@@ -90,10 +104,23 @@ def read_pdf(data: bytes, filename: str = "document.pdf") -> dict:
     text = " ".join(" ".join(parts).split())
     if len(text) < MIN_TEXT_CHARS:
         raise RepurposeError(
-            "That PDF has no readable text (it may be scanned images). Copy the text into the brief instead."
+            "That PDF has no readable text (it may be scanned images). Paste its text instead.", "scanned_pdf"
         )
     name = filename.rsplit("/", 1)[-1].rsplit(".", 1)[0].replace("_", " ").replace("-", " ").strip()
     return {"title": (title or name or "Your PDF")[:200], "text": text[:MAX_TEXT_CHARS], "source": filename}
+
+
+def read_text(text: str) -> dict:
+    """Text the user pasted. The title is its first line, shortened."""
+    text = (text or "").replace("\r\n", "\n").strip()
+    if len(text) < MIN_TEXT_CHARS:
+        raise RepurposeError(
+            f"Paste a bit more text - at least {MIN_TEXT_CHARS} characters, so there is something to work from.",
+            "too_short",
+        )
+    first = " ".join(text.split("\n", 1)[0].split())
+    title = first if len(first) <= 80 else first[:77].rsplit(" ", 1)[0] + "..."
+    return {"title": title or "Your text", "text": " ".join(text.split())[:MAX_TEXT_CHARS], "source": "Pasted text"}
 
 
 SYSTEM_PROMPT = """You turn existing content (a web page or a document) into social media post ideas for the business
