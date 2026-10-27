@@ -37,7 +37,7 @@ $(document).ready(function () {
             if (currentConversationId) sessionStorage.setItem(CONVERSATION_KEY, String(currentConversationId));
             else sessionStorage.removeItem(CONVERSATION_KEY);
         } catch (e) { /* storage blocked - the thread still works until a refresh */ }
-        $('.history-card').each(function () {
+        $('.cl-item').each(function () {
             $(this).toggleClass('active', Number($(this).data('id')) === currentConversationId);
         });
     }
@@ -187,7 +187,7 @@ $(document).ready(function () {
     });
     $('#sidebarBackdrop').on('click', function () { setMobileDrawer(false); });
     // Picking a conversation or starting a new one closes the drawer
-    $('#sidebar').on('click', '.history-card, #newChatBtn', function () { window.closeMobileDrawer(); });
+    $('#sidebar').on('click', '.cl-row, #newChatBtn', function () { window.closeMobileDrawer(); });
     $(window).on('resize', function () { if (!isPhone()) setMobileDrawer(false); });
 
     // Phones: composer options (platforms, voice, tone, output) fold away
@@ -203,6 +203,7 @@ $(document).ready(function () {
         if (tone) parts.push($('#toneSelect option:selected').text());
         $('#styleMenuLabel').text(parts.length ? parts.join(' · ') : 'Style');
         $('#styleMenuBtn').toggleClass('is-set', parts.length > 0);
+        if (typeof updateComposerSummary === 'function') updateComposerSummary();
     }
     function setStyleMenuOpen(open) {
         $('#styleMenuPanel').toggleClass('d-none', !open);
@@ -287,11 +288,40 @@ $(document).ready(function () {
         } catch (e) { /* not JSON: leave it */ }
     });
 
-    $('#dockOptionsBtn').on('click', function () {
-        const open = !$('#dropZone').hasClass('options-open');
+    // Composer "Options": platforms, what to make and voice / tone / language
+    // open in a panel above the toolbar; closed, a one-line summary says what
+    // is picked. Remembered in this browser; opens by itself while no platform
+    // is picked (nothing can be generated without one).
+    const OPTIONS_KEY = 'avir_composer_options_open';
+    function setComposerOptions(open, remember) {
         $('#dropZone').toggleClass('options-open', open);
-        $(this).toggleClass('active', open).attr('aria-expanded', String(open));
-    });
+        $('#dockOptionsBtn').toggleClass('active', open).attr('aria-expanded', String(open));
+        if (remember) { try { localStorage.setItem(OPTIONS_KEY, open ? '1' : '0'); } catch (e) { /* storage blocked */ } }
+    }
+    window.openComposerOptions = function () { setComposerOptions(true, false); };
+    $('#dockOptionsBtn').on('click', function () { setComposerOptions(!$('#dropZone').hasClass('options-open'), true); });
+
+    function updateComposerSummary() {
+        const names = $('.platform-chips-inline input:checked').map(function () {
+            return $(this).closest('label').find('.chip-content').text().trim();
+        }).get();
+        const make = [];
+        if ($('#mediaText').prop('checked')) make.push('caption');
+        if ($('#mediaImage').prop('checked')) make.push('image');
+        if ($('#mediaVideo').prop('checked')) make.push('video');
+        const style = $('#styleMenuLabel').text().trim();
+        const parts = [names.length ? names.join(', ') : 'Pick a platform', make.join(' + ') || 'caption'];
+        if (style && style !== 'Style') parts.push(style);
+        $('#composerSummary').text(parts.join(' · ')).toggleClass('is-missing', !names.length);
+    }
+    $('#dropZone').on('change', 'input, select', updateComposerSummary);
+    let optionsPref = null;
+    try { optionsPref = localStorage.getItem(OPTIONS_KEY); } catch (e) { /* storage blocked */ }
+    setComposerOptions(optionsPref === '1', false);
+    setTimeout(function () {  // after last time's choices are restored
+        updateComposerSummary();
+        if (!$('.platform-chips-inline input:checked').length) setComposerOptions(true, false);
+    }, 400);
 
     // Restore saved sidebar preference
     if (localStorage.getItem('sidebar_hidden') === 'true') {
@@ -2859,8 +2889,10 @@ $(document).ready(function () {
         // behind the "N Agents Active" toggle, so it never actually showed
         // unless the user happened to click it); the button still lets you
         // collapse it if you want.
-        let agentBreakdownHtml = `<div class="agent-pipeline-breakdown" id="${msgId}_pipeline_panel">`;
-        agentBreakdownHtml += `<div class="fw-bold mb-1 text-primary">Agents Engaged in this Turn:</div>`;
+        // Folded away until the "N Agents Active" button opens it; nothing at all
+        // when no agents were recorded (it used to show an empty box)
+        let agentBreakdownHtml = agentsCount ? `<div class="agent-pipeline-breakdown d-none" id="${msgId}_pipeline_panel">` : '';
+        if (agentsCount) agentBreakdownHtml += `<div class="fw-bold mb-1 text-primary">Agents Engaged in this Turn:</div>`;
         (agentsExecuted || []).forEach(a => {
             agentBreakdownHtml += `
                 <div class="d-flex align-items-center justify-content-between py-1 border-bottom border-light">
@@ -2872,7 +2904,7 @@ $(document).ready(function () {
                 </div>
             `;
         });
-        agentBreakdownHtml += `</div>`;
+        if (agentsCount) agentBreakdownHtml += `</div>`;
 
         // Build Platform Tabs
         let tabsHtml = `<div class="platform-tabs-chat">`;
@@ -2914,7 +2946,7 @@ $(document).ready(function () {
                         <div id="${msgId}_media_image_${p}">
                             ${imageCreatingHtml(platforms.length > 1 || p === 'instagram')}
                         </div>
-                        ` : ''}
+                        ` : `<div id="${msgId}_media_image_${p}"></div>`}
                         ${pData.media?.video?.url ? buildGeneratedMediaHtml('video', pData.media.video)
                             : (selectedOutputs || []).includes('video') ? `
                         <div id="${msgId}_media_video_${p}">${videoCreatingHtml()}</div>
@@ -2931,15 +2963,17 @@ $(document).ready(function () {
         const paginationHtml = totalGens > 1 ? `
             <div class="generation-pagination ms-2 d-inline-flex align-items-center bg-light rounded px-2 py-1 border">
                 <i class="fas fa-chevron-left cursor-pointer text-secondary me-2 gen-prev" data-msg="${msgId}" ${currentGen === 1 ? 'style="opacity: 0.5; pointer-events: none;"' : ''}></i>
-                <span class="small font-weight-bold">${currentGen} / ${totalGens}</span>
+                <span class="small font-weight-bold">Version ${currentGen} of ${totalGens}</span>
                 <i class="fas fa-chevron-right cursor-pointer text-secondary ms-2 gen-next" data-msg="${msgId}" ${currentGen === totalGens ? 'style="opacity: 0.5; pointer-events: none;"' : ''}></i>
             </div>
         ` : '';
 
+        // Ready-to-publish layout: the checklist (renderChecklist) and the
+        // Schedule / Send for approval buttons on the left, the post on the right
         const cardContent = `
             <div class="assistant-header">
                 <div class="assistant-title d-flex align-items-center">
-                    <div><i class="fas fa-sparkles text-primary me-1"></i>AVIR Studio Output</div>
+                    <div title="${runId ? 'Run #' + runId : ''}"><i class="fas fa-sparkles text-primary me-1"></i>AVIR Studio Output</div>
                     ${paginationHtml}
                 </div>
                 <div class="assistant-meta-tags">
@@ -2947,13 +2981,21 @@ $(document).ready(function () {
                     ${pipelineBadgeHtml}
                     ${memBadgeHtml}
                     ${costBadgeHtml}
-                    <span class="assistant-run-tag">${runId ? 'Run #' + runId : 'Generated'}</span>
                 </div>
             </div>
             ${agentBreakdownHtml}
+            <div class="out-layout">
+                <aside class="out-side" aria-label="Ready to publish">
+                    <div class="out-check" id="${msgId}_checklist" aria-live="polite"></div>
+                    <div class="assistant-card-footer action-row out-cta">
+                        ${scheduleButtonHtml(msgId)}
+                        ${approvalButtonHtml(msgId)}
+                    </div>
+                </aside>
+                <div class="out-main">
             ${tabsHtml}
             ${panelsHtml}
-            ${actionRowHtml(msgId, `
+            ${outMoreRowHtml(msgId, `
                 <button class="dropdown-item btn-regenerate" data-msg="${msgId}"
                     title="${historyObj.refine ? 'Apply the same change again, as a new version' : 'Write the caption again, as a new version. Your image is kept.'}">
                     <i class="fas fa-sync-alt me-2"></i>${historyObj.refine ? 'Redo this change' : 'Rewrite caption'}
@@ -2961,9 +3003,13 @@ $(document).ready(function () {
                 <button class="dropdown-item btn-refine-base" data-msg="${msgId}" title="Your next message will edit this version">
                     <i class="fas fa-wand-magic-sparkles me-2"></i>${refineBaseMsgId === msgId ? 'Refining this version' : 'Refine this version'}
                 </button>`)}
+                </div>
+            </div>
         `;
 
         elem.find('.assistant-card').html(cardContent);
+        elem.data('outPlatform', platforms[0]);
+        watchChecklist(msgId);
 
         elem.find('.btn-send-approval').on('click', () => openApproval(msgId));
 
@@ -2979,6 +3025,8 @@ $(document).ready(function () {
             const targetId = $(this).attr('data-target');
             elem.find('.platform-panel-item').hide();
             $('#' + targetId).fadeIn(150);
+            elem.data('outPlatform', targetId.split('_tab_').pop());
+            renderChecklist(msgId);
         });
 
         // Bind Pagination
@@ -3716,6 +3764,159 @@ $(document).ready(function () {
             </div>`;
     }
 
+    // Under the post: Preview and "More" (Schedule and Send for approval live
+    // with the checklist on the left)
+    function outMoreRowHtml(msgId, moreItems) {
+        return `
+            <div class="out-more-row">
+                <button class="btn btn-sm btn-quiet btn-preview-post" data-msg="${msgId}" title="See it as it will look on each platform">
+                    <i class="fas fa-eye me-1"></i>Preview
+                </button>
+                <div class="dropdown action-more">
+                    <button class="btn btn-sm btn-quiet" type="button" data-bs-toggle="dropdown" aria-expanded="false" title="More actions">
+                        <i class="fas fa-ellipsis me-1"></i>More
+                    </button>
+                    <div class="dropdown-menu dropdown-menu-end">${moreItems}</div>
+                </div>
+            </div>`;
+    }
+
+    // ── Ready-to-publish checklist (the output card's left column) ─────────
+    // Worked out from the post's data and what the card shows right now, so it
+    // follows image generation, edits and scheduling as they happen.
+    const OUT_NAMES = { linkedin: 'LinkedIn', instagram: 'Instagram', facebook: 'Facebook', youtube: 'YouTube', x: 'X' };
+    let bestTimes = null;  // /api/best-times, asked once; until then the item just says "Choose when"
+    let bestTimesAsked = false;
+    function bestTimeFor(platform) {
+        if (!bestTimesAsked) {
+            bestTimesAsked = true;
+            $.getJSON('/api/best-times?tz=' + (-new Date().getTimezoneOffset())).done(r => {
+                bestTimes = r.platforms || {};
+                $('.out-check').each(function () { renderChecklist(this.id.replace(/_checklist$/, '')); });
+            });
+        }
+        return bestTimes ? bestTimes[platform] || null : null;
+    }
+
+    function imageState(msgId, p, pData, wanted) {
+        const media = pData.media || {};
+        const $slot = $(`#${msgId}_media_image_${p}`);
+        if (media.image && media.image.limit_reached || $slot.find('.image-limit-card').length) return { state: 'warn', note: "Today's image limit is reached" };
+        if ($slot.find('.img-creating').length) return { state: 'working', note: 'Being created…' };
+        const url = $slot.find('img.media-output-img').attr('src') || (media.image && media.image.url);
+        if (url) return { state: 'done', note: `Your logo placed · ${(media.image && media.image.resolution) || '1024×1024'}`, url: url };
+        if ($slot.children().length && !$slot.find('img').length) return { state: 'warn', note: "Couldn't create the image", retry: true };
+        return { state: wanted ? 'todo' : 'optional', note: p === 'instagram' ? 'Instagram posts need an image' : 'No image yet (optional)' };
+    }
+
+    function checklistItems(msgId, p) {
+        const h = window.chatHistory[msgId];
+        const post = postTextOf(msgId, p);
+        if (!h || !post) return [];
+        const pData = post.node || {};
+        const items = [];
+        const len = Array.from(post.caption || '').length;
+        const limit = window.PostPreview && window.PostPreview.limitFor ? window.PostPreview.limitFor(p) : null;
+        items.push(len
+            ? { key: 'caption', state: limit && len > limit ? 'warn' : 'done', title: 'Caption written',
+                note: `${len.toLocaleString()}${limit ? ' / ' + limit.toLocaleString() : ''} characters${post.node.edited ? ' · edited' : ''}`, act: post.runId ? 'Edit' : '' }
+            : { key: 'caption', state: 'todo', title: 'Write a caption', note: 'No caption yet', act: post.runId ? 'Write' : '' });
+        const tags = post.tags.length;
+        items.push({ key: 'tags', state: tags ? (p === 'instagram' && tags > 30 ? 'warn' : 'done') : 'optional',
+            title: tags ? 'Hashtags picked' : 'No hashtags', note: tags ? `${tags} for ${OUT_NAMES[p] || p}${p === 'instagram' && tags > 30 ? ' (30 at most)' : ''}` : 'Optional',
+            act: post.runId ? 'Edit' : '' });
+        const wantedImage = (h.selectedOutputs || []).includes('image') || p === 'instagram';
+        const img = imageState(msgId, p, pData, wantedImage);
+        items.push(Object.assign({ key: 'image', title: img.state === 'done' ? 'Image with your logo' : 'Image' }, img,
+            { act: img.state === 'done' ? 'View' : img.retry ? 'Try again' : (img.state === 'todo' || img.state === 'optional') ? 'Create' : '' }));
+        if (pData.compliance) {
+            const c = pData.compliance;
+            const attention = c.needs_attention || 0;
+            items.push(attention
+                ? { key: 'brand', state: 'warn', title: 'Brand check', note: `${attention} item${attention > 1 ? 's need' : ' needs'} your attention`, act: 'Review' }
+                : { key: 'brand', state: 'done', title: 'Brand check passed', note: `${c.rules_checked || 0} rules checked${(c.disclaimers_added || []).length ? ' · disclaimer added' : ''}`, act: 'Details' });
+        }
+        if (window.SCHEDULING_ENABLED) {
+            const planned = h.scheduled && h.scheduled[h.currentIndex];
+            if (planned) {
+                const when = new Date(planned.at).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+                items.push({ key: 'time', state: 'done', title: 'Scheduled', note: when, act: '' });
+            } else {
+                const best = bestTimeFor(p);
+                items.push({ key: 'time', state: 'todo', title: 'Pick a time',
+                    note: best && best.next_slot
+                        ? 'Next good slot: ' + new Date(best.next_slot).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
+                        : 'Choose when it goes out', act: 'Schedule' });
+            }
+        }
+        return items;
+    }
+
+    function renderChecklist(msgId) {
+        const $box = $(`#${msgId}_checklist`);
+        if (!$box.length) return;
+        const p = $(`#${msgId}`).data('outPlatform');
+        const items = checklistItems(msgId, p);
+        const counted = items.filter(i => i.state !== 'optional');
+        const done = counted.filter(i => i.state === 'done').length;
+        const working = items.some(i => i.state === 'working');
+        const warn = items.some(i => i.state === 'warn');
+        const title = working ? 'Finishing your post…' : done === counted.length ? 'Ready to publish' : warn ? 'Needs a quick look' : 'Almost ready';
+        const marks = { done: '<i class="fas fa-check"></i>', working: '<i class="fas fa-spinner fa-spin"></i>', warn: '!', todo: '', optional: '' };
+        const pct = counted.length ? Math.round(done / counted.length * 100) : 0;
+        $box.html(`
+            <p class="out-eyebrow">${escapeHtml(OUT_NAMES[p] || p || '')} post</p>
+            <h3 class="out-title">${title}</h3>
+            <p class="out-sub">${done} of ${counted.length} checks done</p>
+            <div class="out-progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Checks done"><span style="width:${pct}%"></span></div>
+            <ul class="out-items">
+                ${items.map(i => `
+                <li class="out-item is-${i.state}">
+                    <span class="out-mark" aria-hidden="true">${marks[i.state]}</span>
+                    <span class="out-text"><strong>${escapeHtml(i.title)}</strong><small>${escapeHtml(i.note || '')}</small></span>
+                    ${i.act ? `<button type="button" class="out-act" data-msg="${msgId}" data-platform="${escapeAttr(p)}" data-key="${i.key}"${i.url ? ` data-url="${escapeAttr(i.url)}"` : ''}>${escapeHtml(i.act)}</button>` : ''}
+                </li>`).join('')}
+            </ul>`);
+    }
+
+    // Re-check whenever the post's content changes (image done, edit saved, ...)
+    function watchChecklist(msgId) {
+        const elem = $(`#${msgId}`);
+        const old = elem.data('outObserver');
+        if (old) old.disconnect();
+        renderChecklist(msgId);
+        const panel = elem.find('.platform-content-panel')[0];
+        if (!panel || !window.MutationObserver) return;
+        let queued = false;
+        const observer = new MutationObserver(() => {
+            if (queued) return;
+            queued = true;
+            requestAnimationFrame(() => { queued = false; renderChecklist(msgId); });
+        });
+        observer.observe(panel, { childList: true, subtree: true });
+        elem.data('outObserver', observer);
+    }
+
+    // A checklist item's button does what the card's own controls do
+    $(document).on('click', '.out-act', function () {
+        const msgId = $(this).data('msg'), p = $(this).data('platform'), key = $(this).data('key');
+        const $panel = $(`#${msgId}_tab_${p}`);
+        const reveal = $el => { if ($el.length) $el[0].scrollIntoView({ block: 'center', behavior: 'smooth' }); };
+        if (key === 'caption') $panel.find('.btn-edit-post').not('[data-focus]').first().trigger('click');
+        else if (key === 'tags') {
+            const $line = $panel.find('.hashtag-line').attr('open', true);
+            const $edit = $line.find('.btn-edit-post[data-focus]').first();
+            if ($edit.length) $edit.trigger('click'); else reveal($line);
+        } else if (key === 'image') {
+            const url = $(this).data('url');
+            if (url && typeof window.openImagePreview === 'function') window.openImagePreview(url);
+            else if (typeof window.regenerateImage === 'function') window.regenerateImage(msgId, p);
+        } else if (key === 'brand') {
+            const $c = $panel.find('.compliance-line').attr('open', true);
+            reveal($c);
+        } else if (key === 'time') openSchedule(msgId);
+    });
+
     // "Send for approval" (static/js/approval_send.js): after sending, the
     // button becomes a link to the request
     function approvalButtonHtml(msgId) {
@@ -3798,6 +3999,7 @@ $(document).ready(function () {
 
     function refreshScheduleButton(msgId) {
         $(`#${msgId} .assistant-card-footer`).find('.btn-schedule-post, .btn-scheduled, .btn-schedule-soon').first().replaceWith(scheduleButtonHtml(msgId));
+        renderChecklist(msgId);
     }
 
     function openSchedule(msgId) {
@@ -4018,32 +4220,31 @@ $(document).ready(function () {
         }
     });
 
-    // ── History Functions ──────────────────────────────────────────────
+    // ── History (sidebar) ──────────────────────────────────────────────
+    // Pinned chats first, then the rest grouped by date. Library and Archived
+    // sit at the bottom; Archived swaps the list for the archived chats.
     let currentHistoryTab = 'active';
 
-    $(document).on('click', '.history-tab-pill', function () {
-        currentHistoryTab = $(this).data('tab');
-        $('.history-tab-pill').removeClass('active');
-        $(this).addClass('active');
+    function showHistoryTab(tab) {
+        currentHistoryTab = tab;
+        const archived = tab === 'archived';
+        $('#historyBackBtn').toggleClass('d-none', !archived);
+        $('#historyArchivedBtn').toggleClass('active', archived).attr('aria-pressed', archived);
+        $('#sidebarSearchInput').attr('placeholder', archived ? 'Search archived chats' : 'Search chats');
         renderHistory();
-    });
+    }
+    $('#historyArchivedBtn').on('click', function () { showHistoryTab(currentHistoryTab === 'archived' ? 'active' : 'archived'); });
+    $('#historyBackBtn').on('click', function () { showHistoryTab('active'); });
 
     function renderHistory() {
         const isArchived = currentHistoryTab === 'archived';
         $.ajax({
-            url: `/api/conversations?limit=30&archived=${isArchived}`,
+            url: `/api/conversations?limit=50&archived=${isArchived}`,
             type: 'GET',
             success: function (r) {
-                const history = r.conversations || [];
-                window._allHistoryItems = history;
-                $('#historyCount').text(history.length);
-
-                const searchQuery = $('#sidebarSearchInput').val() || '';
-                if (searchQuery.trim()) {
-                    filterAndRenderHistory(searchQuery.trim(), isArchived);
-                } else {
-                    renderHistoryList(history, isArchived);
-                }
+                window._allHistoryItems = r.conversations || [];
+                const q = ($('#sidebarSearchInput').val() || '').trim();
+                renderHistoryList(q ? filterHistory(q) : window._allHistoryItems, isArchived);
             },
             error: function () {
                 showToast('Could not load your history right now.', 'error');
@@ -4051,31 +4252,89 @@ $(document).ready(function () {
         });
     }
 
-    function filterAndRenderHistory(query, isArchived) {
-        if (!window._allHistoryItems) return;
+    function filterHistory(query) {
         const q = query.toLowerCase();
-        const filtered = window._allHistoryItems.filter(item =>
+        return (window._allHistoryItems || []).filter(item =>
             (item.story && item.story.toLowerCase().includes(q)) ||
             (item.tone && item.tone.toLowerCase().includes(q)) ||
             (Array.isArray(item.platforms) && item.platforms.join(' ').toLowerCase().includes(q))
         );
-        renderHistoryList(filtered, isArchived);
     }
 
     $('#sidebarSearchInput').on('input', function () {
-        const q = $(this).val().toLowerCase().trim();
-        const isArchived = currentHistoryTab === 'archived';
-        if (q) {
-            filterAndRenderHistory(q, isArchived);
-        } else if (window._allHistoryItems) {
-            renderHistoryList(window._allHistoryItems, isArchived);
-        }
+        const q = $(this).val().trim();
+        renderHistoryList(q ? filterHistory(q) : (window._allHistoryItems || []), currentHistoryTab === 'archived');
     });
+
+    // "Create a concise explainer video for Indian investors..." -> "Concise explainer video for Indian investors..."
+    function shortTitle(text) {
+        const t = String(text || '').trim()
+            .replace(/^(please\s+)?(create|write|make|generate|draft|design|give me|prepare)\s+(me\s+)?((a|an|the|some)\s+)?/i, '');
+        return t ? t.charAt(0).toUpperCase() + t.slice(1) : (text || 'Untitled chat');
+    }
+
+    // Short time for a row ("2h", "3d", "Oct 9") and the group it belongs to
+    const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+    function historyDate(item) {
+        const d = item.updated_at ? new Date(item.updated_at) : new Date(String(item.timestamp || '').replace(' ', 'T'));
+        return isNaN(d) ? null : d;
+    }
+    function shortWhen(d) {
+        if (!d) return '';
+        const mins = Math.floor((Date.now() - d) / 60000);
+        if (mins < 1) return 'now';
+        if (mins < 60) return `${mins}m`;
+        if (mins < 60 * 24) return `${Math.floor(mins / 60)}h`;
+        if (mins < 60 * 24 * 7) return `${Math.floor(mins / 1440)}d`;
+        const now = new Date();
+        return `${MONTHS[d.getMonth()]} ${d.getDate()}` + (d.getFullYear() !== now.getFullYear() ? `, ${d.getFullYear()}` : '');
+    }
+    function groupLabel(d) {
+        if (!d) return 'Older';
+        const start = new Date(); start.setHours(0, 0, 0, 0);
+        const day = 86400000;
+        if (d >= start) return 'Today';
+        if (d >= start - day) return 'Yesterday';
+        if (d >= start - 6 * day) return 'Previous 7 days';
+        if (d >= start - 29 * day) return 'Previous 30 days';
+        const now = new Date();
+        return MONTH_NAMES[d.getMonth()] + (d.getFullYear() !== now.getFullYear() ? ` ${d.getFullYear()}` : '');
+    }
+
+    const PLATFORM_ICONS = {
+        linkedin: 'fab fa-linkedin-in', instagram: 'fab fa-instagram', facebook: 'fab fa-facebook-f',
+        youtube: 'fab fa-youtube', x: 'fab fa-x-twitter', twitter: 'fab fa-x-twitter',
+    };
+
+    function historyRow(item, isArchived) {
+        const platforms = Array.isArray(item.platforms) ? item.platforms : [];
+        const first = (platforms[0] || '').toLowerCase();
+        const icon = PLATFORM_ICONS[first] || 'fas fa-comment';
+        const platformNames = platforms.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ');
+        const d = historyDate(item);
+        const title = shortTitle(item.story);
+        const menu = isArchived
+            ? `<button type="button" role="menuitem" data-act="restore"><i class="fas fa-box-open"></i>Restore</button>`
+            : `<button type="button" role="menuitem" data-act="${item.is_pinned ? 'unpin' : 'pin'}"><i class="fas fa-thumbtack"></i>${item.is_pinned ? 'Unpin' : 'Pin to top'}</button>
+               <button type="button" role="menuitem" data-act="archive"><i class="fas fa-box-archive"></i>Archive</button>`;
+        return `
+            <div class="cl-item${Number(item.id) === currentConversationId ? ' active' : ''}" data-id="${item.id}">
+                <button type="button" class="cl-row" title="${escapeHtml(item.story || '')}">
+                    <span class="cl-plat p-${escapeHtml(first)}" title="${escapeHtml(platformNames)}" aria-hidden="true"><i class="${icon}"></i></span>
+                    <span class="cl-title">${escapeHtml(title)}</span>
+                    <span class="cl-when">${shortWhen(d)}</span>
+                </button>
+                <button type="button" class="cl-menu-btn" aria-label="More options for ${escapeHtml(title)}" aria-haspopup="menu" aria-expanded="false"><i class="fas fa-ellipsis"></i></button>
+                <div class="cl-menu" role="menu" hidden>${menu}</div>
+            </div>`;
+    }
 
     function renderHistoryList(items, isArchived) {
         if (!items.length) {
-            const emptyText = isArchived ? 'No archived campaigns' : 'No chat history yet';
-            const emptySub = isArchived ? 'Archived items will appear here' : 'Start a conversation to generate content';
+            const searching = ($('#sidebarSearchInput').val() || '').trim();
+            const emptyText = searching ? 'No chats match your search' : (isArchived ? 'No archived chats' : 'No chat history yet');
+            const emptySub = searching ? 'Try another word' : (isArchived ? 'Archived chats will appear here' : 'Start a conversation to generate content');
             $('#historyList').html(`
                 <div class="history-empty">
                     <div class="history-empty-icon"><i class="fas ${isArchived ? 'fa-box-archive' : 'fa-comments'}"></i></div>
@@ -4087,76 +4346,80 @@ $(document).ready(function () {
         }
 
         let html = '';
-        items.forEach(item => {
-            const platformList = Array.isArray(item.platforms) ? item.platforms : [];
-            const platformBadges = platformList.map(p => {
-                const icons = {
-                    facebook: '<i class="fab fa-facebook color-fb me-1"></i>',
-                    instagram: '<i class="fab fa-instagram color-ig me-1"></i>',
-                    linkedin: '<i class="fab fa-linkedin color-li me-1"></i>'
-                };
-                return `<span class="history-platform-tag">${icons[p] || ''}${p.toUpperCase()}</span>`;
-            }).join(' ');
-
-            const toneTag = item.tone && item.tone !== 'Auto' ? `<span class="history-tone-tag"><i class="fas fa-sliders me-1"></i>${escapeHtml(item.tone)}</span>` : '';
-            const countTag = item.message_count > 1
-                ? `<span class="history-tone-tag" title="${item.message_count} messages in this conversation"><i class="fas fa-comments me-1"></i>${item.message_count}</span>` : '';
-            const dateStr = item.timestamp || 'Recent';
-
-            const actionBtn = isArchived
-                ? `<button class="btn-history-icon btn-unarchive-item" data-id="${item.id}" title="Restore conversation"><i class="fas fa-box-open"></i></button>`
-                : `<button class="btn-history-icon btn-archive-item" data-id="${item.id}" title="Archive conversation"><i class="fas fa-box-archive"></i></button>`;
-
-            html += `
-                <div class="history-card${Number(item.id) === currentConversationId ? ' active' : ''}" data-id="${item.id}">
-                    <div class="history-card-header">
-                        <div class="history-card-title">${escapeHtml(item.story)}</div>
-                        <div class="history-card-actions">
-                            ${actionBtn}
-                        </div>
-                    </div>
-                    <div class="history-card-meta">
-                        <div class="history-tags-row">
-                            ${platformBadges}
-                            ${toneTag}
-                            ${countTag}
-                        </div>
-                        <span class="history-date">${dateStr}</span>
-                    </div>
-                </div>
-            `;
-        });
-
+        const pinned = isArchived ? [] : items.filter(i => i.is_pinned);
+        if (pinned.length) {
+            html += `<p class="cl-group"><i class="fas fa-thumbtack" aria-hidden="true"></i>Pinned</p>`;
+            pinned.forEach(item => { html += historyRow(item, isArchived); });
+        }
+        let lastGroup = null;
+        items.filter(i => isArchived || !i.is_pinned)
+            .sort((a, b) => (historyDate(b) || 0) - (historyDate(a) || 0))
+            .forEach(item => {
+                const group = groupLabel(historyDate(item));
+                if (group !== lastGroup) { html += `<p class="cl-group">${group}</p>`; lastGroup = group; }
+                html += historyRow(item, isArchived);
+            });
         $('#historyList').html(html);
+    }
 
-        $('.history-card').on('click', function (e) {
-            if ($(e.target).closest('.history-card-actions').length) return;
-            $('.history-card').removeClass('active');
-            $(this).addClass('active');
-            const id = $(this).data('id');
-            loadConversation(id);
-        });
+    // Row clicks, the "..." menu and its actions (one set of handlers for the whole list)
+    function closeHistoryMenus() {
+        $('.cl-item.menu-open').removeClass('menu-open').find('.cl-menu').prop('hidden', true)
+            .end().find('.cl-menu-btn').attr('aria-expanded', 'false');
+    }
+    $('#historyList').on('click', '.cl-row', function () {
+        const $item = $(this).closest('.cl-item');
+        $('.cl-item').removeClass('active');
+        $item.addClass('active');
+        loadConversation($item.data('id'));
+    });
+    $('#historyList').on('click', '.cl-menu-btn', function (e) {
+        e.stopPropagation();
+        const $item = $(this).closest('.cl-item');
+        const open = !$item.hasClass('menu-open');
+        closeHistoryMenus();
+        if (!open) return;
+        const $menu = $item.find('.cl-menu').removeClass('up').prop('hidden', false);
+        $item.addClass('menu-open');
+        // Near the bottom of the list it opens upwards, so it is never cut off
+        const list = document.getElementById('historyList').getBoundingClientRect();
+        if ($menu[0].getBoundingClientRect().bottom > list.bottom) $menu.addClass('up');
+        $(this).attr('aria-expanded', 'true');
+        $item.find('.cl-menu button').first().trigger('focus');
+    });
+    $('#historyList').on('click', '.cl-menu button', function (e) {
+        e.stopPropagation();
+        const id = $(this).closest('.cl-item').data('id');
+        const act = $(this).data('act');
+        closeHistoryMenus();
+        if (act === 'archive') archiveRun(id);
+        else if (act === 'restore') unarchiveRun(id);
+        else setPinned(id, act === 'pin');
+    });
+    $(document).on('click', function (e) { if (!$(e.target).closest('.cl-menu').length) closeHistoryMenus(); });
+    $(document).on('keydown', function (e) {
+        if (e.key !== 'Escape' || !$('.cl-item.menu-open').length) return;
+        const $btn = $('.cl-item.menu-open .cl-menu-btn');
+        closeHistoryMenus();
+        $btn.trigger('focus');
+    });
 
-        $('.btn-archive-item').on('click', function (e) {
-            e.stopPropagation();
-            const id = $(this).data('id');
-            archiveRun(id);
-        });
-
-        $('.btn-unarchive-item').on('click', function (e) {
-            e.stopPropagation();
-            const id = $(this).data('id');
-            unarchiveRun(id);
+    function setPinned(id, pinned) {
+        $.ajax({
+            url: `/api/conversations/${id}/${pinned ? 'pin' : 'unpin'}`,
+            type: 'POST',
+            success: function () { renderHistory(); },
+            error: function () { showToast(pinned ? 'Could not pin this chat' : 'Could not unpin this chat', 'error'); }
         });
     }
 
     function archiveRun(runId) {
-        const $card = $(`.history-card[data-id="${runId}"]`);
+        const $item = $(`.cl-item[data-id="${runId}"]`);
         window.withUndo({
             message: 'Conversation archived.',
             url: `/api/conversations/${runId}/archive`,
-            hide: () => $card.slideUp(150),
-            restore: () => $card.slideDown(150),
+            hide: () => $item.slideUp(150),
+            restore: () => $item.slideDown(150),
             done: () => renderHistory(),
             failed: () => showToast('Failed to archive conversation', 'error'),
         });
@@ -4167,7 +4430,7 @@ $(document).ready(function () {
             url: `/api/conversations/${runId}/unarchive`,
             type: 'POST',
             success: function () {
-                showToast('Conversation restored to Active', 'success');
+                showToast('Conversation restored', 'success');
                 renderHistory();
             },
             error: function () {

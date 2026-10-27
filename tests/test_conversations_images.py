@@ -151,6 +151,40 @@ def test_archive_and_restore_conversation(app, fakes):
     assert client.post(f"/api/conversations/{conv_id}/unarchive").status_code == 200
 
 
+def _conversation(user, story):
+    conv_id = db.ensure_conversation(user["id"], None, story)
+    db.save_run(story=story, tone="Auto", platforms=["linkedin"], content={"linkedin": {"caption": {"primary_caption": story}}},
+                user_id=user["id"], conversation_id=conv_id)
+    return conv_id
+
+
+def test_pinned_conversations_come_first_and_archiving_unpins(app):
+    user, client = _user(app)
+    older = _conversation(user, "Diwali offer")
+    newer = _conversation(user, "Hiring post")
+    listed = client.get("/api/conversations").get_json()["conversations"]
+    assert [c["id"] for c in listed] == [newer, older] and not any(c["is_pinned"] for c in listed)
+    assert listed[0]["updated_at"].endswith("Z")
+
+    assert client.post(f"/api/conversations/{older}/pin").get_json()["is_pinned"] is True
+    listed = client.get("/api/conversations").get_json()["conversations"]
+    assert [(c["id"], c["is_pinned"]) for c in listed] == [(older, True), (newer, False)]
+
+    client.post(f"/api/conversations/{older}/archive")
+    client.post(f"/api/conversations/{older}/unarchive")
+    assert not any(c["is_pinned"] for c in client.get("/api/conversations").get_json()["conversations"])
+
+    assert client.post(f"/api/conversations/{newer}/unpin").status_code == 200
+
+
+def test_cannot_pin_someone_elses_conversation(app):
+    owner, _ = _user(app)
+    _, stranger = _user(app, name="Ravi")
+    conv_id = _conversation(owner, "Private plan")
+    assert stranger.post(f"/api/conversations/{conv_id}/pin").status_code == 404
+    assert app.test_client().post(f"/api/conversations/{conv_id}/pin").status_code == 401
+
+
 def test_runs_saved_before_conversations_each_get_one(app):
     user, _ = _user(app)
     run_id = db.save_run(story="Old post", tone="Auto", platforms=["linkedin"], content={}, user_id=user["id"])

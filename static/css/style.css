@@ -5288,3 +5288,183 @@ details[open] > summary .compliance-caret { transform: rotate(180deg); }
 .last-setup-note { margin-left: 6px; padding: 1px 8px; border-radius: 999px; background: #f1f5f9; color: var(--bp-text-sub, #64748b);
     font-size: 0.7rem; font-weight: 600; }
 .last-setup-note.d-none { display: none; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   Studio Chat sidebar (option A): compact rows, Pinned, then by date;
+   Library and Archived at the bottom. app_v2.js renderHistoryList.
+   ══════════════════════════════════════════════════════════════════════ */
+.sidebar { padding: 14px 10px 0; gap: 0; }
+.cl-top { display: flex; align-items: center; gap: 8px; padding: 0 4px 10px; }
+.cl-new {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 42px; border: 0; border-radius: 10px; background: var(--brand-strong); color: #fff;
+  font-size: 0.92rem; font-weight: 600; cursor: pointer; transition: background .15s ease;
+}
+.cl-new:hover { background: var(--brand-hover); }
+.cl-new:focus-visible, .cl-icon-btn:focus-visible, .cl-row:focus-visible, .cl-foot-link:focus-visible, .cl-back:focus-visible, .cl-menu-btn:focus-visible {
+  outline: 3px solid rgba(var(--brand-rgb), .35); outline-offset: 2px;
+}
+.cl-icon-btn {
+  width: 42px; height: 42px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--bp-border, #e2e8f0); border-radius: 10px; background: var(--bp-card, #fff); color: #64748b; cursor: pointer;
+}
+.cl-icon-btn:hover { color: var(--brand-strong); border-color: var(--bp-border-hover, #cbd5e1); }
+
+.cl-search { position: relative; margin: 0 4px 6px; }
+.cl-search > i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-size: 12px; color: #6b7280; pointer-events: none; }
+.cl-search input {
+  width: 100%; height: 38px; padding: 0 12px 0 32px; border-radius: 10px; font-size: 0.86rem; color: #0f172a;
+  background: var(--bp-card, #fff); border: 1px solid var(--bp-border, #e2e8f0); outline: none;
+}
+.cl-search input:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(var(--brand-rgb), .12); }
+
+.cl-back {
+  display: flex; align-items: center; gap: 8px; margin: 4px 4px 0; padding: 8px; border: 0; border-radius: 8px;
+  background: transparent; color: #0f172a; font-size: 0.86rem; font-weight: 600; cursor: pointer; text-align: left;
+}
+.cl-back:hover { background: rgba(15, 23, 42, .05); }
+
+.cl-list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 0 8px; }
+.cl-group { margin: 14px 10px 4px; font-size: 0.74rem; font-weight: 600; color: #6b7280; display: flex; align-items: center; gap: 6px; }
+.cl-group i { font-size: 0.68rem; }
+
+.cl-item { position: relative; }
+.cl-row {
+  width: 100%; display: flex; align-items: center; gap: 10px; min-height: 42px; padding: 0 36px 0 8px;
+  border: 0; border-radius: 10px; background: transparent; color: #111827; text-align: left; cursor: pointer;
+  font-size: 0.875rem; font-weight: 500;
+}
+.cl-row:hover { background: rgba(15, 23, 42, .05); }
+.cl-item.active .cl-row { background: #fff4ec; box-shadow: inset 0 0 0 1px #ffd2b3; font-weight: 600; }
+.cl-plat {
+  width: 26px; height: 26px; flex-shrink: 0; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 0.8rem; background: #f1f5f9; color: #475569;
+}
+.cl-plat.p-linkedin { background: #dbeafe; color: #0a66c2; }
+.cl-plat.p-instagram { background: #fce7f3; color: #a21d6b; }
+.cl-plat.p-facebook { background: #e0e7ff; color: #1d4ed8; }
+.cl-plat.p-youtube { background: #fee2e2; color: #b91c1c; }
+.cl-plat.p-x { background: #e5e7eb; color: #111827; }
+.cl-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cl-when { flex-shrink: 0; font-size: 0.75rem; color: #6b7280; font-weight: 500; }
+.cl-item:hover .cl-when, .cl-item:focus-within .cl-when, .cl-item.menu-open .cl-when { visibility: hidden; }
+
+/* Row menu: Pin / Archive (or Restore) */
+.cl-menu-btn {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%); width: 30px; height: 30px;
+  border: 0; border-radius: 8px; background: transparent; color: #64748b; cursor: pointer; opacity: 0;
+}
+.cl-item:hover .cl-menu-btn, .cl-item:focus-within .cl-menu-btn, .cl-item.menu-open .cl-menu-btn { opacity: 1; }
+.cl-menu-btn:hover, .cl-item.menu-open .cl-menu-btn { background: rgba(15, 23, 42, .08); color: #0f172a; }
+.cl-menu {
+  position: absolute; right: 4px; top: calc(100% - 2px); z-index: 20; min-width: 168px; padding: 6px;
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 12px; box-shadow: 0 12px 30px rgba(15, 23, 42, .14);
+}
+.cl-menu.up { top: auto; bottom: calc(100% - 2px); }
+.cl-menu button {
+  width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 0; border-radius: 8px;
+  background: transparent; color: #111827; font-size: 0.86rem; text-align: left; cursor: pointer;
+}
+.cl-menu button:hover, .cl-menu button:focus-visible { background: #f3f4f6; outline: none; }
+.cl-menu button i { width: 14px; color: #64748b; }
+
+.cl-footer { display: flex; gap: 4px; padding: 8px 0 10px; border-top: 1px solid var(--bp-border, #e5e7eb); background: inherit; }
+.cl-foot-link {
+  flex: 1; min-height: 42px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  border: 0; border-radius: 10px; background: transparent; color: #374151; font-size: 0.86rem; font-weight: 500;
+  text-decoration: none; cursor: pointer;
+}
+.cl-foot-link:hover { background: rgba(15, 23, 42, .05); color: #0f172a; }
+.cl-foot-link.active { background: #fff4ec; color: var(--brand-strong); font-weight: 600; }
+.cl-list .history-empty { margin-top: 24px; }
+@media (hover: none) { .cl-menu-btn { opacity: 1; } .cl-when { display: none; } }
+
+/* ══════════════════════════════════════════════════════════════════════
+   AVIR Studio Output, option D: ready-to-publish checklist on the left,
+   the post on the right. app_v2.js renderChecklist.
+   ══════════════════════════════════════════════════════════════════════ */
+.out-layout { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 18px; align-items: start; margin-top: 12px; }
+.out-side {
+  position: sticky; top: 12px; display: flex; flex-direction: column; gap: 14px; padding: 16px;
+  background: #fffaf6; border: 1px solid #ffd2b3; border-radius: 16px;
+}
+.out-main { min-width: 0; }
+.out-eyebrow { margin: 0; font-size: 0.7rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #9a3412; }
+.out-title { margin: 4px 0 0; font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; color: #111827; }
+.out-sub { margin: 2px 0 0; font-size: 0.8rem; color: #4b5563; }
+.out-progress { margin-top: 10px; height: 6px; border-radius: 999px; background: #ffe4d1; overflow: hidden; }
+.out-progress span { display: block; height: 100%; border-radius: 999px; background: var(--brand-strong); transition: width .4s ease; }
+.out-items { list-style: none; margin: 14px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.out-item { display: flex; align-items: flex-start; gap: 10px; padding: 9px 10px; border-radius: 12px; background: #fff; border: 1px solid #f3e1d4; }
+.out-mark {
+  width: 22px; height: 22px; flex-shrink: 0; margin-top: 1px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;
+  font-size: 0.7rem; font-weight: 800; box-sizing: border-box; border: 2px solid #cbd5e1; color: #64748b; background: #fff;
+}
+.out-item.is-done .out-mark { background: #047857; border-color: #047857; color: #fff; }
+.out-item.is-working .out-mark { border-color: var(--brand-strong); color: var(--brand-strong); }
+.out-item.is-warn .out-mark { background: #b45309; border-color: #b45309; color: #fff; }
+.out-item.is-todo .out-mark { border-color: var(--brand-strong); }
+.out-item.is-optional { background: transparent; border-style: dashed; }
+.out-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.out-text strong { font-size: 0.86rem; font-weight: 600; color: #111827; }
+.out-text small { font-size: 0.74rem; color: #4b5563; margin-top: 1px; }
+.out-item.is-warn .out-text small { color: #92400e; }
+.out-act {
+  flex-shrink: 0; height: 28px; padding: 0 10px; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff;
+  font-size: 0.75rem; font-weight: 600; color: #374151; cursor: pointer;
+}
+.out-act:hover { border-color: var(--brand-strong); color: var(--brand-strong); }
+.out-act:focus-visible { outline: 3px solid rgba(var(--brand-rgb), .35); outline-offset: 2px; }
+.out-cta { display: flex; flex-direction: column; gap: 8px; padding: 0; margin: 0; border: 0; background: transparent; }
+.out-cta > .btn, .out-cta > a { width: 100%; justify-content: center; min-height: 42px; display: inline-flex; align-items: center; font-weight: 600; }
+.out-cta .btn-schedule-post { background: var(--brand-strong); border-color: var(--brand-strong); color: #fff; }
+.out-cta .btn-schedule-post:hover { background: var(--brand-hover); border-color: var(--brand-hover); color: #fff; }
+.out-cta .btn-send-approval { background: #fff; border: 1px solid #cbd5e1; color: #111827; }
+.out-cta > .btn-send-approval:first-child { background: var(--brand-strong); border-color: var(--brand-strong); color: #fff; }
+.out-side .sched-success { margin: 0; }
+.out-more-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--bp-border, #e5e7eb); }
+@media (max-width: 1100px) {
+  .out-layout { grid-template-columns: 1fr; }
+  .out-side { position: static; order: 2; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Studio Chat composer, option C: a simple box; "Options" opens a panel
+   (platforms, what to make, voice / tone / language) above the toolbar,
+   and a summary line says what is picked. app_v2.js setComposerOptions.
+   ══════════════════════════════════════════════════════════════════════ */
+.composer-v2 .composer-bar { flex-wrap: wrap; gap: 8px 10px; }
+.composer-v2 .btn-dock-options {
+  display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 14px; flex-shrink: 0;
+  border: 1px solid var(--bp-border, #e5e7eb); border-radius: 12px; background: #fff; color: #374151;
+  font-size: 13px; font-weight: 600; cursor: pointer; transition: var(--tr);
+}
+.composer-v2 .btn-dock-options:hover { border-color: var(--brand-border); color: var(--brand-strong); }
+.composer-v2 .btn-dock-options.active { background: #fff4ec; border-color: #ffd2b3; color: #9a3412; }
+.composer-v2 .btn-dock-options:focus-visible { outline: 3px solid rgba(var(--brand-rgb), .35); outline-offset: 2px; }
+.dock-options-caret { font-size: 9px; transition: transform .2s ease; transform: rotate(180deg); }
+.btn-dock-options.active .dock-options-caret { transform: none; }
+.composer-summary { flex: 1 1 160px; min-width: 0; font-size: 13px; color: #4b5563; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.composer-summary.is-missing { color: #9a3412; font-weight: 600; }
+.composer-v2 .chat-actions-group { margin-left: auto; }
+
+/* The panel: Post to | Create on the first row, voice / tone / language below */
+.composer-v2 .chat-config-bar {
+  order: -1; flex: 1 1 100%; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px 24px;
+  margin: 2px 0 4px; padding: 12px 4px 14px; border-bottom: 1px solid var(--bp-border, #e5e7eb); align-items: start;
+}
+.chat-input-dock:not(.options-open) .chat-config-bar { display: none; }
+.composer-v2 .config-group { flex-direction: column; align-items: flex-start; gap: 8px; }
+.composer-v2 .config-label { min-width: 0; font-size: 12px; }
+.composer-v2 .style-menu { grid-column: 1 / -1; margin: 0; }
+.composer-v2 .style-menu-btn { display: none; }
+.composer-v2 #styleMenuPanel, .composer-v2 #styleMenuPanel.d-none {
+  display: grid !important; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;
+  position: static; width: auto; padding: 0; border: 0; box-shadow: none; background: transparent;
+}
+@media (max-width: 768px) {
+  .composer-v2 .chat-config-bar { grid-template-columns: 1fr; }
+  .composer-v2 #styleMenuPanel, .composer-v2 #styleMenuPanel.d-none { grid-template-columns: 1fr; }
+  .composer-summary { flex-basis: 100%; order: 5; }
+}
+@media (prefers-reduced-motion: reduce) { .dock-options-caret { transition: none; } }

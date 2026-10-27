@@ -73,6 +73,8 @@
 
     function startTour(name) {
         const lib = window.driver && window.driver.js && window.driver.js.driver;
+        // Studio Chat: the platform / output steps point into the composer's Options panel
+        if (name === 'studio' && typeof window.openComposerOptions === 'function') window.openComposerOptions();
         const steps = (TOURS[name] || []).filter(s => !s.element || visible(s.element));
         if (!lib || steps.length < 2) return false;
         setOpen(false);

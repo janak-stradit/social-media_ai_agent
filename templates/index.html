@@ -45,43 +45,39 @@
     <div class="sidebar-backdrop" id="sidebarBackdrop" aria-hidden="true"></div>
 
     <!-- ── SIDEBAR ── -->
-    <aside class="sidebar" id="sidebar">
-        <div class="sidebar-top-action d-flex align-items-center gap-2">
-            <button class="btn-new-chat flex-grow-1" id="newChatBtn">
-                <i class="fas fa-plus me-2"></i>New Conversation
+    <aside class="sidebar" id="sidebar" aria-label="Conversations">
+        <div class="cl-top">
+            <button class="cl-new" id="newChatBtn">
+                <i class="fas fa-plus" aria-hidden="true"></i>New chat
             </button>
-            <button type="button" class="btn-sidebar-hide" id="sidebarHideBtn" title="Hide Sidebar">
-                <i class="fas fa-angles-left"></i>
+            <button type="button" class="cl-icon-btn" id="sidebarHideBtn" title="Hide sidebar" aria-label="Hide sidebar">
+                <i class="fas fa-angles-left" aria-hidden="true"></i>
             </button>
         </div>
 
-        <!-- Sidebar Campaign Search -->
-        <div class="sidebar-search-box">
-            <i class="fas fa-search sidebar-search-icon"></i>
-            <input type="text" id="sidebarSearchInput" class="sidebar-search-input" placeholder="Search campaigns...">
+        <div class="cl-search">
+            <i class="fas fa-search" aria-hidden="true"></i>
+            <label for="sidebarSearchInput" class="visually-hidden">Search chats</label>
+            <input type="text" id="sidebarSearchInput" placeholder="Search chats" autocomplete="off">
         </div>
 
-        <div class="sidebar-section">
-            <div class="d-flex align-items-center justify-content-between mb-2 px-1">
-                <div class="sidebar-section-title mb-0"><i class="fas fa-clock-rotate-left me-2"></i>History</div>
-                <div class="history-tab-pills">
-                    <button type="button" class="history-tab-pill active" id="historyTabActive" data-tab="active">Active</button>
-                    <button type="button" class="history-tab-pill" id="historyTabArchived" data-tab="archived"><i class="fas fa-box-archive me-1"></i>Archived</button>
-                </div>
+        <!-- Archived view only: way back to the chats -->
+        <button type="button" class="cl-back d-none" id="historyBackBtn">
+            <i class="fas fa-arrow-left" aria-hidden="true"></i>Archived chats
+        </button>
+
+        <!-- Pinned, then by date (app_v2.js renderHistoryList) -->
+        <nav id="historyList" class="cl-list" aria-label="Chat history">
+            <div class="history-empty">
+                <div class="history-empty-icon"><i class="fas fa-comments"></i></div>
+                <p class="history-empty-title">No chat history yet</p>
+                <small class="history-empty-sub">Start a conversation to generate content</small>
             </div>
-            <div id="historyList" class="history-list">
-                <div class="history-empty">
-                    <div class="history-empty-icon"><i class="fas fa-comments"></i></div>
-                    <p class="history-empty-title">No chat history yet</p>
-                    <small class="history-empty-sub">Start a conversation to generate content</small>
-                </div>
-            </div>
-        </div>
-        <div class="sidebar-footer">
-            <div class="sidebar-stat">
-                <span class="sidebar-stat-label">Conversations</span>
-                <span class="sidebar-stat-value" id="historyCount">0</span>
-            </div>
+        </nav>
+
+        <div class="cl-footer">
+            <a href="/library" class="cl-foot-link"><i class="fas fa-images" aria-hidden="true"></i>Library</a>
+            <button type="button" class="cl-foot-link" id="historyArchivedBtn"><i class="fas fa-box-archive" aria-hidden="true"></i>Archived</button>
         </div>
     </aside>
 
@@ -244,11 +240,6 @@
                 <!-- 2. One toolbar: where it goes, what to make, how it sounds, then Generate -->
                 <div class="composer-bar">
 
-                    <!-- Phones: the options below fold away behind this button -->
-                    <button type="button" class="btn-chat-attach btn-dock-options" id="dockOptionsBtn" title="Platforms, output &amp; style" aria-expanded="false" aria-controls="dropZone">
-                        <i class="fas fa-sliders"></i>
-                    </button>
-
                     <button type="button" class="btn-chat-attach" id="attachBtn" onclick="document.getElementById('imageInput').click()" title="Attach an image" aria-label="Attach an image">
                         <i class="fas fa-paperclip"></i>
                     </button>
@@ -271,7 +262,14 @@
                         </div>
                     </div>
 
-                    <div class="chat-config-bar">
+                    <!-- Options: platforms, what to make, voice / tone / language open in the
+                         panel above; next to the button, a one-line summary of the choices -->
+                    <button type="button" class="btn-dock-options" id="dockOptionsBtn" title="Platforms, output &amp; style" aria-expanded="false" aria-controls="composerOptions">
+                        <i class="fas fa-sliders" aria-hidden="true"></i><span>Options</span><i class="fas fa-chevron-up dock-options-caret" aria-hidden="true"></i>
+                    </button>
+                    <span class="composer-summary" id="composerSummary" aria-live="polite"></span>
+
+                    <div class="chat-config-bar" id="composerOptions" role="group" aria-label="Post options">
 
                         <!-- Platform Selection -->
                         <div class="config-group" id="tourPlatforms">
