@@ -142,3 +142,55 @@ def test_signed_out_visitors_cannot_use_it():
     app = create_app("development")
     app.config.update(TESTING=True)
     assert app.test_client().post("/api/repurpose", json={"url": "https://acme.com"}).status_code == 401
+
+
+def test_pasted_text_is_read_with_its_first_line_as_title():
+    doc = repurpose.read_text("Acme cuts late deliveries\n" + ARTICLE)
+    assert doc["title"] == "Acme cuts late deliveries" and doc["source"] == "Pasted text"
+    assert "32 percent" in doc["text"] and "\n" not in doc["text"]
+    long_first = repurpose.read_text("word " * 60 + "\n" + ARTICLE)["title"]
+    assert long_first.endswith("...") and len(long_first) <= 80
+    with pytest.raises(repurpose.RepurposeError, match="at least 200"):
+        repurpose.read_text("Too short")
+
+
+@pytest.mark.parametrize("reason,fallback", [("blocked", "text"), ("thin_content", "text"), ("not_html", "pdf"),
+                                              ("unsafe_url", None)])
+def test_failures_name_another_way_to_try(monkeypatch, reason, fallback):
+    from services import website_scraper_service as web
+
+    monkeypatch.setattr(web, "_fetch_raw", lambda url, **kw: (None, reason))
+    with pytest.raises(repurpose.RepurposeError) as err:
+        repurpose.read_url("https://example.com")
+    assert err.value.code == reason and err.value.fallback == fallback
+    with pytest.raises(repurpose.RepurposeError) as scanned:
+        repurpose.read_pdf(_pdf("Hi"), "scan.pdf")
+    assert scanned.value.fallback == "text"
+
+
+def test_the_route_reads_pasted_text_and_reports_fallbacks(client, monkeypatch):
+    body = client.post("/api/repurpose", json={"text": "Tracking results\n" + ARTICLE}).get_json()
+    assert body["success"] and body["kind"] == "text" and body["title"] == "Tracking results"
+
+    def blocked(url):
+        raise repurpose.RepurposeError(repurpose.URL_ERRORS["blocked"], "blocked")
+
+    monkeypatch.setattr(repurpose, "read_url", blocked)
+    res = client.post("/api/repurpose", json={"url": "https://acme.com/a"})
+    assert res.status_code == 400 and res.get_json()["fallback"] == "text" and res.get_json()["code"] == "blocked"
+    assert client.post("/api/repurpose", json={"text": "short"}).get_json()["code"] == "too_short"
+
+
+def test_studio_chat_has_the_new_window_and_starting_card(client):
+    import db
+    from sqlalchemy.orm import Session
+
+    with client.session_transaction() as s:
+        user_id = s["user_id"]
+    with Session(db.engine) as session:  # a fully set-up account, so Studio Chat opens
+        session.query(db.User).filter(db.User.id == user_id).update({"email_verified": True, "onboarding_completed": True})
+        session.commit()
+    html = client.get("/dashboard").data
+    for marker in (b'id="rpStartCard"', b'data-rp-tab="link"', b'data-rp-tab="pdf"', b'data-rp-tab="text"',
+                   b'id="rpDrop"', b'id="rpCancel"', b'id="rpFallback"', b'id="rpIdeaList"'):
+        assert marker in html, marker

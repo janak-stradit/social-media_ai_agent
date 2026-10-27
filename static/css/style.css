@@ -5209,20 +5209,88 @@ a.cal-top-post:hover { background: var(--brand-bg); }
     border-radius: 999px; background: #fff7ed; color: #c2410c; font-size: 0.8rem; font-weight: 600; cursor: pointer; }
 .repurpose-hint:hover { background: #ffedd5; }
 .repurpose-hint.d-none { display: none; }
-.repurpose-or { display: flex; align-items: center; gap: 10px; margin: 14px 0; color: var(--bp-text-sub); font-size: 0.8rem; }
-.repurpose-or::before, .repurpose-or::after { content: ""; flex: 1; border-top: 1px solid var(--bp-border); }
-.repurpose-drop { display: flex; align-items: center; justify-content: center; padding: 16px; border: 1.5px dashed var(--bp-border);
-    border-radius: 12px; color: var(--bp-text-sub); font-size: 0.9rem; cursor: pointer; }
-.repurpose-drop:hover { border-color: #fb923c; color: #c2410c; }
-.repurpose-status { margin-top: 16px; padding: 12px 14px; border-radius: 10px; background: #f8fafc; font-size: 0.88rem; color: var(--bp-text-sub); }
-.repurpose-status.is-error { background: #fef2f2; color: #b91c1c; }
-.repurpose-result { margin-top: 18px; }
-.repurpose-source p { margin: 4px 0 0; font-size: 0.88rem; color: var(--bp-text-sub); }
-.repurpose-angles { display: grid; gap: 10px; margin-top: 14px; }
-.repurpose-angle { padding: 12px 14px; border: 1px solid var(--bp-border); border-radius: 12px; }
-.repurpose-angle p { margin: 6px 0 10px; font-size: 0.86rem; color: var(--bp-text-sub); }
-.repurpose-angle-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.repurpose-format { flex-shrink: 0; padding: 2px 8px; border-radius: 999px; background: #f1f5f9; font-size: 0.72rem; font-weight: 600; color: var(--bp-text-sub); }
+/* The window: tabs for the source, a wait with placeholder cards, the ideas */
+.rp-tabs { display: inline-flex; gap: 4px; padding: 4px; margin-bottom: 18px; background: #f1f5f9; border-radius: 12px; }
+.rp-tab { display: inline-flex; align-items: center; gap: 7px; border: 0; background: transparent; color: var(--bp-text-sub); font-size: 0.86rem;
+    font-weight: 600; padding: 7px 14px; border-radius: 9px; cursor: pointer; }
+.rp-tab:hover { color: var(--bp-text); }
+.rp-tab.active { background: #fff; color: #c2410c; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12); }
+.rp-tab:focus-visible { outline: 2px solid #fb923c; outline-offset: 2px; }
+.rp-input-row { display: flex; gap: 8px; }
+.rp-input-row .form-control { flex: 1; min-width: 0; }
+.rp-hint { margin: 8px 0 0; font-size: 0.8rem; color: var(--bp-text-sub); }
+.rp-drop { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 34px 16px; border: 1.5px dashed var(--bp-border);
+    border-radius: 14px; text-align: center; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.rp-drop:hover, .rp-drop.is-over { border-color: #fb923c; background: #fff7ed; }
+.rp-drop-icon { font-size: 1.8rem; color: #ea580c; margin-bottom: 6px; }
+.rp-drop-title { font-weight: 600; color: var(--bp-text); }
+.rp-drop-title u { color: #c2410c; }
+.rp-drop-sub { font-size: 0.8rem; color: var(--bp-text-sub); }
+.rp-text-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
+.rp-error { display: flex; gap: 10px; margin-top: 14px; padding: 12px 14px; border-radius: 10px; background: #fef2f2; color: #b91c1c; font-size: 0.88rem; }
+.rp-error > i { margin-top: 3px; }
+.rp-error.d-none { display: none; }
+.rp-fallback { display: block; margin-top: 6px; padding: 0; border: 0; background: none; color: #c2410c; font-weight: 600; text-decoration: underline; cursor: pointer; }
+.rp-fallback.d-none { display: none; }
+.rp-back-ideas { margin-top: 16px; padding: 0; border: 0; background: none; color: var(--bp-text-sub); font-size: 0.85rem; font-weight: 600; cursor: pointer; }
+.rp-back-ideas:hover { color: #c2410c; }
+.rp-back-ideas.d-none { display: none; }
+
+.rp-working-head { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border-radius: 12px; background: #f8fafc; }
+.rp-working-head .spinner-border { color: #ea580c; margin-top: 3px; flex-shrink: 0; }
+.rp-working-head > div { flex: 1; min-width: 0; }
+.rp-working-head strong { display: block; color: var(--bp-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp-working-head small { color: var(--bp-text-sub); font-variant-numeric: tabular-nums; }
+.rp-skeletons { display: grid; gap: 10px; margin-top: 14px; }
+.rp-skeleton { height: 108px; border-radius: 12px; background: linear-gradient(90deg, #f1f5f9 25%, #f8fafc 50%, #f1f5f9 75%);
+    background-size: 200% 100%; animation: rp-shimmer 1.4s ease-in-out infinite; }
+@keyframes rp-shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .rp-skeleton { animation: none; } }
+
+.rp-source { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border: 1px solid var(--bp-border); border-radius: 12px; background: #fafafa; }
+.rp-source-icon { width: 36px; height: 36px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 10px;
+    background: #fff7ed; color: #ea580c; }
+.rp-source-body { flex: 1; min-width: 0; }
+.rp-source-body strong { display: block; color: var(--bp-text); }
+.rp-source-body small, .rp-source-body small a { color: var(--bp-text-sub); font-size: 0.8rem; word-break: break-all; }
+.rp-source-body p { margin: 6px 0 0; font-size: 0.86rem; color: var(--bp-text-sub); }
+.rp-ideas-label { margin: 18px 0 10px; font-size: 0.75rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--bp-text-sub); }
+.rp-ideas { display: grid; gap: 10px; }
+.rp-idea { padding: 14px 16px; border: 1px solid var(--bp-border); border-radius: 12px; background: #fff; transition: border-color 0.15s; }
+.rp-idea:hover { border-color: #fdba74; }
+.rp-idea-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.rp-idea-head strong { color: var(--bp-text); }
+.rp-format { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px; border-radius: 999px; background: #f1f5f9;
+    font-size: 0.72rem; font-weight: 600; color: var(--bp-text-sub); }
+.rp-brief { margin: 6px 0 12px; font-size: 0.88rem; line-height: 1.55; color: var(--bp-text-sub); }
+.rp-brief.d-none, .rp-brief-edit.d-none { display: none; }
+.rp-brief-edit { margin: 8px 0 12px; font-size: 0.88rem; }
+.rp-idea-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.rp-save.is-saved { color: #c2410c; border-color: #fdba74; }
+
+/* The starting point on the empty Studio Chat screen */
+.rp-start { display: flex; align-items: center; gap: 18px; margin: 0 0 1.4rem; padding: 16px 18px; border: 1px solid #fed7aa; border-radius: 16px;
+    background: linear-gradient(135deg, #fff7ed, #fff); }
+.rp-start-copy { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; }
+.rp-start-icon { width: 40px; height: 40px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border-radius: 12px;
+    background: #ea580c; color: #fff; }
+.rp-start-copy strong { display: block; color: var(--bp-text); }
+.rp-start-copy span { display: block; font-size: 0.84rem; color: var(--bp-text-sub); }
+.rp-start-form { display: flex; align-items: center; gap: 8px; flex: 0 1 460px; }
+.rp-start-form .form-control { flex: 1; min-width: 0; }
+.rp-start-more { flex-shrink: 0; border: 0; background: none; padding: 6px 4px; color: #c2410c; font-size: 0.84rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.rp-start-more:hover { text-decoration: underline; }
+@media (max-width: 860px) {
+    .rp-start { flex-direction: column; align-items: stretch; }
+    .rp-start-form { flex-basis: auto; flex-wrap: wrap; }
+    .rp-start-form .form-control { flex-basis: 100%; }
+}
+@media (max-width: 576px) {
+    .rp-input-row { flex-direction: column; }
+    .rp-text-foot { flex-direction: column; align-items: stretch; }
+    .rp-source { flex-wrap: wrap; }
+    .rp-idea-actions .btn-primary-action { flex: 1 1 100%; }
+}
 
 /* ── Post card: one main action, quiet secondary ones, edits in "More" ── */
 .action-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }

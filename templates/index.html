@@ -137,6 +137,23 @@
                     </div>
                 </div>
 
+                <!-- Turn your own content into posts (app_v2.js openRepurpose) -->
+                <div class="rp-start" id="rpStartCard">
+                    <div class="rp-start-copy">
+                        <div class="rp-start-icon"><i class="fas fa-file-import"></i></div>
+                        <div>
+                            <strong>Turn your content into posts</strong>
+                            <span>Paste a link to a blog post or product page, or use a PDF, and get 3-5 ready-to-write post ideas.</span>
+                        </div>
+                    </div>
+                    <form class="rp-start-form" id="rpStartForm" novalidate>
+                        <input type="url" class="form-control" id="rpStartUrl" placeholder="Paste a link..." autocomplete="off" inputmode="url" aria-label="Link to turn into posts">
+                        <button type="submit" class="btn-primary-action text-nowrap">Get ideas</button>
+                        <button type="button" class="rp-start-more" id="rpStartPdf"><i class="far fa-file-pdf me-1"></i>PDF</button>
+                        <button type="button" class="rp-start-more" id="rpStartText"><i class="fas fa-align-left me-1"></i>Text</button>
+                    </form>
+                </div>
+
                 <!-- "Ideas for you" (app_v2.js loadIdeaFeed, /api/ideas/feed): tabs for
                      what's trending in the user's industry, post types that work and
                      upcoming dates. Hidden until the user has a brand profile; the
@@ -251,8 +268,8 @@
                     <input type="file" id="imageInput" accept="image/*" class="d-none">
 
                     <!-- Repurpose: a link or PDF becomes post ideas (app_v2.js openRepurpose) -->
-                    <button type="button" class="btn-chat-attach" id="repurposeBtn" title="Start from a link or PDF" aria-label="Start from a link or PDF">
-                        <i class="fas fa-link"></i>
+                    <button type="button" class="btn-chat-attach" id="repurposeBtn" title="Turn a link, PDF or text into post ideas" aria-label="Turn a link, PDF or text into post ideas">
+                        <i class="fas fa-file-import"></i>
                     </button>
 
                     <!-- Saved briefs (app_v2.js): starred under a sent message, loaded again from here -->
@@ -393,35 +410,86 @@
 </div>
 
 <!-- ═══════════════════════ CREDIT EXTENSION REQUEST MODAL ═══════════════════════ -->
-<!-- Start from a link or PDF (app_v2.js: openRepurpose) -->
+<!-- Start from a link, PDF or pasted text (app_v2.js: openRepurpose). Three steps in
+     one window: the source, the wait, the ideas. The last ideas stay until a new source
+     is read, so choosing one doesn't lose the others. -->
 <div class="modal fade" id="repurposeModal" tabindex="-1" aria-labelledby="repurposeTitle" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
         <div class="modal-content credit-modal-light">
             <div class="modal-header credit-modal-header-light">
                 <div class="d-flex align-items-center gap-3">
-                    <div class="credit-icon-badge"><i class="fas fa-link"></i></div>
+                    <div class="credit-icon-badge"><i class="fas fa-file-import"></i></div>
                     <div>
-                        <h5 class="modal-title text-navy font-bold mb-0" id="repurposeTitle">Start from a link or PDF</h5>
-                        <small class="text-slate-500 font-medium">A blog post, product page, brochure or report becomes ready-to-use post ideas</small>
+                        <h5 class="modal-title text-navy font-bold mb-0" id="repurposeTitle">Turn your content into posts</h5>
+                        <small class="text-slate-500 font-medium" id="repurposeSubtitle">Give us a link, a PDF or some text, and get 3-5 ready-to-write post ideas</small>
                     </div>
                 </div>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
-                <form id="repurposeForm" class="repurpose-form" novalidate>
-                    <label class="form-label small fw-semibold" for="repurposeUrl">Link</label>
-                    <div class="d-flex gap-2">
-                        <input type="url" class="form-control" id="repurposeUrl" placeholder="https://yourcompany.com/blog/your-article" autocomplete="off">
-                        <button type="submit" class="btn btn-dark text-nowrap" id="repurposeGo">Read it</button>
+                <!-- 1. The source -->
+                <div class="rp-step" id="rpSource">
+                    <div class="rp-tabs" role="tablist" aria-label="What to start from">
+                        <button type="button" class="rp-tab active" role="tab" aria-selected="true" data-rp-tab="link"><i class="fas fa-link"></i>Link</button>
+                        <button type="button" class="rp-tab" role="tab" aria-selected="false" data-rp-tab="pdf"><i class="far fa-file-pdf"></i>PDF</button>
+                        <button type="button" class="rp-tab" role="tab" aria-selected="false" data-rp-tab="text"><i class="fas fa-align-left"></i>Paste text</button>
                     </div>
-                    <div class="repurpose-or"><span>or</span></div>
-                    <label class="repurpose-drop" for="repurposeFile">
-                        <i class="fas fa-file-pdf me-2"></i><span id="repurposeFileLabel">Upload a PDF (up to 15 MB)</span>
-                        <input type="file" id="repurposeFile" accept="application/pdf,.pdf" class="d-none">
-                    </label>
-                </form>
-                <div class="repurpose-status d-none" id="repurposeStatus" role="status"></div>
-                <div class="repurpose-result d-none" id="repurposeResult" aria-live="polite"></div>
+
+                    <form class="rp-pane" data-rp-pane="link" id="rpLinkForm" novalidate>
+                        <label class="form-label small fw-semibold" for="repurposeUrl">Link to a page</label>
+                        <div class="rp-input-row">
+                            <input type="url" class="form-control" id="repurposeUrl" placeholder="https://yourcompany.com/blog/your-article" autocomplete="off" inputmode="url">
+                            <button type="submit" class="btn-primary-action text-nowrap">Find post ideas</button>
+                        </div>
+                        <p class="rp-hint">Works best with blog posts, product pages, case studies and news articles.</p>
+                    </form>
+
+                    <div class="rp-pane d-none" data-rp-pane="pdf">
+                        <label class="rp-drop" id="rpDrop" for="repurposeFile">
+                            <i class="far fa-file-pdf rp-drop-icon"></i>
+                            <span class="rp-drop-title">Drop a PDF here, or <u>choose a file</u></span>
+                            <span class="rp-drop-sub">Brochures, reports and decks saved as PDF &middot; up to 15 MB</span>
+                            <input type="file" id="repurposeFile" accept="application/pdf,.pdf" class="d-none">
+                        </label>
+                    </div>
+
+                    <form class="rp-pane d-none" data-rp-pane="text" id="rpTextForm" novalidate>
+                        <label class="form-label small fw-semibold" for="rpText">Paste the text</label>
+                        <textarea class="form-control" id="rpText" rows="7" placeholder="Paste an article, a press release, meeting notes or a product description..."></textarea>
+                        <div class="rp-text-foot">
+                            <span class="rp-hint mb-0" id="rpTextCount">At least 200 characters</span>
+                            <button type="submit" class="btn-primary-action text-nowrap" id="rpTextGo" disabled>Find post ideas</button>
+                        </div>
+                    </form>
+
+                    <div class="rp-error d-none" id="rpError" role="alert">
+                        <i class="fas fa-circle-exclamation"></i>
+                        <div><span id="rpErrorText"></span>
+                            <button type="button" class="rp-fallback d-none" id="rpFallback"></button></div>
+                    </div>
+
+                    <button type="button" class="rp-back-ideas d-none" id="rpBackToIdeas"><i class="fas fa-arrow-left me-1"></i>Back to your ideas</button>
+                </div>
+
+                <!-- 2. The wait -->
+                <div class="rp-step d-none" id="rpWorking" aria-live="polite">
+                    <div class="rp-working-head">
+                        <span class="spinner-border spinner-border-sm" aria-hidden="true"></span>
+                        <div><strong id="rpWorkingTitle">Reading the page</strong>
+                            <small id="rpWorkingSub">Finding the key points and writing post ideas. This usually takes 10-30 seconds.</small></div>
+                        <button type="button" class="btn-quiet btn btn-sm" id="rpCancel">Cancel</button>
+                    </div>
+                    <div class="rp-skeletons" aria-hidden="true">
+                        <div class="rp-skeleton"></div><div class="rp-skeleton"></div><div class="rp-skeleton"></div>
+                    </div>
+                </div>
+
+                <!-- 3. The ideas -->
+                <div class="rp-step d-none" id="rpIdeas">
+                    <div class="rp-source" id="rpSourceCard"></div>
+                    <div class="rp-ideas-label" id="rpIdeasLabel"></div>
+                    <div class="rp-ideas" id="rpIdeaList"></div>
+                </div>
             </div>
         </div>
     </div>
