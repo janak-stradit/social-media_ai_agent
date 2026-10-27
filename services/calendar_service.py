@@ -125,7 +125,7 @@ def calendar_month(user_id: int, year: int, month: int, tz_minutes: int = 0, now
     day = grid_start
     while day < grid_end:
         days[day.isoformat()] = {"date": day.isoformat(), "in_month": day.month == month, "posts": [], "scheduled": [],
-                                 "occasions": [], "suggestion": None}
+                                 "occasions": [], "suggestion": None, "autopilot": None}
         day += timedelta(days=1)
 
     for post in posts_created_between(user_id, _day_start(grid_start, tz), _day_start(grid_end, tz)):
@@ -135,6 +135,16 @@ def calendar_month(user_id: int, year: int, month: int, tz_minutes: int = 0, now
         local = item["scheduled_at"].astimezone(tz)
         days[local.date().isoformat()]["scheduled"].append(
             {**item, "scheduled_at": item["scheduled_at"].isoformat(), "time": local.strftime("%H:%M")})
+
+    # Autopilot posts still waiting for approval (services/autopilot_service.py)
+    try:
+        from db import list_autopilot_posts
+
+        for post in list_autopilot_posts(user_id, limit=60, statuses=("awaiting_approval",)):
+            if post["slot_date"] in days:
+                days[post["slot_date"]]["autopilot"] = {k: post[k] for k in ("id", "status", "idea_title", "approval_request_id", "slot_at")}
+    except Exception:  # noqa: BLE001 - the calendar works without Autopilot
+        pass
 
     profile = get_user_brand_profile(user_id) or {}
     markets = {_FESTIVAL_REGIONS[r] for r in profile.get("compliance_regions") or profile.get("regions_detected") or []
@@ -152,7 +162,7 @@ def calendar_month(user_id: int, year: int, month: int, tz_minutes: int = 0, now
     feed = cached_idea_feed(user_id) if profile else None
     ideas = _ideas_for_slots(slots, feed, occasions)
     for slot in slots:
-        if slot.isoformat() in days:
+        if slot.isoformat() in days and not days[slot.isoformat()]["autopilot"]:
             idea = ideas.get(slot)
             days[slot.isoformat()]["suggestion"] = {
                 "idea": {k: idea.get(k) for k in ("title", "summary", "prompt", "platform", "format", "group")} if idea else None,

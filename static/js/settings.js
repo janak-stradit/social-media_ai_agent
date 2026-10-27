@@ -97,6 +97,37 @@ $(document).ready(function () {
         return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
     }
 
+    // ── Grouped sidebar: a state badge per entry, and a search ─────────
+    // tone: 'ok' | 'warn' | '' (neutral). Other scripts (autopilot.js) call it too.
+    window.setSettingsBadge = function (tabId, text, tone) {
+        $(`[data-badge-for="${tabId}"]`).text(text || '').removeClass('is-ok is-warn').addClass(tone ? 'is-' + tone : '');
+    };
+    // A group heading shows only while one of its entries does
+    function syncSettingsGroups() {
+        $('.st-nav .st-group').each(function () {
+            const items = $(this).nextUntil('.st-group', '.bc-nav-item');
+            $(this).toggleClass('is-filtered-out', !items.filter(':not(.d-none):not(.is-filtered-out)').length);
+        });
+    }
+    $('#settingsSearch').on('input', function () {
+        const words = this.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+        $('.st-nav .bc-nav-item').each(function () {
+            const text = ($(this).text() + ' ' + ($(this).data('keywords') || '')).toLowerCase();
+            $(this).toggleClass('is-filtered-out', words.length > 0 && !words.every(w => text.includes(w)));
+        });
+        syncSettingsGroups();
+        $('#settingsSearchEmpty').toggleClass('d-none', !words.length || $('.st-nav .bc-nav-item:not(.d-none):not(.is-filtered-out)').length > 0);
+    }).on('keydown', function (e) {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        const first = $('.st-nav .bc-nav-item:not(.d-none):not(.is-filtered-out)').get(0);
+        if (!first) return;
+        if (first.tagName === 'A') { window.location.href = first.href; return; }
+        if (window.bootstrap) bootstrap.Tab.getOrCreateInstance(first).show();
+        first.focus();
+    });
+    syncSettingsGroups();
+
     function renderSocialCards() {
         const byPlatform = {};
         currentSocialAccounts.filter(a => a.status === 'connected').forEach(a => { byPlatform[a.platform] = a; });
@@ -293,6 +324,7 @@ $(document).ready(function () {
     // ── Security tab: two-step sign-in ───────────────────────────────────
     function loadTwoFactor() {
         $.getJSON('/api/auth/2fa').done(function (r) {
+            window.setSettingsBadge('security-tab', r.enabled ? '2-step on' : '2-step off', r.enabled ? 'ok' : (r.required ? 'warn' : ''));
             $('#tfaStatus').text(r.enabled
                 ? 'On. Signing in asks for a code from your authenticator app as well as your password.'
                 : 'Off. Add a code from an authenticator app to signing in, so a stolen password alone is not enough.');
@@ -350,6 +382,7 @@ $(document).ready(function () {
             const currency = mine[0].currency || 'USD';
             const plans = all[0].plans || [];
             if (!usage) return;
+            window.setSettingsBadge('plan-tab', usage.plan.name);
             const end = new Date(usage.period_end).toLocaleDateString(undefined, { day: 'numeric', month: 'long' });
             $('#planSummary').html(`You're on the <strong>${escapeHtml(usage.plan.name)}</strong> plan. `
                 + (usage.is_admin ? 'Admins have no limits.' : `This month's allowance resets on ${escapeHtml(end)}.`));
@@ -501,7 +534,7 @@ $(document).ready(function () {
     $('#plan-tab').on('shown.bs.tab', loadPlan);
 
     // The email's "Email settings" link lands on /settings#notifications
-    const HASH_TABS = { '#notifications': 'notifications-tab', '#plan': 'plan-tab', '#security': 'security-tab' };
+    const HASH_TABS = { '#notifications': 'notifications-tab', '#plan': 'plan-tab', '#security': 'security-tab', '#autopilot': 'autopilot-tab' };
     if (HASH_TABS[window.location.hash]) {
         const tab = document.getElementById(HASH_TABS[window.location.hash]);
         if (tab && window.bootstrap) bootstrap.Tab.getOrCreateInstance(tab).show();
@@ -520,6 +553,10 @@ $(document).ready(function () {
                 if (!r.success) return;
                 currentSocialAccounts = r.accounts || [];
                 renderSocialCards();
+                const connected = currentSocialAccounts.filter(a => a.status === 'connected');
+                const expired = connected.filter(a => a.expired).length;
+                window.setSettingsBadge('connected-accounts-tab', expired ? `${expired} to reconnect` : connected.length ? `${connected.length} connected` : 'None yet',
+                    expired ? 'warn' : connected.length ? 'ok' : '');
             }
         });
     }
@@ -690,6 +727,10 @@ $(document).ready(function () {
             success: function (r) {
                 if (!r.success) return;
                 const posts = r.scheduled_posts || [];
+                const upcoming = posts.filter(p => p.status === 'pending').length;
+                const failed = posts.filter(p => p.status === 'failed').length;
+                window.setSettingsBadge('scheduled-posts-tab', failed ? `${failed} failed` : upcoming ? `${upcoming} upcoming` : '',
+                    failed ? 'warn' : '');
                 if (!posts.length) {
                     $('#scheduledPostsTbody').html(`
                         <tr>

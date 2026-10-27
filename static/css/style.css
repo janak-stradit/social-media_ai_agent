@@ -4003,6 +4003,45 @@ body.settings-page { overflow: hidden; }
   body.settings-page { overflow: auto; }
 }
 
+/* Settings, layout A "Grouped sidebar": full width, scrolls as a
+   page; a light sidebar that stays in view; each section opens with a page
+   title and a one-line intro; social accounts as rows. */
+body.settings-page { overflow: auto; background: #f4f5f7; }
+body.settings-page .bc-main { height: auto; min-height: calc(var(--vh100, 100vh) - var(--header-h)); max-width: none; width: 100%;
+  margin: var(--header-h) 0 0; padding: 28px 32px 64px; gap: 32px; align-items: flex-start; box-sizing: border-box; }
+body.settings-page .st-sidebar { width: 260px; padding: 0; background: transparent; border-right: 0; overflow: visible;
+  position: sticky; top: calc(var(--header-h) + 24px); }
+body.settings-page .bc-content { flex: 1; min-width: 0; overflow: visible; padding: 0; }
+body.settings-page .st-nav .bc-nav-item.active { background: #fff7ed; color: var(--brand-strong); box-shadow: none; }
+
+.st-pane-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 16px; }
+.st-pane-head-text { min-width: 0; }
+.st-pane-head h2 { margin: 0; font-size: 1.4rem; font-weight: 800; letter-spacing: -0.01em; color: var(--bp-text); }
+.st-pane-head p { margin: 4px 0 0; font-size: 0.9rem; color: var(--bp-text-sub); max-width: 760px; }
+.st-pane-head .ap-switch { margin-top: 6px; }
+body.settings-page .settings-pane-card { padding: 20px 22px; border-radius: 14px; box-shadow: none !important; }
+body.settings-page .settings-pane-card + .settings-pane-card { margin-top: 16px; }
+.st-card-title { margin: 0 0 4px; font-size: 1rem; font-weight: 700; color: var(--bp-text); }
+
+/* Social accounts as rows: logo and name, then the status line, the button on the right */
+body.settings-page .social-cards { grid-template-columns: minmax(0, 1fr); gap: 10px; margin-top: 0; }
+body.settings-page .social-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 16px; row-gap: 2px; align-items: center; padding: 14px 16px; border-radius: 12px; }
+body.settings-page .social-card > * { grid-column: 1; }
+body.settings-page .social-card > .sc-actions { grid-column: 2; grid-row: 1 / span 4; margin: 0; padding: 0; align-self: center; flex-wrap: nowrap; }
+body.settings-page .social-card .sc-head .platform-icon-circle { width: 40px; height: 40px; border-radius: 10px; font-size: 17px; }
+body.settings-page .social-card .sc-head .sc-status { margin-left: 8px; }
+body.settings-page .social-card > :not(.sc-head):not(.sc-actions) { padding-left: 50px; }
+body.settings-page .sc-primary { flex: none; }
+
+@media (max-width: 900px) {
+  body.settings-page .bc-main { flex-direction: column; gap: 20px; padding: 20px 16px 48px; }
+  body.settings-page .st-sidebar { position: static; width: 100%; }
+  body.settings-page .social-card { grid-template-columns: minmax(0, 1fr); }
+  body.settings-page .social-card > .sc-actions { grid-column: 1; grid-row: auto; padding-top: 8px; }
+  body.settings-page .social-card > :not(.sc-head):not(.sc-actions) { padding-left: 0; }
+  .st-pane-head { flex-direction: column; }
+}
+
 /* ===== Slider-puzzle verification (static/js/captcha.js) ===== */
 body.captcha-open { overflow: hidden; }
 .captcha-overlay {
@@ -4667,6 +4706,12 @@ a:hover > .stradit-badge, .stradit-badge:hover { background: #1e293b; }
 .cal-goal, .cal-board { min-width: 0; }
 .cal-main { max-width: 1240px; width: 100%; margin: 0 auto; padding: calc(var(--header-h) + 28px) 24px 64px; display: flex; flex-direction: column; gap: 20px; }
 
+/* Planner workspace: the whole window wide (no 1240px column), so the To plan
+   panel and the calendar both get room on big screens */
+.cal-main.cal-planner { max-width: none; padding-left: 24px; padding-right: 24px; }
+.cal-planner .cal-plan { max-width: 320px; }
+@media (min-width: 1600px) { .cal-planner .cal-day { min-height: 140px; } }
+@media (max-width: 768px) { .cal-main.cal-planner { padding-left: 12px; padding-right: 12px; } }
 /* Planner workspace: the slim strip with this week's goal and the last 30 days */
 .cal-strip {
   display: flex; flex-wrap: wrap; align-items: center; gap: 10px 20px; padding: 12px 18px;
@@ -4687,6 +4732,10 @@ a:hover > .stradit-badge, .stradit-badge:hover { background: #1e293b; }
 .cal-plan-week { height: 36px; padding: 0 14px; border-radius: 9px; border: 1px solid var(--brand-border); background: var(--brand-bg); color: var(--brand-strong);
   font: inherit; font-size: 0.82rem; font-weight: 700; cursor: pointer; transition: var(--tr); }
 .cal-plan-week:hover { background: #ffedd5; }
+.cal-autopilot { display: inline-flex; align-items: center; gap: 7px; height: 36px; padding: 0 12px; border-radius: 9px; font-size: 0.82rem; font-weight: 600;
+  color: var(--bp-text-sub); background: #fff; border: 1px solid var(--bp-border); text-decoration: none; transition: var(--tr); }
+.cal-autopilot:hover { color: var(--bp-text); border-color: var(--bp-border-hover); }
+.cal-autopilot.is-on { color: #14532d; background: #f0fdf4; border-color: #bbf7d0; }
 .cal-strip-text { margin: -10px 4px 0; font-size: 0.82rem; color: var(--bp-text-sub); }
 .cal-strip-text:empty { display: none; }
 
@@ -4731,6 +4780,10 @@ a:hover > .stradit-badge, .stradit-badge:hover { background: #1e293b; }
 .cal-filters button[aria-pressed="false"] { text-decoration: line-through; }
 .cal-board .cal-legend { margin-bottom: 10px; }
 .cal-dot.is-failed { background: #dc2626; border-radius: 50%; }
+.cal-chip.is-autopilot { border-style: dashed; }
+.cal-chip.is-autopilot-waiting { color: #9a3412; background: #fff7ed; border: 1px dashed #fb923c; text-decoration: none; }
+.cal-chip.is-autopilot-waiting:hover { background: #ffedd5; color: #7c2d12; }
+.cal-legend-ap { font-size: 0.72rem; color: var(--brand-strong); }
 .cal-chip.is-scheduled.is-failed { color: #991b1b; background: #fef2f2; border-color: #fecaca; }
 .cal-grid.is-week .cal-day { min-height: 320px; }
 .cal-grid.is-week .cal-chip span { white-space: normal; }
@@ -4791,6 +4844,54 @@ a:hover > .stradit-badge, .stradit-badge:hover { background: #1e293b; }
 .cal-chip.is-slot { color: var(--brand-strong); background: transparent; border: 1px dashed var(--brand-light); }
 .cal-chip.is-slot:hover { background: #fff3ea; border-style: solid; }
 .cal-note { margin: 12px 2px 0; font-size: 0.78rem; color: var(--bp-text-sub); }
+
+/* Settings: grouped sidebar with state badges and a search (settings.js) */
+.st-sidebar { gap: 1rem; }
+.st-title { margin: 0; padding: 0 0.75rem; font-size: 1.35rem; font-weight: 800; color: var(--bp-text); }
+.st-search { position: relative; display: block; margin: 0; }
+.st-search i { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-size: 0.8rem; color: #9ca3af; }
+.st-search input { width: 100%; height: 38px; padding: 0 12px 0 32px; border: 1px solid var(--bp-border); border-radius: 10px; font-size: 0.88rem; background: #fff; }
+.st-search input:focus { outline: none; border-color: var(--brand-strong); box-shadow: 0 0 0 3px rgba(var(--brand-rgb), 0.15); }
+.st-nav { gap: 2px; }
+.st-group { padding: 12px 12px 4px; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--bp-text-sub); }
+.st-group:first-child { padding-top: 0; }
+.st-nav .bc-nav-item { text-decoration: none; }
+.st-label { flex: 1; min-width: 0; text-align: left; }
+.st-badge { flex-shrink: 0; padding: 1px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 600; color: #475569; background: #f1f5f9; }
+.st-badge:empty { display: none; }
+.st-badge.is-ok { color: #14532d; background: #dcfce7; }
+.st-badge.is-warn { color: #78350f; background: #fef3c7; }
+.st-empty { margin: 8px 12px; font-size: 0.82rem; color: var(--bp-text-sub); }
+.st-nav .is-filtered-out { display: none !important; }
+
+/* Settings -> Autopilot (autopilot.js) */
+.ap-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.ap-switch { display: flex; align-items: center; gap: 10px; margin: 4px 0 0; padding-left: 0; flex-shrink: 0; }
+.ap-switch .form-check-input { width: 3rem; height: 1.5rem; margin: 0; float: none; cursor: pointer; }
+.ap-switch .form-check-input:checked { background-color: var(--brand-strong); border-color: var(--brand-strong); }
+.ap-switch label { font-weight: 700; font-size: 0.9rem; min-width: 26px; }
+.ap-status { margin: 14px 0 0; padding: 10px 14px; border-radius: 10px; font-size: 0.86rem; background: #f8fafc; color: var(--bp-text-sub); }
+.ap-status:empty { display: none; }
+.ap-status.is-on { background: #f0fdf4; color: #14532d; }
+.ap-status.is-problem { background: #fffbeb; color: #78350f; }
+.ap-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 18px 0 6px; }
+.ap-field { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; min-width: 0; }
+.ap-field legend, .ap-field label { font-size: 0.8rem; font-weight: 600; color: var(--bp-text); margin: 0; float: none; width: auto; }
+.ap-field small { font-size: 0.76rem; color: var(--bp-text-sub); }
+.ap-platforms { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.ap-platforms label { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; font-size: 0.86rem; }
+.ap-platforms .is-off { color: #9ca3af; }
+.ap-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 10px; }
+.ap-subhead { margin: 22px 0 8px; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--bp-text-sub); }
+.ap-posts { display: flex; flex-direction: column; gap: 6px; }
+.ap-post { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--bp-border); border-radius: 10px; font-size: 0.86rem; }
+.ap-post-day { width: 110px; font-weight: 600; color: var(--bp-text); }
+.ap-post-title { flex: 1 1 200px; min-width: 0; color: var(--bp-text-sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ap-pill { padding: 2px 9px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; background: #f1f5f9; color: #334155; }
+.ap-pill.is-awaiting_approval { background: #fff7ed; color: #9a3412; }
+.ap-pill.is-scheduled { background: #dbeafe; color: #1e3a8a; }
+.ap-pill.is-failed, .ap-pill.is-expired { background: #fee2e2; color: #7f1d1d; }
+@media (max-width: 768px) { .ap-options { grid-template-columns: 1fr; } .ap-head { flex-direction: column; } }
 
 /* Studio Chat: this week's goal, linking to the calendar (app_v2.js loadGoalPill) */
 .goal-pill {
