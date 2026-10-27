@@ -1,0 +1,69 @@
+{# The public site's header, as on the landing page (templates/landing.html
+   .app-header), for public pages outside it (legal.html). Scoped "sh-"
+   classes so it can't clash with the app's .app-header in style.css; keep the
+   sizes and colours in step with the landing page. #}
+<header class="sh-header" id="siteHeader">
+    <a href="/" class="sh-brand" aria-label="AVIR AI home">
+        <div class="sh-logo">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+            </svg>
+        </div>
+        <div>
+            <span class="sh-name">AVIR AI <span class="sh-beta">Beta</span></span>
+            <span class="sh-tagline">AI Social Studio &middot; by StradIT</span>
+        </div>
+    </a>
+    <nav class="sh-nav" aria-label="Main">
+        <a href="/#channels">Platforms</a>
+        <a href="/#languages">Languages</a>
+        <a href="/#studio">Image studio</a>
+        <a href="/#features">Features</a>
+        <a href="/#how">How it works</a>
+        <a href="/#faq">FAQ</a>
+    </nav>
+    <div class="sh-actions">
+        <a href="/login" class="sh-btn sh-btn-outline">Sign in</a>
+        <a href="/signup" class="sh-btn sh-btn-primary">Get started</a>
+    </div>
+</header>
+<style>
+    .sh-header { --sh-edge: clamp(16px, 3vw, 48px); position: sticky; top: 0; z-index: 50; height: 68px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 1rem; padding: 0 var(--sh-edge); background: rgba(255, 255, 255, 0.82); backdrop-filter: saturate(160%) blur(12px); -webkit-backdrop-filter: saturate(160%) blur(12px); border-bottom: 1px solid transparent; transition: border-color 0.2s ease, background 0.2s ease; font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif; }
+    .sh-header.is-scrolled { border-bottom-color: #e5e7eb; background: rgba(255, 255, 255, 0.9); }
+    .sh-brand { display: flex; align-items: center; gap: 10px; text-decoration: none; color: #111827; }
+    .sh-brand:hover { color: #111827; }
+    .sh-logo { width: 38px; height: 38px; border-radius: 11px; background: linear-gradient(135deg, #e85a1c, #c2410c); display: flex; align-items: center; justify-content: center; box-shadow: 0 6px 14px rgba(232, 90, 28, 0.3); flex-shrink: 0; }
+    .sh-name { display: block; font-weight: 800; font-size: 1.05rem; letter-spacing: -0.01em; line-height: 1.1; }
+    .sh-tagline { display: block; font-size: 0.68rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #6b7280; margin-top: 2px; }
+    .sh-beta { display: inline-block; margin-left: 6px; padding: 1px 7px; font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; line-height: 1.5; vertical-align: middle; color: #374151; background: #f3f4f6; border: 1px solid #e5e7eb; border-radius: 999px; }
+    .sh-nav { display: flex; gap: 0.25rem; }
+    .sh-nav a { color: #374151; text-decoration: none; font-weight: 500; font-size: 0.94rem; padding: 0.5rem 0.8rem; border-radius: 8px; transition: color 0.15s ease, background 0.15s ease; }
+    .sh-nav a:hover { color: #111827; background: #f3f4f6; }
+    .sh-actions { display: flex; align-items: center; justify-content: flex-end; gap: 0.6rem; }
+    .sh-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; border-radius: 8px; padding: 0.62rem 1.1rem; font-family: inherit; font-weight: 600; font-size: 0.95rem; line-height: 1.5; white-space: nowrap; text-decoration: none; transition: all 0.2s ease; }
+    .sh-btn:focus-visible { outline: 3px solid rgba(232, 90, 28, 0.35); outline-offset: 2px; }
+    .sh-btn-outline { background: #fff; color: #111827; border: 1px solid #e5e7eb; }
+    .sh-btn-outline:hover { border-color: #cbd5e1; background: #f9fafb; color: #111827; }
+    .sh-btn-primary { background: #c2410c; color: #fff; border: 1px solid #c2410c; padding: 0.62rem 1.25rem; box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08), 0 4px 12px rgba(232, 90, 28, 0.18); }
+    .sh-btn-primary:hover { background: #9a3412; border-color: #9a3412; color: #fff; transform: translateY(-1px); }
+    @media (max-width: 1080px) { .sh-tagline { display: none; } }
+    @media (max-width: 860px) { .sh-nav { display: none; } .sh-header { grid-template-columns: 1fr auto; } }
+    @media (max-width: 640px) {
+        .sh-header { padding: 0 16px; }
+        .sh-actions .sh-btn-outline { border: none; background: transparent; padding: 0.5rem 0.55rem; }
+        .sh-actions .sh-btn-primary { padding: 0.5rem 0.85rem; font-size: 0.875rem; }
+    }
+    @media (max-width: 380px) { .sh-beta, .sh-actions .sh-btn-outline { display: none; } }
+</style>
+<script>
+    (function () {
+        // A border once the page scrolls, as on the landing page
+        var header = document.getElementById('siteHeader');
+        if (!header) return;
+        var onScroll = function () { header.classList.toggle('is-scrolled', window.scrollY > 8); };
+        onScroll();
+        window.addEventListener('scroll', onScroll, { passive: true });
+    })();
+</script>
