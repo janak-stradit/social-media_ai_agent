@@ -67,6 +67,9 @@
 html { zoom: var(--ui-zoom); }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* The reset above removes the browser's own centring of <dialog> (Library image viewer,
+   Calendar post dialog); give it back */
+dialog { margin: auto; max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow: auto; }
 
 body {
   font-family: 'Inter', system-ui, sans-serif;
