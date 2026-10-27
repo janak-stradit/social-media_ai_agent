@@ -284,6 +284,11 @@ class ImageGeneration(Base):
     prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     edit_instruction: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     clean_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    # Image Library: starred (set on the original of an edit chain) and removed
+    # from the library (set on every version; the files stay, so posts that
+    # already use them keep working)
+    favorite_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     width: Mapped[int | None] = mapped_column(Integer, nullable=True)
     height: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
@@ -1079,6 +1084,8 @@ def init_db():
             f"ALTER TABLE {img_tbl} ADD COLUMN clean_url VARCHAR(1000)",
             f"ALTER TABLE {img_tbl} ADD COLUMN width INTEGER",
             f"ALTER TABLE {img_tbl} ADD COLUMN height INTEGER",
+            f"ALTER TABLE {img_tbl} ADD COLUMN favorite_at TIMESTAMP",
+            f"ALTER TABLE {img_tbl} ADD COLUMN deleted_at TIMESTAMP",
             f"CREATE INDEX IF NOT EXISTS ix_image_generations_conversation_id ON {img_tbl} (conversation_id)",
             f"CREATE INDEX IF NOT EXISTS ix_image_generations_parent_id ON {img_tbl} (parent_id)",
             f"CREATE INDEX IF NOT EXISTS ix_image_generations_root_id ON {img_tbl} (root_id)",
@@ -2311,24 +2318,134 @@ def _asset_dict(r: "ImageGeneration") -> dict:
     }
 
 
-def list_user_images(user_id: int, limit: int = 60, offset: int = 0, query: str | None = None) -> tuple[list[dict], int]:
-    """The image library: every image the user has made (edits included),
-    newest first, optionally only those whose description matches. -> (images, total)"""
+def _library_chains(session, user_id: int):
+    """One row per image in the library: the newest version of each edit chain
+    (an original and its edits share root_id), with how many versions it has.
+    -> subquery (root, latest, versions)"""
+    root = func.coalesce(ImageGeneration.root_id, ImageGeneration.id)
+    return (
+        session.query(root.label("root"), func.max(ImageGeneration.id).label("latest"),
+                      func.count(ImageGeneration.id).label("versions"))
+        .filter(ImageGeneration.user_id == user_id, ImageGeneration.kind.in_(("image", "edit")),
+                ImageGeneration.media_url.isnot(None), ImageGeneration.media_url != "",
+                ImageGeneration.deleted_at.is_(None))
+        .group_by(root)
+        .subquery()
+    )
+
+
+def _library_search(rows, query: str | None):
+    """Every word must appear in what the image was asked to show."""
+    for word in [w for w in (query or "").lower().split() if w][:6]:
+        # % and _ typed by the user are searched for as themselves
+        like = "%" + word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        rows = rows.filter(or_(func.lower(func.coalesce(ImageGeneration.prompt, "")).like(like, escape="\\"),
+                               func.lower(func.coalesce(ImageGeneration.description, "")).like(like, escape="\\"),
+                               func.lower(func.coalesce(ImageGeneration.edit_instruction, "")).like(like, escape="\\")))
+    return rows
+
+
+def list_user_images(user_id: int, limit: int = 60, offset: int = 0, query: str | None = None,
+                     conversation: int | str | None = None, favorites: bool = False) -> tuple[list[dict], int]:
+    """The image library, newest first: one entry per image (its newest
+    version; "versions" says how many there are), optionally only those whose
+    description matches, from one conversation ("none" = images made outside
+    one) or starred. -> (images, total)"""
     with Session(engine) as session:
-        rows = session.query(ImageGeneration).filter(
-            ImageGeneration.user_id == user_id, ImageGeneration.kind.in_(("image", "edit")),
-            ImageGeneration.media_url.isnot(None), ImageGeneration.media_url != "",
-        )
-        words = [w for w in (query or "").lower().split() if w][:6]
-        for word in words:
-            # % and _ typed by the user are searched for as themselves
-            like = "%" + word.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
-            rows = rows.filter(or_(func.lower(func.coalesce(ImageGeneration.prompt, "")).like(like, escape="\\"),
-                                   func.lower(func.coalesce(ImageGeneration.description, "")).like(like, escape="\\"),
-                                   func.lower(func.coalesce(ImageGeneration.edit_instruction, "")).like(like, escape="\\")))
+        chains = _library_chains(session, user_id)
+        rows = (session.query(ImageGeneration, chains.c.versions, chains.c.root)
+                .join(chains, ImageGeneration.id == chains.c.latest))
+        rows = _library_search(rows, query)
+        if conversation == "none":
+            rows = rows.filter(ImageGeneration.conversation_id.is_(None))
+        elif conversation is not None:
+            rows = rows.filter(ImageGeneration.conversation_id == int(conversation))
+        starred = {r for (r,) in session.query(ImageGeneration.id).filter(
+            ImageGeneration.user_id == user_id, ImageGeneration.favorite_at.isnot(None))}
+        if favorites:
+            rows = rows.filter(chains.c.root.in_(starred or {0}))
         total = rows.count()
         page = rows.order_by(ImageGeneration.id.desc()).offset(max(0, offset)).limit(max(1, min(limit, 200))).all()
-        return [_asset_dict(r) for r in page], total
+        return [{**_asset_dict(r), "versions": int(n), "root_id": int(root), "favorite": int(root) in starred}
+                for r, n, root in page], total
+
+
+def list_library_folders(user_id: int, query: str | None = None) -> list[dict]:
+    """The library by campaign: one folder per Studio Chat conversation that
+    made images, plus one for images made outside a conversation; newest
+    first. A search keeps the folders whose title or any image matches.
+    -> [{conversation_id, title, count, covers: [url x4], updated_at}]"""
+    with Session(engine) as session:
+        chains = _library_chains(session, user_id)
+        rows = (session.query(ImageGeneration.conversation_id, ImageGeneration.media_url, ImageGeneration.created_at,
+                              ImageGeneration.id)
+                .join(chains, ImageGeneration.id == chains.c.latest)
+                .order_by(ImageGeneration.id.desc()).all())
+        matching = None
+        if query:
+            matching = {c for (c,) in _library_search(
+                session.query(ImageGeneration.conversation_id).join(chains, ImageGeneration.id == chains.c.latest), query)}
+        titles = dict(session.query(Conversation.id, Conversation.title).filter(Conversation.user_id == user_id))
+        folders: dict = {}
+        for conv_id, url, created, _ in rows:
+            folder = folders.setdefault(conv_id, {"conversation_id": conv_id, "count": 0, "covers": [],
+                                                  "updated_at": _as_utc(created).isoformat() if created else None})
+            folder["count"] += 1
+            if len(folder["covers"]) < 4:
+                folder["covers"].append(url)
+        words = [w for w in (query or "").lower().split() if w]
+        out = []
+        for folder in folders.values():
+            folder["title"] = titles.get(folder["conversation_id"]) or (
+                "Other images" if folder["conversation_id"] is None else "Untitled campaign")
+            if query and folder["conversation_id"] not in matching and not all(
+                    w in folder["title"].lower() for w in words):
+                continue
+            out.append(folder)
+        return out
+
+
+def list_image_versions(user_id: int, image_id: int) -> list[dict]:
+    """Every version of an image (its original and edits), oldest first."""
+    with Session(engine) as session:
+        row = session.get(ImageGeneration, image_id)
+        if row is None or row.user_id != user_id:
+            return []
+        root = row.root_id or row.id
+        chain = (session.query(ImageGeneration)
+                 .filter(ImageGeneration.user_id == user_id, or_(ImageGeneration.id == root, ImageGeneration.root_id == root),
+                         ImageGeneration.media_url.isnot(None), ImageGeneration.media_url != "",
+                         ImageGeneration.deleted_at.is_(None))
+                 .order_by(ImageGeneration.id).all())
+        return [_asset_dict(r) for r in chain]
+
+
+def set_image_favorite(user_id: int, image_id: int, on: bool) -> bool | None:
+    """Star or unstar an image (its whole edit chain). None when it isn't the user's."""
+    with Session(engine) as session:
+        row = session.get(ImageGeneration, image_id)
+        if row is None or row.user_id != user_id:
+            return None
+        root = session.get(ImageGeneration, row.root_id or row.id) or row
+        root.favorite_at = _utcnow() if on else None
+        session.commit()
+        return on
+
+
+def delete_library_image(user_id: int, image_id: int) -> int:
+    """Remove an image and all its versions from the library. The files stay,
+    so posts and schedules that use them keep working. -> versions removed"""
+    with Session(engine) as session:
+        row = session.get(ImageGeneration, image_id)
+        if row is None or row.user_id != user_id:
+            return 0
+        root = row.root_id or row.id
+        removed = (session.query(ImageGeneration)
+                   .filter(ImageGeneration.user_id == user_id, ImageGeneration.deleted_at.is_(None),
+                           or_(ImageGeneration.id == root, ImageGeneration.root_id == root))
+                   .update({"deleted_at": _utcnow()}, synchronize_session=False))
+        session.commit()
+        return removed
 
 
 # ── Saved briefs (Studio Chat: the star on a message) ──────────────────────

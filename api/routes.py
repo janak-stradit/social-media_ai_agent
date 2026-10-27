@@ -2174,11 +2174,21 @@ def conversation_detail(conversation_id):
     return jsonify({"success": True, **data})
 
 
+def _library_image(i: dict) -> dict:
+    return {"id": i["id"], "url": i["url"], "description": (i.get("edit_instruction") or i.get("prompt") or "")[:200],
+            "prompt": (i.get("prompt") or "")[:500], "width": i["width"], "height": i["height"],
+            "created_at": i["created_at"], "kind": i["kind"], "platform": i.get("platform"),
+            "conversation_id": i["conversation_id"], "version": i["version"], "versions": i.get("versions", 1),
+            "favorite": bool(i.get("favorite"))}
+
+
 @api_bp.route("/library/images", methods=["GET"])
 @login_required_api
 def library_images_route():
-    """The image library: every image the user has made, newest first.
-    ?q= searches what the image was asked to show; ?limit= & ?offset= page it."""
+    """The image library: one entry per image (its newest version), newest
+    first. ?q= searches what the image was asked to show; ?conversation= (an
+    id, or "none") keeps one campaign folder; ?favorites=1 the starred ones;
+    ?limit= & ?offset= page it."""
     if not DB_AVAILABLE:
         return jsonify({"error": "Database not available"}), 503
     from db import list_user_images
@@ -2186,13 +2196,86 @@ def library_images_route():
     try:
         limit = max(1, min(int(request.args.get("limit", 60)), 200))
         offset = max(0, int(request.args.get("offset", 0)))
+        conversation = request.args.get("conversation") or None
+        if conversation not in (None, "none"):
+            conversation = int(conversation)
     except ValueError:
-        return jsonify({"success": False, "error": "limit and offset must be numbers"}), 400
-    rows, total = list_user_images(get_current_user_id(), limit=limit, offset=offset, query=request.args.get("q"))
-    images = [{"id": i["id"], "url": i["url"], "description": (i.get("edit_instruction") or i.get("prompt") or "")[:200],
-               "width": i["width"], "height": i["height"], "created_at": i["created_at"], "kind": i["kind"],
-               "conversation_id": i["conversation_id"], "version": i["version"]} for i in rows]
+        return jsonify({"success": False, "error": "limit, offset and conversation must be numbers"}), 400
+    rows, total = list_user_images(get_current_user_id(), limit=limit, offset=offset, query=request.args.get("q"),
+                                   conversation=conversation, favorites=request.args.get("favorites") == "1")
+    images = [_library_image(i) for i in rows]
     return jsonify({"success": True, "images": images, "total": total, "has_more": offset + len(images) < total})
+
+
+@api_bp.route("/library/folders", methods=["GET"])
+@login_required_api
+def library_folders_route():
+    """The library by campaign: a folder per Studio Chat conversation that made
+    images (and one for the rest), newest first. ?q= keeps matching folders."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import list_library_folders
+
+    return jsonify({"success": True, "folders": list_library_folders(get_current_user_id(), request.args.get("q"))})
+
+
+@api_bp.route("/library/images/<int:image_id>/versions", methods=["GET"])
+@login_required_api
+def library_image_versions_route(image_id):
+    """Every version of an image (the original and its edits), oldest first."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import list_image_versions
+
+    versions = list_image_versions(get_current_user_id(), image_id)
+    if not versions:
+        return jsonify({"success": False, "error": "Image not found"}), 404
+    return jsonify({"success": True, "versions": [_library_image(v) for v in versions]})
+
+
+@api_bp.route("/library/images/<int:image_id>/favorite", methods=["POST"])
+@login_required_api
+def library_image_favorite_route(image_id):
+    """Body {on: true|false}: star or unstar an image."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import set_image_favorite
+
+    on = bool((request.get_json(silent=True) or {}).get("on", True))
+    if set_image_favorite(get_current_user_id(), image_id, on) is None:
+        return jsonify({"success": False, "error": "Image not found"}), 404
+    return jsonify({"success": True, "favorite": on})
+
+
+@api_bp.route("/library/images", methods=["DELETE"])
+@login_required_api
+def library_images_delete_route():
+    """?ids=1,2,3: remove several images (and their versions) from the library."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import delete_library_image
+
+    try:
+        ids = [int(i) for i in (request.args.get("ids") or "").split(",") if i.strip()][:200]
+    except ValueError:
+        return jsonify({"success": False, "error": "ids must be numbers"}), 400
+    user_id = get_current_user_id()
+    return jsonify({"success": True, "removed": sum(delete_library_image(user_id, i) for i in ids)})
+
+
+@api_bp.route("/library/images/<int:image_id>", methods=["DELETE"])
+@login_required_api
+def library_image_delete_route(image_id):
+    """Remove an image (and its versions) from the library. Posts already using
+    it keep working; the page offers Undo before this is sent."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import delete_library_image
+
+    removed = delete_library_image(get_current_user_id(), image_id)
+    if not removed:
+        return jsonify({"success": False, "error": "Image not found"}), 404
+    return jsonify({"success": True, "removed": removed})
 
 
 @api_bp.route("/briefs", methods=["GET", "POST"])
