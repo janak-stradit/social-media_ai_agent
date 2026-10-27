@@ -40,6 +40,7 @@ $(document).ready(function () {
         $('.cl-item').each(function () {
             $(this).toggleClass('active', Number($(this).data('id')) === currentConversationId);
         });
+        if (typeof updateHeaderConversation === 'function') updateHeaderConversation();
     }
 
     function clearConversation() {
@@ -322,6 +323,27 @@ $(document).ready(function () {
         updateComposerSummary();
         if (!$('.platform-chips-inline input:checked').length) setComposerOptions(true, false);
     }, 400);
+
+    // Chat header: full at the top of the chat, a slim bar (with the
+    // conversation's name) once the chat is scrolled. Two thresholds, so it
+    // doesn't flicker at the edge.
+    (function compactHeader() {
+        const $ws = $('#chatWorkspace'), $bar = $('#chatHeaderBar');
+        if (!$ws.length || !$bar.length) return;
+        let compact = false, ticking = false;
+        const update = () => {
+            ticking = false;
+            const top = $ws.scrollTop();
+            const next = compact ? top > 12 : top > 64;
+            if (next !== compact) { compact = next; $bar.toggleClass('is-compact', compact); }
+        };
+        $ws.on('scroll', () => { if (!ticking) { ticking = true; requestAnimationFrame(update); } });
+        $('#chatHeaderTop').on('click', () => $ws.stop().animate({ scrollTop: 0 }, 250));
+    })();
+    function updateHeaderConversation() {
+        const name = $('.cl-item.active .cl-title').first().text().trim();
+        $('#chatHeaderConv').text(name ? ' · ' + name : '');
+    }
 
     // Restore saved sidebar preference
     if (localStorage.getItem('sidebar_hidden') === 'true') {
@@ -2402,17 +2424,17 @@ $(document).ready(function () {
                 </div>`
             : '';
 
+        // Same two-column layout as a post: the next step (make the post) on the
+        // left, the research on the right
         const cardContent = `
             <div class="assistant-header">
                 <div class="assistant-title"><i class="fas fa-magnifying-glass"></i>Research Summary</div>
             </div>
-            <div class="research-result-block">
-                ${themesHtml}
-                ${notesHtml}
-                ${hooksHtml}
-            </div>
-            <div class="research-cta-block">
-                <div class="research-cta-title"><i class="fas fa-wand-magic-sparkles me-1"></i>Want to turn this into a post?</div>
+            <div class="out-layout">
+            <aside class="out-side research-cta-block" aria-label="Turn this into a post">
+                <p class="out-eyebrow">Next step</p>
+                <h3 class="out-title">Turn this into a post</h3>
+                <p class="out-sub">${themes.length + researchNotes.length + hooks.length} findings ready to use</p>
                 <div class="research-cta-row">
                     <span class="config-label">Platforms:</span>
                     <div class="platform-chips-inline" id="${msgId}_researchPlatforms">
@@ -2433,6 +2455,12 @@ $(document).ready(function () {
                 <button type="button" class="btn btn-primary btn-sm mt-2 research-generate-btn" id="${msgId}_researchGenerateBtn">
                     <i class="fas fa-bolt me-1"></i>Generate Content
                 </button>
+            </aside>
+            <div class="out-main research-result-block">
+                ${themesHtml}
+                ${notesHtml}
+                ${hooksHtml}
+            </div>
             </div>
         `;
         assistantElem.find('.assistant-card').html(cardContent);
@@ -3008,7 +3036,7 @@ $(document).ready(function () {
         `;
 
         elem.find('.assistant-card').html(cardContent);
-        elem.data('outPlatform', platforms[0]);
+        elem.data('outPlatform', platforms[0]).removeData('outEyebrow');
         watchChecklist(msgId);
 
         elem.find('.btn-send-approval').on('click', () => openApproval(msgId));
@@ -3660,7 +3688,7 @@ $(document).ready(function () {
         const pager = total > 1 ? `
             <div class="generation-pagination ms-2 d-inline-flex align-items-center bg-light rounded px-2 py-1 border">
                 <i class="fas fa-chevron-left cursor-pointer text-secondary me-2 gen-prev" data-msg="${msgId}" ${cur === 1 ? 'style="opacity: 0.5; pointer-events: none;"' : ''}></i>
-                <span class="small font-weight-bold">${cur} / ${total}</span>
+                <span class="small font-weight-bold">Version ${cur} of ${total}</span>
                 <i class="fas fa-chevron-right cursor-pointer text-secondary ms-2 gen-next" data-msg="${msgId}" ${cur === total ? 'style="opacity: 0.5; pointer-events: none;"' : ''}></i>
             </div>` : '';
         const tiles = h.platforms.map(k => {
@@ -3701,21 +3729,35 @@ $(document).ready(function () {
         const costHtml = usage && usage.cost_usd
             ? `<span class="badge-cost-tag me-1" id="${msgId}_cost_badge" title="Images${ad ? ' + ad copy' : ''}">${costBadgeInner(usage)}</span>` : '';
         const elem = $(`#${msgId}`);
+        // Same ready-to-publish layout as a post: checklist + Schedule on the left
         elem.find('.assistant-card').html(`
             <div class="assistant-header">
-                <div class="assistant-title"><div><i class="fas ${escapeAttr(icon)} text-primary me-1"></i>${escapeHtml(label)}${meta.occasion ? ` · ${escapeHtml(meta.occasion)}` : ''}</div>${pager}</div>
-                <div class="assistant-meta-tags">${costHtml}<span class="assistant-run-tag">${r.runId ? 'Run #' + r.runId : 'Generated'}</span></div>
+                <div class="assistant-title"><div title="${r.runId ? 'Run #' + r.runId : ''}"><i class="fas ${escapeAttr(icon)} text-primary me-1"></i>${escapeHtml(label)}${meta.occasion ? ` · ${escapeHtml(meta.occasion)}` : ''}</div>${pager}</div>
+                <div class="assistant-meta-tags">${costHtml}</div>
             </div>
+            <div class="out-layout">
+                <aside class="out-side" aria-label="Ready to publish">
+                    <div class="out-check" id="${msgId}_checklist" aria-live="polite"></div>
+                    <div class="assistant-card-footer action-row out-cta">
+                        ${scheduleButtonHtml(msgId)}
+                        ${approvalButtonHtml(msgId)}
+                    </div>
+                </aside>
+                <div class="out-main">
             ${meta.text ? `<div class="preset-brief"><i class="fas fa-quote-left me-1"></i>${escapeHtml(meta.text)}</div>` : ''}
             ${meta.hiring && meta.hiring.design_names ? `<div class="preset-brief"><i class="fas fa-palette me-1"></i>Design: ${escapeHtml(meta.hiring.design_names.layout)} · ${escapeHtml(meta.hiring.design_names.scene)} · ${escapeHtml(meta.hiring.design_names.treatment)}. <strong>New images</strong> gives a different design. Check the words on the image before posting.</div>` : ''}
             ${meta.occasion_auto ? `<div class="preset-brief"><i class="fas fa-calendar-day me-1"></i>Made for the next festival, <strong>${escapeHtml(meta.occasion)}</strong>. For another occasion, type e.g. <em>/festive Eid</em>.</div>` : ''}
             <div class="preset-grid${h.platforms.length > 1 ? ' multi' : ''}">${tiles}</div>
             ${adHtml}${carHtml}
-            ${actionRowHtml(msgId, `
+            ${outMoreRowHtml(msgId, `
                 <button class="dropdown-item btn-preset-regen" data-msg="${msgId}" title="Create these images again, as a new version (uses today's images)"><i class="fas fa-sync-alt me-2"></i>New images</button>
                 <button class="dropdown-item btn-refine-base" data-msg="${msgId}" title="Your next message will edit this version">
                     <i class="fas fa-wand-magic-sparkles me-2"></i>${refineBaseMsgId === msgId ? 'Refining this version' : 'Refine this version'}</button>`)}
-            <div class="preset-tip"><i class="fas fa-lightbulb me-1"></i>Want a change? Just type it - e.g. "make the background darker".</div>`);
+            <div class="preset-tip"><i class="fas fa-lightbulb me-1"></i>Want a change? Just type it - e.g. "make the background darker".</div>
+                </div>
+            </div>`);
+        elem.data('outEyebrow', label + (meta.occasion ? ` · ${meta.occasion}` : ''));
+        watchChecklist(msgId);
 
         elem.find('.gen-prev, .gen-next').on('click', function () {
             h.currentIndex = Math.max(0, Math.min(h.responses.length - 1, h.currentIndex + ($(this).hasClass('gen-next') ? 1 : -1)));
@@ -3829,34 +3871,79 @@ $(document).ready(function () {
         const img = imageState(msgId, p, pData, wantedImage);
         items.push(Object.assign({ key: 'image', title: img.state === 'done' ? 'Image with your logo' : 'Image' }, img,
             { act: img.state === 'done' ? 'View' : img.retry ? 'Try again' : (img.state === 'todo' || img.state === 'optional') ? 'Create' : '' }));
-        if (pData.compliance) {
-            const c = pData.compliance;
-            const attention = c.needs_attention || 0;
-            items.push(attention
-                ? { key: 'brand', state: 'warn', title: 'Brand check', note: `${attention} item${attention > 1 ? 's need' : ' needs'} your attention`, act: 'Review' }
-                : { key: 'brand', state: 'done', title: 'Brand check passed', note: `${c.rules_checked || 0} rules checked${(c.disclaimers_added || []).length ? ' · disclaimer added' : ''}`, act: 'Details' });
-        }
-        if (window.SCHEDULING_ENABLED) {
-            const planned = h.scheduled && h.scheduled[h.currentIndex];
-            if (planned) {
-                const when = new Date(planned.at).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-                items.push({ key: 'time', state: 'done', title: 'Scheduled', note: when, act: '' });
-            } else {
-                const best = bestTimeFor(p);
-                items.push({ key: 'time', state: 'todo', title: 'Pick a time',
-                    note: best && best.next_slot
-                        ? 'Next good slot: ' + new Date(best.next_slot).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
-                        : 'Choose when it goes out', act: 'Schedule' });
-            }
-        }
+        const brand = brandCheckItem(pData.compliance);
+        if (brand) items.push(brand);
+        const time = timeCheckItem(msgId, p);
+        if (time) items.push(time);
         return items;
+    }
+
+    function brandCheckItem(c) {
+        if (!c) return null;
+        const attention = c.needs_attention || 0;
+        return attention
+            ? { key: 'brand', state: 'warn', title: 'Brand check', note: `${attention} item${attention > 1 ? 's need' : ' needs'} your attention`, act: 'Review' }
+            : { key: 'brand', state: 'done', title: 'Brand check passed', note: `${c.rules_checked || 0} rules checked${(c.disclaimers_added || []).length ? ' · disclaimer added' : ''}`, act: 'Details' };
+    }
+
+    function timeCheckItem(msgId, p) {
+        if (!window.SCHEDULING_ENABLED) return null;
+        const h = window.chatHistory[msgId];
+        const planned = h.scheduled && h.scheduled[h.currentIndex];
+        if (planned) {
+            const when = new Date(planned.at).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+            return { key: 'time', state: 'done', title: 'Scheduled', note: when, act: '' };
+        }
+        const best = p ? bestTimeFor(p) : null;
+        return { key: 'time', state: 'todo', title: 'Pick a time',
+            note: best && best.next_slot
+                ? 'Next good slot: ' + new Date(best.next_slot).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
+                : 'Choose when it goes out', act: 'Schedule' };
+    }
+
+    // An image command (/metaad, /festive, /carousel, hiring post...): its images,
+    // the ad copy or caption that came with them, then the time
+    function presetChecklistItems(msgId) {
+        const h = window.chatHistory[msgId];
+        const r = h.responses[h.currentIndex] || {};
+        const content = r.content || {};
+        const meta = content._preset || h.presetRun || {};
+        const images = h.platforms.map(k => (content[k] || {}).media?.image).filter(Boolean);
+        const made = images.filter(i => i.url && !i.limit_reached).length;
+        const limited = images.some(i => i.limit_reached);
+        const items = [{
+            key: 'images', state: limited ? 'warn' : made ? 'done' : 'todo',
+            title: made ? `${made} image${made === 1 ? '' : 's'} made` : 'Images',
+            note: limited ? "Today's image limit is reached" : made ? 'Your logo placed on each' : 'No images yet', act: 'New images',
+        }];
+        const ad = meta.ad_copy;
+        if (ad) items.push({ key: 'adcopy', state: 'done', title: 'Ad copy written', note: `Headline: ${ad.headline || ''}`, act: 'Copy' });
+        const post = postTextOf(msgId, 'carousel');
+        if (post && post.caption) {
+            const job = !!post.node.job;
+            items.push({ key: 'carousel', state: 'done', title: job ? 'Job post caption' : 'Caption written',
+                note: `${Array.from(post.caption).length.toLocaleString()} characters${post.tags.length ? ` · ${post.tags.length} hashtags` : ''}${post.node.edited ? ' · edited' : ''}`,
+                act: post.runId ? 'Edit' : '' });
+            const brand = brandCheckItem(job ? post.node.compliance : null);
+            if (brand) items.push(brand);
+        }
+        const time = timeCheckItem(msgId, null);
+        if (time) items.push(time);
+        return items;
+    }
+
+    function isPresetMessage(msgId) {
+        const h = window.chatHistory[msgId];
+        return !!(h && (h.preset || ((h.responses[h.currentIndex] || {}).content || {})._preset));
     }
 
     function renderChecklist(msgId) {
         const $box = $(`#${msgId}_checklist`);
         if (!$box.length) return;
         const p = $(`#${msgId}`).data('outPlatform');
-        const items = checklistItems(msgId, p);
+        const preset = isPresetMessage(msgId);
+        const items = preset ? presetChecklistItems(msgId) : checklistItems(msgId, p);
+        const eyebrow = preset ? ($(`#${msgId}`).data('outEyebrow') || 'Image command') : `${OUT_NAMES[p] || p || ''} post`;
         const counted = items.filter(i => i.state !== 'optional');
         const done = counted.filter(i => i.state === 'done').length;
         const working = items.some(i => i.state === 'working');
@@ -3865,7 +3952,7 @@ $(document).ready(function () {
         const marks = { done: '<i class="fas fa-check"></i>', working: '<i class="fas fa-spinner fa-spin"></i>', warn: '!', todo: '', optional: '' };
         const pct = counted.length ? Math.round(done / counted.length * 100) : 0;
         $box.html(`
-            <p class="out-eyebrow">${escapeHtml(OUT_NAMES[p] || p || '')} post</p>
+            <p class="out-eyebrow">${escapeHtml(eyebrow)}</p>
             <h3 class="out-title">${title}</h3>
             <p class="out-sub">${done} of ${counted.length} checks done</p>
             <div class="out-progress" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100" aria-label="Checks done"><span style="width:${pct}%"></span></div>
@@ -3885,7 +3972,7 @@ $(document).ready(function () {
         const old = elem.data('outObserver');
         if (old) old.disconnect();
         renderChecklist(msgId);
-        const panel = elem.find('.platform-content-panel')[0];
+        const panel = elem.find('.out-main')[0];
         if (!panel || !window.MutationObserver) return;
         let queued = false;
         const observer = new MutationObserver(() => {
@@ -3900,7 +3987,8 @@ $(document).ready(function () {
     // A checklist item's button does what the card's own controls do
     $(document).on('click', '.out-act', function () {
         const msgId = $(this).data('msg'), p = $(this).data('platform'), key = $(this).data('key');
-        const $panel = $(`#${msgId}_tab_${p}`);
+        const $tab = $(`#${msgId}_tab_${p}`);
+        const $panel = $tab.length ? $tab : $(`#${msgId}`);  // an image command's card has no platform tabs
         const reveal = $el => { if ($el.length) $el[0].scrollIntoView({ block: 'center', behavior: 'smooth' }); };
         if (key === 'caption') $panel.find('.btn-edit-post').not('[data-focus]').first().trigger('click');
         else if (key === 'tags') {
@@ -3915,6 +4003,9 @@ $(document).ready(function () {
             const $c = $panel.find('.compliance-line').attr('open', true);
             reveal($c);
         } else if (key === 'time') openSchedule(msgId);
+        else if (key === 'images') $panel.find('.btn-preset-regen').first().trigger('click');
+        else if (key === 'adcopy') $panel.find('.preset-adcopy:not(.post-text-block) .preset-copy').first().trigger('click');
+        else if (key === 'carousel') $panel.find(`#${msgId}_text_carousel .btn-edit-post`).first().trigger('click');
     });
 
     // "Send for approval" (static/js/approval_send.js): after sending, the
@@ -4360,6 +4451,7 @@ $(document).ready(function () {
                 html += historyRow(item, isArchived);
             });
         $('#historyList').html(html);
+        updateHeaderConversation();
     }
 
     // Row clicks, the "..." menu and its actions (one set of handlers for the whole list)
@@ -4371,6 +4463,7 @@ $(document).ready(function () {
         const $item = $(this).closest('.cl-item');
         $('.cl-item').removeClass('active');
         $item.addClass('active');
+        updateHeaderConversation();
         loadConversation($item.data('id'));
     });
     $('#historyList').on('click', '.cl-menu-btn', function (e) {

@@ -85,9 +85,11 @@
     <main class="main-content chat-main">
 
         <!-- Top Title Bar -->
-        <div class="chat-header-bar">
-            <div>
-                <h1 class="chat-header-title">Campaign Studio</h1>
+        <!-- Full at the top; once the chat is scrolled it shrinks to a slim bar
+             with the conversation's name (app_v2.js: compact header) -->
+        <div class="chat-header-bar" id="chatHeaderBar">
+            <div class="chat-header-titles">
+                <h1 class="chat-header-title">Campaign Studio<span class="chat-header-conv" id="chatHeaderConv"></span></h1>
                 <p class="chat-header-subtitle">Describe your idea, attach visual assets, and set campaign configs below</p>
             </div>
             <div class="d-flex gap-2 align-items-center">
@@ -96,9 +98,12 @@
                     <span class="goal-pill-dots" id="goalPillDots" aria-hidden="true"></span>
                     <span class="goal-pill-text" id="goalPillText"></span>
                 </a>
-                <a href="/competitor-dashboard" class="btn-xs-outline-info text-decoration-none" title="Open Analysis Dashboard">
+                <a href="/competitor-dashboard" class="btn-xs-outline-info text-decoration-none" title="Open Analysis Dashboard" aria-label="Analysis Dashboard">
                     <i class="fas fa-chart-line me-2"></i><span class="btn-label">Analysis Dashboard</span>
                 </a>
+                <button type="button" class="chat-header-top" id="chatHeaderTop" title="Back to the top of the chat" aria-label="Back to the top of the chat">
+                    <i class="fas fa-arrow-up" aria-hidden="true"></i>
+                </button>
             </div>
         </div>
 

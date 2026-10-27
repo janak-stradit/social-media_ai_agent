@@ -5468,3 +5468,142 @@ details[open] > summary .compliance-caret { transform: rotate(180deg); }
   .composer-summary { flex-basis: 100%; order: 5; }
 }
 @media (prefers-reduced-motion: reduce) { .dock-options-caret { transition: none; } }
+
+/* Research Summary card in the same layout: "Turn this into a post" on the left */
+.out-side.research-cta-block { margin: 0; gap: 12px; }
+.out-side.research-cta-block .research-cta-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+.out-side.research-cta-block .platform-chips-inline, .out-side.research-cta-block .media-chips-inline { flex-wrap: wrap; gap: 6px; }
+.out-side.research-cta-block .research-generate-btn {
+  width: 100%; min-height: 42px; margin-top: 4px !important; border: 0; border-radius: 10px;
+  background: var(--brand-strong); color: #fff; font-weight: 600;
+}
+.out-side.research-cta-block .research-generate-btn:hover { background: var(--brand-hover); }
+.out-main.research-result-block { margin: 0; }
+/* Image-command card: tiles and ad copy use the right-hand column */
+.out-main .preset-grid { margin-top: 0; }
+
+/* ══════════════════════════════════════════════════════════════════════
+   Schedule post window (option C): suggested times as chips, connection
+   problems said once, one compact row per platform. approval_send.js
+   ══════════════════════════════════════════════════════════════════════ */
+.sa-schedule .modal-header { align-items: flex-start; }
+.sa-schedule .modal-header > div { flex: 1; min-width: 0; }
+.sa-schedule #saReviewer { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.sa-when-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.sa-when-chip {
+  display: inline-flex; flex-direction: column; align-items: flex-start; justify-content: center; min-height: 40px; padding: 4px 12px;
+  border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; color: #111827; font-size: 13px; font-weight: 600; cursor: pointer; line-height: 1.2;
+}
+.sa-when-chip small { font-size: 11px; font-weight: 500; color: #047857; }
+.sa-when-chip:hover { border-color: #cbd5e1; }
+.sa-when-chip.on { border-color: var(--brand-strong); background: #fff4ec; color: #9a3412; }
+.sa-when-chip.sa-when-custom { flex-direction: row; align-items: center; border-style: dashed; color: #4b5563; font-weight: 500; }
+.sa-when-chip.sa-when-custom.on { border-style: solid; color: #9a3412; }
+.sa-when-chip:focus-visible { outline: 3px solid rgba(var(--brand-rgb), .35); outline-offset: 2px; }
+.sa-schedule .sa-when { display: flex; align-items: center; gap: 8px; }
+.sa-schedule .sa-when.d-none { display: none !important; }
+.sa-schedule .sa-when-zone { font-size: 12px; color: #4b5563; }
+
+.sa-notice {
+  display: flex; align-items: center; gap: 10px; margin-bottom: 8px; padding: 10px 12px; border-radius: 12px;
+  background: #fffbeb; border: 1px solid #fde68a; font-size: 13px; color: #92400e;
+}
+.sa-notice > span { flex: 1; }
+.sa-notice-btn {
+  height: 32px; padding: 0 12px; display: inline-flex; align-items: center; border-radius: 8px; background: #0f172a; color: #fff !important;
+  font-size: 13px; font-weight: 600; text-decoration: none;
+}
+.sa-notice-skip { height: 32px; padding: 0 10px; border: 1px solid #fde68a; border-radius: 8px; background: transparent; color: #92400e; font-size: 13px; cursor: pointer; }
+.sa-what { margin: 12px 0 8px; font-size: 12px; font-weight: 700; color: #4b5563; }
+.sa-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.sa-row { border: 1px solid #e5e7eb; border-radius: 12px; background: #fff; }
+.sa-row.open { border-color: #ffd2b3; box-shadow: 0 4px 14px rgba(15, 23, 42, .06); }
+.sa-row.off .sa-row-main { opacity: .6; }
+.sa-row-main { display: flex; align-items: center; gap: 12px; padding: 10px; }
+.sa-row-main .form-check-input { width: 18px; height: 18px; margin: 0; flex-shrink: 0; }
+.sa-row-thumb { width: 52px; height: 52px; border-radius: 8px; object-fit: cover; flex-shrink: 0; }
+.sa-row-text { display: inline-flex; align-items: center; justify-content: center; background: #f3f4f6; color: #64748b; }
+.sa-row-text-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sa-row-text-col strong { font-size: 14px; }
+.sa-row-text-col small { font-size: 12px; color: #4b5563; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sa-row-status { font-size: 12px; font-weight: 600; margin-left: 4px; }
+.sa-row-status.ok { color: #047857; }
+.sa-row-status.off { color: #b45309; }
+.sa-row-status.warn { color: #b45309; }
+.sa-row-edit { height: 32px; padding: 0 12px; border: 1px solid #e5e7eb; border-radius: 8px; background: #fff; font-size: 13px; font-weight: 600; color: #374151; cursor: pointer; flex-shrink: 0; }
+.sa-row-edit:hover { border-color: var(--brand-strong); color: var(--brand-strong); }
+.sa-row-editor { padding: 4px 12px 12px; border-top: 1px solid #f1f5f9; }
+.sa-schedule .sa-footer-note { margin-right: auto; font-size: 13px; color: #374151; }
+@media (max-width: 576px) {
+  .sa-notice { flex-wrap: wrap; }
+  .sa-row-thumb { width: 44px; height: 44px; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Chat header (option B): full at the top of the chat, a slim 44px bar once
+   the chat is scrolled. app_v2.js compactHeader
+   ══════════════════════════════════════════════════════════════════════ */
+.chat-header-bar { transition: padding .2s ease, box-shadow .2s ease; position: relative; z-index: 5; }
+.chat-header-titles { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.chat-main { min-width: 0; }  /* the one-line header title must not widen the chat area */
+#chatHeaderBar { min-width: 0; max-width: 100%; gap: 10px; }
+#chatHeaderBar > .d-flex { flex-shrink: 0; }
+@media (max-width: 768px) {
+  #chatHeaderBar .goal-pill-text { display: none; }
+  #chatHeaderBar .goal-pill { padding: 6px 8px; }
+}
+.chat-header-title { transition: font-size .2s ease; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chat-header-subtitle { transition: opacity .15s ease; }
+.chat-header-conv { display: none; font-weight: 500; color: var(--bp-text-sub, #4b5563); }
+.chat-header-top {
+  display: none; width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--bp-border, #e5e7eb);
+  background: #fff; color: #374151; align-items: center; justify-content: center; cursor: pointer;
+}
+.chat-header-top:hover { color: var(--brand-strong); border-color: var(--brand-border); }
+.chat-header-bar.is-compact { padding-top: 6px; padding-bottom: 6px; min-height: 44px; box-shadow: 0 4px 12px rgba(15, 23, 42, .06); }
+.chat-header-bar.is-compact .chat-header-title { font-size: 0.95rem; margin: 0; }
+.chat-header-bar.is-compact .chat-header-subtitle { display: none; }
+.chat-header-bar.is-compact .chat-header-conv { display: inline; }
+.chat-header-bar.is-compact .goal-pill-text { display: none; }
+.chat-header-bar.is-compact .goal-pill { padding: 6px 8px; }
+.chat-header-bar.is-compact .btn-label { display: none; }
+.chat-header-bar.is-compact .btn-xs-outline-info { padding: 6px 9px; }
+.chat-header-bar.is-compact .btn-xs-outline-info i { margin-right: 0 !important; }
+.chat-header-bar.is-compact .chat-header-top { display: inline-flex; }
+@media (prefers-reduced-motion: reduce) {
+  .chat-header-bar, .chat-header-title, .chat-header-subtitle { transition: none; }
+}
+.sa-schedule #saReviewer, .sa-schedule .sa-when-chips { align-items: flex-start; justify-content: flex-start; text-align: left; }
+
+/* Schedule window, round 2: the "connect first" screen, full-date chips,
+   platform tiles for text-only posts */
+.sa-schedule #saReviewer.d-none { display: none !important; }
+.sa-when-head { display: flex; align-items: baseline; gap: 8px; }
+.sa-when-label { font-size: 13px; font-weight: 700; color: #111827; }
+.sa-schedule .sa-when-head .sa-when-zone { font-size: 12px; color: #6b7280; }
+.sa-when-chip { min-height: 46px; padding: 6px 14px; }
+.sa-when-chip small { margin-top: 2px; }
+.sa-when-chip.sa-when-custom { min-height: 46px; }
+
+.sa-plat-tile { display: inline-flex; align-items: center; justify-content: center; border-radius: 12px; color: #fff; font-size: 22px; flex-shrink: 0; }
+.sa-plat-tile.sm { width: 28px; height: 28px; border-radius: 8px; font-size: 14px; }
+.sa-tile-linkedin { background: #0a66c2; }
+.sa-tile-instagram { background: linear-gradient(135deg, #f58529, #dd2a7b 55%, #8134af); }
+.sa-tile-facebook { background: #1877f2; }
+.sa-tile-youtube { background: #ff0000; }
+.sa-row-thumb.sa-plat-tile { width: 52px; height: 52px; }
+
+.sa-connect-first { text-align: center; padding: 18px 12px 8px; }
+.sa-connect-icons { display: flex; justify-content: center; gap: 10px; margin-bottom: 14px; }
+.sa-connect-icons .sa-plat-tile { width: 56px; height: 56px; font-size: 28px; border-radius: 16px; box-shadow: 0 8px 20px rgba(15, 23, 42, .15); }
+.sa-connect-first h3 { margin: 0; font-size: 1.15rem; font-weight: 700; color: #111827; }
+.sa-connect-first > p { max-width: 420px; margin: 8px auto 0; font-size: 14px; line-height: 1.55; color: #4b5563; }
+.sa-connect-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; }
+.sa-connect-btn {
+  display: inline-flex; align-items: center; min-height: 44px; padding: 0 20px; border-radius: 12px;
+  background: var(--brand-strong); color: #fff !important; font-weight: 600; font-size: 15px; text-decoration: none;
+}
+.sa-connect-btn:hover { background: var(--brand-hover); }
+.sa-connect-first .sa-connect-wait { margin-top: 14px; font-size: 12px; color: #6b7280; }
+.sa-notice { padding: 8px 10px; }
+.sa-notice > span:not(.sa-plat-tile) { flex: 1; }
