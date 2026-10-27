@@ -132,3 +132,47 @@ def test_endpoints(app, user):
     month = client.get("/api/calendar?month=2026-10&tz=330").get_json()
     assert month["success"] and month["month"] == "2026-10" and month["progress"]["goal"] == 5
     assert client.get("/api/calendar?month=nonsense").status_code == 400
+
+
+def test_the_planner_lists_ideas_and_occasions_to_plan(user, monkeypatch):
+    with Session(db.engine) as session:
+        session.add(db.UserBrandProfile(user_id=user["id"], website="https://example.com",
+                                        industry_category="investment_wealth", compliance_regions=json.dumps(["India"])))
+        session.commit()
+    feed = {"groups": {
+        "trending": [{"title": f"Trend {i}", "prompt": "Brief.", "platform": "instagram"} for i in range(6)],
+        "playbook": [{"title": "Read a chart", "prompt": "Chart brief.", "platform": "linkedin"}],
+        "dates": [{"title": "Diwali greeting", "prompt": "Diwali brief.", "platform": "facebook", "occasion": "Diwali"}],
+    }}
+    from services import festival_service, trend_service
+
+    monkeypatch.setattr(trend_service, "cached_idea_feed", lambda user_id: feed)
+    monkeypatch.setattr(festival_service, "get_upcoming_festivals", lambda days_ahead=60, today=None: [
+        {"name": "Diwali", "date": "2026-11-08", "region": "India", "days_until": 25},
+        {"name": "Thanksgiving", "date": "2026-11-26", "region": "USA", "days_until": 43}])
+
+    plan = calendar_service.calendar_month(user["id"], 2026, 10, IST, WED)["plan"]
+    titles = [i["title"] for i in plan["ideas"]]
+    assert titles[0] == "Diwali greeting" and len(titles) == calendar_service.PLAN_IDEAS  # dates first, then trending
+    assert plan["ideas"][0]["group"] == "dates" and plan["ideas"][0]["prompt"] == "Diwali brief."
+    assert plan["occasions"] == [{"name": "Diwali", "date": "2026-11-08", "region": "India"}]  # only the user's markets
+
+
+def test_the_planner_without_a_brand_profile_is_empty(user):
+    plan = calendar_service.calendar_month(user["id"], 2026, 10, IST, WED)["plan"]
+    assert plan == {"ideas": [], "occasions": []}
+
+
+def test_the_calendar_page_is_a_planner(app, user):
+    with Session(db.engine) as session:  # a fully set-up account, so the page opens
+        session.query(db.User).filter(db.User.id == user["id"]).update({"email_verified": True, "onboarding_completed": True})
+        session.commit()
+    client = app.test_client()
+    with client.session_transaction() as s:
+        s["user_id"] = user["id"]
+    html = client.get("/calendar").get_data(as_text=True)
+    for marker in ('class="cal-strip"', 'id="calPlan"', 'id="calPlanIdeas"', 'id="calPlanOpen"', 'id="calPlanOccasions"',
+                   'id="calAlerts"', 'data-cal-view="week"', 'data-cal-platform="instagram"', 'id="calResultsToggle"',
+                   'id="calPlanWeek"', 'id="calGrid"'):
+        assert marker in html, marker
+    assert 'id="calRing"' not in html  # the big goal card is now the slim strip

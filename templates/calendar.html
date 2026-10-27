@@ -35,36 +35,38 @@
     </div>
 </header>
 
-<!-- Filled in by static/js/calendar.js from /api/calendar (services/calendar_service.py) -->
-<main class="cal-main">
+<!-- Planner workspace (static/js/calendar.js; data: /api/calendar, services/calendar_service.py):
+     a slim strip with this week's goal and the last 30 days, alerts for posts
+     that didn't publish, a "To plan" panel (ideas, open days, occasions) to
+     drag onto the calendar, and the calendar itself (Month / Week). -->
+<main class="cal-main cal-planner">
 
-    <!-- This week's goal -->
-    <section class="cal-goal" aria-labelledby="calGoalTitle">
-        <div class="cal-ring" id="calRing" role="img" aria-label="Weekly goal progress">
-            <svg viewBox="0 0 64 64" aria-hidden="true">
-                <circle class="cal-ring-track" cx="32" cy="32" r="27"></circle>
-                <circle class="cal-ring-fill" id="calRingFill" cx="32" cy="32" r="27" transform="rotate(-90 32 32)"></circle>
-            </svg>
-            <span class="cal-ring-text"><strong id="calDone">–</strong><small>of <span id="calGoalOf">–</span></small></span>
-        </div>
-        <div class="cal-goal-copy">
+    <section class="cal-strip" aria-labelledby="calGoalTitle">
+        <div class="cal-strip-goal">
             <h1 id="calGoalTitle">This week</h1>
-            <p id="calGoalText">Loading your week...</p>
-            <div class="cal-week" id="calWeek" aria-hidden="true"></div>
+            <div class="cal-progress" role="img" id="calProgress" aria-label="Weekly goal progress"><span id="calProgressFill"></span></div>
+            <span class="cal-strip-count"><strong id="calDone">–</strong> of <span id="calGoalOf">–</span> posts</span>
+            <span class="cal-streak d-none" id="calStreak"><i class="fas fa-fire" aria-hidden="true"></i><span></span></span>
         </div>
-        <div class="cal-goal-side">
-            <div class="cal-streak d-none" id="calStreak"><i class="fas fa-fire"></i><span></span></div>
-            <div class="cal-stepper" role="group" aria-label="Posts per week goal">
-                <span class="cal-stepper-label">Weekly goal</span>
-                <button type="button" id="calGoalDown" aria-label="One post fewer per week"><i class="fas fa-minus"></i></button>
-                <strong id="calGoalValue" aria-live="polite">–</strong>
-                <button type="button" id="calGoalUp" aria-label="One post more per week"><i class="fas fa-plus"></i></button>
-            </div>
+        <div class="cal-stepper" role="group" aria-label="Posts per week goal">
+            <span class="cal-stepper-label">Goal</span>
+            <button type="button" id="calGoalDown" aria-label="One post fewer per week"><i class="fas fa-minus"></i></button>
+            <strong id="calGoalValue" aria-live="polite">–</strong>
+            <button type="button" id="calGoalUp" aria-label="One post more per week"><i class="fas fa-plus"></i></button>
         </div>
+        <span class="cal-strip-sep" aria-hidden="true"></span>
+        <span class="cal-strip-results" id="calResultsSummary">Loading your results...</span>
+        <button type="button" class="cal-link-btn" id="calResultsToggle" aria-expanded="false" aria-controls="calResults">See results</button>
+        <span class="cal-strip-fill"></span>
+        <button type="button" class="cal-plan-week" id="calPlanWeek"><i class="fas fa-wand-magic-sparkles me-1" aria-hidden="true"></i>Plan my week</button>
     </section>
+    <p class="cal-strip-text" id="calGoalText" aria-live="polite"></p>
 
-    <!-- How published posts did (calendar.js loadResults; /api/analytics) -->
-    <section class="cal-results" aria-labelledby="calResultsTitle">
+    <!-- Posts that didn't publish (or only partly), with Retry -->
+    <div class="cal-alerts" id="calAlerts" aria-live="polite"></div>
+
+    <!-- How published posts did (calendar.js loadResults; /api/analytics), opened from the strip -->
+    <section class="cal-results d-none" id="calResults" aria-labelledby="calResultsTitle">
         <div class="cal-results-head">
             <h2 id="calResultsTitle">How your posts did</h2>
             <span class="cal-results-sub">Posts published through AVIR AI in the last 30 days</span>
@@ -74,29 +76,59 @@
         <div class="cal-best" id="calBestTimes"></div>
     </section>
 
-    <!-- The month -->
-    <section class="cal-board" aria-label="Calendar">
-        <div class="cal-toolbar">
-            <div class="cal-nav">
-                <button type="button" id="calPrev" aria-label="Previous month"><i class="fas fa-chevron-left"></i></button>
-                <h2 id="calMonth" aria-live="polite">&nbsp;</h2>
-                <button type="button" id="calNext" aria-label="Next month"><i class="fas fa-chevron-right"></i></button>
-                <button type="button" class="cal-today-btn" id="calToday">Today</button>
+    <div class="cal-layout">
+        <!-- To plan: drag a card onto a day, or click it, to start it in Studio Chat -->
+        <aside class="cal-plan" id="calPlan" aria-labelledby="calPlanTitle">
+            <div class="cal-plan-head">
+                <h2 id="calPlanTitle">To plan</h2>
+                <span>Drag onto a day</span>
+            </div>
+            <div class="cal-plan-group" id="calPlanOpenGroup">
+                <h3>Open days this week</h3>
+                <div class="cal-plan-list" id="calPlanOpen"></div>
+            </div>
+            <div class="cal-plan-group">
+                <h3>Ideas for you</h3>
+                <div class="cal-plan-list" id="calPlanIdeas"></div>
+            </div>
+            <div class="cal-plan-group">
+                <h3>Coming up</h3>
+                <div class="cal-plan-list" id="calPlanOccasions"></div>
+            </div>
+        </aside>
+
+        <section class="cal-board" aria-label="Calendar">
+            <div class="cal-toolbar">
+                <div class="cal-nav">
+                    <button type="button" id="calPrev" aria-label="Previous"><i class="fas fa-chevron-left"></i></button>
+                    <h2 id="calMonth" aria-live="polite">&nbsp;</h2>
+                    <button type="button" id="calNext" aria-label="Next"><i class="fas fa-chevron-right"></i></button>
+                    <button type="button" class="cal-today-btn" id="calToday">Today</button>
+                </div>
+                <div class="cal-view" role="group" aria-label="Show">
+                    <button type="button" data-cal-view="month" aria-pressed="true">Month</button>
+                    <button type="button" data-cal-view="week" aria-pressed="false">Week</button>
+                </div>
+                <div class="cal-filters" role="group" aria-label="Platforms">
+                    <button type="button" data-cal-platform="linkedin" aria-pressed="true"><i class="fab fa-linkedin" aria-hidden="true"></i>LinkedIn</button>
+                    <button type="button" data-cal-platform="instagram" aria-pressed="true"><i class="fab fa-instagram" aria-hidden="true"></i>Instagram</button>
+                    <button type="button" data-cal-platform="facebook" aria-pressed="true"><i class="fab fa-facebook" aria-hidden="true"></i>Facebook</button>
+                </div>
             </div>
             <div class="cal-legend" aria-hidden="true">
                 <span><i class="cal-dot is-post"></i>Created</span>
                 <span><i class="cal-dot is-scheduled"></i>Scheduled</span>
-                <span><i class="cal-dot is-published"></i>Published</span>
+                <span><i class="cal-dot is-failed"></i>Didn't publish</span>
                 <span><i class="cal-dot is-slot"></i>Suggested</span>
                 <span><i class="cal-dot is-occasion"></i>Occasion</span>
             </div>
-        </div>
-        <div class="cal-weekdays" aria-hidden="true">
-            <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
-        </div>
-        <div class="cal-grid" id="calGrid"></div>
-        <p class="cal-note" id="calNote"></p>
-    </section>
+            <div class="cal-weekdays" aria-hidden="true">
+                <span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span><span>Sun</span>
+            </div>
+            <div class="cal-grid" id="calGrid"></div>
+            <p class="cal-note" id="calNote"></p>
+        </section>
+    </div>
 </main>
 
 <!-- A scheduled post: details, move, cancel, retry (calendar.js: openScheduled) -->

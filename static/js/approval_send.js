@@ -92,6 +92,22 @@
         return localInputValue(d);
     }
 
+    // A day chosen on the Content Calendar (an idea dropped onto it, calendar.js):
+    // offered first, at 10:00 that day, while it is still ahead
+    function plannedWhen() {
+        let day = null;
+        try { day = sessionStorage.getItem('avir_planned_day'); } catch (e) { /* storage blocked */ }
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day || '');
+        if (!m) return null;
+        const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 10, 0, 0, 0);
+        if (d.getTime() < Date.now() + 5 * 60 * 1000) {  // that day's morning has passed: later today
+            d.setTime(Date.now() + 60 * 60 * 1000);
+            d.setMinutes(0, 0, 0);
+            if (d.getDate() !== Number(m[3])) return null;
+        }
+        return localInputValue(d);
+    }
+
     function whenProblem() {
         if (!state.when) return 'Choose a date and time.';
         const when = new Date(state.when);
@@ -119,6 +135,8 @@
         const picks = out.slice(0, 2).map(c => ({ value: c.value, note: 'Best for ' + c.hint.join(', ') }));
         const tomorrow = defaultWhen();
         if (!picks.some(c => c.value === tomorrow)) picks.push({ value: tomorrow, note: 'Tomorrow morning' });
+        const planned = plannedWhen();
+        if (planned && !picks.some(c => c.value === planned)) picks.push({ value: planned, note: 'The day you planned' });
         return picks.sort((a, b) => a.value.localeCompare(b.value));
     }
 
@@ -560,6 +578,7 @@
                                        run_id: state.source.runId || null, conversation_id: state.source.conversationId || null }),
             }).done(r => {
                 hide();
+                try { sessionStorage.removeItem('avir_planned_day'); } catch (e) { /* storage blocked */ }  // used: forget it
                 toast(`Scheduled for ${when.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}. It is on your calendar.`, 'success');
                 if (state.source.onScheduled) state.source.onScheduled(r.scheduled_post);
             }).fail(xhr => {
@@ -596,7 +615,7 @@
                 format: 'multi_image', titles: titles,
             };
         });
-        state = { mode: mode, source, sections, images: [], reviewer: null, dims: {}, when: defaultWhen(), connections: null, best: null, customWhen: false };
+        state = { mode: mode, source, sections, images: [], reviewer: null, dims: {}, when: plannedWhen() || defaultWhen(), connections: null, best: null, customWhen: false };
         picker = null;
         $('#sendApprovalModal .sa-modal').toggleClass('sa-schedule', scheduling());
         $('#sendApprovalTitle').html(scheduling() ? '<i class="fas fa-calendar-plus me-2"></i>Schedule post' : '<i class="fas fa-paper-plane me-2"></i>Send for approval');

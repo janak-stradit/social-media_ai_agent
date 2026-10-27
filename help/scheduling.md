@@ -36,9 +36,23 @@ Scheduled posts are shown on their day with their time.
 | Amber | Published on some platforms only |
 | Red | Not published |
 
+## Planning your week
+
+The strip at the top of the calendar shows this week's goal, how many posts you have made, and your streak. Use **-** and **+** to change the goal, and **See results** for how your published posts did.
+
+The **To plan** panel lists:
+
+- **Open days this week**: days to post on to reach your goal, each with an idea.
+- **Ideas for you**: ideas from your industry's news, post types that work and upcoming dates.
+- **Coming up**: festivals and holidays in your markets over the next weeks.
+
+Drag a card onto a day, or click it, to start that post in Studio Chat. When you schedule it, the day you dropped it on is offered first. **Plan my week** takes you to this week's open days.
+
+Switch between **Month** and **Week**, and use the platform buttons to show only LinkedIn, Instagram or Facebook posts.
+
 ## If a post doesn't go out
 
-You get a notification under the bell, with the reason for each platform. Fix the cause (most often an expired connection), then click the post on the calendar and choose **Try again now**. Platforms that were already published are not sent again.
+A red banner at the top of the calendar lists it, with the reason. You also get a notification under the bell. Fix the cause (most often an expired connection), then click **Retry** in the banner, or click the post on the calendar and choose **Try again now**. Platforms that were already published are not sent again.
 
 All scheduled posts are also listed in [Social accounts](/settings), under **Scheduled posts**.
 

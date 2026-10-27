@@ -149,7 +149,8 @@ def calendar_month(user_id: int, year: int, month: int, tz_minutes: int = 0, now
     monday = _monday(today)
     posted = {date.fromisoformat(d["date"]) for d in progress["days"] if d["count"]}
     slots = _slot_days(progress["goal"], monday, today, posted, progress["remaining"])
-    ideas = _ideas_for_slots(slots, cached_idea_feed(user_id) if profile else None, occasions)
+    feed = cached_idea_feed(user_id) if profile else None
+    ideas = _ideas_for_slots(slots, feed, occasions)
     for slot in slots:
         if slot.isoformat() in days:
             idea = ideas.get(slot)
@@ -163,4 +164,28 @@ def calendar_month(user_id: int, year: int, month: int, tz_minutes: int = 0, now
         "days": list(days.values()),
         "progress": progress,
         "has_brand_profile": bool(profile),
+        "plan": _plan(feed, markets, today),
     }
+
+
+PLAN_IDEAS = 8
+PLAN_OCCASION_DAYS = 45
+
+
+def _plan(feed: dict | None, markets: set, today: date) -> dict:
+    """The planner's "To plan" panel: ideas from the saved "Ideas for you"
+    feed (upcoming dates first, then trending, then post types that work) and
+    the occasions in the user's markets over the next weeks. Whatever month is
+    shown, this is about what's ahead from today."""
+    from services.festival_service import get_upcoming_festivals
+
+    groups = (feed or {}).get("groups") or {}
+    ideas = []
+    for group in ("dates", "trending", "playbook"):
+        for idea in groups.get(group) or []:
+            if len(ideas) < PLAN_IDEAS and idea.get("title"):
+                ideas.append({**{k: idea.get(k) for k in ("title", "summary", "prompt", "platform", "format", "occasion")},
+                              "group": group})
+    occasions = [{"name": f["name"], "date": f["date"], "region": f["region"]}
+                 for f in get_upcoming_festivals(days_ahead=PLAN_OCCASION_DAYS, today=today) if f["region"] in markets]
+    return {"ideas": ideas, "occasions": occasions[:8]}
