@@ -108,7 +108,9 @@
     function whenChoices() {
         const out = [];
         const best = state.best || {};
-        ORDER.filter(p => state.sections[p] && best[p] && best[p].next_slot).forEach(p => {
+        // only the platforms that are ticked (all of them until any is)
+        const ticked = ORDER.filter(p => state.sections[p] && state.sections[p].on);
+        (ticked.length ? ticked : ORDER.filter(p => state.sections[p])).filter(p => best[p] && best[p].next_slot).forEach(p => {
             const value = localInputValue(new Date(best[p].next_slot));
             const same = out.find(c => c.value === value);
             if (same) same.hint.push(NAMES[p]); else out.push({ value, hint: [NAMES[p]] });
@@ -117,7 +119,7 @@
         const picks = out.slice(0, 2).map(c => ({ value: c.value, note: 'Best for ' + c.hint.join(', ') }));
         const tomorrow = defaultWhen();
         if (!picks.some(c => c.value === tomorrow)) picks.push({ value: tomorrow, note: 'Tomorrow morning' });
-        return picks;
+        return picks.sort((a, b) => a.value.localeCompare(b.value));
     }
 
     function renderWhen() {
@@ -151,12 +153,18 @@
         $.getJSON('/api/best-times?tz=' + tz).done(function (r) {
             if (!state) return;
             state.best = r.platforms || {};
-            const platform = Object.keys(state.sections).find(p => state.sections[p].on) || Object.keys(state.sections)[0];
-            const best = state.best[platform];
-            if (best && !state.whenTouched) state.when = localInputValue(new Date(best.next_slot));
+            pickDefaultWhen();
             renderWhen();
             render();
         });
+    }
+
+    // Until the user picks a time: the earliest best slot of the ticked platforms
+    function pickDefaultWhen() {
+        if (!state.best || state.whenTouched) return;
+        const choices = whenChoices();
+        const first = choices.find(c => c.note.startsWith('Best')) || choices[0];
+        if (first) state.when = first.value;
     }
 
     // ── Rendering ────────────────────────────────────────────────────────
@@ -438,7 +446,11 @@
         if (bindOnce.done) return;
         bindOnce.done = true;
         const $doc = $(document);
-        $doc.on('change', '[data-include]', function () { state.sections[$(this).data('include')].on = this.checked; render(); });
+        $doc.on('change', '[data-include]', function () {
+            state.sections[$(this).data('include')].on = this.checked;
+            if (scheduling()) { pickDefaultWhen(); renderWhen(); }
+            render();
+        });
         $doc.on('change', '[data-media]', function () {
             const sec = state.sections[$(this).data('media')];
             sec.media = this.value;
@@ -510,6 +522,7 @@
         $doc.on('click', '[data-skip]', function () {
             const sec = state.sections[$(this).data('skip')];
             sec.on = false; sec.skipped = true;
+            pickDefaultWhen(); renderWhen();
             render();
         });
         // The image picker opens on top of the dialog. When it closes, the dialog
@@ -599,6 +612,7 @@
                 // A platform that isn't connected starts unticked, so the rest can be scheduled straight away
                 Object.keys(sections).forEach(p => { if (!state.connections[p]) sections[p].on = false; });
                 if (!Object.values(sections).some(sec => sec.on)) Object.values(sections).forEach(sec => { sec.on = true; });  // none connected: show what to connect
+                pickDefaultWhen();
                 renderWhen();
                 render();
             }).fail(() => { state.connections = {}; render(); });
