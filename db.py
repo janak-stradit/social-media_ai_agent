@@ -455,6 +455,8 @@ class Conversation(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Pinned to the top of the Studio Chat sidebar (newest pin first); None = not pinned
+    pinned_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     # The image "it" / "this" refers to (an ImageGeneration id) - the newest
     # image, or the version the user picked with "Refine this version"
     active_image_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
@@ -1067,6 +1069,7 @@ def init_db():
             f"ALTER TABLE {run_tbl} ADD COLUMN is_archived BOOLEAN DEFAULT FALSE",
             f"ALTER TABLE {run_tbl} ADD COLUMN conversation_id INTEGER",
             f"CREATE INDEX IF NOT EXISTS ix_run_history_conversation_id ON {run_tbl} (conversation_id)",
+            f"ALTER TABLE {_tbl('conversations')} ADD COLUMN pinned_at TIMESTAMP",
             f"ALTER TABLE {img_tbl} ADD COLUMN conversation_id INTEGER",
             f"ALTER TABLE {img_tbl} ADD COLUMN parent_id INTEGER",
             f"ALTER TABLE {img_tbl} ADD COLUMN root_id INTEGER",
@@ -2209,7 +2212,10 @@ def _conversation_summary(conv: "Conversation", runs: list) -> dict:
         "tone": latest.tone if latest else None,
         "message_count": len(runs),
         "timestamp": (conv.updated_at or conv.created_at).strftime("%Y-%m-%d %H:%M"),
+        # UTC, for the sidebar's "3d" / "Oct 9" and its date groups
+        "updated_at": (conv.updated_at or conv.created_at).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "is_archived": bool(conv.is_archived),
+        "is_pinned": conv.pinned_at is not None,
         "active_image_id": conv.active_image_id,
     }
 
@@ -2219,7 +2225,9 @@ def list_conversations(user_id: int, limit: int = 30, archived: bool = False) ->
         convs = (
             session.query(Conversation)
             .filter(Conversation.user_id == user_id, Conversation.is_archived.is_(bool(archived)))
-            .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
+            # Pinned first (newest pin on top), so they are never cut off by the limit
+            .order_by(Conversation.pinned_at.is_(None), Conversation.pinned_at.desc(),
+                      Conversation.updated_at.desc(), Conversation.id.desc())
             .limit(limit)
             .all()
         )
@@ -2257,6 +2265,19 @@ def set_conversation_archived(conversation_id: int, user_id: int, archived: bool
         if not conv or conv.user_id != user_id:
             return False
         conv.is_archived = bool(archived)
+        if archived:
+            conv.pinned_at = None  # an archived chat leaves the Pinned list
+        session.commit()
+        return True
+
+
+def set_conversation_pinned(conversation_id: int, user_id: int, pinned: bool) -> bool:
+    """Pins a conversation to the top of the sidebar, or unpins it."""
+    with Session(engine) as session:
+        conv = session.get(Conversation, conversation_id)
+        if not conv or conv.user_id != user_id:
+            return False
+        conv.pinned_at = _utcnow() if pinned else None
         session.commit()
         return True
 

@@ -2281,6 +2281,26 @@ def conversation_unarchive(conversation_id):
     return jsonify({"success": True, "is_archived": False})
 
 
+@api_bp.route("/conversations/<int:conversation_id>/pin", methods=["POST"])
+@login_required_api
+def conversation_pin(conversation_id):
+    from db import set_conversation_pinned
+
+    if not DB_AVAILABLE or not set_conversation_pinned(conversation_id, get_current_user_id(), True):
+        return jsonify({"error": "Conversation not found"}), 404
+    return jsonify({"success": True, "is_pinned": True})
+
+
+@api_bp.route("/conversations/<int:conversation_id>/unpin", methods=["POST"])
+@login_required_api
+def conversation_unpin(conversation_id):
+    from db import set_conversation_pinned
+
+    if not DB_AVAILABLE or not set_conversation_pinned(conversation_id, get_current_user_id(), False):
+        return jsonify({"error": "Conversation not found"}), 404
+    return jsonify({"success": True, "is_pinned": False})
+
+
 @api_bp.route("/conversations/<int:conversation_id>/active-image", methods=["POST"])
 @login_required_api
 def conversation_active_image(conversation_id):
