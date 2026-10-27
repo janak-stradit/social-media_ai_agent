@@ -246,45 +246,24 @@ def get_models_info():
     """Return 100% dynamic live runtime AI model status, active providers, and agent purpose mappings"""
     user_id = get_current_user_id()
 
-    # 1. Dynamic Text & LLM Agent Model Detection
-    text_model = getattr(Config, "BEDROCK_TEXT_MODEL", "amazon.nova-lite-v1:0")
-    if getattr(Config, "AWS_ACCESS_KEY_ID", None) or getattr(Config, "AWS_PROFILE", None):
-        text_provider = f"AWS Bedrock ({getattr(Config, 'AWS_REGION', 'us-east-1')})"
-        text_status = "ACTIVE"
-    elif getattr(Config, "OPENAI_API_KEY", None):
-        text_model = getattr(Config, "AGENTSCOPE_MODEL", "gpt-4o")
-        text_provider = "OpenAI / OpenRouter API"
-        text_status = "ACTIVE"
-    else:
-        text_provider = "System Default Engine"
-        text_status = "ONLINE"
+    # 1-4. What text, vision, image and video really run on (services/ai_router.py
+    # mirrors the rules the generation code follows), not a guess from the keys
+    from services import ai_router
 
-    # 2. Dynamic Vision Model Detection
-    vision_model = getattr(Config, "BEDROCK_VISION_MODEL", "amazon.nova-lite-v1:0")
-    vision_prov = getattr(Config, "VISION_PROVIDER", "bedrock")
-    vision_status = (
-        "ACTIVE" if (getattr(Config, "AWS_ACCESS_KEY_ID", None) or getattr(Config, "AWS_PROFILE", None)) else "ONLINE"
-    )
+    now = ai_router.current()
 
-    # 3. Dynamic Image Generation Model Detection
-    if getattr(Config, "Z_AI_API_KEY", None):
-        image_model = getattr(Config, "Z_AI_IMAGE_MODEL", "cogview-4-250304")
-        image_provider = "Z.AI GLM (CogView-4)"
-        image_status = "ACTIVE"
-    elif getattr(Config, "AWS_ACCESS_KEY_ID", None) or getattr(Config, "AWS_PROFILE", None):
-        image_model = getattr(Config, "BEDROCK_IMAGE_MODEL", "amazon.nova-canvas-v1:0")
-        image_provider = f"AWS Bedrock Nova Canvas ({getattr(Config, 'AWS_REGION', 'us-east-1')})"
-        image_status = "ACTIVE"
-    else:
-        image_model = getattr(Config, "IMAGE_MODEL", "openai/dall-e-3")
-        image_provider = "OpenAI DALL-E"
-        image_status = "STANDBY"
+    def _status(info):
+        if not info["model"]:
+            return "STANDBY"
+        return "ONLINE" if info["provider"].startswith(("Mock", "Local")) else "ACTIVE"
 
-    # 4. Dynamic Video Generation Model Detection
-    # (HeyRoute is the only video provider - see media_service.generate_video)
-    video_model = Config.HEYROUTE_VIDEO_MODEL
-    video_provider = "HeyRoute"
-    video_status = "ACTIVE" if Config.HEYROUTE_VIDEO_API_KEY else "STANDBY"
+    def _provider(info):
+        return info["provider"] + (f" (then {', '.join(info['fallbacks'])})" if info["fallbacks"] else "")
+
+    text_model, text_provider, text_status = now["text"]["model"], _provider(now["text"]), _status(now["text"])
+    vision_model, vision_provider, vision_status = now["vision"]["model"], _provider(now["vision"]), _status(now["vision"])
+    image_model, image_provider, image_status = now["image"]["model"] or "-", _provider(now["image"]), _status(now["image"])
+    video_model, video_provider, video_status = now["video"]["model"] or "-", _provider(now["video"]), _status(now["video"])
 
     # 5. Dynamic RAG Memory Engine Stats
     try:
@@ -318,7 +297,7 @@ def get_models_info():
             "purpose": "Vision & Visual Media Analysis",
             "category": "vision",
             "model_name": vision_model,
-            "provider": f"AWS Bedrock ({vision_prov})",
+            "provider": vision_provider,
             "status": vision_status,
             "agents": ["VisionAgent"],
             "description": "Analyzes uploaded user images and video clips to extract contextual scenes, text overlays, and visual color palettes.",
@@ -6289,6 +6268,237 @@ def save_my_billing_profile():
     profile = save_billing_profile(get_current_user_id(), str(data.get("name") or "").strip()[:160],
                                    gstin, str(data.get("address") or "").strip()[:400], state)
     return jsonify({"success": True, "profile": profile})
+
+
+# ── Admin -> AI providers (services/ai_router.py, AI_PROVIDERS_PLAN.md) ──
+# Connections (with write-only keys) and the models they offer. Every change
+# is audited without the key; tests and model lists are rate-limited because
+# they call the provider.
+
+def _ai_number(value, name: str) -> float | None:
+    if value in (None, ""):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as err:
+        raise ValueError(f"{name} must be a number.") from err
+    if number < 0:
+        raise ValueError(f"{name} can't be negative.")
+    return number
+
+
+def _ai_connection_fields(data: dict, creating: bool) -> dict:
+    """Validated fields of a connection from the request (the key encrypted)."""
+    from services import ai_keys, ai_router
+
+    fields = {}
+    if creating or "name" in data:
+        name = str(data.get("name") or "").strip()[:120]
+        if not name:
+            raise ValueError("Give the connection a name.")
+        fields["name"] = name
+    if creating:
+        kind = str(data.get("kind") or "")
+        if kind not in ai_router.KINDS:
+            raise ValueError("Choose the kind of provider.")
+        if kind == "bedrock":
+            raise ValueError("AWS Bedrock uses the AWS credentials in the server settings; it is added automatically when they are set.")
+        fields["kind"] = kind
+    kind = fields.get("kind") or data.get("_kind")
+    if "base_url" in data or (creating and kind == "openai_compatible"):
+        fields["base_url"] = ai_router.check_base_url(data.get("base_url")) if kind == "openai_compatible" else None
+    if "enabled" in data:
+        fields["enabled"] = bool(data["enabled"])
+    if data.get("api_key"):
+        try:
+            fields["api_key_encrypted"], fields["key_last4"] = ai_keys.encrypt(str(data["api_key"]))
+        except ai_keys.KeysUnavailable as err:
+            raise ValueError(str(err)) from err
+        fields["key_env"] = None  # a typed key replaces the ENV_FILE one
+    elif data.get("remove_key"):
+        fields["clear_key"] = True
+    elif creating:
+        raise ValueError("Enter the API key.")
+    return fields
+
+
+@api_bp.route("/admin/ai", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_ai_overview():
+    """Everything Admin -> AI providers shows: connections (never their keys),
+    models, what runs now per capability, and the choices for the forms."""
+    from db import list_ai_connections, list_ai_models
+    from services import ai_keys, ai_router
+
+    seeded = ai_router.seed_from_env()
+    if seeded:
+        _audit("ai.catalog_seeded", details={"connections": [c["name"] for c in list_ai_connections()]})
+    return jsonify({"success": True, "connections": list_ai_connections(), "models": list_ai_models(),
+                    "current": ai_router.current(), "kinds": ai_router.KINDS, "capabilities": ai_router.CAPABILITY_NAMES,
+                    "features": ai_router.FEATURES, "keys_ready": ai_keys.ready(),
+                    "routing_from_env": bool(Config.AI_ROUTING_FROM_ENV)})
+
+
+@api_bp.route("/admin/ai/connections", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_ai_connection_create():
+    """Body {name, kind, base_url, api_key}."""
+    from db import save_ai_connection
+    from services import ai_router
+
+    data = request.get_json(silent=True) or {}
+    try:
+        fields = _ai_connection_fields(data, creating=True)
+    except (ValueError, ai_router.ConnectionProblem) as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    connection = save_ai_connection(None, **fields)
+    from db import bump_ai_routes_version
+
+    bump_ai_routes_version()
+    _audit("ai.connection_added", details={"connection": connection["name"], "kind": connection["kind"],
+                                           "base_url": connection["base_url"]})
+    return jsonify({"success": True, "connection": connection})
+
+
+@api_bp.route("/admin/ai/connections/<int:connection_id>", methods=["PUT", "DELETE"])
+@login_required_api
+@admin_required_api
+def admin_ai_connection_update(connection_id):
+    """PUT {name?, base_url?, enabled?, api_key? (replace), remove_key?}; DELETE removes it and its models."""
+    from db import bump_ai_routes_version, delete_ai_connection, get_ai_connection, list_ai_routes, list_ai_models, save_ai_connection
+    from services import ai_router
+
+    existing = get_ai_connection(connection_id)
+    if existing is None:
+        return jsonify({"success": False, "error": "Connection not found"}), 404
+    if request.method == "DELETE":
+        model_ids = {m["id"] for m in list_ai_models(connection_id)}
+        used = [r["key"] for r in list_ai_routes() if {r["model_id"], *r["fallback_model_ids"]} & model_ids]
+        if used:
+            return jsonify({"success": False, "error": f"It is in use ({', '.join(used)}). Choose other models there first."}), 409
+        delete_ai_connection(connection_id)
+        bump_ai_routes_version()
+        _audit("ai.connection_removed", details={"connection": existing["name"]})
+        return jsonify({"success": True})
+    data = request.get_json(silent=True) or {}
+    try:
+        fields = _ai_connection_fields({**data, "_kind": existing["kind"]}, creating=False)
+    except (ValueError, ai_router.ConnectionProblem) as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    if fields.get("clear_key") and not existing["key_env"] and existing["key_source"] == "admin":
+        pass  # removing the only key leaves the connection without one; it shows as "No key"
+    connection = save_ai_connection(connection_id, **fields)
+    bump_ai_routes_version()
+    changed = sorted(k for k in fields if k not in ("api_key_encrypted", "key_last4", "clear_key", "key_env"))
+    if "api_key_encrypted" in fields:
+        changed.append("api key replaced")
+    if fields.get("clear_key"):
+        changed.append("api key removed")
+    _audit("ai.connection_changed", details={"connection": connection["name"], "changed": changed})
+    return jsonify({"success": True, "connection": connection})
+
+
+@api_bp.route("/admin/ai/connections/<int:connection_id>/test", methods=["POST"])
+@login_required_api
+@admin_required_api
+@limit_by_user("ai_admin_test")
+def admin_ai_connection_test(connection_id):
+    """Reach the provider with this connection's key. -> {ok, message, models}"""
+    from db import get_ai_connection
+    from services import ai_router
+
+    try:
+        result = ai_router.test_connection(connection_id)
+    except ai_router.ConnectionProblem as err:
+        return jsonify({"success": False, "error": str(err)}), 404
+    from db import bump_ai_routes_version
+
+    bump_ai_routes_version()  # a passed test makes a connection preferred
+    return jsonify({"success": True, **result, "connection": get_ai_connection(connection_id)})
+
+
+@api_bp.route("/admin/ai/models", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_ai_model_create():
+    """Body {connection_id, model_id, label?, capabilities: [...], prices...}, or
+    {connection_id, models: [{model_id, capabilities}, ...]} to add several from Fetch models."""
+    from db import save_ai_model
+
+    data = request.get_json(silent=True) or {}
+    items = data.get("models") if isinstance(data.get("models"), list) else [data]
+    added, errors = [], []
+    for item in items[:200]:
+        try:
+            added.append(save_ai_model(None, **_ai_model_fields({**item, "connection_id": data.get("connection_id")}, True)))
+        except ValueError as err:
+            errors.append(f"{item.get('model_id')}: {err}" if len(items) > 1 else str(err))
+    if not added:
+        return jsonify({"success": False, "error": "; ".join(errors) or "Nothing to add."}), 400
+    from db import bump_ai_routes_version
+
+    bump_ai_routes_version()
+    _audit("ai.models_added", details={"connection_id": data.get("connection_id"), "models": [m["model_id"] for m in added]})
+    return jsonify({"success": True, "models": added, "errors": errors})
+
+
+def _ai_model_fields(data: dict, creating: bool) -> dict:
+    from db import AI_CAPABILITIES
+
+    fields = {}
+    if creating:
+        try:
+            fields["connection_id"] = int(data.get("connection_id"))
+        except (TypeError, ValueError) as err:
+            raise ValueError("Choose the connection.") from err
+    if creating or "model_id" in data:
+        model_id = str(data.get("model_id") or "").strip()[:200]
+        if not model_id:
+            raise ValueError("Enter the model's id, exactly as the provider names it.")
+        fields["model_id"] = model_id
+    if "label" in data:
+        fields["label"] = str(data.get("label") or "").strip()[:200] or None
+    if creating or "capabilities" in data:
+        caps = [c for c in (data.get("capabilities") or []) if c in AI_CAPABILITIES]
+        if not caps:
+            raise ValueError("Tick at least one thing the model can do.")
+        fields["capabilities"] = caps
+    for key, name in (("price_in_per_1k", "Input price"), ("price_out_per_1k", "Output price"),
+                      ("price_per_image", "Price per image"), ("price_per_video_second", "Price per video second")):
+        if key in data:
+            fields[key] = _ai_number(data[key], name)
+    if "enabled" in data:
+        fields["enabled"] = bool(data["enabled"])
+    return fields
+
+
+@api_bp.route("/admin/ai/models/<int:model_pk>", methods=["PUT", "DELETE"])
+@login_required_api
+@admin_required_api
+def admin_ai_model_update(model_pk):
+    from db import bump_ai_routes_version, delete_ai_model, list_ai_models, list_ai_routes, save_ai_model
+
+    existing = next((m for m in list_ai_models() if m["id"] == model_pk), None)
+    if existing is None:
+        return jsonify({"success": False, "error": "Model not found"}), 404
+    if request.method == "DELETE":
+        used = [r["key"] for r in list_ai_routes() if model_pk in {r["model_id"], *r["fallback_model_ids"]}]
+        if used:
+            return jsonify({"success": False, "error": f"It is in use ({', '.join(used)}). Choose another model there first."}), 409
+        delete_ai_model(model_pk)
+        bump_ai_routes_version()
+        _audit("ai.model_removed", details={"model": existing["model_id"]})
+        return jsonify({"success": True})
+    try:
+        model = save_ai_model(model_pk, **_ai_model_fields(request.get_json(silent=True) or {}, False))
+    except ValueError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    bump_ai_routes_version()
+    changes = {k: [existing.get(k), model.get(k)] for k in model if existing.get(k) != model.get(k)}
+    _audit("ai.model_changed", details={"model": model["model_id"], "changes": changes})
+    return jsonify({"success": True, "model": model})
 
 
 @api_bp.route("/admin/payments", methods=["GET"])

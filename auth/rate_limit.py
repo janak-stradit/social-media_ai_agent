@@ -28,6 +28,7 @@ RULES = {
     "ai_user": (150, 60 * 60),  # AI calls (generate, refine, research, ideas from a link...)
     "media_user": (40, 60 * 60),  # image and video generation
     "email_user": (30, 60 * 60),  # emails sent on the user's behalf (approvals, "send me one now")
+    "ai_admin_test": (30, 10 * 60),  # Admin -> AI providers: tests and model lists (they call the provider)
 }
 
 

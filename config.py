@@ -74,6 +74,17 @@ class Config:
     # model (HeyRoute help -> Generate videos -> Billing).
     HEYROUTE_VIDEO_COST_PER_SECOND_USD = float(os.getenv("HEYROUTE_VIDEO_COST_PER_SECOND_USD", "0.70"))
 
+    # AI providers from Admin (AI_PROVIDERS_PLAN.md, services/ai_router.py).
+    # API keys typed in Admin are encrypted with AI_KEYS_ENCRYPTION_KEY - its own
+    # key, not SECRET_KEY, so changing SECRET_KEY can't make them unreadable.
+    # Without it, Admin can't store keys (keys from ENV_FILE still work). Make one:
+    #   python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    # Changing it makes stored keys unreadable: re-enter them, or keep the old one.
+    AI_KEYS_ENCRYPTION_KEY = os.getenv("AI_KEYS_ENCRYPTION_KEY", "")
+    # Emergency switch: true = ignore everything set in Admin -> AI providers and
+    # run on the ENV_FILE settings above, as before.
+    AI_ROUTING_FROM_ENV = os.getenv("AI_ROUTING_FROM_ENV", "false").lower() == "true"
+
     # SMTP - approval-notification emails
     SMTP_HOST = os.getenv("SMTP_HOST")
     SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))

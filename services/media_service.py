@@ -836,17 +836,19 @@ class MediaGenerationService:
         raise RuntimeError("HeyRoute image stream ended without an image.")
 
     @staticmethod
-    def _heyroute_error_text(resp) -> str:
+    def _heyroute_error_text(resp, provider: str = "HeyRoute") -> str:
         """A readable reason for a failed image request - never a Cloudflare
         HTML error page dumped into the chat."""
         status = resp.status_code
+        if status in (401, 403):
+            return f"{provider} refused the API key for images ({status}). Check the key in Admin -> AI providers."
         if status in (522, 524, 504):
-            return f"HeyRoute took too long to create the image (timeout {status}). Please try again."
+            return f"{provider} took too long to create the image (timeout {status}). Please try again."
         if status in (502, 503, 520, 521, 523):
-            return f"HeyRoute's image service is temporarily unavailable ({status}). Please try again in a minute."
+            return f"{provider}'s image service is temporarily unavailable ({status}). Please try again in a minute."
         text = resp.text or ""
         if "<html" in text[:300].lower():
-            return f"HeyRoute image request failed ({status})."
+            return f"{provider} image request failed ({status})."
         if status == 400 and "invalid_request" in text:
             import re
 
@@ -856,7 +858,7 @@ class MediaGenerationService:
                 "attached image was refused - try rewording the request or attaching a different image."
                 + (f" Reference: {ref.group(1)}" if ref else "")
             )
-        return f"HeyRoute image request failed: {status} - {text[:300]}"
+        return f"{provider} image request failed: {status} - {text[:300]}"
 
     def _generate_image_heyroute(
         self,
@@ -868,20 +870,31 @@ class MediaGenerationService:
         model: str | None = None,
     ) -> dict:
         """Same return shape as _generate_image_kie: {url (local), original_url,
-        prompt, model, cost}."""
+        prompt, model, cost}. The request goes to the connection that offers
+        the model in Admin -> AI providers (e.g. Meta for muse-image-1.0), else
+        to HeyRoute (HEYROUTE_IMAGE_API_KEY) as before. Every such provider
+        takes the same OpenAI-style /images/generations and /images/edits."""
         import base64
 
-        key = Config.HEYROUTE_IMAGE_API_KEY
-        if not key:
-            raise RuntimeError("HEYROUTE_IMAGE_API_KEY is not configured.")
+        from services import ai_router
+
         # The user's model from Image access / Image Settings, else the global default
         model = model or Config.HEYROUTE_IMAGE_MODEL
+        target = ai_router.connection_for_model(model, "image")
+        if target:
+            key, base, provider = target["api_key"], target["base_url"].rstrip("/"), target["connection"]
+        else:
+            key, base, provider = Config.HEYROUTE_IMAGE_API_KEY, Config.HEYROUTE_BASE_URL, "HeyRoute"
+            if not key:
+                raise RuntimeError("HEYROUTE_IMAGE_API_KEY is not configured.")
+        # HeyRoute sits behind Cloudflare, which cuts replies that take over
+        # 100 s to start, so its images are streamed; other providers answer plainly
+        stream = "heyroute" in base.lower()
         # square=True: one image shared by every platform of a post (1:1 works on all)
         hint = self._HEYROUTE_ASPECT_HINTS["instagram"] if square else self._HEYROUTE_ASPECT_HINTS.get(platform)
         full_prompt = f"{prompt}\n\n{hint}" if hint and hint not in prompt else prompt
         references = self._resolve_image_paths(image_path)[: self._HEYROUTE_MAX_REFERENCES]
         uploads = [_reference_upload(ref) for ref in references]
-        base = Config.HEYROUTE_BASE_URL
 
         def send(plain: bool = False):
             # Streamed: HeyRoute is behind Cloudflare, which cuts a reply that
@@ -889,7 +902,7 @@ class MediaGenerationService:
             # scenes, pro models) used to fail that way. A stream starts at once.
             # plain=True: just model + prompt. Some models (e.g. gpt-image-2.5)
             # reject the extra n/stream fields with 400 invalid_request.
-            extra = {} if plain else {"n": 1, "stream": True}
+            extra = {} if plain else ({"n": 1, "stream": True} if stream else {"n": 1})
             if references:
                 return requests.post(
                     f"{base}/images/edits",
@@ -921,17 +934,17 @@ class MediaGenerationService:
                 or resp.status_code in (502, 503, 504)
             )
             if unusable and model != Config.HEYROUTE_IMAGE_MODEL:
-                logger.warning(f"HeyRoute image model {model!r} unavailable ({resp.status_code}); "
+                logger.warning(f"{provider} image model {model!r} unavailable ({resp.status_code}); "
                       f"using {Config.HEYROUTE_IMAGE_MODEL!r} instead")
                 return self._generate_image_heyroute(
                     prompt, platform, size, image_path, square=square, model=Config.HEYROUTE_IMAGE_MODEL
                 )
             logger.warning(
-                f"HeyRoute image request failed: {resp.status_code} model={model} "
+                f"{provider} image request failed: {resp.status_code} model={model} "
                 f"references={[(name, len(data), mime) for name, data, mime in uploads]} "
                 f"prompt_chars={len(full_prompt)} - {resp.text[:300]!r}"
             )
-            raise RuntimeError(self._heyroute_error_text(resp))
+            raise RuntimeError(self._heyroute_error_text(resp, provider))
 
         item = ((self._heyroute_image_payload(resp) or {}).get("data") or [{}])[0]
         original_url = item.get("url")
@@ -940,7 +953,7 @@ class MediaGenerationService:
         elif original_url:
             img_data = requests.get(original_url, timeout=60).content
         else:
-            raise RuntimeError("HeyRoute image response had no image data.")
+            raise RuntimeError(f"{provider} image response had no image data.")
 
         is_square = square or platform == "instagram"
         local_filename = self._save_compact_image(
@@ -950,7 +963,7 @@ class MediaGenerationService:
             "url": f"/static/uploads/{local_filename}",
             "original_url": original_url,
             "prompt": full_prompt,
-            "model": f"heyroute/{model}",
+            "model": f"{'heyroute' if provider == 'HeyRoute' else provider.lower()}/{model}",
             "model_id": model,
             "cost": _image_price(model),
         }
@@ -969,8 +982,10 @@ class MediaGenerationService:
         replace HeyRoute's real error, so the user saw a misleading kie.ai
         message. Other providers are only used when chosen explicitly via
         generate_image(ai_model=...)."""
-        if not Config.HEYROUTE_IMAGE_API_KEY:
-            raise RuntimeError("HEYROUTE_IMAGE_API_KEY is not configured - image generation runs on HeyRoute.")
+        from services import ai_router
+
+        if not Config.HEYROUTE_IMAGE_API_KEY and not ai_router.connection_for_model(model or Config.HEYROUTE_IMAGE_MODEL, "image"):
+            raise RuntimeError("No image provider is set up: add HEYROUTE_IMAGE_API_KEY, or the model's connection in Admin -> AI providers.")
         return self._generate_image_heyroute(prompt, platform, size, image_path, square=square, model=model)
 
     def _file_to_data_uri(self, path: str) -> str:

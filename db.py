@@ -925,6 +925,70 @@ class AppSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
 
 
+# ── AI providers from Admin (AI_PROVIDERS_PLAN.md; services/ai_router.py) ──
+class AiConnection(Base):
+    """One account at one AI provider. Its key is either typed in Admin
+    (stored encrypted, services/ai_keys.py) or read from ENV_FILE
+    (key_env names the variable) - never both shown, never returned."""
+
+    __tablename__ = "ai_connections"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)  # openai_compatible | bedrock | kie
+    base_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    api_key_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    key_last4: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    key_env: Mapped[str | None] = mapped_column(String(64), nullable=True)  # e.g. HEYROUTE_API_KEY
+    extra: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON, e.g. {"region": "us-east-1"}
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_test_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_test_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    last_test_error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+
+
+class AiModel(Base):
+    """A model one connection offers: what it can do and what it costs."""
+
+    __tablename__ = "ai_models"
+    __table_args__ = (
+        UniqueConstraint("connection_id", "model_id", name="uq_ai_model_per_connection"),
+        {"schema": SCHEMA} if not IS_SQLITE else {},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    connection_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey(f"{SCHEMA}.ai_connections.id" if not IS_SQLITE else "ai_connections.id", ondelete="CASCADE"),
+        nullable=False, index=True)
+    model_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    capabilities: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON: text, vision, image, video
+    price_in_per_1k: Mapped[float | None] = mapped_column(Float, nullable=True)  # USD per 1,000 input tokens
+    price_out_per_1k: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price_per_image: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price_per_video_second: Mapped[float | None] = mapped_column(Float, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+
+
+class AiRoute(Base):
+    """Which model serves a capability ("text") or a feature ("text.hashtags"),
+    with fallbacks in order. No row = today's ENV_FILE behaviour."""
+
+    __tablename__ = "ai_routes"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    model_id: Mapped[int | None] = mapped_column(Integer, nullable=True)  # ai_models.id
+    fallback_model_ids: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON list of ai_models.id
+    params: Mapped[str] = mapped_column(Text, nullable=False, default="{}")  # JSON
+    updated_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+
+
 class BrandAsset(Base):
     """A brand character or logo reference image, manageable from
     /brand-configuration's "Logo & Character" tab - an extensible list
@@ -3453,6 +3517,173 @@ IMAGE_UNLIMITED = -1
 def _day_start_utc(now: datetime | None = None) -> datetime:
     now = now or datetime.now(timezone.utc)
     return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+# ── AI providers (services/ai_router.py reads these; Admin -> AI providers edits them) ──
+AI_KINDS = ("openai_compatible", "bedrock", "kie")
+AI_CAPABILITIES = ("text", "vision", "image", "video")
+
+
+def _json_list(raw) -> list:
+    try:
+        value = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return []
+    return value if isinstance(value, list) else []
+
+
+def _ai_connection_dict(row: "AiConnection") -> dict:
+    """Never the key: only whether there is one, its last 4 and where it comes from."""
+    try:
+        extra = json.loads(row.extra or "{}")
+    except (TypeError, ValueError):
+        extra = {}
+    return {
+        "id": row.id, "name": row.name, "kind": row.kind, "base_url": row.base_url, "extra": extra,
+        "enabled": row.enabled, "key_env": row.key_env, "key_last4": row.key_last4,
+        "has_key": bool(row.api_key_encrypted) or bool(row.key_env and os.getenv(row.key_env)),
+        "key_source": "admin" if row.api_key_encrypted else ("env" if row.key_env else None),
+        "last_test_at": _as_utc(row.last_test_at).isoformat() if row.last_test_at else None,
+        "last_test_ok": row.last_test_ok, "last_test_error": row.last_test_error,
+    }
+
+
+def _ai_model_dict(row: "AiModel") -> dict:
+    return {
+        "id": row.id, "connection_id": row.connection_id, "model_id": row.model_id, "label": row.label,
+        "capabilities": [c for c in _json_list(row.capabilities) if c in AI_CAPABILITIES],
+        "price_in_per_1k": row.price_in_per_1k, "price_out_per_1k": row.price_out_per_1k,
+        "price_per_image": row.price_per_image, "price_per_video_second": row.price_per_video_second,
+        "enabled": row.enabled,
+    }
+
+
+def list_ai_connections() -> list[dict]:
+    with Session(engine) as session:
+        return [_ai_connection_dict(r) for r in session.query(AiConnection).order_by(AiConnection.id)]
+
+
+def get_ai_connection(connection_id: int, with_secret: bool = False) -> dict | None:
+    """with_secret adds "api_key_encrypted" (for services/ai_router.py only)."""
+    with Session(engine) as session:
+        row = session.get(AiConnection, connection_id)
+        if row is None:
+            return None
+        out = _ai_connection_dict(row)
+        if with_secret:
+            out["api_key_encrypted"] = row.api_key_encrypted
+        return out
+
+
+def save_ai_connection(connection_id: int | None, **fields) -> dict:
+    """Create (connection_id None) or update a connection. Keys arrive already
+    encrypted (api_key_encrypted + key_last4); api_key_encrypted=None with
+    clear_key=True removes a typed key."""
+    with Session(engine) as session:
+        row = session.get(AiConnection, connection_id) if connection_id else AiConnection()
+        if row is None:
+            raise ValueError("Connection not found")
+        for key in ("name", "kind", "base_url", "key_env", "enabled"):
+            if key in fields:
+                setattr(row, key, fields[key])
+        if "extra" in fields:
+            row.extra = json.dumps(fields["extra"] or {})
+        if fields.get("api_key_encrypted"):
+            row.api_key_encrypted, row.key_last4 = fields["api_key_encrypted"], fields.get("key_last4")
+        elif fields.get("clear_key"):
+            row.api_key_encrypted, row.key_last4 = None, None
+        if any(k in fields for k in ("base_url", "api_key_encrypted", "clear_key", "key_env")):
+            row.last_test_at = row.last_test_ok = row.last_test_error = None  # test again after a change
+        if connection_id is None:
+            session.add(row)
+        session.commit()
+        session.refresh(row)
+        return _ai_connection_dict(row)
+
+
+def record_ai_connection_test(connection_id: int, ok: bool, error: str | None) -> None:
+    with Session(engine) as session:
+        row = session.get(AiConnection, connection_id)
+        if row is not None:
+            row.last_test_at, row.last_test_ok, row.last_test_error = _utcnow(), ok, (error or None) and error[:500]
+            session.commit()
+
+
+def delete_ai_connection(connection_id: int) -> bool:
+    with Session(engine) as session:
+        row = session.get(AiConnection, connection_id)
+        if row is None:
+            return False
+        session.query(AiModel).filter(AiModel.connection_id == connection_id).delete(synchronize_session=False)
+        session.delete(row)
+        session.commit()
+        return True
+
+
+def list_ai_models(connection_id: int | None = None) -> list[dict]:
+    with Session(engine) as session:
+        rows = session.query(AiModel)
+        if connection_id is not None:
+            rows = rows.filter(AiModel.connection_id == connection_id)
+        return [_ai_model_dict(r) for r in rows.order_by(AiModel.connection_id, AiModel.model_id)]
+
+
+def save_ai_model(model_pk: int | None, **fields) -> dict:
+    """Create (model_pk None) or update a model. Raises ValueError for a
+    duplicate model on the same connection or an unknown connection."""
+    from sqlalchemy.exc import IntegrityError
+
+    with Session(engine) as session:
+        if model_pk:
+            row = session.get(AiModel, model_pk)
+            if row is None:
+                raise ValueError("Model not found")
+        else:
+            if session.get(AiConnection, fields.get("connection_id")) is None:
+                raise ValueError("Connection not found")
+            row = AiModel(connection_id=fields["connection_id"])
+            session.add(row)
+        for key in ("model_id", "label", "price_in_per_1k", "price_out_per_1k", "price_per_image",
+                    "price_per_video_second", "enabled"):
+            if key in fields:
+                setattr(row, key, fields[key])
+        if "capabilities" in fields:
+            row.capabilities = json.dumps([c for c in fields["capabilities"] or [] if c in AI_CAPABILITIES])
+        try:
+            session.commit()
+        except IntegrityError as err:
+            session.rollback()
+            raise ValueError("That model is already listed for this connection.") from err
+        session.refresh(row)
+        return _ai_model_dict(row)
+
+
+def delete_ai_model(model_pk: int) -> bool:
+    with Session(engine) as session:
+        row = session.get(AiModel, model_pk)
+        if row is None:
+            return False
+        session.delete(row)
+        session.commit()
+        return True
+
+
+def list_ai_routes() -> list[dict]:
+    with Session(engine) as session:
+        return [{"key": r.key, "model_id": r.model_id, "fallback_model_ids": _json_list(r.fallback_model_ids),
+                 "params": json.loads(r.params or "{}"), "updated_by": r.updated_by,
+                 "updated_at": _as_utc(r.updated_at).isoformat() if r.updated_at else None}
+                for r in session.query(AiRoute).order_by(AiRoute.key)]
+
+
+def bump_ai_routes_version() -> int:
+    """Every server process re-reads the AI settings when this number changes."""
+    try:
+        version = int(get_setting("ai_routes_version", "0") or 0) + 1
+    except ValueError:
+        version = 1
+    save_setting("ai_routes_version", str(version))
+    return version
 
 
 def get_image_settings() -> dict:

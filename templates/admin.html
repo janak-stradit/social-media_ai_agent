@@ -737,6 +737,33 @@
         .preset-builtin summary { cursor: pointer; font-size: 0.78rem; font-weight: 600; color: #6b7280; }
         .preset-builtin pre { white-space: pre-wrap; font-size: 0.76rem; color: #4b5563; background: #f9fafb; border-radius: 8px; padding: 0.6rem; margin: 0.4rem 0 0; }
         .admin-side-panel-footer .me-auto { margin-right: auto; }
+
+        /* AI providers (admin_ai.js) */
+        .ai-section-title { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: #64748b; margin: 1.4rem 0 0.6rem; }
+        .ai-notice { padding: 10px 14px; border-radius: 10px; background: #eff6ff; color: #1e3a8a; font-size: 0.86rem; margin-bottom: 0.6rem; }
+        .ai-notice.is-warning { background: #fffbeb; color: #92400e; }
+        .ai-notice code { color: inherit; font-weight: 600; }
+        .ai-now { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+        .ai-now-card { padding: 12px 14px; border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; }
+        .ai-now-card .ai-now-cap { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #64748b; }
+        .ai-now-card strong { display: block; margin-top: 4px; color: #0f172a; font-size: 0.92rem; }
+        .ai-now-card .ai-now-model { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; color: #334155; word-break: break-all; }
+        .ai-now-card small { display: block; margin-top: 6px; color: #64748b; font-size: 0.76rem; }
+        .ai-source { display: inline-block; margin-top: 8px; padding: 1px 8px; border-radius: 999px; background: #f1f5f9; color: #475569; font-size: 0.7rem; font-weight: 600; }
+        .ai-key { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+        .ai-test-ok { color: #15803d; font-size: 0.82rem; }
+        .ai-test-bad { color: #b91c1c; font-size: 0.82rem; }
+        .ai-cap { display: inline-block; margin: 0 4px 2px 0; padding: 1px 8px; border-radius: 999px; background: #f1f5f9; color: #334155; font-size: 0.72rem; font-weight: 600; }
+        .ai-caps { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+        .ai-caps label { display: inline-flex; align-items: center; gap: 6px; font-size: 0.86rem; font-weight: 500; margin: 0; }
+        .ai-model-id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; word-break: break-all; }
+        .ai-price { font-size: 0.8rem; color: #334155; white-space: nowrap; }
+        .ai-price.is-missing { color: #b45309; }
+        .ai-fetch-list { max-height: 50vh; overflow-y: auto; border: 1px solid #e2e8f0; border-radius: 10px; }
+        .ai-fetch-list label { display: flex; align-items: center; gap: 8px; padding: 7px 12px; margin: 0; border-bottom: 1px solid #f1f5f9; font-size: 0.84rem; cursor: pointer; }
+        .ai-fetch-list label:last-child { border-bottom: 0; }
+        .ai-fetch-list label.is-known { color: #94a3b8; cursor: default; }
+        .ai-row-off td { opacity: 0.55; }
         @media (max-width: 640px) {
             .preset-admin-row { flex-wrap: wrap; }
             .preset-admin-main { flex-basis: calc(100% - 60px); }
@@ -827,6 +854,9 @@
                 </button>
                 <button type="button" class="bc-nav-item" data-admin-tab="images" onclick="switchAdminTab('images')">
                     <i class="fas fa-image"></i> Image Settings
+                </button>
+                <button type="button" class="bc-nav-item" data-admin-tab="ai" onclick="switchAdminTab('ai'); loadAiProviders();">
+                    <i class="fas fa-microchip"></i> AI providers
                 </button>
                 <button type="button" class="bc-nav-item" data-admin-tab="plans" onclick="switchAdminTab('plans'); loadPlanEditor();">
                     <i class="fas fa-gem"></i> Plans
@@ -1281,6 +1311,48 @@
                 </div>
             </div>
 
+            <!-- PANE: AI PROVIDERS (admin_ai.js; services/ai_router.py, AI_PROVIDERS_PLAN.md) -->
+            <div class="admin-pane d-none" id="adminPaneAi">
+                <div class="bc-pane-header">
+                    <div>
+                        <h5><i class="fas fa-microchip text-primary me-2"></i>AI providers</h5>
+                        <p>The provider accounts AVIR AI can use, the models they offer and what each model costs. Choosing which model serves each feature comes next.</p>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn-xs btn-xs-solid-success" onclick="openAiConnection()"><i class="fas fa-plus me-1"></i>Add connection</button>
+                    </div>
+                </div>
+                <div class="ai-notice d-none" id="aiKeysNotice" role="status"></div>
+                <div class="ai-notice is-warning d-none" id="aiEnvNotice" role="status"></div>
+
+                <h6 class="ai-section-title">What runs now</h6>
+                <div class="ai-now" id="aiNow"><div class="text-muted small">Loading...</div></div>
+
+                <h6 class="ai-section-title">Connections</h6>
+                <div class="admin-table-wrap">
+                    <div class="admin-table-scroll">
+                        <table class="admin-table-light">
+                            <thead><tr><th>Name</th><th>Provider</th><th>API key</th><th>Last test</th><th class="text-end">Actions</th></tr></thead>
+                            <tbody id="aiConnectionsTbody"><tr><td colspan="5" class="text-center py-4 text-muted">Loading...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="d-flex align-items-center justify-content-between mt-4 mb-2">
+                    <h6 class="ai-section-title m-0">Models and prices</h6>
+                    <button type="button" class="btn-xs btn-xs-outline-neutral" onclick="openAiModel()"><i class="fas fa-plus me-1"></i>Add a model by hand</button>
+                </div>
+                <p class="small text-muted mb-2">Prices are what the provider charges you, in US dollars. They are used to charge users' credits, so keep them exact.</p>
+                <div class="admin-table-wrap">
+                    <div class="admin-table-scroll">
+                        <table class="admin-table-light">
+                            <thead><tr><th>Model</th><th>Connection</th><th>Can do</th><th>Price</th><th>On</th><th class="text-end">Actions</th></tr></thead>
+                            <tbody id="aiModelsTbody"><tr><td colspan="6" class="text-center py-4 text-muted">Loading...</td></tr></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
             <!-- PANE: AUDIT LOG (admin.js loadAuditLog; db.AuditLog) -->
             <div class="admin-pane d-none" id="adminPaneAudit">
                 <div class="bc-pane-header">
@@ -1299,6 +1371,7 @@
                             <option value="2fa">Two-step sign-in</option>
                             <option value="login">Failed codes</option>
                             <option value="payment">Payments</option>
+                            <option value="ai">AI providers</option>
                         </select>
                     </div>
                 </div>
@@ -1617,6 +1690,121 @@
         </div>
     </aside>
 
+    <!-- AI providers: a connection (admin_ai.js) -->
+    <div class="admin-panel-backdrop" id="aiConnBackdrop" onclick="closeAiPanels()"></div>
+    <aside class="admin-side-panel" id="aiConnPanel" aria-labelledby="aiConnTitle">
+        <div class="admin-side-panel-header">
+            <h5 id="aiConnTitle"><i class="fas fa-plug text-primary me-2"></i>Add connection</h5>
+            <button type="button" class="admin-side-panel-close" onclick="closeAiPanels()" aria-label="Close"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="admin-side-panel-body">
+            <div class="admin-form-group">
+                <label for="aiConnName">Name</label>
+                <input type="text" id="aiConnName" class="form-control form-control-sm" maxlength="120" placeholder="e.g. OpenAI - main account">
+            </div>
+            <div class="admin-form-group" id="aiConnKindGroup">
+                <label for="aiConnKind">Provider</label>
+                <select id="aiConnKind" class="form-select form-select-sm"></select>
+            </div>
+            <div class="admin-form-group" id="aiConnUrlGroup">
+                <label for="aiConnUrl">API address</label>
+                <input type="url" id="aiConnUrl" class="form-control form-control-sm" placeholder="https://api.openai.com/v1">
+                <div class="small text-muted mt-1" id="aiConnUrlHint">Fill in a known provider:
+                    <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-ai-url="https://heyroute.ai/v1">HeyRoute</button> &middot;
+                    <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-ai-url="https://api.openai.com/v1">OpenAI</button> &middot;
+                    <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-ai-url="https://openrouter.ai/api/v1">OpenRouter</button> &middot;
+                    <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-ai-url="https://generativelanguage.googleapis.com/v1beta/openai">Gemini</button> &middot;
+                    <button type="button" class="btn btn-link btn-sm p-0 align-baseline" data-ai-url="https://api.meta.ai/v1">Meta (Muse)</button>
+                </div>
+            </div>
+            <div class="admin-form-group">
+                <label for="aiConnKey">API key</label>
+                <input type="password" id="aiConnKey" class="form-control form-control-sm" autocomplete="new-password" spellcheck="false">
+                <div class="small text-muted mt-1" id="aiConnKeyHint">Stored encrypted. It can't be shown again - only its last 4 characters.</div>
+                <label class="form-check mt-2 d-none" id="aiConnRemoveKeyRow">
+                    <input type="checkbox" class="form-check-input" id="aiConnRemoveKey">
+                    <span class="form-check-label small">Remove the key typed here</span>
+                </label>
+            </div>
+            <div class="small text-danger d-none" id="aiConnError" role="alert"></div>
+        </div>
+        <div class="admin-side-panel-footer">
+            <button type="button" class="btn-xs btn-xs-outline-neutral me-auto" onclick="closeAiPanels()">Cancel</button>
+            <button type="button" class="btn-xs btn-xs-solid-success" id="aiConnSave" onclick="saveAiConnection()"><i class="fas fa-check me-1"></i>Save and test</button>
+        </div>
+    </aside>
+
+    <!-- AI providers: a model (admin_ai.js) -->
+    <aside class="admin-side-panel" id="aiModelPanel" aria-labelledby="aiModelTitle">
+        <div class="admin-side-panel-header">
+            <h5 id="aiModelTitle"><i class="fas fa-cube text-primary me-2"></i>Add a model</h5>
+            <button type="button" class="admin-side-panel-close" onclick="closeAiPanels()" aria-label="Close"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="admin-side-panel-body">
+            <div class="admin-form-group" id="aiModelConnGroup">
+                <label for="aiModelConn">Connection</label>
+                <select id="aiModelConn" class="form-select form-select-sm"></select>
+            </div>
+            <div class="admin-form-group">
+                <label for="aiModelId">Model id <span class="text-muted fw-normal">(exactly as the provider names it)</span></label>
+                <input type="text" id="aiModelId" class="form-control form-control-sm" maxlength="200" spellcheck="false" placeholder="e.g. gpt-5.6-terra">
+            </div>
+            <div class="admin-form-group">
+                <label for="aiModelLabel">Name shown in Admin <span class="text-muted fw-normal">(optional)</span></label>
+                <input type="text" id="aiModelLabel" class="form-control form-control-sm" maxlength="200">
+            </div>
+            <div class="admin-form-group">
+                <label>What it can do</label>
+                <div class="ai-caps" id="aiModelCaps"></div>
+            </div>
+            <div class="ai-prices">
+                <div class="admin-form-group" data-price-for="text vision">
+                    <label for="aiPriceIn">Input, per 1,000 tokens (USD)</label>
+                    <input type="number" step="0.000001" min="0" id="aiPriceIn" class="form-control form-control-sm" placeholder="e.g. 0.0025">
+                </div>
+                <div class="admin-form-group" data-price-for="text vision">
+                    <label for="aiPriceOut">Output, per 1,000 tokens (USD)</label>
+                    <input type="number" step="0.000001" min="0" id="aiPriceOut" class="form-control form-control-sm" placeholder="e.g. 0.01">
+                </div>
+                <div class="admin-form-group" data-price-for="image">
+                    <label for="aiPriceImage">Per image (USD)</label>
+                    <input type="number" step="0.0001" min="0" id="aiPriceImage" class="form-control form-control-sm" placeholder="e.g. 0.04">
+                </div>
+                <div class="admin-form-group" data-price-for="video">
+                    <label for="aiPriceVideo">Per second of video (USD)</label>
+                    <input type="number" step="0.0001" min="0" id="aiPriceVideo" class="form-control form-control-sm" placeholder="e.g. 0.70">
+                </div>
+            </div>
+            <div class="small text-danger d-none" id="aiModelError" role="alert"></div>
+        </div>
+        <div class="admin-side-panel-footer">
+            <button type="button" class="btn-xs btn-xs-outline-neutral me-auto" onclick="closeAiPanels()">Cancel</button>
+            <button type="button" class="btn-xs btn-xs-solid-success" id="aiModelSave" onclick="saveAiModel()"><i class="fas fa-check me-1"></i>Save</button>
+        </div>
+    </aside>
+
+    <!-- AI providers: models a connection offers (admin_ai.js) -->
+    <aside class="admin-side-panel wide" id="aiFetchPanel" aria-labelledby="aiFetchTitle">
+        <div class="admin-side-panel-header">
+            <h5 id="aiFetchTitle"><i class="fas fa-list text-primary me-2"></i>Models offered</h5>
+            <button type="button" class="admin-side-panel-close" onclick="closeAiPanels()" aria-label="Close"><i class="fas fa-xmark"></i></button>
+        </div>
+        <div class="admin-side-panel-body">
+            <p class="small text-muted" id="aiFetchIntro"></p>
+            <input type="search" id="aiFetchFilter" class="form-control form-control-sm mb-2" placeholder="Filter models">
+            <div class="ai-fetch-list" id="aiFetchList"></div>
+            <div class="admin-form-group mt-3">
+                <label>The ticked models can do</label>
+                <div class="ai-caps" id="aiFetchCaps"></div>
+                <div class="small text-muted mt-1">Add prices afterwards in the models table.</div>
+            </div>
+        </div>
+        <div class="admin-side-panel-footer">
+            <button type="button" class="btn-xs btn-xs-outline-neutral me-auto" onclick="closeAiPanels()">Cancel</button>
+            <button type="button" class="btn-xs btn-xs-solid-success" id="aiFetchAdd" onclick="addFetchedAiModels()"><i class="fas fa-plus me-1"></i>Add ticked models</button>
+        </div>
+    </aside>
+
     <!-- Image command editor (Image Settings -> Image commands -> Edit) -->
     <div class="admin-panel-backdrop" id="presetEditBackdrop" onclick="closePresetEditor()"></div>
     <aside class="admin-side-panel wide preset-editor" id="presetEditPanel" aria-labelledby="presetEditTitle">
@@ -1778,12 +1966,13 @@
             document.querySelectorAll('.admin-pane').forEach(function (pane) {
                 pane.classList.add('d-none');
             });
-            var paneMap = { users: 'adminPaneUsers', requests: 'adminPaneRequests', cost: 'adminPaneCost', invites: 'adminPaneInvites', emails: 'adminPaneEmails', images: 'adminPaneImages', plans: 'adminPanePlans', audit: 'adminPaneAudit', payments: 'adminPanePayments' };
+            var paneMap = { users: 'adminPaneUsers', requests: 'adminPaneRequests', cost: 'adminPaneCost', invites: 'adminPaneInvites', emails: 'adminPaneEmails', images: 'adminPaneImages', plans: 'adminPanePlans', audit: 'adminPaneAudit', payments: 'adminPanePayments', ai: 'adminPaneAi' };
             var pane = document.getElementById(paneMap[tab]);
             if (pane) pane.classList.remove('d-none');
         }
     </script>
     <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/admin_ai.js') }}"></script>
 <script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
     {% include 'partials/cookie_consent.html' %}
 </body>

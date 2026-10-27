@@ -174,7 +174,7 @@ failed, so a broken setup can't go live by accident.
 
 | Phase | What ships | Size |
 |---|---|---|
-| 1. Foundation | Tables, encryption with `AI_KEYS_ENCRYPTION_KEY`, router with `ENV_FILE` fallback, seeding the tables from today's settings on first start (nothing changes for users), Admin: Connections + Models (fetch, test, prices), honest AI status | 3-4 days |
+| 1. Foundation (done) | Tables, encryption with `AI_KEYS_ENCRYPTION_KEY`, router with `ENV_FILE` fallback, seeding the tables from today's settings on first start (nothing changes for users), Admin: Connections + Models (fetch, test, prices), honest AI status | 3-4 days |
 | 2. Text | Text routing + per-feature overrides, `LLMService(feature=...)` at the 18 call sites, model-based token costs, Test this route | 3 days |
 | 3. Images and vision | Image, edit, carousel and vision routes; Image Settings models moved in; per-user image model kept | 2-3 days |
 | 4. Video and polish | Video route with fallbacks and per-model settings, History + Revert, key rotation script, Help article | 2-3 days |

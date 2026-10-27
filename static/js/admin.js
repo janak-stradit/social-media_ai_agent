@@ -1161,7 +1161,7 @@ $(document).ready(function () {
         $('#imgAvailableModels').html(available.map(id => `<option value="${escapeAttr(id)}">`).join(''));
         $('#imgAvailableHint').text(available.length
             ? `Image models on your HeyRoute image key: ${available.join(', ')}. Other models on the key are text models and can't make images.`
-            : 'Type the HeyRoute model id exactly as HeyRoute lists it.');
+            : 'Type the model id exactly as its provider lists it. A model from another provider (e.g. Meta) also needs its connection in AI providers; otherwise it is sent to HeyRoute.');
         $('#imgSettingsError').addClass('d-none');
         syncRemoveButtons();
         flagNonImageModels();
