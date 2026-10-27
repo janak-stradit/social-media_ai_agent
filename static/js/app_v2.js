@@ -290,17 +290,14 @@ $(document).ready(function () {
     });
 
     // Composer "Options": platforms, what to make and voice / tone / language
-    // open in a panel above the toolbar; closed, a one-line summary says what
-    // is picked. Remembered in this browser; opens by itself while no platform
-    // is picked (nothing can be generated without one).
-    const OPTIONS_KEY = 'avir_composer_options_open';
-    function setComposerOptions(open, remember) {
+    // open in a panel above the toolbar. It always starts closed; the one-line
+    // summary next to the button says what is picked (or "Pick a platform").
+    function setComposerOptions(open) {
         $('#dropZone').toggleClass('options-open', open);
         $('#dockOptionsBtn').toggleClass('active', open).attr('aria-expanded', String(open));
-        if (remember) { try { localStorage.setItem(OPTIONS_KEY, open ? '1' : '0'); } catch (e) { /* storage blocked */ } }
     }
-    window.openComposerOptions = function () { setComposerOptions(true, false); };
-    $('#dockOptionsBtn').on('click', function () { setComposerOptions(!$('#dropZone').hasClass('options-open'), true); });
+    window.openComposerOptions = function () { setComposerOptions(true); };
+    $('#dockOptionsBtn').on('click', function () { setComposerOptions(!$('#dropZone').hasClass('options-open')); });
 
     function updateComposerSummary() {
         const names = $('.platform-chips-inline input:checked').map(function () {
@@ -316,13 +313,9 @@ $(document).ready(function () {
         $('#composerSummary').text(parts.join(' · ')).toggleClass('is-missing', !names.length);
     }
     $('#dropZone').on('change', 'input, select', updateComposerSummary);
-    let optionsPref = null;
-    try { optionsPref = localStorage.getItem(OPTIONS_KEY); } catch (e) { /* storage blocked */ }
-    setComposerOptions(optionsPref === '1', false);
-    setTimeout(function () {  // after last time's choices are restored
-        updateComposerSummary();
-        if (!$('.platform-chips-inline input:checked').length) setComposerOptions(true, false);
-    }, 400);
+    setComposerOptions(false);
+    try { localStorage.removeItem('avir_composer_options_open'); } catch (e) { /* storage blocked */ }  // old "remember open" choice
+    setTimeout(updateComposerSummary, 400);  // after last time's choices are restored
 
     // Chat header: full at the top of the chat, a slim bar (with the
     // conversation's name) once the chat is scrolled. Two thresholds, so it
