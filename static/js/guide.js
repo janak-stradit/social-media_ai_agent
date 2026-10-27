@@ -46,7 +46,7 @@
             { element: '#bpRules', popover: { title: 'Do\'s and don\'ts', description: 'Things to always or never say. Add your own, for example <em>"never mention prices"</em>.' } },
             { element: '#bpCompliance', popover: { title: 'Industry and markets', description: 'These decide which advertising rules your captions are checked against, and which festivals appear in Ideas for you.' } },
             { element: '#bpRescanBtn', popover: { title: 'Website changed?', description: '<strong>Re-analyze</strong> reads your site again and fetches your logo afresh, for example after a rebrand.' } },
-            { element: '#bpSaveBtn', popover: { title: 'Save your changes', description: 'Edits apply to the next post you generate.' } },
+            { popover: { title: 'Save your changes', description: 'When you change anything, a bar appears at the bottom with <strong>Save all</strong>: it saves every section at once (or press Ctrl+S). Edits apply to the next post you generate.' } },
         ],
         approvals: [
             { popover: { title: 'Approval requests', description: 'Every post sent for review is listed here: the ones you sent, and the ones sent to you to review.' } },
