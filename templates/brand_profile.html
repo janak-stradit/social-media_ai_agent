@@ -701,6 +701,35 @@
             .bc-nav-item { white-space: nowrap; width: auto; }
             .bc-content { padding: 1.5rem 1rem 4rem; }
         }
+
+        /* One Save all bar (brand_profile.js refreshSaveBar) */
+        .bp-savebar { position: fixed; left: 50%; bottom: 16px; z-index: 1040; width: min(760px, calc(100% - 24px));
+            transform: translate(-50%, 140%); transition: transform 0.22s ease; pointer-events: none; }
+        .bp-savebar.is-visible { transform: translate(-50%, 0); pointer-events: auto; }
+        .bp-savebar-inner { display: flex; align-items: center; gap: 12px; padding: 10px 12px 10px 16px; border-radius: 14px;
+            background: #111827; color: #fff; box-shadow: 0 16px 40px rgba(15, 23, 42, 0.32); }
+        .bp-savebar-icon { flex-shrink: 0; }
+        .bp-savebar-icon.is-clean { color: #4ade80; }
+        .bp-savebar-icon.is-dirty { color: #fb923c; display: none; }
+        .bp-savebar.is-dirty .bp-savebar-icon.is-clean { display: none; }
+        .bp-savebar.is-dirty .bp-savebar-icon.is-dirty { display: inline-block; }
+        .bp-savebar.is-dirty .bp-savebar-inner { box-shadow: 0 0 0 2px #fb923c, 0 16px 40px rgba(15, 23, 42, 0.32); }
+        .bp-savebar-text { flex: 1; min-width: 0; font-size: 0.88rem; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .bp-savebar-actions { display: flex; gap: 8px; flex-shrink: 0; }
+        .bp-savebar-discard { border: 1px solid #374151; background: transparent; color: #e5e7eb; border-radius: 8px; padding: 0.45rem 0.9rem;
+            font-size: 0.86rem; font-weight: 600; cursor: pointer; }
+        .bp-savebar-discard:hover { background: #1f2937; }
+        .bp-savebar-discard:focus-visible, .bp-savebar .btn-primary-save:focus-visible { outline: 2px solid #fb923c; outline-offset: 2px; }
+        .bp-savebar .btn-primary-save { padding: 0.45rem 1.1rem; }
+        .bp-savebar button:disabled { opacity: 0.45; cursor: not-allowed; }
+        body.bp-has-savebar .bc-content-inner { padding-bottom: 96px; }
+        @media (max-width: 576px) {
+            .bp-savebar-inner { flex-wrap: wrap; }
+            .bp-savebar-text { flex-basis: calc(100% - 30px); white-space: normal; }
+            .bp-savebar-actions { flex-basis: 100%; }
+            .bp-savebar-actions button { flex: 1; }
+        }
+        @media (prefers-reduced-motion: reduce) { .bp-savebar { transition: none; } }
     </style>
 </head>
 
@@ -995,7 +1024,7 @@
 
                         <!-- Card 7: Compliance (Full Width) - industry + markets select the
                              advertising rules content must follow (services/compliance_rules.py).
-                             Saved separately via its own Confirm button. -->
+                             Saved (and first confirmed) by the page's Save all bar. -->
                         <div class="brand-config-card" id="bpCompliance" style="grid-column: 1 / -1;">
                             <h6><div class="card-icon-circle"><i data-feather="check-square"></i></div> Compliance</h6>
                             <div class="brand-config-card-desc">Your industry and markets decide which advertising regulations your content follows. We detected these from your website - review and confirm.</div>
@@ -1019,12 +1048,6 @@
                                 <span class="small" id="bpComplianceStatus"></span>
                             </div>
                             <div id="bpComplianceRules" class="bp-compliance-rules"></div>
-
-                            <div class="d-flex justify-content-end mt-3">
-                                <button type="button" class="btn-primary-save" id="bpComplianceSaveBtn" onclick="saveComplianceProfile()">
-                                    <i data-feather="check" class="me-2"></i>Confirm Compliance Settings
-                                </button>
-                            </div>
                         </div>
 
                         <!-- Card 8: Approval Reviewer (Full Width) - filled by approval_settings.js -->
@@ -1032,21 +1055,27 @@
 
                     </div> <!-- end masonry grid -->
 
-                    <!-- Save Button Area -->
-                    <div class="d-flex justify-content-end align-items-center mt-3 mb-4 gap-3">
-                        <div class="unsaved-warning" id="bpUnsavedWarning" style="opacity: 0; transition: opacity 0.2s; background: rgba(255,255,255,0.9); padding: 0.4rem 0.8rem; border-radius: var(--radius-sm); box-shadow: var(--shadow-sm); border: 1px solid var(--border-color);">
-                            <i data-feather="alert-circle" style="width:16px;"></i> Unsaved changes
-                        </div>
-                        <button type="button" class="btn-primary-save shadow" id="bpSaveBtn" onclick="saveBrandProfile()">
-                            <i data-feather="check" class="me-2"></i>Save Changes
-                        </button>
-                    </div>
                 </div> <!-- end form wrap -->
             </div> <!-- end bc-content-inner -->
         </main>
     </div>
 
 
+
+    <!-- One Save all bar for the whole page (brand_profile.js refreshSaveBar): shows
+         while anything is unsaved - brand details, compliance, the reviewer - and
+         saves them together. Ctrl+S saves too. -->
+    <div class="bp-savebar" id="bpSaveBar" role="region" aria-label="Unsaved changes" aria-live="polite">
+        <div class="bp-savebar-inner">
+            <i class="fas fa-circle-check bp-savebar-icon is-clean" aria-hidden="true"></i>
+            <i class="fas fa-circle-exclamation bp-savebar-icon is-dirty" aria-hidden="true"></i>
+            <span class="bp-savebar-text" id="bpSaveBarText">All changes saved</span>
+            <div class="bp-savebar-actions">
+                <button type="button" class="bp-savebar-discard" id="bpDiscard" disabled>Discard</button>
+                <button type="button" class="btn-primary-save" id="bpSaveAll" disabled><i class="fas fa-check me-2"></i>Save all</button>
+            </div>
+        </div>
+    </div>
 
     <div class="toast-container position-fixed bottom-0 end-0 p-3">
         <div id="toast" class="ent-toast" role="alert">

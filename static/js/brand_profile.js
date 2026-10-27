@@ -6,6 +6,7 @@
 $(document).ready(function () {
     const HEX_COLOR_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
     let initialFormState = '';
+    let lastProfile = null;  // what was loaded, for Discard
 
     function showToast(msg, type = 'info') {
         const icons = {
@@ -300,9 +301,11 @@ $(document).ready(function () {
         $('#bpContentDonts').trigger('update.listInput');
 
         // Save initial state for dirty tracking
+        lastProfile = profile;
         setTimeout(() => {
             initialFormState = getFormState();
-            checkDirtyState();
+            initialCardStates = cardStates();
+            refreshSaveBar();
         }, 50);
     }
 
@@ -344,6 +347,8 @@ $(document).ready(function () {
     // main form's dirty tracking (form-select/checkboxes, not .form-control).
     let complianceExcluded = new Set();
     let industryLabels = {};
+    let complianceSaved = null;     // {industry, regions, excluded} as stored
+    let complianceConfirmed = true; // false until the detected settings are confirmed once
     const SEVERITY_BADGE = { high: 'bg-danger-subtle text-danger', medium: 'bg-warning-subtle text-warning', low: 'bg-secondary-subtle text-secondary' };
 
     function loadComplianceProfile() {
@@ -368,8 +373,11 @@ $(document).ready(function () {
 
             $('#bpComplianceNotice').text(r.notice);
             complianceExcluded = new Set(r.excluded_rule_ids || []);
+            complianceSaved = complianceState();
+            complianceConfirmed = !!r.confirmed_at;
             setComplianceStatus(r.confirmed_at);
             renderComplianceRules(r.rules);
+            refreshSaveBar();
         }).fail(function () {
             $('#bpCompliance').addClass('d-none');
         });
@@ -379,6 +387,15 @@ $(document).ready(function () {
         $('#bpComplianceStatus').html(confirmedAt
             ? `<span class="text-success"><i class="fas fa-check-circle me-1"></i>Confirmed ${escapeHtml(confirmedAt)}</span>`
             : '<span class="text-warning"><i class="fas fa-exclamation-circle me-1"></i>Not confirmed yet - review and confirm</span>');
+    }
+
+    function complianceState() {
+        return JSON.stringify({ industry: $('#bpComplianceIndustry').val(), regions: selectedComplianceRegions().sort(),
+            excluded: Array.from(complianceExcluded).sort() });
+    }
+    function complianceDirty() {
+        if (complianceSaved === null || $('#bpCompliance').hasClass('d-none')) return false;
+        return !complianceConfirmed || complianceState() !== complianceSaved;
     }
 
     function selectedComplianceRegions() {
@@ -430,8 +447,8 @@ $(document).ready(function () {
         });
     }
 
-    $('#bpComplianceIndustry').on('change', previewComplianceRules);
-    $('#bpComplianceRegions').on('change', '.bp-compliance-region', previewComplianceRules);
+    $('#bpComplianceIndustry').on('change', () => { previewComplianceRules(); refreshSaveBar(); });
+    $('#bpComplianceRegions').on('change', '.bp-compliance-region', () => { previewComplianceRules(); refreshSaveBar(); });
     $('#bpComplianceRules').on('change', '.bp-rule-applies', function () {
         const $rule = $(this).closest('.bp-rule');
         const ruleId = $rule.attr('data-rule');
@@ -440,16 +457,14 @@ $(document).ready(function () {
         const total = $('#bpComplianceRules .bp-rule').length;
         $('#bpComplianceRuleCount').text(`(${total - $('#bpComplianceRules .bp-rule.excluded').length} of ${total} active)`);
         setComplianceStatus(null);
+        refreshSaveBar();
     });
 
-    window.saveComplianceProfile = function () {
+    // -> a jQuery promise (the Save all bar runs it); rejects with the reason
+    function saveComplianceProfile() {
         const regions = selectedComplianceRegions();
-        if (!regions.length) {
-            showToast('Select at least one market.', 'warning');
-            return;
-        }
-        const $btn = $('#bpComplianceSaveBtn').prop('disabled', true);
-        $.ajax({
+        if (!regions.length) return $.Deferred().reject('Compliance: select at least one market.').promise();
+        return $.ajax({
             url: '/api/compliance-profile',
             type: 'PUT',
             contentType: 'application/json',
@@ -458,17 +473,15 @@ $(document).ready(function () {
                 regions: regions,
                 excluded_rule_ids: Array.from(complianceExcluded)
             }),
-            success: function () {
-                $btn.prop('disabled', false);
-                showToast('Compliance settings confirmed.', 'success');
-                loadComplianceProfile();
-            },
-            error: function (xhr) {
-                $btn.prop('disabled', false);
-                showToast((xhr.responseJSON && xhr.responseJSON.error) || 'Failed to save compliance settings.', 'error');
-            }
+        }).then(function (r) {
+            complianceSaved = complianceState();
+            complianceConfirmed = true;
+            loadComplianceProfile();
+            return r;
+        }, function (xhr) {
+            return $.Deferred().reject((xhr.responseJSON && xhr.responseJSON.error) || 'Compliance settings could not be saved.').promise();
         });
-    };
+    }
 
     function updateFontsHint() {
         const fonts = $('#bpFonts').val().trim();
@@ -483,21 +496,104 @@ $(document).ready(function () {
         return $('#bpFormWrap .form-control').map(function () { return $(this).val(); }).get().join('||');
     }
 
-    function checkDirtyState() {
-        if ($('#bpFormWrap').hasClass('d-none')) return;
-        const currentState = getFormState();
-        const isDirty = currentState !== initialFormState;
-
-        if (isDirty) {
-            $('#bpUnsavedWarning').css('opacity', '1');
-        } else {
-            $('#bpUnsavedWarning').css('opacity', '0');
-        }
+    // Each profile card's values, so the Save all bar can say which ones changed
+    let initialCardStates = {};
+    function cardStates() {
+        const states = {};
+        $('#bpFormWrap .brand-config-card').each(function () {
+            const values = $(this).find('.form-control').map(function () { return $(this).val(); }).get();
+            if (values.length && this.id && this.id !== 'bpCompliance') states[this.id] = values.join('||');
+        });
+        return states;
+    }
+    function cardName(id) {
+        return $(`#${id} > h6`).first().text().trim() || 'Brand details';
+    }
+    function profileDirty() {
+        return !$('#bpFormWrap').hasClass('d-none') && getFormState() !== initialFormState;
     }
 
-    // Bind dirty checking
-    $('#bpFormWrap').on('input', '.form-control', function () {
-        checkDirtyState();
+    function checkDirtyState() { refreshSaveBar(); }
+
+    // ── One Save all bar for the whole page ─────────────────────────────
+    // Profile fields, Compliance and the Approval reviewer each save to their
+    // own endpoint; the bar saves every changed part together and keeps a
+    // part that failed marked as unsaved.
+    function changedParts() {
+        const parts = [];
+        if (profileDirty()) {
+            const now = cardStates();
+            Object.keys(now).forEach(id => { if (now[id] !== initialCardStates[id]) parts.push(cardName(id)); });
+            if (!parts.length) parts.push('Brand details');
+        }
+        if (complianceDirty()) parts.push(complianceConfirmed ? 'Compliance' : 'Compliance (needs confirming)');
+        if (window.approvalReviewer && window.approvalReviewer.isDirty()) parts.push('Approval reviewer');
+        return parts;
+    }
+    let saving = false;
+    // Always on screen while the profile is open: "All changes saved" (Save all
+    // greyed out) until something changes, then what changed.
+    function refreshSaveBar() {
+        const open = !$('#bpFormWrap').hasClass('d-none');
+        const parts = open ? changedParts() : [];
+        $('#bpSaveBar').toggleClass('is-visible', open).toggleClass('is-dirty', parts.length > 0 || saving);
+        $('body').toggleClass('bp-has-savebar', open);
+        if (!saving) {
+            $('#bpSaveBarText').text(parts.length ? `Unsaved changes: ${parts.join(', ')}` : 'All changes saved');
+            $('#bpSaveAll').prop('disabled', !parts.length);
+            $('#bpDiscard').prop('disabled', !parts.length);
+        }
+    }
+    function saveAll() {
+        if (saving) return;
+        const jobs = [];
+        if (profileDirty()) jobs.push(['Brand details', saveBrandProfile]);
+        if (complianceDirty()) jobs.push(['Compliance', saveComplianceProfile]);
+        if (window.approvalReviewer && window.approvalReviewer.isDirty()) jobs.push(['Approval reviewer', window.approvalReviewer.save]);
+        if (!jobs.length) return;
+        saving = true;
+        $('#bpSaveAll').prop('disabled', true).html('<span class="spinner-border spinner-border-sm me-2"></span>Saving...');
+        $('#bpDiscard').prop('disabled', true);
+        $('#bpSaveBarText').text(`Saving ${jobs.map(j => j[0]).join(', ')}...`);
+        // every part runs, even when another fails
+        const settled = jobs.map(([name, run]) => {
+            const result = $.Deferred();
+            run().then(() => result.resolve({ name: name, ok: true }), reason => result.resolve({ name: name, ok: false, reason: reason }));
+            return result.promise();
+        });
+        $.when(...settled).then(function (...results) {
+            saving = false;
+            $('#bpSaveAll').prop('disabled', false).html('<i class="fas fa-check me-2"></i>Save all');
+            $('#bpDiscard').prop('disabled', false);
+            const failed = results.filter(r => !r.ok);
+            if (!failed.length) showToast(jobs.length > 1 ? 'All changes saved.' : `${jobs[0][0]} saved.`, 'success');
+            else showToast(`${failed.map(f => f.reason || `${f.name} could not be saved`).join(' ')}`, 'error');
+            refreshSaveBar();
+        });
+    }
+    function discardAll() {
+        if (lastProfile) populateForm(lastProfile);
+        if (complianceSaved !== null) loadComplianceProfile();
+        if (window.approvalReviewer) window.approvalReviewer.discard();
+        setTimeout(refreshSaveBar, 80);
+        showToast('Changes discarded.', 'info');
+    }
+    $('#bpSaveAll').on('click', saveAll);
+    $('#bpDiscard').on('click', discardAll);
+    $(document).on('approvalReviewer:change', refreshSaveBar);
+    $(document).on('keydown', function (e) {  // Ctrl+S / Cmd+S saves everything
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && !$('#bpFormWrap').hasClass('d-none')) {
+            e.preventDefault();
+            saveAll();
+        }
+    });
+    window.addEventListener('beforeunload', function (e) {  // leaving with unsaved edits asks first
+        if (changedParts().length && !saving) { e.preventDefault(); e.returnValue = ''; }
+    });
+
+    // Bind dirty checking (tag and list inputs fire "input" on their textareas)
+    $('#bpFormWrap').on('input change', '.form-control', function () {
+        refreshSaveBar();
         if ($(this).attr('id') === 'bpFonts') updateFontsHint();
     });
 
@@ -564,10 +660,8 @@ $(document).ready(function () {
         });
     }
 
-    window.saveBrandProfile = function () {
-        const $btn = $('#bpSaveBtn');
-        $btn.prop('disabled', true);
-
+    // -> a jQuery promise (the Save all bar runs it); rejects with the reason
+    function saveBrandProfile() {
         const payload = {
             company_name: $('#bpCompanyName').val().trim(),
             industry: $('#bpIndustry').val().trim(),
@@ -584,28 +678,23 @@ $(document).ready(function () {
             content_donts: linesToList($('#bpContentDonts').val())
         };
 
-        $.ajax({
+        const sentState = getFormState(), sentCards = cardStates();
+        return $.ajax({
             url: '/api/brand-profile',
             type: 'PUT',
             contentType: 'application/json',
             data: JSON.stringify(payload),
-            success: function (r) {
-                if (r.success) {
-                    $btn.prop('disabled', false);
-                    showToast('Brand configuration saved!', 'success');
-                    initialFormState = getFormState();
-                    checkDirtyState();
-                } else {
-                    $btn.prop('disabled', false);
-                    showToast(r.error || 'Failed to save.', 'error');
-                }
-            },
-            error: function (xhr) {
-                $btn.prop('disabled', false);
-                showToast((xhr.responseJSON && xhr.responseJSON.error) || 'Failed to save.', 'error');
-            }
+        }).then(function (r) {
+            if (!r.success) return $.Deferred().reject(r.error || 'Brand details could not be saved.').promise();
+            // what was sent is now saved (edits typed during the save stay unsaved)
+            initialFormState = sentState;
+            initialCardStates = sentCards;
+            lastProfile = Object.assign({}, lastProfile || {}, payload);
+            return r;
+        }, function (xhr) {
+            return $.Deferred().reject((xhr.responseJSON && xhr.responseJSON.error) || 'Brand details could not be saved.').promise();
         });
-    };
+    }
 
     window.rescanBrandProfile = function (source) {
         const isEmpty = source === 'empty';

@@ -1,17 +1,32 @@
-// Content Calendar (templates/calendar.html): this week's goal on top, the
-// month below. Data: /api/calendar (services/calendar_service.py). Vanilla JS
-// like user_menu.js - the page loads neither jQuery nor Bootstrap's JS.
+// Content Calendar (templates/calendar.html), a planner workspace: a slim strip
+// with this week's goal and the last 30 days, alerts for posts that didn't
+// publish, a "To plan" panel (open days, ideas, occasions) whose cards can be
+// dragged onto a day, and the calendar (Month or Week, filtered by platform).
+// Data: /api/calendar (services/calendar_service.py). Vanilla JS like
+// user_menu.js - the page loads neither jQuery nor Bootstrap's JS.
 (function () {
     const grid = document.getElementById('calGrid');
     if (!grid) return;
     const $ = (id) => document.getElementById(id);
     const tz = -new Date().getTimezoneOffset();  // minutes ahead of UTC: days follow the user's own clock
-    const RING = 2 * Math.PI * 27;
     const PLATFORM_ICONS = { linkedin: 'fa-linkedin', instagram: 'fa-instagram', facebook: 'fa-facebook', youtube: 'fa-youtube' };
     const CONVERSATION_KEY = 'avir_active_conversation';  // Studio Chat reopens this conversation (app_v2.js)
     const PENDING_IDEA_KEY = 'avir_pending_idea';         // ...or starts a new post from this idea
+    const PLANNED_DAY_KEY = 'avir_planned_day';           // ...planned for this day (approval_send.js offers it in Schedule)
+    const VIEW_KEY = 'avir_calendar_view', FILTER_KEY = 'avir_calendar_platforms';
+    const ALL_PLATFORMS = ['linkedin', 'instagram', 'facebook'];
     let shownMonth = null;  // "YYYY-MM"
     let goal = 3;
+    let lastData = null;
+    let view = 'month';      // month | week
+    let weekStart = null;    // the Monday shown in Week view ("YYYY-MM-DD")
+    let platforms = new Set(ALL_PLATFORMS);
+    let draggedIdea = null;  // a "To plan" card being dragged onto a day
+    try {
+        view = localStorage.getItem(VIEW_KEY) === 'week' ? 'week' : 'month';
+        const saved = JSON.parse(localStorage.getItem(FILTER_KEY) || 'null');
+        if (Array.isArray(saved) && saved.length) platforms = new Set(saved.filter(p => ALL_PLATFORMS.includes(p)));
+    } catch (e) { /* storage blocked: defaults */ }
 
     function el(tag, className, text) {
         const node = document.createElement(tag);
@@ -48,24 +63,14 @@
         $('calGoalDown').disabled = p.goal <= 1;
         $('calGoalUp').disabled = p.goal >= 7;
         const share = Math.min(1, p.done / p.goal);
-        const fill = $('calRingFill');
-        fill.style.strokeDasharray = RING;
-        fill.style.strokeDashoffset = RING * (1 - share);
-        $('calRing').classList.toggle('is-met', p.goal_met);
-        $('calRing').setAttribute('aria-label', p.done + ' of ' + p.goal + ' posts created this week');
+        $('calProgressFill').style.width = Math.round(share * 100) + '%';
+        $('calProgress').classList.toggle('is-met', p.goal_met);
+        $('calProgress').setAttribute('aria-label', p.done + ' of ' + p.goal + ' posts created this week');
         $('calGoalText').textContent = p.goal_met
             ? (p.done > p.goal ? 'Goal reached, and then some: ' + p.done + ' posts created this week.' : 'Goal reached. Nice work this week.')
             : (p.done === 0
-                ? 'No posts yet this week. Pick a suggested day below to get started.'
+                ? 'No posts yet this week. Drag an idea onto a day, or use an open day in To plan.'
                 : p.remaining + ' more ' + (p.remaining === 1 ? 'post' : 'posts') + ' to reach your goal this week.');
-
-        const week = $('calWeek');
-        week.textContent = '';
-        p.days.forEach(function (day) {
-            const dot = el('span', 'cal-week-day' + (day.count ? ' has-post' : '') + (day.date === p.today ? ' is-today' : ''));
-            dot.append(el('small', '', parseDay(day.date).toLocaleDateString(undefined, { weekday: 'narrow' })), el('b', '', day.count ? String(day.count) : ''));
-            week.appendChild(dot);
-        });
 
         const streak = $('calStreak');
         streak.classList.toggle('d-none', p.streak_weeks < 2);
@@ -93,6 +98,12 @@
     $('calGoalUp').addEventListener('click', function () { setGoal(goal + 1); });
 
     // ── The month ─────────────────────────────────────────────────────
+    // A post shows when it is for a platform that's switched on (or has no platform yet)
+    function shown(list) {
+        const on = (list || []).filter(p => ALL_PLATFORMS.includes(p));
+        return !on.length || on.some(p => platforms.has(p));
+    }
+
     function postChip(post) {
         const chip = el('button', 'cal-chip is-post');
         chip.type = 'button';
@@ -253,7 +264,7 @@
     }
 
     function scheduledChip(item) {
-        const chip = el('button', 'cal-chip is-scheduled is-' + item.status);
+        const chip = el('button', 'cal-chip is-scheduled is-' + item.status + (item.status === 'failed' || item.status === 'partial' ? ' is-failed' : ''));
         chip.type = 'button';
         chip.title = (STATUS_TEXT[item.status] || 'Scheduled') + ' at ' + item.time + ': ' + item.title
             + (item.movable ? ' (drag to another day to move it, or click for more)' : '');
@@ -293,9 +304,26 @@
         return chip;
     }
 
+    function startIdea(idea, dayIso) {
+        try {
+            sessionStorage.removeItem(CONVERSATION_KEY);
+            sessionStorage.setItem(PENDING_IDEA_KEY, JSON.stringify(idea));
+            if (dayIso) sessionStorage.setItem(PLANNED_DAY_KEY, dayIso); else sessionStorage.removeItem(PLANNED_DAY_KEY);
+        } catch (e) { /* storage blocked: Studio Chat opens without the idea */ }
+        window.location.href = '/dashboard';
+    }
+
+    function visibleDays(data) {
+        if (view !== 'week') return data.days;
+        const start = weekStart || mondayOf(data.today);
+        const end = isoDay(new Date(parseDay(start).getTime() + 7 * 864e5));
+        return data.days.filter(d => d.date >= start && d.date < end);
+    }
+
     function renderGrid(data) {
         grid.textContent = '';
-        data.days.forEach(function (day) {
+        grid.classList.toggle('is-week', view === 'week');
+        visibleDays(data).forEach(function (day) {
             const isToday = day.date === data.today;
             const cell = el('div', 'cal-day' + (day.in_month ? '' : ' is-outside') + (isToday ? ' is-today' : '')
                 + (day.date < data.today ? ' is-past' : ''));
@@ -315,14 +343,14 @@
                 tag.append(icon('fas fa-star'), el('span', '', occasion.name));
                 cell.appendChild(tag);
             });
-            day.posts.forEach(function (post) { cell.appendChild(postChip(post)); });
-            day.scheduled.forEach(function (item) { cell.appendChild(scheduledChip(item)); });
+            day.posts.filter(p => shown(p.platforms)).forEach(function (post) { cell.appendChild(postChip(post)); });
+            day.scheduled.filter(i => shown(i.platforms)).forEach(function (item) { cell.appendChild(scheduledChip(item)); });
             if (day.suggestion) cell.appendChild(slotChip(day));
-            if (day.date >= data.today) {  // a scheduled post can be dropped on today or a later day
+            if (day.date >= data.today) {  // a scheduled post or a To plan card can be dropped on today or a later day
                 cell.addEventListener('dragover', function (e) {
-                    if (!dragged) return;
+                    if (!dragged && !draggedIdea) return;
                     e.preventDefault();
-                    e.dataTransfer.dropEffect = 'move';
+                    e.dataTransfer.dropEffect = dragged ? 'move' : 'copy';
                     cell.classList.add('is-drop');
                 });
                 cell.addEventListener('dragleave', function () { cell.classList.remove('is-drop'); });
@@ -330,18 +358,133 @@
                     e.preventDefault();
                     cell.classList.remove('is-drop');
                     if (dragged) moveToDay(dragged, day.date);
+                    else if (draggedIdea) startIdea(draggedIdea, day.date);
                 });
             }
             grid.appendChild(cell);
         });
     }
 
-    function render(data) {
-        shownMonth = data.month;
+    function isoDay(date) {
+        return date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
+    }
+    function mondayOf(iso) {
+        const d = parseDay(iso);
+        d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+        return isoDay(d);
+    }
+    function title(data) {
+        if (view === 'week') {
+            const start = parseDay(weekStart || mondayOf(data.today));
+            const end = new Date(start.getTime() + 6 * 864e5);
+            const sameMonth = start.getMonth() === end.getMonth();
+            return start.toLocaleDateString(undefined, sameMonth ? { day: 'numeric' } : { day: 'numeric', month: 'short' })
+                + ' - ' + end.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+        }
         const parts = data.month.split('-').map(Number);
-        $('calMonth').textContent = new Date(parts[0], parts[1] - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+        return new Date(parts[0], parts[1] - 1, 1).toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    }
+
+    // ── To plan: open days this week, ideas, occasions ───────────────
+    function planCard(text, sub, iconClass, idea, dayIso) {
+        const card = el('button', 'cal-plan-card');
+        card.type = 'button';
+        const label = el('span', 'cal-plan-text');
+        label.append(el('strong', '', text), el('small', '', sub));
+        card.append(icon(iconClass), label);
+        if (idea) {
+            card.title = 'Click to start it in Studio Chat, or drag it onto a day';
+            card.draggable = true;
+            card.addEventListener('dragstart', function (e) {
+                draggedIdea = idea;
+                e.dataTransfer.effectAllowed = 'copy';
+                e.dataTransfer.setData('text/plain', idea.title || 'idea');
+                grid.classList.add('is-dragging');
+            });
+            card.addEventListener('dragend', function () {
+                draggedIdea = null;
+                grid.classList.remove('is-dragging');
+                grid.querySelectorAll('.is-drop').forEach(function (cell) { cell.classList.remove('is-drop'); });
+            });
+            card.addEventListener('click', function () { startIdea(idea, dayIso || null); });
+        }
+        return card;
+    }
+    const IDEA_GROUPS = { dates: 'Upcoming date', trending: 'Trending', playbook: 'Post type that works' };
+    function renderPlan(data) {
+        const plan = data.plan || { ideas: [], occasions: [] };
+        const weekEnd = isoDay(new Date(parseDay(mondayOf(data.today)).getTime() + 7 * 864e5));
+        const open = data.days.filter(d => d.suggestion && d.date >= data.today && d.date < weekEnd);
+        const openList = $('calPlanOpen');
+        openList.textContent = '';
+        open.forEach(function (day) {
+            const idea = day.suggestion.idea || { title: '', prompt: '' };
+            openList.appendChild(planCard(parseDay(day.date).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'short' }),
+                day.suggestion.idea ? day.suggestion.idea.title : 'A good day to post', 'fas fa-calendar-plus', idea, day.date));
+        });
+        if (!open.length) openList.appendChild(el('p', 'cal-plan-empty', data.progress.goal_met ? 'Your goal for this week is met.' : 'No open days left this week.'));
+
+        const ideas = $('calPlanIdeas');
+        ideas.textContent = '';
+        plan.ideas.forEach(function (idea) {
+            ideas.appendChild(planCard(idea.title, (IDEA_GROUPS[idea.group] || 'Idea') + (idea.platform ? ' · ' + (PLATFORM_NAMES[idea.platform] || idea.platform) : ''),
+                idea.platform && PLATFORM_ICONS[idea.platform] ? 'fab ' + PLATFORM_ICONS[idea.platform] : 'fas fa-lightbulb', idea));
+        });
+        if (!plan.ideas.length) {
+            ideas.appendChild(el('p', 'cal-plan-empty', data.has_brand_profile
+                ? 'Open Ideas for you in Studio Chat to get ideas here.' : 'Add your website on your brand profile to get ideas here.'));
+        }
+
+        const occasions = $('calPlanOccasions');
+        occasions.textContent = '';
+        plan.occasions.forEach(function (o) {
+            const days = Math.round((parseDay(o.date) - parseDay(data.today)) / 864e5);
+            const when = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : 'In ' + days + ' days · ' + parseDay(o.date).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+            occasions.appendChild(planCard(o.name, when + ' · ' + o.region, 'fas fa-star',
+                { title: o.name + ' post', prompt: 'Create a post for ' + o.name + ' (' + o.region + ').', occasion: o.name }));
+        });
+        if (!plan.occasions.length) occasions.appendChild(el('p', 'cal-plan-empty', 'No occasions in your markets in the next 45 days.'));
+    }
+
+    // ── Posts that didn't publish ─────────────────────────────────────
+    function renderAlerts(data) {
+        const box = $('calAlerts');
+        box.textContent = '';
+        const failed = [];
+        data.days.forEach(d => d.scheduled.forEach(item => { if (item.status === 'failed' || item.status === 'partial') failed.push(item); }));
+        failed.slice(0, 3).forEach(function (item) {
+            const when = new Date(item.scheduled_at);
+            const alert = el('div', 'cal-alert');
+            alert.setAttribute('role', 'alert');
+            const reasons = Object.values(item.results || {}).filter(r => r && !r.ok && r.error).map(r => r.error);
+            const text = el('span', 'cal-alert-text');
+            text.append(el('strong', '', item.status === 'partial' ? 'Partly published: ' : "Didn't publish: "),
+                document.createTextNode('"' + item.title + '", ' + when.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })
+                    + (reasons.length ? '. ' + reasons[0] : '.')));
+            const retry = el('button', 'cal-btn is-primary', item.status === 'partial' ? 'Send the rest' : 'Retry');
+            retry.type = 'button';
+            retry.addEventListener('click', function () {
+                retry.disabled = true;
+                api('POST', '/api/social/scheduled/' + item.id + '/retry')
+                    .then(function () { toast('Trying again - it goes out within a minute.'); load(shownMonth); })
+                    .catch(function (err) { retry.disabled = false; toast(err.message); });
+            });
+            const details = el('button', 'cal-btn', 'Details');
+            details.type = 'button';
+            details.addEventListener('click', function () { openScheduled(item); });
+            alert.append(icon('fas fa-triangle-exclamation'), text, details, retry);
+            box.appendChild(alert);
+        });
+    }
+
+    function render(data) {
+        lastData = data;
+        shownMonth = data.month;
+        $('calMonth').textContent = title(data);
         renderGoal(data.progress);
         renderGrid(data);
+        renderPlan(data);
+        renderAlerts(data);
         $('calNote').textContent = data.has_brand_profile
             ? 'Suggested days come from your weekly goal; their ideas come from your "Ideas for you" in Studio Chat.'
             : 'Add your website in My Brand Configuration to get ideas on your suggested days.';
@@ -360,13 +503,67 @@
     }
 
     function shift(by) {
+        if (view === 'week') {
+            // a week belongs to the month of its Monday, whose grid holds it whole
+            weekStart = isoDay(new Date(parseDay(weekStart || mondayOf(lastData.today)).getTime() + by * 7 * 864e5));
+            const month = weekStart.slice(0, 7);
+            if (month === shownMonth) render(lastData); else load(month);
+            return;
+        }
         const parts = shownMonth.split('-').map(Number);
         const next = new Date(parts[0], parts[1] - 1 + by, 1);
         load(next.getFullYear() + '-' + String(next.getMonth() + 1).padStart(2, '0'));
     }
     $('calPrev').addEventListener('click', function () { if (shownMonth) shift(-1); });
     $('calNext').addEventListener('click', function () { if (shownMonth) shift(1); });
-    $('calToday').addEventListener('click', function () { load(null); });
+    $('calToday').addEventListener('click', function () { weekStart = null; load(null); });
+
+    // Month / Week
+    function setView(next) {
+        view = next;
+        try { localStorage.setItem(VIEW_KEY, view); } catch (e) { /* storage blocked */ }
+        document.querySelectorAll('[data-cal-view]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.calView === view)));
+        if (!lastData) return;
+        if (view === 'week' && !weekStart) {
+            // this week when this month is shown, else the month's first week
+            weekStart = lastData.month === lastData.today.slice(0, 7) ? mondayOf(lastData.today) : mondayOf(lastData.month + '-01');
+        }
+        render(lastData);
+    }
+    document.querySelectorAll('[data-cal-view]').forEach(b => b.addEventListener('click', () => setView(b.dataset.calView)));
+    document.querySelectorAll('[data-cal-view]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.calView === view)));
+
+    // Platform filters
+    function syncFilters() {
+        document.querySelectorAll('[data-cal-platform]').forEach(b => b.setAttribute('aria-pressed', String(platforms.has(b.dataset.calPlatform))));
+    }
+    document.querySelectorAll('[data-cal-platform]').forEach(function (b) {
+        b.addEventListener('click', function () {
+            const p = b.dataset.calPlatform;
+            if (platforms.has(p)) { if (platforms.size > 1) platforms.delete(p); else return; } else platforms.add(p);
+            try { localStorage.setItem(FILTER_KEY, JSON.stringify(Array.from(platforms))); } catch (e) { /* storage blocked */ }
+            syncFilters();
+            if (lastData) renderGrid(lastData);
+        });
+    });
+    syncFilters();
+
+    // Results, opened from the strip
+    $('calResultsToggle').addEventListener('click', function () {
+        const open = $('calResults').classList.toggle('d-none') === false;
+        this.setAttribute('aria-expanded', String(open));
+        this.textContent = open ? 'Hide results' : 'See results';
+    });
+
+    // Plan my week: bring the open days into view
+    $('calPlanWeek').addEventListener('click', function () {
+        const group = $('calPlanOpenGroup');
+        group.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        group.classList.remove('is-flash');
+        void group.offsetWidth;  // restart the highlight
+        group.classList.add('is-flash');
+        if (!$('calPlanOpen').querySelector('.cal-plan-card')) toast('Nothing open this week. Drag an idea onto a later day instead.');
+    });
 
     // ── How published posts did ───────────────────────────────────────
     function number(n) { return Number(n || 0).toLocaleString(); }
@@ -375,6 +572,10 @@
             .then((r) => r.json())
             .then(function (r) {
                 const a = r && r.analytics;
+                $('calResultsSummary').textContent = a && a.posts
+                    ? 'Last 30 days: ' + number(a.posts) + ' post' + (a.posts === 1 ? '' : 's') + ' published'
+                      + (a.engagement_rate === null || a.engagement_rate === undefined ? '' : ' · ' + a.engagement_rate + '% engagement')
+                    : 'Nothing published through AVIR AI in the last 30 days';
                 const kpis = $('calKpis');
                 const top = $('calTopPosts');
                 kpis.textContent = '';
@@ -406,7 +607,7 @@
                 });
                 top.appendChild(el('p', 'cal-results-note', 'Numbers update every few hours for 30 days after a post goes out. Some platforms only share reach with business accounts.'));
             })
-            .catch(function () { /* the section stays empty */ });
+            .catch(function () { $('calResultsSummary').textContent = 'Results unavailable right now'; });
     }
 
     // ── Best times to post ────────────────────────────────────────────

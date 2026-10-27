@@ -26,6 +26,11 @@ $(function () {
     const $input = $('#approvalReviewerEmail');
     const $status = $('#approvalReviewerStatus');
     let defaultReviewer = null;
+    let savedEmail = '';
+    // On /brand-profile one "Save all" bar saves every section (brand_profile.js),
+    // so this card's own button is hidden there and the page calls save().
+    const centralSave = $('#bpSaveBar').length > 0;
+    if (centralSave) $('#approvalReviewerSaveBtn').addClass('d-none');
 
     function setHint(saved) {
         $('#approvalReviewerHint').text(saved
@@ -41,31 +46,46 @@ $(function () {
 
     $.getJSON('/api/approval-settings').done(function (r) {
         defaultReviewer = r.default_reviewer_email || null;
-        $input.val(r.reviewer_email || '');
+        savedEmail = r.reviewer_email || '';
+        $input.val(savedEmail);
         setHint(r.reviewer_email);
+        $(document).trigger('approvalReviewer:change');
     });
 
-    $('#approvalReviewerSaveBtn').on('click', function () {
+    // -> a jQuery promise; rejects with the reason when the email is invalid or the save fails
+    function save() {
         const email = $input.val().trim();
         if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
             showStatus('Please enter a valid email address.', false);
-            return;
+            return $.Deferred().reject('Enter a valid reviewer email address.').promise();
         }
-        const $btn = $(this).prop('disabled', true);
-        $.ajax({
+        const $btn = $('#approvalReviewerSaveBtn').prop('disabled', true);
+        return $.ajax({
             url: '/api/approval-settings',
             type: 'PUT',
             contentType: 'application/json',
             data: JSON.stringify({ reviewer_email: email }),
-            success: function (r) {
-                $input.val(r.reviewer_email || '');
-                setHint(r.reviewer_email);
-                showStatus(r.reviewer_email ? 'Reviewer saved.' : 'Reviewer cleared.', true);
-            },
-            error: function (xhr) {
-                showStatus((xhr.responseJSON && xhr.responseJSON.error) || 'Could not save the reviewer.', false);
-            },
-            complete: function () { $btn.prop('disabled', false); }
+        }).then(function (r) {
+            savedEmail = r.reviewer_email || '';
+            $input.val(savedEmail);
+            setHint(r.reviewer_email);
+            showStatus(r.reviewer_email ? 'Reviewer saved.' : 'Reviewer cleared.', true);
+            return r;
+        }, function (xhr) {
+            const message = (xhr.responseJSON && xhr.responseJSON.error) || 'Could not save the reviewer.';
+            showStatus(message, false);
+            return $.Deferred().reject(message).promise();
+        }).always(function () {
+            $btn.prop('disabled', false);
+            $(document).trigger('approvalReviewer:change');
         });
-    });
+    }
+
+    window.approvalReviewer = {
+        isDirty: () => $input.val().trim() !== savedEmail,
+        save: save,
+        discard: function () { $input.val(savedEmail); $status.text(''); $(document).trigger('approvalReviewer:change'); },
+    };
+    $input.on('input', function () { $status.text(''); $(document).trigger('approvalReviewer:change'); });
+    $('#approvalReviewerSaveBtn').on('click', function () { save(); });
 });

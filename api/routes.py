@@ -6666,7 +6666,7 @@ def update_brand_profile():
     for key in ("company_name", "industry", "target_audience", "brand_voice_summary", "tagline", "visual_style"):
         if key in data:
             fields[key] = (data[key] or "").strip()
-    for key in ("key_themes", "primary_colors", "content_dos", "content_donts", "fonts"):
+    for key in ("key_themes", "primary_colors", "content_dos", "content_donts", "fonts", "core_products"):
         if key in data:
             fields[key] = [item.strip() for item in (data[key] or []) if isinstance(item, str) and item.strip()]
     if "country" in data:  # sets the composer's post languages
