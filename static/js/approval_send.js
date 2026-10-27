@@ -100,16 +100,48 @@
         return '';
     }
 
+    // Schedule's "When": the best times for this post's platforms as chips
+    // (/api/best-times), the date picker only when asked for
+    const slotLabel = d => d.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short' }) + ' · '
+        + d.toLocaleString(undefined, { hour: 'numeric', minute: '2-digit' });
+    const whenText = value => slotLabel(new Date(value));
+    function whenChoices() {
+        const out = [];
+        const best = state.best || {};
+        ORDER.filter(p => state.sections[p] && best[p] && best[p].next_slot).forEach(p => {
+            const value = localInputValue(new Date(best[p].next_slot));
+            const same = out.find(c => c.value === value);
+            if (same) same.hint.push(NAMES[p]); else out.push({ value, hint: [NAMES[p]] });
+        });
+        out.sort((a, b) => a.value.localeCompare(b.value));
+        const picks = out.slice(0, 2).map(c => ({ value: c.value, note: 'Best for ' + c.hint.join(', ') }));
+        const tomorrow = defaultWhen();
+        if (!picks.some(c => c.value === tomorrow)) picks.push({ value: tomorrow, note: 'Tomorrow morning' });
+        return picks;
+    }
+
     function renderWhen() {
         let zone = '';
         try { zone = Intl.DateTimeFormat().resolvedOptions().timeZone || ''; } catch (e) { /* older browser: no name */ }
+        if (scheduling() && blockedByConnections()) { $('#saReviewer').empty().addClass('d-none'); return; }
+        $('#saReviewer').removeClass('d-none');
+        const choices = whenChoices();
+        const custom = state.customWhen || !choices.some(c => c.value === state.when);
         $('#saReviewer').html(`
-            <span class="sa-when">
-                <label for="saWhen">Publish on</label>
+            <div class="sa-when-head"><span class="sa-when-label">When</span><span class="sa-when-zone">your time${zone ? ' · ' + esc(zone.replace(/_/g, ' ')) : ''}</span></div>
+            <div class="sa-when-chips" role="group" aria-label="When it goes out">
+                ${choices.map(c => {
+                    const on = !custom && c.value === state.when;
+                    return `<button type="button" class="sa-when-chip${on ? ' on' : ''}" data-when="${esc(c.value)}" aria-pressed="${on}">
+                        ${esc(whenText(c.value))}<small>${esc(c.note)}</small></button>`;
+                }).join('')}
+                <button type="button" class="sa-when-chip sa-when-custom${custom ? ' on' : ''}" data-when-custom aria-pressed="${custom}">
+                    <i class="fas fa-calendar-day me-1"></i>${custom ? esc(whenText(state.when)) : 'Other date & time'}</button>
+            </div>
+            <div class="sa-when${custom ? '' : ' d-none'}">
+                <label for="saWhen">Date and time</label>
                 <input type="datetime-local" class="form-control form-control-sm" id="saWhen" value="${esc(state.when)}" min="${localInputValue(new Date())}">
-                <span class="sa-when-zone">your time${zone ? ' (' + esc(zone.replace(/_/g, ' ')) + ')' : ''}</span>
-            </span>
-            ${state.whenHint ? `<span class="sa-when-hint"><i class="fas fa-clock me-1"></i>${esc(state.whenHint)}</span>` : ''}`);
+            </div>`);
     }
 
     // Start the time at the best slot for the post's first platform
@@ -117,12 +149,11 @@
     function suggestBestTime() {
         const tz = -new Date().getTimezoneOffset();
         $.getJSON('/api/best-times?tz=' + tz).done(function (r) {
-            if (!state || state.whenTouched) return;
+            if (!state) return;
+            state.best = r.platforms || {};
             const platform = Object.keys(state.sections).find(p => state.sections[p].on) || Object.keys(state.sections)[0];
-            const best = (r.platforms || {})[platform];
-            if (!best) return;
-            state.when = localInputValue(new Date(best.next_slot));
-            state.whenHint = `${best.source === 'your_posts' ? 'Best time from your past ' + NAMES[platform] + ' posts' : 'A good time for ' + NAMES[platform]}: ${best.label}.`;
+            const best = state.best[platform];
+            if (best && !state.whenTouched) state.when = localInputValue(new Date(best.next_slot));
             renderWhen();
             render();
         });
@@ -182,8 +213,6 @@
     function sectionHtml(platform) {
         const sec = state.sections[platform];
         const issues = sec.on ? problems(platform, sec) : [];
-        const mediaChoice = (value, label) => `<label class="sa-pill${sec.media === value ? ' on' : ''}">
-            <input type="radio" name="saMedia_${platform}" value="${value}" ${sec.media === value ? 'checked' : ''} data-media="${platform}"> ${label}</label>`;
         return `
             <section class="sa-section${sec.on ? '' : ' off'}">
                 <label class="sa-section-head">
@@ -195,6 +224,17 @@
                 </label>
                 ${sec.on ? `
                 ${connectionHtml(platform)}
+                ${sectionEditorHtml(platform, issues)}
+                ` : ''}
+            </section>`;
+    }
+
+    // A platform's media, caption and hashtags (and what still needs fixing)
+    function sectionEditorHtml(platform, issues) {
+        const sec = state.sections[platform];
+        const mediaChoice = (value, label) => `<label class="sa-pill${sec.media === value ? ' on' : ''}">
+            <input type="radio" name="saMedia_${platform}" value="${value}" ${sec.media === value ? 'checked' : ''} data-media="${platform}"> ${label}</label>`;
+        return `
                 <div class="sa-media-row">
                     ${platform === 'instagram' ? '' : mediaChoice('none', 'Text only')}
                     ${mediaChoice('single', 'One image')}
@@ -214,13 +254,97 @@
                 <textarea class="form-control form-control-sm" id="saCaption_${platform}" rows="4" data-caption="${platform}">${esc(sec.caption)}</textarea>
                 <label class="sa-label" for="saTags_${platform}">Hashtags</label>
                 <input class="form-control form-control-sm" id="saTags_${platform}" data-tags="${platform}" value="${esc(sec.hashtags.join(' '))}" placeholder="#marketing #launch">
-                ${issues.length ? `<div class="sa-issues">${issues.map(t => `<div><i class="fas fa-triangle-exclamation me-1"></i>${esc(t)}</div>`).join('')}</div>` : ''}
-                ` : ''}
-            </section>`;
+                ${issues.length ? `<div class="sa-issues">${issues.map(t => `<div><i class="fas fa-triangle-exclamation me-1"></i>${esc(t)}</div>`).join('')}</div>` : ''}`;
+    }
+
+    // Schedule: what the window shows depends on where things stand.
+    // Nothing in the post can go out yet (no account connected) -> one
+    // clear "connect" screen. Otherwise: problems said once (with Connect /
+    // Leave it out), then one row per platform that opens into the editor.
+    const connected = p => !!(state.connections && state.connections[p]);
+    const blockedByConnections = () => !!state.connections && Object.keys(state.sections).length > 0
+        && !Object.keys(state.sections).some(connected);
+
+    function connectFirstHtml(platforms) {
+        const names = platforms.map(p => NAMES[p]);
+        const list = names.length > 1 ? names.slice(0, -1).join(', ') + ' or ' + names[names.length - 1] : names[0];
+        return `
+            <div class="sa-connect-first">
+                <div class="sa-connect-icons" aria-hidden="true">${platforms.map(p => `<span class="sa-plat-tile sa-tile-${p}"><i class="fab ${ICONS[p]}"></i></span>`).join('')}</div>
+                <h3>Connect ${esc(list)} to schedule this post</h3>
+                <p>AVIR AI publishes it for you at the time you choose. Connecting takes about a minute and opens in a new tab, so this post stays here.</p>
+                <div class="sa-connect-actions">
+                    ${platforms.map(p => `<a class="sa-connect-btn" href="/settings" target="_blank" rel="noopener"><i class="fab ${ICONS[p]} me-2"></i>Connect ${NAMES[p]}</a>`).join('')}
+                </div>
+                <p class="sa-connect-wait"><i class="fas fa-rotate me-1"></i>This window updates by itself when you come back.</p>
+            </div>`;
+    }
+
+    function scheduleBodyHtml(platforms) {
+        if (blockedByConnections()) return connectFirstHtml(platforms);
+        const missing = state.connections ? platforms.filter(p => !connected(p) && state.sections[p].on) : [];
+        const notice = missing.map(p => `
+            <div class="sa-notice">
+                <span class="sa-plat-tile sa-tile-${p} sm" aria-hidden="true"><i class="fab ${ICONS[p]}"></i></span>
+                <span><strong>${NAMES[p]}</strong> isn't connected yet.</span>
+                <a class="sa-notice-btn" href="/settings" target="_blank" rel="noopener" title="Opens Settings in a new tab - this post stays here">Connect</a>
+                <button type="button" class="sa-notice-skip" data-skip="${p}">Leave it out</button>
+            </div>`).join('');
+        const rows = platforms.map(p => {
+            const sec = state.sections[p];
+            const issues = sec.on ? problems(p, sec).filter(t => !t.startsWith('Connect your')) : [];
+            const status = !state.connections ? ''
+                : !connected(p) ? (sec.on ? '' : `<span class="sa-row-status off">not connected · <a href="/settings" target="_blank" rel="noopener">Connect</a></span>`)
+                : issues.length ? `<span class="sa-row-status warn">${issues.length} to fix</span>`
+                : `<span class="sa-row-status ok">${esc(state.connections[p])}</span>`;
+            const thumb = sec.images[0] ? `<img src="${esc(sec.images[0])}" alt="" class="sa-row-thumb">`
+                : `<span class="sa-row-thumb sa-plat-tile sa-tile-${p}" aria-hidden="true"><i class="fab ${ICONS[p]}"></i></span>`;
+            const firstLine = (sec.caption || '').split('\n').find(l => l.trim()) || 'No caption';
+            const open = sec.open || (sec.on && issues.length && sec.openedForIssues !== false);
+            return `
+                <li class="sa-row${sec.on ? '' : ' off'}${open ? ' open' : ''}">
+                    <div class="sa-row-main">
+                        <input type="checkbox" class="form-check-input" data-include="${p}" ${sec.on ? 'checked' : ''} aria-label="Include ${NAMES[p]}">
+                        ${thumb}
+                        <span class="sa-row-text-col">
+                            <strong>${NAMES[p]} ${status}</strong>
+                            <small>${esc(firstLine)}</small>
+                        </span>
+                        <button type="button" class="sa-row-edit" data-open-sec="${p}" aria-expanded="${open}">${open ? 'Done' : 'Edit'}</button>
+                    </div>
+                    ${open && sec.on ? `<div class="sa-row-editor">${sectionEditorHtml(p, issues)}</div>` : ''}
+                </li>`;
+        }).join('');
+        return `${notice}<p class="sa-what">Post to</p><ul class="sa-rows">${rows}</ul>`;
+    }
+
+    function scheduleNote(on) {
+        if (!on.length) return 'Tick at least one platform.';
+        if (on.some(p => state.connections && !connected(p))) return 'Connect it, or leave it out, to schedule the rest.';
+        const broken = on.find(p => problems(p, state.sections[p]).length);
+        if (broken) return `${NAMES[broken]}: ${problems(broken, state.sections[broken])[0]}`;
+        const when = whenProblem();
+        if (when) return when;
+        return 'Goes out by itself. Move or cancel it any time in the calendar.';
     }
 
     function render() {
         const platforms = ORDER.filter(p => state.sections[p]);
+        if (scheduling()) {
+            $('#saBody').html(platforms.length ? scheduleBodyHtml(platforms)
+                : '<div class="text-muted small">This post has nothing that can be scheduled.</div>');
+            const on = platforms.filter(p => state.sections[p].on);
+            const blocked = !on.length || on.some(p => problems(p, state.sections[p]).length) || !!whenProblem() || !state.connections;
+            const waiting = blockedByConnections();
+            $('#saSubmit').toggleClass('d-none', waiting).prop('disabled', blocked)
+                .html(`<i class="fas fa-calendar-check me-1"></i>Schedule${whenProblem() ? '' : ' for ' + esc(whenText(state.when))}`);
+            $('#saFooterNote').text(!state.connections ? 'Checking your connected accounts…' : waiting ? '' : scheduleNote(on));
+            if ($('#saReviewer').hasClass('d-none') !== waiting) renderWhen();
+            // The clicked control was just redrawn: keep the keyboard in the dialog (Esc, Tab)
+            const dialog = document.getElementById('sendApprovalModal');
+            if (dialog && dialog.classList.contains('show') && (document.activeElement === document.body || !document.activeElement)) dialog.focus();
+            return;
+        }
         $('#saBody').html(platforms.length ? platforms.map(sectionHtml).join('')
             : '<div class="text-muted small">This post has nothing that can be scheduled.</div>');
         const on = platforms.filter(p => state.sections[p].on);
@@ -368,6 +492,26 @@
                 .fail(xhr => toast((xhr.responseJSON || {}).error || 'Could not save the reviewer.', 'error'));
         });
         $doc.on('input change', '#saWhen', function () { state.when = this.value; state.whenTouched = true; render(); });
+        $doc.on('click', '[data-when]', function () {
+            state.when = $(this).data('when'); state.whenTouched = true; state.customWhen = false;
+            renderWhen(); render();
+        });
+        $doc.on('click', '[data-when-custom]', function () {
+            state.customWhen = true; renderWhen(); render();
+            $('#saWhen').trigger('focus');
+        });
+        $doc.on('click', '[data-open-sec]', function () {
+            const sec = state.sections[$(this).data('open-sec')];
+            const open = $(this).attr('aria-expanded') === 'true';
+            sec.open = !open;
+            sec.openedForIssues = !open ? undefined : false;  // closing it keeps it closed even with notes
+            render();
+        });
+        $doc.on('click', '[data-skip]', function () {
+            const sec = state.sections[$(this).data('skip')];
+            sec.on = false; sec.skipped = true;
+            render();
+        });
         // The image picker opens on top of the dialog. When it closes, the dialog
         // behind takes the keyboard back (Esc, Tab) and the page stays locked.
         $doc.on('hidden.bs.modal', '#saPickerModal', function () {
@@ -407,7 +551,7 @@
                 if (state.source.onScheduled) state.source.onScheduled(r.scheduled_post);
             }).fail(xhr => {
                 toast((xhr.responseJSON || {}).error || 'Could not schedule the post.', 'error');
-            }).always(() => $btn.html(submitLabel()) && render());
+            }).always(() => render());
             return;
         }
         $btn.html('<i class="fas fa-spinner fa-spin me-1"></i>Sending...');
@@ -439,8 +583,9 @@
                 format: 'multi_image', titles: titles,
             };
         });
-        state = { mode: mode, source, sections, images: [], reviewer: null, dims: {}, when: defaultWhen(), connections: null };
+        state = { mode: mode, source, sections, images: [], reviewer: null, dims: {}, when: defaultWhen(), connections: null, best: null, customWhen: false };
         picker = null;
+        $('#sendApprovalModal .sa-modal').toggleClass('sa-schedule', scheduling());
         $('#sendApprovalTitle').html(scheduling() ? '<i class="fas fa-calendar-plus me-2"></i>Schedule post' : '<i class="fas fa-paper-plane me-2"></i>Send for approval');
         $('#saSubmit').html(submitLabel());
         loadImages();
@@ -454,6 +599,7 @@
                 // A platform that isn't connected starts unticked, so the rest can be scheduled straight away
                 Object.keys(sections).forEach(p => { if (!state.connections[p]) sections[p].on = false; });
                 if (!Object.values(sections).some(sec => sec.on)) Object.values(sections).forEach(sec => { sec.on = true; });  // none connected: show what to connect
+                renderWhen();
                 render();
             }).fail(() => { state.connections = {}; render(); });
             watchConnections();
@@ -480,7 +626,7 @@
             if (!$('#sendApprovalModal').hasClass('show')) return;
             $.get('/api/social/connections').done(r => {
                 const now = r.connections || {};
-                Object.keys(state.sections).forEach(p => { if (now[p] && !state.connections[p]) state.sections[p].on = true; });
+                Object.keys(state.sections).forEach(p => { if (now[p] && !state.connections[p]) { state.sections[p].on = true; state.sections[p].skipped = false; } });
                 state.connections = now;
                 render();
             });
