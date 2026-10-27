@@ -34,40 +34,74 @@
     </div>
 </header>
 
-<!-- Filled in by static/js/library.js from /api/library/images -->
+<!-- Filled in by static/js/library.js: campaign folders (/api/library/folders),
+     images (/api/library/images), a carousel tray and an image viewer. The view
+     is in the address (#all, #favorites, #c=<conversation id>) so Back works. -->
 <main class="lib-main">
     <section class="lib-head">
         <div>
             <h1>Image Library</h1>
-            <p id="libSummary">Every image you have created, newest first.</p>
+            <p id="libSummary">Your images, grouped by the campaign that made them.</p>
         </div>
         <div class="lib-search">
             <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
-            <input type="search" id="libSearch" placeholder="Search by what the image shows" aria-label="Search your images">
+            <input type="search" id="libSearch" placeholder="Search campaigns and images" aria-label="Search your images">
         </div>
     </section>
 
-    <!-- Shown while images are ticked: make one post out of them -->
-    <div class="lib-bar d-none" id="libBar" role="region" aria-label="Selected images">
-        <strong id="libBarCount"></strong>
-        <span class="lib-bar-hint" id="libBarHint"></span>
-        <span class="lib-bar-actions">
-            <button type="button" class="lib-btn" id="libClear">Clear</button>
-            <button type="button" class="lib-btn" id="libApprove"><i class="fas fa-paper-plane me-1"></i>Send for approval</button>
-            <button type="button" class="lib-btn is-primary" id="libSchedule"><i class="fas fa-calendar-plus me-1"></i>Schedule</button>
-        </span>
+    <div class="lib-toolbar">
+        <div class="lib-views" role="tablist" aria-label="Show">
+            <button type="button" class="lib-view active" role="tab" aria-selected="true" data-lib-view="folders"><i class="far fa-folder"></i>Campaigns</button>
+            <button type="button" class="lib-view" role="tab" aria-selected="false" data-lib-view="all"><i class="far fa-images"></i>All images</button>
+            <button type="button" class="lib-view" role="tab" aria-selected="false" data-lib-view="favorites" id="libFavorites"><i class="far fa-star"></i>Favourites</button>
+        </div>
     </div>
 
-    <div class="lib-grid" id="libGrid" aria-live="polite"></div>
+    <!-- Inside a campaign: where you are, and what to do with all of it -->
+    <div class="lib-crumb d-none" id="libCrumb">
+        <button type="button" class="lib-crumb-back" id="libBack"><i class="fas fa-arrow-left" aria-hidden="true"></i>All campaigns</button>
+        <div class="lib-crumb-title"><strong id="libFolderTitle"></strong><span id="libFolderCount"></span></div>
+        <div class="lib-crumb-actions">
+            <button type="button" class="lib-btn" id="libFolderChat"><i class="fas fa-comments me-1"></i>Open conversation</button>
+            <button type="button" class="lib-btn is-primary" id="libFolderCarousel"><i class="fas fa-clone me-1"></i>Make a carousel</button>
+        </div>
+    </div>
+
+    <div class="lib-folders" id="libFolders" aria-live="polite"></div>
+    <div class="lib-grid d-none" id="libGrid" aria-live="polite"></div>
     <div class="lib-more"><button type="button" class="lib-btn d-none" id="libMore">Show more</button></div>
 </main>
 
-<!-- One image, larger -->
+<!-- The carousel tray: ticked images in order; drag (or use the arrows) to reorder -->
+<div class="lib-tray d-none" id="libTray" role="region" aria-label="Selected images">
+    <div class="lib-tray-head">
+        <strong id="libTrayCount"></strong>
+        <span class="lib-tray-hint" id="libTrayHint"></span>
+    </div>
+    <ol class="lib-tray-items" id="libTrayItems"></ol>
+    <div class="lib-tray-actions">
+        <button type="button" class="lib-btn" id="libClear">Clear</button>
+        <button type="button" class="lib-btn" id="libDeleteSelected"><i class="far fa-trash-can me-1"></i>Delete</button>
+        <button type="button" class="lib-btn" id="libApprove"><i class="fas fa-paper-plane me-1"></i>Send for approval</button>
+        <button type="button" class="lib-btn is-primary" id="libSchedule"><i class="fas fa-calendar-plus me-1"></i>Schedule</button>
+    </div>
+</div>
+
+<!-- One image, larger, with its details, versions and actions -->
 <dialog class="lib-viewer" id="libViewer" aria-label="Image">
     <form method="dialog"><button class="cal-dialog-close" aria-label="Close"><i class="fas fa-xmark" aria-hidden="true"></i></button></form>
-    <img id="libViewerImg" src="" alt="">
-    <p id="libViewerText"></p>
-    <div class="lib-viewer-actions" id="libViewerActions"></div>
+    <div class="lib-viewer-body">
+        <div class="lib-viewer-media"><img id="libViewerImg" src="" alt=""></div>
+        <aside class="lib-viewer-side">
+            <p class="lib-viewer-text" id="libViewerText"></p>
+            <div class="lib-viewer-meta" id="libViewerMeta"></div>
+            <div class="lib-versions d-none" id="libVersions">
+                <div class="lib-side-label" id="libVersionsLabel">Versions</div>
+                <div class="lib-versions-strip" id="libVersionsStrip"></div>
+            </div>
+            <div class="lib-viewer-actions" id="libViewerActions"></div>
+        </aside>
+    </div>
 </dialog>
 
 <div class="toast-container position-fixed bottom-0 end-0 p-3">
@@ -82,6 +116,7 @@
 <script>window.SCHEDULING_ENABLED = {{ 'true' if config.STUDIO_SCHEDULING else 'false' }};</script>
 <script src="{{ url_for('static', filename='js/post_preview.js') }}"></script>
 <script src="{{ url_for('static', filename='js/approval_send.js') }}"></script>
+<script src="{{ url_for('static', filename='js/undo.js') }}"></script>
 <script src="{{ url_for('static', filename='js/library.js') }}"></script>
 <script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
     {% include 'partials/cookie_consent.html' %}

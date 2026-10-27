@@ -49,11 +49,14 @@ def test_the_library_lists_the_users_own_images_newest_first(app):
     db.log_image_generation(user["id"], 0.04, kind="image")  # failed: nothing to show
 
     body = _login(app, user).get("/api/library/images").get_json()
-    assert body["total"] == 3 and not body["has_more"]
-    assert [i["url"] for i in body["images"]] == [edit, second, first]
+    # an image and its edit are one entry: the newest version, with how many there are
+    assert body["total"] == 2 and not body["has_more"]
+    assert [i["url"] for i in body["images"]] == [edit, first]
     newest = body["images"][0]
     assert newest["kind"] == "edit" and newest["description"] == "make the background darker" and newest["version"] == 2
-    assert body["images"][2]["conversation_id"] == conv and body["images"][2]["width"] == 1080
+    assert newest["versions"] == 2 and body["images"][1]["versions"] == 1
+    assert body["images"][1]["conversation_id"] == conv and body["images"][1]["width"] == 1080
+    assert second not in [i["url"] for i in body["images"]]
 
 
 def test_search_and_paging(app):
@@ -83,6 +86,68 @@ def test_library_page_and_login(app):
     assert html.index("jquery") < html.index("/static/js/approval_send.js") < html.index("/static/js/library.js")
     assert app.test_client().get("/api/library/images").status_code == 401
     assert app.test_client().get("/library").status_code in (301, 302)
+
+
+def test_folders_group_images_by_campaign(app):
+    user = _user()
+    diwali = db.ensure_conversation(user["id"], None, "Diwali sale")
+    hiring = db.ensure_conversation(user["id"], None, "Q4 hiring")
+    for i in range(5):
+        _image(user, f"Diwali lamp banner {i}", conversation_id=diwali)
+    _image(user, "Hiring poster", conversation_id=hiring)
+    _image(user, "A loose image")
+    client = _login(app, user)
+
+    folders = client.get("/api/library/folders").get_json()["folders"]
+    assert [(f["title"], f["count"]) for f in folders] == [("Other images", 1), ("Q4 hiring", 1), ("Diwali sale", 5)]
+    assert len(folders[2]["covers"]) == 4  # a 2x2 cover
+    assert [f["title"] for f in client.get("/api/library/folders?q=lamp").get_json()["folders"]] == ["Diwali sale"]
+    assert [f["title"] for f in client.get("/api/library/folders?q=hiring").get_json()["folders"]] == ["Q4 hiring"]
+
+    assert client.get(f"/api/library/images?conversation={diwali}").get_json()["total"] == 5
+    assert client.get("/api/library/images?conversation=none").get_json()["total"] == 1
+    assert client.get("/api/library/images?conversation=abc").status_code == 400
+
+
+def test_versions_favourites_and_delete(app):
+    user, other = _user(), _user()
+    original, _ = _image(user, "A sneaker on a track")
+    edit, _ = _image(user, "A sneaker on a track", kind="edit", parent_id=original, edit_instruction="make it blue")
+    keep, _ = _image(user, "A water bottle")
+    client = _login(app, user)
+
+    versions = client.get(f"/api/library/images/{edit}/versions").get_json()["versions"]
+    assert [v["id"] for v in versions] == [original, edit]
+    assert _login(app, other).get(f"/api/library/images/{edit}/versions").status_code == 404
+
+    # starring any version stars the image, and survives a new edit
+    assert client.post(f"/api/library/images/{edit}/favorite", json={"on": True}).get_json()["favorite"] is True
+    _image(user, "A sneaker on a track", kind="edit", parent_id=edit, edit_instruction="add a logo")
+    starred = client.get("/api/library/images?favorites=1").get_json()
+    assert starred["total"] == 1 and starred["images"][0]["favorite"] and starred["images"][0]["versions"] == 3
+    client.post(f"/api/library/images/{original}/favorite", json={"on": False})
+    assert client.get("/api/library/images?favorites=1").get_json()["total"] == 0
+
+    # deleting removes every version from the library, only for its owner
+    assert _login(app, other).delete(f"/api/library/images/{edit}").status_code == 404
+    assert client.delete(f"/api/library/images/{edit}").get_json()["removed"] == 3
+    left = client.get("/api/library/images").get_json()
+    assert [i["id"] for i in left["images"]] == [keep]
+    assert client.get(f"/api/library/images/{original}/versions").status_code == 404
+
+    more = [_image(user, f"Bulk {i}")[0] for i in range(2)]
+    foreign, _ = _image(other, "Not yours")
+    assert client.delete(f"/api/library/images?ids={more[0]},{more[1]},{foreign}").get_json()["removed"] == 2
+    assert _login(app, other).get("/api/library/images").get_json()["total"] == 1
+    assert client.delete("/api/library/images?ids=x").status_code == 400
+
+
+def test_library_page_has_folders_and_the_tray(app):
+    client = _login(app, db.create_user("Admin", f"{uuid.uuid4().hex[:10]}@example.com", "h", is_admin=True))
+    html = client.get("/library").get_data(as_text=True)
+    for marker in ('data-lib-view="folders"', 'data-lib-view="all"', 'id="libFavorites"', 'id="libTray"',
+                   'id="libTrayItems"', 'id="libVersions"', "js/undo.js"):
+        assert marker in html, marker
 
 
 # ── Saved briefs ────────────────────────────────────────────────────────────
