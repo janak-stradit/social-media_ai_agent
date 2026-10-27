@@ -199,6 +199,12 @@
 
         *, *::before, *::after { box-sizing: border-box; }
         html { scroll-behavior: smooth; scroll-padding-top: calc(var(--header-h) + 12px); }
+        /* Smooth (inertia) scrolling: static/js/vendor/lenis, rules from its lenis.css */
+        html.lenis, html.lenis body { height: auto; }
+        html.lenis { scroll-behavior: auto; }
+        .lenis:not(.lenis-autoToggle).lenis-stopped { overflow: clip; }
+        .lenis [data-lenis-prevent] { overscroll-behavior: contain; }
+        .lenis.lenis-smooth iframe { pointer-events: none; }
         body { margin: 0; font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif; color: var(--ink); background: var(--canvas); -webkit-font-smoothing: antialiased; overflow-x: hidden; }
         img { max-width: 100%; }
         a { color: inherit; }
@@ -234,6 +240,8 @@
         /* ── Shared section bits ─────────────────────────────────── */
         section { position: relative; }
         .section { padding: 96px 0; }
+        .section-warm { background: linear-gradient(180deg, var(--brand-bg-soft) 0%, var(--brand-bg) 100%); border-top: 1px solid var(--brand-border); border-bottom: 1px solid var(--brand-border); }
+        .section-warm .ch-preview { padding-top: 68px; background: radial-gradient(circle at 50% 0%, #ffffff, var(--brand-bg-soft) 70%); border-color: var(--brand-border); }
         .section-alt { background: var(--canvas-alt); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
         .eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #475569; }
         .eyebrow::before { content: ''; width: 18px; height: 2px; border-radius: 2px; background: var(--brand-gradient); }
@@ -321,16 +329,21 @@
         .brief-card .label { font-size: 0.72rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
         .brief-card p { margin-top: 6px; font-size: 1.02rem; font-weight: 500; color: var(--ink); }
         .ch-tabs { display: flex; gap: 8px; margin-top: 1.4rem; flex-wrap: wrap; }
-        .ch-tab { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 10px; border: 1px solid var(--line); background: #fff; font-family: inherit; font-size: 0.92rem; font-weight: 600; color: var(--ink-2); cursor: pointer; transition: all 0.2s ease; }
-        .ch-tab:hover { border-color: var(--line-strong); }
-        .ch-tab[aria-selected="true"] { border-color: var(--ink); background: #fff; color: var(--ink); box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.06); }
-        .ch-tab:focus-visible { outline: 3px solid rgba(var(--brand-rgb), 0.35); outline-offset: 2px; }
+        .ch-tab, .lang-tab { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 10px; border: 1px solid var(--line); background: #fff; font-family: inherit; font-size: 0.92rem; font-weight: 600; color: var(--ink-2); cursor: pointer; transition: all 0.2s ease; }
+        .ch-tab:hover, .lang-tab:hover { border-color: var(--line-strong); }
+        .ch-tab[aria-selected="true"], .lang-tab[aria-selected="true"] { border-color: var(--ink); background: #fff; color: var(--ink); box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.06); }
+        .ch-tab:focus-visible, .lang-tab:focus-visible { outline: 3px solid rgba(var(--brand-rgb), 0.35); outline-offset: 2px; }
         .ch-points { list-style: none; padding: 0; margin: 1.6rem 0 0; display: grid; gap: 0.7rem; }
         .ch-points li { display: flex; gap: 10px; color: var(--ink-2); font-size: 0.97rem; line-height: 1.5; }
         .ch-points i { color: var(--check); margin-top: 4px; }
         .ch-preview { position: relative; min-height: 520px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-lg); background: radial-gradient(circle at 50% 0%, #eef2ff, var(--canvas-alt) 65%); border: 1px solid var(--line); padding: 32px; }
         .ch-panel { width: 100%; max-width: 420px; background: #fff; border-radius: 16px; border: 1px solid var(--line); box-shadow: var(--shadow-lg); overflow: hidden; animation: panel-in 0.45s cubic-bezier(0.16, 1, 0.3, 1); }
-        .ch-panel[hidden] { display: none; }
+        /* Switchable panels share one grid cell; hidden ones keep their space, so
+           switching never changes the page height (smooth scroll / anchors stay put) */
+        .ch-preview { display: grid; place-items: center; }
+        .ch-preview > .ch-panel { grid-area: 1 / 1; }
+        .ch-panel[hidden], .lang-caption[hidden], .studio-shot[hidden] { visibility: hidden; }
+        .ch-panel[hidden], .lang-caption[hidden] { display: block; }
         .ch-body { padding: 0 14px 10px; font-size: 0.86rem; line-height: 1.55; color: var(--ink-2); }
         .ch-body .more { color: var(--muted); }
         .ch-img { position: relative; display: flex; align-items: center; justify-content: center; overflow: hidden; color: #fff; background: linear-gradient(135deg, #818cf8 0%, #4f46e5 55%, #312e81 100%); }
@@ -350,6 +363,15 @@
         .ch-foot .reacts { display: inline-flex; align-items: center; gap: 4px; }
         .ch-foot .reacts span { width: 18px; height: 18px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 0.55rem; color: #fff; }
         .ch-tags { color: #1d4ed8; font-weight: 600; }
+
+        /* ── Local languages ─────────────────────────────────────── */
+        .langs-grid .ch-preview { order: -1; padding-top: 68px; background: radial-gradient(circle at 50% 0%, var(--brand-bg), var(--canvas-alt) 65%); }
+        .lang-tab { padding: 8px 14px; font-size: 0.88rem; }
+        .lang-more { display: inline-flex; align-items: center; padding: 8px 6px; font-size: 0.88rem; font-weight: 600; color: var(--muted); }
+        .langs-grid .ch-panel { display: grid; }
+        .lang-caption { grid-area: 3 / 1; }
+        .lang-caption { padding-top: 10px; font-size: 0.92rem; line-height: 1.65; animation: panel-in 0.45s cubic-bezier(0.16, 1, 0.3, 1); }
+        .lang-caption .ch-tags { display: block; margin-top: 6px; }
         .ch-badge { position: absolute; top: 18px; left: 18px; display: inline-flex; align-items: center; gap: 8px; background: #fff; border: 1px solid var(--line); padding: 7px 12px; border-radius: 999px; font-size: 0.78rem; font-weight: 600; box-shadow: var(--shadow-sm); }
         .ch-badge i { color: var(--ink-2); }
 
@@ -359,21 +381,49 @@
         .studio .wrap { position: relative; }
         .studio .eyebrow { color: #94a3b8; }
         .studio .section-desc { color: #cbd5e1; }
-        .studio-flow { display: flex; align-items: center; justify-content: center; gap: 14px; margin: -1.2rem auto 3rem; flex-wrap: wrap; }
-        .studio-flow .step { display: inline-flex; align-items: center; gap: 10px; background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 12px; padding: 10px 14px; font-size: 0.9rem; color: #e2e8f0; }
-        .studio-flow .step i { color: #cbd5e1; }
-        .studio-flow code { font-family: ui-monospace, Consolas, monospace; color: #fff; font-weight: 700; }
-        .studio-flow .arrow { color: #64748b; }
-        .studio-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
-        .cmd-card { background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 18px; overflow: hidden; transition: transform 0.25s ease, border-color 0.25s ease, background 0.25s ease; }
-        .cmd-card:hover { transform: translateY(-4px); border-color: rgba(255, 255, 255, 0.28); background: rgba(255, 255, 255, 0.06); }
+        .studio-orb { position: absolute; width: 420px; height: 420px; border-radius: 50%; filter: blur(70px); pointer-events: none; }
+        .studio-orb.orb-a { top: 6%; left: -140px; background: rgba(232, 90, 28, 0.22); }
+        .studio-orb.orb-b { bottom: -60px; right: -120px; background: rgba(99, 102, 241, 0.22); }
+        .studio-app { display: grid; grid-template-columns: minmax(260px, 0.75fr) minmax(0, 1.6fr); gap: 22px; align-items: stretch; }
+        .studio-side { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+        .studio-prompt { display: flex; align-items: center; gap: 12px; background: #fff; color: var(--ink); border-radius: 14px; padding: 10px 10px 10px 10px; box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35); }
+        .studio-attach { width: 46px; height: 46px; border-radius: 10px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; font-size: 1.3rem; color: #fff; background: linear-gradient(135deg, #475569, #0f172a); }
+        .studio-prompt-text { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+        .studio-file { font-size: 0.72rem; font-weight: 600; color: var(--muted); }
+        .studio-typed { font-family: ui-monospace, Consolas, monospace; font-size: 1rem; font-weight: 700; color: var(--ink); white-space: nowrap; }
+        .studio-typed .caret { display: inline-block; width: 2px; height: 1.05em; margin-left: 2px; vertical-align: -2px; background: var(--brand); animation: blink 1s step-end infinite; }
+        .studio-send { width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; color: #fff; background: var(--brand-strong); font-size: 0.9rem; }
+        .studio-cmds { display: flex; flex-direction: column; gap: 8px; }
+        .studio-cmd { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.1); background: rgba(255, 255, 255, 0.04); color: #e2e8f0; font-family: inherit; font-size: 0.95rem; font-weight: 600; cursor: pointer; transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease; }
+        .studio-cmd:hover { background: rgba(255, 255, 255, 0.08); transform: translateX(3px); }
+        .studio-cmd[aria-selected="true"] { background: rgba(232, 90, 28, 0.16); border-color: rgba(255, 160, 102, 0.6); color: #fff; }
+        .studio-cmd[aria-selected="true"] .cmd-code { background: var(--brand-strong); border-color: var(--brand-strong); color: #fff; }
+        .studio-cmd:focus-visible { outline: 3px solid rgba(var(--brand-rgb), 0.5); outline-offset: 2px; }
+        .studio-screen { position: relative; display: grid; grid-template-rows: auto auto 1fr; border-radius: 20px; overflow: hidden; background: #0b1220; border: 1px solid rgba(255, 255, 255, 0.12); box-shadow: 0 40px 90px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.03) inset; transform: perspective(1200px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
+        .studio-screen.is-tilting { transition: transform 0.08s linear; }
+        .studio-screen-bar { display: flex; align-items: center; gap: 6px; padding: 12px 16px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); }
+        .studio-screen-bar span { width: 10px; height: 10px; border-radius: 50%; background: rgba(255, 255, 255, 0.18); }
+        .studio-screen-bar b { margin-left: auto; font-size: 0.75rem; font-weight: 600; color: #94a3b8; }
+        .studio-screen.is-generating .studio-screen-bar b { color: #ffa066; }
+        .studio-progress { height: 3px; background: rgba(255, 255, 255, 0.06); }
+        .studio-progress span { display: block; height: 100%; width: 0; background: var(--brand-gradient); }
+        .studio-screen.is-generating .studio-progress span { width: 100%; transition: width 0.9s cubic-bezier(0.4, 0, 0.2, 1); }
+        .studio-shot { display: flex; flex-direction: column; flex: 1; animation: shot-in 0.6s cubic-bezier(0.16, 1, 0.3, 1); }
+        .studio-shot { grid-area: 3 / 1; }
+        .studio-shot[hidden] { display: flex; }
+        .studio-shot .cmd-art { height: 210px; zoom: 1.6; }
+        .studio-screen.is-generating .studio-shot .cmd-art { filter: blur(8px) saturate(0.6); }
+        .studio-shot .cmd-art .product { translate: calc(var(--mx, 0) * 10px) calc(var(--my, 0) * 8px); transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), translate 0.2s ease-out; }
+        .studio-shot .cmd-art > :not(.product) { translate: calc(var(--mx, 0) * -4px) calc(var(--my, 0) * -3px); transition: translate 0.2s ease-out; }
+        .studio-shot .cmd-art::after { content: 'YOUR LOGO'; position: absolute; top: 8px; right: 8px; z-index: 3; font-size: 0.42rem; font-weight: 800; letter-spacing: 0.06em; color: #0f172a; background: rgba(255, 255, 255, 0.92); border-radius: 4px; padding: 3px 6px; }
+        .studio-shot-info { padding: 18px 22px 22px; }
+        .studio-shot-info h3 { font-size: 1.2rem; font-weight: 700; }
+        .studio-shot-info p { font-size: 0.95rem; line-height: 1.55; color: #94a3b8; margin-top: 6px; }
+        @keyframes shot-in { from { opacity: 0; transform: scale(0.97); } }
         .cmd-art { position: relative; height: 190px; overflow: hidden; display: flex; align-items: center; justify-content: center; }
         .cmd-art .product { position: relative; z-index: 2; font-size: 3.4rem; color: #fff; filter: drop-shadow(0 16px 18px rgba(0, 0, 0, 0.35)); transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1); }
-        .cmd-card:hover .cmd-art .product { transform: scale(1.08) rotate(-4deg); }
-        .cmd-info { padding: 18px 18px 20px; }
+        .studio-screen:hover .cmd-art .product { transform: scale(1.08) rotate(-4deg); }
         .cmd-code { display: inline-block; font-family: ui-monospace, Consolas, monospace; font-size: 0.85rem; font-weight: 700; color: #e2e8f0; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.14); padding: 3px 9px; border-radius: 7px; }
-        .cmd-info h3 { font-size: 1.12rem; font-weight: 700; margin-top: 12px; }
-        .cmd-info p { font-size: 0.92rem; line-height: 1.55; color: #94a3b8; margin-top: 6px; }
         .cmd-sizes { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; }
         .cmd-sizes span { font-size: 0.72rem; font-weight: 600; color: #cbd5e1; background: rgba(255, 255, 255, 0.07); border-radius: 6px; padding: 3px 8px; }
         /* the six scenes, drawn in CSS around the same product */
@@ -385,7 +435,7 @@
         .art-billboard .board { position: absolute; width: 58%; height: 54%; top: 16%; border: 6px solid #e2e8f0; border-radius: 4px; background: linear-gradient(135deg, #6366f1, #312e81); box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35); }
         .art-billboard .board::after { content: ''; position: absolute; left: 50%; bottom: -34px; width: 8px; height: 28px; background: #94a3b8; transform: translateX(-50%); }
         .art-billboard .product { font-size: 4.2rem; transform: translate(26px, -6px); }
-        .cmd-card:hover .art-billboard .product { transform: translate(34px, -14px) scale(1.12) rotate(-6deg); }
+        .studio-screen:hover .art-billboard .product { transform: translate(34px, -14px) scale(1.12) rotate(-6deg); }
         .art-metaad { background: linear-gradient(135deg, #e0e7ff, #fce7f3); gap: 10px; }
         .art-metaad .frame { position: relative; z-index: 2; background: linear-gradient(160deg, #ec4899, #7c3aed); border-radius: 8px; box-shadow: 0 10px 20px rgba(76, 29, 149, 0.3); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: #fff; }
         .art-metaad .frame i { font-size: 1.6rem; }
@@ -496,6 +546,9 @@
         .cta-card { position: relative; overflow: hidden; border-radius: 28px; background: var(--navy); color: #fff; padding: 64px 56px; display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 40px; align-items: center; }
         .cta-card::before { content: ''; position: absolute; inset: 0; background: radial-gradient(500px 300px at 90% 10%, rgba(99, 102, 241, 0.32), transparent 70%), radial-gradient(400px 260px at 0% 100%, rgba(232, 90, 28, 0.16), transparent 70%); }
         .cta-card > * { position: relative; }
+        .cta-card > .cta-orb { position: absolute; width: 300px; height: 300px; border-radius: 50%; filter: blur(60px); pointer-events: none; }
+        .cta-orb.orb-a { top: -120px; right: 10%; background: rgba(232, 90, 28, 0.28); }
+        .cta-orb.orb-b { bottom: -140px; left: 5%; background: rgba(99, 102, 241, 0.22); }
         .cta-card .section-title { margin-top: 0.8rem; color: #fff; }
         .cta-card p { color: #cbd5e1; font-size: 1.08rem; line-height: 1.65; margin-top: 1rem; }
         .cta-card .eyebrow { color: #94a3b8; }
@@ -537,6 +590,8 @@
         @keyframes panel-in { from { opacity: 0; transform: translateY(14px) scale(0.98); } }
         @keyframes twinkle { 50% { opacity: 0.35; } }
         @media (prefers-reduced-motion: reduce) {
+            .studio-screen { transform: none; }
+            [data-parallax] { translate: none !important; }
             *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
             html { scroll-behavior: auto; }
             .reveal { opacity: 1; transform: none; }
@@ -546,8 +601,12 @@
         @media (max-width: 1080px) {
             .app-header .brand-tagline { display: none; }
             .hero-grid, .channels-grid { grid-template-columns: 1fr; gap: 48px; }
+            .langs-grid .ch-preview { order: 0; }
             .stage { max-width: 520px; margin: 0 auto; width: 100%; justify-self: center; height: 560px; }
-            .studio-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .studio-app { grid-template-columns: 1fr; }
+            .studio-cmds { flex-direction: row; flex-wrap: wrap; }
+            .studio-cmd { width: auto; }
+            .studio-cmd .studio-cmd-name { display: none; }
             .bento { grid-template-columns: repeat(2, minmax(0, 1fr)); }
             .tile.span-3 { grid-column: span 2; }
             .faq-grid { grid-template-columns: 1fr; gap: 28px; }
@@ -580,7 +639,8 @@
             .post-ig { width: 272px; top: 128px; }
             .pill-long { display: none; }
             .visual-headline { font-size: 1.2rem; }
-            .studio-grid, .bento { grid-template-columns: 1fr; }
+            .bento { grid-template-columns: 1fr; }
+            .studio-shot .cmd-art { zoom: 1.3; }
             .tile.span-2, .tile.span-3 { grid-column: auto; }
             .brand-scan, .compete { grid-template-columns: 1fr; }
             .ch-preview { padding: 56px 14px 20px; min-height: 0; }
@@ -614,6 +674,7 @@
         </a>
         <nav class="header-nav" aria-label="Main">
             <a href="#channels">Platforms</a>
+            <a href="#languages">Languages</a>
             <a href="#studio">Image studio</a>
             <a href="#features">Features</a>
             <a href="#how">How it works</a>
@@ -630,7 +691,7 @@
     <!-- HERO -->
     <section class="hero">
         <div class="wrap wrap-wide hero-grid">
-            <div class="hero-copy">
+            <div class="hero-copy" data-parallax="-0.14" data-parallax-max="90">
                 <a href="#studio" class="hero-pill"><b>NEW</b> <span class="pill-long">Image commands like</span> <code>/3dbillboard</code> and <code>/metaad</code></a>
                 <h1 class="hero-title">Scroll&#8209;stopping social posts, <span class="text-gradient">in your brand's voice</span></h1>
                 <p class="hero-subtitle">Describe your post in one line. Get the caption, hashtags and an on-brand image for LinkedIn, Instagram and Facebook.</p>
@@ -655,7 +716,7 @@
 
             <!-- Live demo: a brief is typed, the post builds itself (decorative) -->
             <div class="stage" id="heroStage" aria-hidden="true">
-                <div class="composer">
+                <div class="composer" data-parallax="0.06">
                     <div class="composer-row">
                         <div class="composer-avatar"><i class="fas fa-wand-magic-sparkles"></i></div>
                         <div class="composer-text"><span id="briefText">Diwali offer for our cafe, warm and festive</span><span class="caret"></span></div>
@@ -669,7 +730,7 @@
                     </div>
                 </div>
 
-                <div class="post post-ig" id="heroPost">
+                <div class="post post-ig" id="heroPost" data-parallax="-0.04">
                     <div class="post-head">
                         <div class="post-avatar">YB</div>
                         <div><div class="post-name">yourbrand</div><div class="post-meta">Sponsored</div></div>
@@ -689,11 +750,11 @@
                 </div>
             </div>
         </div>
-        <a href="#channels" class="hero-scroll">See what it makes <i class="fas fa-chevron-down" aria-hidden="true"></i></a>
+        <a href="#channels" class="hero-scroll" data-parallax="-0.3" data-parallax-max="60">See what it makes <i class="fas fa-chevron-down" aria-hidden="true"></i></a>
     </section>
 
     <!-- ONE BRIEF, EVERY CHANNEL -->
-    <section class="section" id="channels">
+    <section class="section section-warm" id="channels">
         <div class="wrap channels-grid">
             <div class="reveal">
                 <span class="eyebrow">One brief, every channel</span>
@@ -718,7 +779,7 @@
             <div class="ch-preview reveal">
                 <span class="ch-badge"><i class="fas fa-wand-magic-sparkles"></i>Generated from one brief</span>
 
-                <article class="ch-panel" role="tabpanel" id="panel-li" aria-labelledby="tab-li">
+                <article class="ch-panel" role="tabpanel" id="panel-li" data-parallax="-0.06" data-parallax-max="28" aria-labelledby="tab-li">
                     <div class="post-head">
                         <div class="post-avatar">YB</div>
                         <div><div class="post-name">Your Brand</div><div class="post-meta">1,204 followers &middot; Just now</div></div>
@@ -729,7 +790,7 @@
                     <div class="ch-foot"><span class="reacts"><span style="background:#0a66c2"><i class="fas fa-thumbs-up"></i></span><span style="background:#df704d"><i class="fas fa-heart"></i></span></span>142 &middot; 18 comments</div>
                 </article>
 
-                <article class="ch-panel" role="tabpanel" id="panel-ig" aria-labelledby="tab-ig" hidden>
+                <article class="ch-panel" role="tabpanel" id="panel-ig" aria-labelledby="tab-ig" data-parallax="-0.06" data-parallax-max="28" hidden>
                     <div class="post-head">
                         <div class="post-avatar">YB</div>
                         <div><div class="post-name">yourbrand</div><div class="post-meta">Original audio</div></div>
@@ -740,7 +801,7 @@
                     <div class="ch-body" style="padding-top:4px;"><b>yourbrand</b> Stop guessing when to post &#9200; Smart Scheduling finds the moment your followers are online. Link in bio! <span class="ch-tags">#NewFeature #SocialMediaTips #ContentCreator</span></div>
                 </article>
 
-                <article class="ch-panel" role="tabpanel" id="panel-fb" aria-labelledby="tab-fb" hidden>
+                <article class="ch-panel" role="tabpanel" id="panel-fb" aria-labelledby="tab-fb" data-parallax="-0.06" data-parallax-max="28" hidden>
                     <div class="post-head">
                         <div class="post-avatar">YB</div>
                         <div><div class="post-name">Your Brand</div><div class="post-meta">Just now &middot; <i class="fas fa-earth-americas"></i></div></div>
@@ -754,46 +815,118 @@
         </div>
     </section>
 
+    <!-- LOCAL LANGUAGES (services/language_service.py) -->
+    <section class="section section-alt" id="languages">
+        <div class="wrap channels-grid langs-grid">
+            <div class="reveal">
+                <span class="eyebrow">Local languages</span>
+                <h2 class="section-title">Speak your customers' language.</h2>
+                <p class="section-desc">Pick a language in Studio Chat and the caption and hashtags are written natively in it, not translated word for word. 52 languages, from Hindi, Gujarati and Tamil to Arabic, Spanish and Hinglish.</p>
+                <div class="ch-tabs" role="tablist" aria-label="Preview by language">
+                    <button class="lang-tab" role="tab" id="lang-tab-hinglish" aria-controls="lang-hinglish" aria-selected="false" tabindex="-1" lang="hi-Latn">Hinglish</button>
+                    <button class="lang-tab" role="tab" id="lang-tab-hi" aria-controls="lang-hi" aria-selected="true" lang="hi">हिन्दी</button>
+                    <button class="lang-tab" role="tab" id="lang-tab-gu" aria-controls="lang-gu" aria-selected="false" tabindex="-1" lang="gu">ગુજરાતી</button>
+                    <button class="lang-tab" role="tab" id="lang-tab-ta" aria-controls="lang-ta" aria-selected="false" tabindex="-1" lang="ta">தமிழ்</button>
+                    <button class="lang-tab" role="tab" id="lang-tab-ar" aria-controls="lang-ar" aria-selected="false" tabindex="-1" lang="ar">العربية</button>
+                    <button class="lang-tab" role="tab" id="lang-tab-es" aria-controls="lang-es" aria-selected="false" tabindex="-1" lang="es">Español</button>
+                    <span class="lang-more">+46 more</span>
+                </div>
+                <ul class="ch-points">
+                    <li><i class="fas fa-check"></i>Your brand and product names, prices and links stay exactly as they are</li>
+                    <li><i class="fas fa-check"></i>Hashtags mix the language with a few English ones, so people find you either way</li>
+                    <li><i class="fas fa-check"></i>Your country's languages come first: 13 for India, including Hinglish</li>
+                </ul>
+            </div>
+
+            <div class="ch-preview reveal">
+                <span class="ch-badge"><i class="fas fa-language"></i>Same brief, any language</span>
+                <article class="ch-panel" data-parallax="-0.06" data-parallax-max="28">
+                    <div class="post-head">
+                        <div class="post-avatar">YB</div>
+                        <div><div class="post-name">yourbrand</div><div class="post-meta">Sponsored</div></div>
+                        <i class="fas fa-ellipsis"></i>
+                    </div>
+                    <div class="ch-img square has-photo" role="img" aria-label="Diwali lamps and rangoli" style="background-image: url('{{ url_for('static', filename='img/landing/hero-diwali.webp') }}');"><span class="visual-logo"><i class="fas fa-circle-dot"></i>YOUR LOGO</span><span class="cap">Diwali Special: 20% off</span></div>
+                    <p class="ch-body lang-caption" role="tabpanel" id="lang-hinglish" aria-labelledby="lang-tab-hinglish" lang="hi-Latn" dir="ltr" hidden><b lang="en" dir="ltr">yourbrand</b> Is Diwali, hamari festive brews ke saath roshni badhaiye! Poore hafte 20% off, sirf Your Brand Café par. Jaldi milte hain &#10024;<span class="ch-tags">#HappyDiwali #DiwaliOffer #CafeLife #DiwaliVibes</span></p>
+                    <p class="ch-body lang-caption" role="tabpanel" id="lang-hi" aria-labelledby="lang-tab-hi" lang="hi" dir="ltr"><b lang="en" dir="ltr">yourbrand</b> इस दिवाली, हमारी त्योहारी कॉफ़ी के साथ रौशनी बढ़ाइए! पूरे हफ़्ते 20% की छूट, Your Brand Café पर। जल्द मिलते हैं &#10024;<span class="ch-tags">#दिवाली #दिवाली_ऑफ़र #HappyDiwali #CafeLife</span></p>
+                    <p class="ch-body lang-caption" role="tabpanel" id="lang-gu" aria-labelledby="lang-tab-gu" lang="gu" dir="ltr" hidden><b lang="en" dir="ltr">yourbrand</b> આ દિવાળી, અમારી તહેવારની ખાસ કોફી સાથે ઉજવો! આખું અઠવાડિયું 20% ની છૂટ, Your Brand Café પર. જલ્દી મળીએ &#10024;<span class="ch-tags">#દિવાળી #દિવાળી_ઓફર #HappyDiwali #CafeLife</span></p>
+                    <p class="ch-body lang-caption" role="tabpanel" id="lang-ta" aria-labelledby="lang-tab-ta" lang="ta" dir="ltr" hidden><b lang="en" dir="ltr">yourbrand</b> இந்த தீபாவளியை எங்கள் பண்டிகை காபியுடன் கொண்டாடுங்கள்! வாரம் முழுவதும் 20% தள்ளுபடி, Your Brand Café-இல். விரைவில் சந்திப்போம் &#10024;<span class="ch-tags">#தீபாவளி #HappyDiwali #DiwaliOffer #CafeLife</span></p>
+                    <p class="ch-body lang-caption" role="tabpanel" id="lang-ar" aria-labelledby="lang-tab-ar" lang="ar" dir="rtl" hidden><b lang="en" dir="ltr">yourbrand</b> احتفلوا بديوالي مع مشروباتنا الاحتفالية! خصم 20% طوال الأسبوع في Your Brand Café. نراكم قريبًا &#10024;<span class="ch-tags">#ديوالي #عروض #HappyDiwali #CafeLife</span></p>
+                    <p class="ch-body lang-caption" role="tabpanel" id="lang-es" aria-labelledby="lang-tab-es" lang="es" dir="ltr" hidden><b lang="en" dir="ltr">yourbrand</b> ¡Ilumina tu Diwali con nuestras bebidas festivas! 20% de descuento toda la semana en Your Brand Café. ¡Te esperamos! &#10024;<span class="ch-tags">#Diwali #OfertaEspecial #HappyDiwali #CafeLife</span></p>
+                </article>
+            </div>
+        </div>
+    </section>
+
     <!-- IMAGE STUDIO -->
     <section class="section studio" id="studio">
+        <span class="studio-orb orb-a" data-parallax="0.18" aria-hidden="true"></span>
+        <span class="studio-orb orb-b" data-parallax="-0.12" aria-hidden="true"></span>
         <div class="wrap">
             <div class="section-head reveal">
                 <span class="eyebrow">Image studio</span>
                 <h2 class="section-title">One product photo. Six studio shoots.</h2>
                 <p class="section-desc">Attach a photo of your product, type a slash command, and get a ready-made campaign visual in the right size, with your logo placed on top.</p>
             </div>
-            <div class="studio-flow reveal">
-                <span class="step"><i class="fas fa-image"></i>Attach your product photo</span>
-                <i class="fas fa-arrow-right arrow" aria-hidden="true"></i>
-                <span class="step"><i class="fas fa-terminal"></i>Type <code>/metaad</code></span>
-                <i class="fas fa-arrow-right arrow" aria-hidden="true"></i>
-                <span class="step"><i class="fas fa-wand-magic-sparkles"></i>Get the finished visuals</span>
-            </div>
-            <div class="studio-grid">
-                <article class="cmd-card reveal">
-                    <div class="cmd-art art-billboard" aria-hidden="true"><div class="board"></div><div class="skyline"></div><i class="fas fa-headphones product"></i></div>
-                    <div class="cmd-info"><span class="cmd-code">/3dbillboard</span><h3>3D Billboard</h3><p>Your product popping out of a giant 3D billboard in the city.</p><div class="cmd-sizes"><span>16:9</span></div></div>
-                </article>
-                <article class="cmd-card reveal">
-                    <div class="cmd-art art-metaad" aria-hidden="true"><div class="frame f1"><i class="fas fa-headphones"></i><span>SHOP</span></div><div class="frame f2"><i class="fas fa-headphones"></i><span>SHOP</span></div><div class="frame f3"><i class="fas fa-headphones"></i><span>SHOP</span></div></div>
-                    <div class="cmd-info"><span class="cmd-code">/metaad</span><h3>Meta Ad</h3><p>Facebook and Instagram ad images, plus the ad copy to go with them.</p><div class="cmd-sizes"><span>Feed 1:1</span><span>Feed 4:5</span><span>Story 9:16</span></div></div>
-                </article>
-                <article class="cmd-card reveal">
-                    <div class="cmd-art art-showcase" aria-hidden="true"><div class="beam"></div><div class="pedestal"></div><i class="fas fa-headphones product"></i></div>
-                    <div class="cmd-info"><span class="cmd-code">/premiumshowcase</span><h3>Premium Showcase</h3><p>A luxury studio photoshoot of your product, lit like a magazine cover.</p><div class="cmd-sizes"><span>1:1</span></div></div>
-                </article>
-                <article class="cmd-card reveal">
-                    <div class="cmd-art art-lifestyle" aria-hidden="true"><div class="sun"></div><i class="fas fa-seedling plant"></i><div class="table"></div><i class="fas fa-headphones product"></i></div>
-                    <div class="cmd-info"><span class="cmd-code">/lifestyle</span><h3>Lifestyle</h3><p>Your product in real, everyday use, in a scene your customers recognise.</p><div class="cmd-sizes"><span>4:5</span></div></div>
-                </article>
-                <article class="cmd-card reveal">
-                    <div class="cmd-art art-catalog" aria-hidden="true"><div class="shadow"></div><i class="fas fa-headphones product"></i><span class="sku">SKU 1042</span></div>
-                    <div class="cmd-info"><span class="cmd-code">/catalog</span><h3>Catalog</h3><p>A clean white-background shot, ready for Amazon or Shopify listings.</p><div class="cmd-sizes"><span>1:1</span></div></div>
-                </article>
-                <article class="cmd-card reveal">
-                    <div class="cmd-art art-festive" aria-hidden="true"><div class="lights"></div><span class="bulb" style="left:12%"></span><span class="bulb" style="left:30%;top:28px;animation-delay:-.6s"></span><span class="bulb" style="left:50%;top:30px;animation-delay:-1.2s"></span><span class="bulb" style="left:70%;top:28px;animation-delay:-1.8s"></span><span class="bulb" style="left:88%;animation-delay:-.3s"></span><i class="fas fa-headphones product"></i><span class="greet">HAPPY DIWALI</span></div>
-                    <div class="cmd-info"><span class="cmd-code">/festive</span><h3>Festive</h3><p>Your product dressed up for the next festival, or name one: <em>/festive Diwali</em>.</p><div class="cmd-sizes"><span>1:1</span></div></div>
-                </article>
+            <div class="studio-app reveal">
+                <div class="studio-side">
+                    <div class="studio-prompt" aria-hidden="true">
+                        <span class="studio-attach"><i class="fas fa-headphones"></i></span>
+                        <div class="studio-prompt-text">
+                            <span class="studio-file">headphones.jpg</span>
+                            <span class="studio-typed"><span id="studioTyped">/metaad</span><span class="caret"></span></span>
+                        </div>
+                        <span class="studio-send"><i class="fas fa-paper-plane"></i></span>
+                    </div>
+                    <div class="studio-cmds" role="tablist" aria-label="Image commands" aria-orientation="vertical">
+                    <button class="studio-cmd" role="tab" id="cmd-tab-3dbillboard" aria-controls="cmd-3dbillboard" aria-selected="false" tabindex="-1" data-cmd="/3dbillboard">
+                        <span class="cmd-code">/3dbillboard</span><span class="studio-cmd-name">3D Billboard</span>
+                    </button>
+                    <button class="studio-cmd" role="tab" id="cmd-tab-metaad" aria-controls="cmd-metaad" aria-selected="true" data-cmd="/metaad">
+                        <span class="cmd-code">/metaad</span><span class="studio-cmd-name">Meta Ad</span>
+                    </button>
+                    <button class="studio-cmd" role="tab" id="cmd-tab-premiumshowcase" aria-controls="cmd-premiumshowcase" aria-selected="false" tabindex="-1" data-cmd="/premiumshowcase">
+                        <span class="cmd-code">/premiumshowcase</span><span class="studio-cmd-name">Premium Showcase</span>
+                    </button>
+                    <button class="studio-cmd" role="tab" id="cmd-tab-lifestyle" aria-controls="cmd-lifestyle" aria-selected="false" tabindex="-1" data-cmd="/lifestyle">
+                        <span class="cmd-code">/lifestyle</span><span class="studio-cmd-name">Lifestyle</span>
+                    </button>
+                    <button class="studio-cmd" role="tab" id="cmd-tab-catalog" aria-controls="cmd-catalog" aria-selected="false" tabindex="-1" data-cmd="/catalog">
+                        <span class="cmd-code">/catalog</span><span class="studio-cmd-name">Catalog</span>
+                    </button>
+                    <button class="studio-cmd" role="tab" id="cmd-tab-festive" aria-controls="cmd-festive" aria-selected="false" tabindex="-1" data-cmd="/festive">
+                        <span class="cmd-code">/festive</span><span class="studio-cmd-name">Festive</span>
+                    </button>
+                    </div>
+                </div>
+                <div class="studio-screen" id="studioScreen">
+                    <div class="studio-screen-bar" aria-hidden="true"><span></span><span></span><span></span><b id="studioStatus">Ready</b></div>
+                    <div class="studio-progress" aria-hidden="true"><span id="studioProgress"></span></div>
+                    <div class="studio-shot" role="tabpanel" id="cmd-3dbillboard" aria-labelledby="cmd-tab-3dbillboard" hidden>
+                        <div class="cmd-art art-billboard" aria-hidden="true"><div class="board"></div><div class="skyline"></div><i class="fas fa-headphones product"></i></div>
+                        <div class="studio-shot-info"><h3>3D Billboard</h3><p>Your product popping out of a giant 3D billboard in the city.</p><div class="cmd-sizes"><span>16:9</span></div></div>
+                    </div>
+                    <div class="studio-shot" role="tabpanel" id="cmd-metaad" aria-labelledby="cmd-tab-metaad">
+                        <div class="cmd-art art-metaad" aria-hidden="true"><div class="frame f1"><i class="fas fa-headphones"></i><span>SHOP</span></div><div class="frame f2"><i class="fas fa-headphones"></i><span>SHOP</span></div><div class="frame f3"><i class="fas fa-headphones"></i><span>SHOP</span></div></div>
+                        <div class="studio-shot-info"><h3>Meta Ad</h3><p>Facebook and Instagram ad images, plus the ad copy to go with them.</p><div class="cmd-sizes"><span>Feed 1:1</span><span>Feed 4:5</span><span>Story 9:16</span></div></div>
+                    </div>
+                    <div class="studio-shot" role="tabpanel" id="cmd-premiumshowcase" aria-labelledby="cmd-tab-premiumshowcase" hidden>
+                        <div class="cmd-art art-showcase" aria-hidden="true"><div class="beam"></div><div class="pedestal"></div><i class="fas fa-headphones product"></i></div>
+                        <div class="studio-shot-info"><h3>Premium Showcase</h3><p>A luxury studio photoshoot of your product, lit like a magazine cover.</p><div class="cmd-sizes"><span>1:1</span></div></div>
+                    </div>
+                    <div class="studio-shot" role="tabpanel" id="cmd-lifestyle" aria-labelledby="cmd-tab-lifestyle" hidden>
+                        <div class="cmd-art art-lifestyle" aria-hidden="true"><div class="sun"></div><i class="fas fa-seedling plant"></i><div class="table"></div><i class="fas fa-headphones product"></i></div>
+                        <div class="studio-shot-info"><h3>Lifestyle</h3><p>Your product in real, everyday use, in a scene your customers recognise.</p><div class="cmd-sizes"><span>4:5</span></div></div>
+                    </div>
+                    <div class="studio-shot" role="tabpanel" id="cmd-catalog" aria-labelledby="cmd-tab-catalog" hidden>
+                        <div class="cmd-art art-catalog" aria-hidden="true"><div class="shadow"></div><i class="fas fa-headphones product"></i><span class="sku">SKU 1042</span></div>
+                        <div class="studio-shot-info"><h3>Catalog</h3><p>A clean white-background shot, ready for Amazon or Shopify listings.</p><div class="cmd-sizes"><span>1:1</span></div></div>
+                    </div>
+                    <div class="studio-shot" role="tabpanel" id="cmd-festive" aria-labelledby="cmd-tab-festive" hidden>
+                        <div class="cmd-art art-festive" aria-hidden="true"><div class="lights"></div><span class="bulb" style="left:12%"></span><span class="bulb" style="left:30%;top:28px;animation-delay:-.6s"></span><span class="bulb" style="left:50%;top:30px;animation-delay:-1.2s"></span><span class="bulb" style="left:70%;top:28px;animation-delay:-1.8s"></span><span class="bulb" style="left:88%;animation-delay:-.3s"></span><i class="fas fa-headphones product"></i><span class="greet">HAPPY DIWALI</span></div>
+                        <div class="studio-shot-info"><h3>Festive</h3><p>Your product dressed up for the next festival, or name one: <em>/festive Diwali</em>.</p><div class="cmd-sizes"><span>1:1</span></div></div>
+                    </div>
+                </div>
             </div>
         </div>
     </section>
@@ -905,17 +1038,17 @@
             </div>
             <div class="steps">
                 <div class="step-card reveal">
-                    <div class="step-num"><i class="fas fa-globe"></i><b>1</b></div>
+                    <div class="step-num" data-parallax="-0.05" data-parallax-max="40"><i class="fas fa-globe"></i><b>1</b></div>
                     <h3>Add your website</h3>
                     <p>AVIR AI reads it and builds your brand profile: voice, colours, products and logo.</p>
                 </div>
                 <div class="step-card reveal">
-                    <div class="step-num"><i class="fas fa-pen-nib"></i><b>2</b></div>
+                    <div class="step-num" data-parallax="-0.1" data-parallax-max="40"><i class="fas fa-pen-nib"></i><b>2</b></div>
                     <h3>Describe your post</h3>
                     <p>Write one line, or type a slash command. Get captions, hashtags and images for each platform.</p>
                 </div>
                 <div class="step-card reveal">
-                    <div class="step-num"><i class="fas fa-paper-plane"></i><b>3</b></div>
+                    <div class="step-num" data-parallax="-0.15" data-parallax-max="40"><i class="fas fa-paper-plane"></i><b>3</b></div>
                     <h3>Review and publish</h3>
                     <p>Refine in chat, send it for approval, then publish or schedule it to your accounts.</p>
                 </div>
@@ -964,6 +1097,8 @@
     <section class="cta">
         <div class="wrap">
             <div class="cta-card reveal">
+                <span class="cta-orb orb-a" data-parallax="0.2" data-parallax-max="80" aria-hidden="true"></span>
+                <span class="cta-orb orb-b" data-parallax="-0.15" data-parallax-max="80" aria-hidden="true"></span>
                 <div>
                     <span class="eyebrow">Get started</span>
                     <h2 class="section-title">Your next post is one sentence away</h2>
@@ -1007,6 +1142,7 @@
                 <nav class="footer-col" aria-label="Product">
                     <h4>Product</h4>
                     <a href="#channels">Platforms</a>
+                    <a href="#languages">Languages</a>
                     <a href="#studio">Image studio</a>
                     <a href="#features">Features</a>
                     <a href="#how">How it works</a>
@@ -1035,9 +1171,19 @@
         </div>
     </footer>
 
+    <script src="{{ url_for('static', filename='js/vendor/lenis-1.3.26.min.js') }}" defer></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+            // Show/hide a switchable panel, replaying its entrance animation when shown
+            const replay = (panel, on) => {
+                panel.hidden = !on;
+                if (!on) return;
+                panel.style.animation = 'none';
+                void panel.offsetWidth;
+                panel.style.animation = '';
+            };
 
             // Header gets a border once the page scrolls
             const header = document.getElementById('siteHeader');
@@ -1055,7 +1201,7 @@
                 });
             }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
             document.querySelectorAll('.reveal').forEach((el, i) => {
-                el.style.transitionDelay = (el.closest('.studio-grid, .bento, .steps') ? (i % 3) * 80 : 0) + 'ms';
+                el.style.transitionDelay = (el.closest('.bento, .steps') ? (i % 3) * 80 : 0) + 'ms';
                 reveal.observe(el);
             });
 
@@ -1067,7 +1213,7 @@
                     const on = t === tab;
                     t.setAttribute('aria-selected', on);
                     t.tabIndex = on ? 0 : -1;
-                    document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+                    replay(document.getElementById(t.getAttribute('aria-controls')), on);
                 });
                 if (focus) tab.focus();
             };
@@ -1086,6 +1232,152 @@
                     const i = tabs.findIndex((t) => t.getAttribute('aria-selected') === 'true');
                     selectTab(tabs[(i + 1) % tabs.length]);
                 }, 5000);
+            }
+
+            // Language tabs (auto-rotate until the visitor picks one)
+            const langTabs = [...document.querySelectorAll('.lang-tab')];
+            let langTimer = null;
+            const selectLang = (tab, focus) => {
+                langTabs.forEach((t) => {
+                    const on = t === tab;
+                    t.setAttribute('aria-selected', on);
+                    t.tabIndex = on ? 0 : -1;
+                    replay(document.getElementById(t.getAttribute('aria-controls')), on);
+                });
+                if (focus) tab.focus();
+            };
+            langTabs.forEach((tab, i) => {
+                tab.addEventListener('click', () => { clearInterval(langTimer); selectLang(tab); });
+                tab.addEventListener('keydown', (e) => {
+                    const next = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+                    if (!next) return;
+                    e.preventDefault();
+                    clearInterval(langTimer);
+                    selectLang(langTabs[(i + next + langTabs.length) % langTabs.length], true);
+                });
+            });
+            if (!reduceMotion) {
+                langTimer = setInterval(() => {
+                    const i = langTabs.findIndex((t) => t.getAttribute('aria-selected') === 'true');
+                    selectLang(langTabs[(i + 1) % langTabs.length]);
+                }, 4000);
+            }
+
+            // Image studio: pick a command, it is "typed" and the shot is generated
+            const cmds = [...document.querySelectorAll('.studio-cmd')];
+            const screen = document.getElementById('studioScreen');
+            const typed = document.getElementById('studioTyped');
+            const status = document.getElementById('studioStatus');
+            let studioTimer = null, studioBusy = null, typeTimer = null;
+            const showShot = (tab) => {
+                cmds.forEach((t) => {
+                    const on = t === tab;
+                    t.setAttribute('aria-selected', on);
+                    t.tabIndex = on ? 0 : -1;
+                    replay(document.getElementById(t.getAttribute('aria-controls')), on);
+                });
+            };
+            const runCmd = (tab, focus) => {
+                if (focus) tab.focus();
+                const text = tab.dataset.cmd;
+                clearTimeout(studioBusy); clearInterval(typeTimer);
+                if (reduceMotion) { typed.textContent = text; showShot(tab); return; }
+                cmds.forEach((t) => t.setAttribute('aria-selected', t === tab));
+                let n = 0;
+                typed.textContent = '';
+                typeTimer = setInterval(() => {
+                    typed.textContent = text.slice(0, ++n);
+                    if (n < text.length) return;
+                    clearInterval(typeTimer);
+                    screen.classList.add('is-generating');
+                    status.textContent = 'Generating…';
+                    studioBusy = setTimeout(() => {
+                        showShot(tab);
+                        screen.classList.remove('is-generating');
+                        status.textContent = 'Done · logo placed';
+                    }, 900);
+                }, 45);
+            };
+            cmds.forEach((tab, i) => {
+                tab.addEventListener('click', () => { clearInterval(studioTimer); runCmd(tab); });
+                tab.addEventListener('keydown', (e) => {
+                    const next = ['ArrowDown', 'ArrowRight'].includes(e.key) ? 1 : ['ArrowUp', 'ArrowLeft'].includes(e.key) ? -1 : 0;
+                    if (!next) return;
+                    e.preventDefault();
+                    clearInterval(studioTimer);
+                    runCmd(cmds[(i + next + cmds.length) % cmds.length], true);
+                });
+            });
+            if (screen && !reduceMotion) {
+                // Cycle through the commands while the studio is on screen, until the visitor picks one
+                const cycle = () => {
+                    const i = cmds.findIndex((t) => t.getAttribute('aria-selected') === 'true');
+                    runCmd(cmds[(i + 1) % cmds.length]);
+                };
+                new IntersectionObserver(([entry]) => {
+                    clearInterval(studioTimer);
+                    if (entry.isIntersecting && !screen.dataset.picked) studioTimer = setInterval(cycle, 4200);
+                }, { threshold: 0.35 }).observe(screen);
+                cmds.forEach((t) => t.addEventListener('click', () => { screen.dataset.picked = '1'; }));
+                // Tilt the screen towards the pointer; the product moves more than the scene (depth)
+                if (window.matchMedia('(hover: hover)').matches) {
+                    screen.addEventListener('pointermove', (e) => {
+                        const r = screen.getBoundingClientRect();
+                        const x = (e.clientX - r.left) / r.width - 0.5, y = (e.clientY - r.top) / r.height - 0.5;
+                        screen.classList.add('is-tilting');
+                        screen.style.setProperty('--ry', (x * 8).toFixed(2) + 'deg');
+                        screen.style.setProperty('--rx', (y * -6).toFixed(2) + 'deg');
+                        screen.style.setProperty('--mx', (x * 2).toFixed(3));
+                        screen.style.setProperty('--my', (y * 2).toFixed(3));
+                    });
+                    screen.addEventListener('pointerleave', () => {
+                        screen.classList.remove('is-tilting');
+                        ['--rx', '--ry', '--mx', '--my'].forEach((v) => screen.style.removeProperty(v));
+                    });
+                }
+            }
+
+            // Smooth scrolling (Lenis): mouse wheel and trackpad glide instead of jumping;
+            // touch scrolling stays native. Menu and "#section" links glide too, landing
+            // below the sticky header. Off for visitors who ask for less motion.
+            let lenis = null;
+            if (!reduceMotion && window.Lenis) {
+                lenis = new Lenis({ autoRaf: true, lerp: 0.09, smoothWheel: true });
+                // "#section" links glide to just below the sticky header (Lenis's own
+                // anchor option lands off by the current scroll once the page has moved)
+                document.addEventListener('click', (e) => {
+                    const link = e.target.closest('a[href^="#"]');
+                    const id = link && link.getAttribute('href').slice(1);
+                    const target = id && document.getElementById(id);
+                    if (!target || e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey) return;
+                    e.preventDefault();
+                    const offset = parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop) || 0;
+                    lenis.scrollTo(target.getBoundingClientRect().top + window.scrollY - offset);
+                    history.pushState(null, '', '#' + id);
+                });
+            }
+
+            // Parallax: [data-parallax="speed"] moves against the scroll by speed x its distance
+            // from the middle of the screen (negative = lags behind, feels further away).
+            // Wide screens only; translate keeps it separate from the reveal/hover transforms.
+            const parallaxEls = [...document.querySelectorAll('[data-parallax]')];
+            if (parallaxEls.length && !reduceMotion && window.matchMedia('(min-width: 861px)').matches) {
+                let ticking = false;
+                const update = () => {
+                    ticking = false;
+                    const mid = window.innerHeight / 2;
+                    parallaxEls.forEach((el) => {
+                        const r = el.getBoundingClientRect();
+                        if (r.bottom < -300 || r.top > window.innerHeight + 300) return;
+                        const max = parseFloat(el.dataset.parallaxMax || 120);
+                        const shift = (r.top + r.height / 2 - mid - (parseFloat(el.style.translate.split(' ')[1]) || 0)) * parseFloat(el.dataset.parallax);
+                        el.style.translate = `0 ${Math.max(-max, Math.min(max, shift)).toFixed(1)}px`;
+                    });
+                };
+                const queue = () => { if (!ticking) { ticking = true; requestAnimationFrame(update); } };
+                if (lenis) lenis.on('scroll', queue); else window.addEventListener('scroll', queue, { passive: true });
+                window.addEventListener('resize', queue);
+                update();
             }
 
             // Hero demo: type a brief, "generate", reveal the post, repeat
