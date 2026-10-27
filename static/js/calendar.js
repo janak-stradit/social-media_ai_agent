@@ -268,7 +268,11 @@
         chip.type = 'button';
         chip.title = (STATUS_TEXT[item.status] || 'Scheduled') + ' at ' + item.time + ': ' + item.title
             + (item.movable ? ' (drag to another day to move it, or click for more)' : '');
-        chip.append(icon('fas ' + (STATUS_ICONS[item.status] || 'fa-clock')), el('span', '', item.time + ' · ' + item.title));
+        chip.append(icon('fas ' + (item.autopilot ? 'fa-robot' : (STATUS_ICONS[item.status] || 'fa-clock'))), el('span', '', item.time + ' · ' + item.title));
+        if (item.autopilot) {
+            chip.classList.add('is-autopilot');
+            chip.title = 'Autopilot · ' + chip.title;
+        }
         chip.addEventListener('click', function () { openScheduled(item); });
         if (item.movable) {
             chip.draggable = true;
@@ -327,7 +331,7 @@
             const isToday = day.date === data.today;
             const cell = el('div', 'cal-day' + (day.in_month ? '' : ' is-outside') + (isToday ? ' is-today' : '')
                 + (day.date < data.today ? ' is-past' : ''));
-            const empty = !day.posts.length && !day.scheduled.length && !day.occasions.length && !day.suggestion;
+            const empty = !day.posts.length && !day.scheduled.length && !day.occasions.length && !day.suggestion && !day.autopilot;
             if (empty) cell.classList.add('is-empty');
 
             const head = el('div', 'cal-day-head');
@@ -345,6 +349,13 @@
             });
             day.posts.filter(p => shown(p.platforms)).forEach(function (post) { cell.appendChild(postChip(post)); });
             day.scheduled.filter(i => shown(i.platforms)).forEach(function (item) { cell.appendChild(scheduledChip(item)); });
+            if (day.autopilot) {  // prepared by Autopilot, waiting for the user's approval
+                const ap = el('a', 'cal-chip is-autopilot-waiting');
+                ap.href = '/approve/' + day.autopilot.approval_request_id;
+                ap.title = 'Autopilot prepared "' + (day.autopilot.idea_title || 'a post') + '". Approve it to schedule it.';
+                ap.append(icon('fas fa-robot'), el('span', '', 'To approve: ' + (day.autopilot.idea_title || 'Autopilot post')));
+                cell.appendChild(ap);
+            }
             if (day.suggestion) cell.appendChild(slotChip(day));
             if (day.date >= data.today) {  // a scheduled post or a To plan card can be dropped on today or a later day
                 cell.addEventListener('dragover', function (e) {
@@ -639,7 +650,26 @@
             .catch(function () { /* the list stays empty */ });
     }
 
+    // Autopilot's state in the strip (/api/autopilot, services/autopilot_service.py)
+    function loadAutopilot() {
+        fetch('/api/autopilot', { credentials: 'same-origin' })
+            .then((r) => r.json())
+            .then(function (r) {
+                const a = r && r.autopilot;
+                if (!a) return;
+                const link = $('calAutopilot');
+                const waiting = (a.posts || []).filter(p => p.status === 'awaiting_approval').length;
+                link.classList.toggle('is-on', a.enabled && !a.paused_reason);
+                link.querySelector('span').textContent = !a.enabled ? 'Autopilot: Off · Turn on'
+                    : a.paused_reason ? 'Autopilot: Paused'
+                        : 'Autopilot: On' + (waiting ? ' · ' + waiting + ' to approve' : '');
+                link.href = waiting ? '/approve' : '/settings#autopilot';
+            })
+            .catch(function () { /* the link still opens the settings */ });
+    }
+
     load(null);
     loadResults();
     loadBestTimes();
+    loadAutopilot();
 })();
