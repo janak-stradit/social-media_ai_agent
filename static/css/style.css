@@ -6285,3 +6285,29 @@ a.ap-btn { text-decoration: none; }
 .perf-btn.is-main { background: var(--brand-strong); border-color: var(--brand-strong); color: #fff; }
 .perf-btn.is-main:hover { background: var(--brand-hover); border-color: var(--brand-hover); color: #fff; }
 .perf-winner-actions .perf-open { padding: 0 6px; }
+/* Performance: a post's own page (templates/performance_post.html, performance_post.js) */
+.perf-post-link { font-weight: 600; color: var(--text-main); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.perf-post-link:hover { color: var(--brand-strong); text-decoration: underline; }
+.perf-back { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; align-self: flex-start; font-weight: 600; color: var(--brand-strong); text-decoration: none; }
+.perf-back:hover { color: var(--brand-hover); }
+.post-head { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.post-head p { margin: 0; color: var(--text-sub); }
+.post-badges { display: flex; flex-wrap: wrap; gap: 8px; }
+.post-badges:empty { display: none; }
+.post-curve { margin: 0; }
+.post-why, .post-comments { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.post-why li { display: flex; gap: 10px; align-items: flex-start; }
+.post-why li > span:last-child { display: flex; flex-direction: column; }
+.post-why-dot { flex: none; width: 10px; height: 10px; margin-top: 6px; border-radius: 999px; background: #94a3b8; }
+.post-why-dot.is-up { background: #16a34a; }
+.post-why-dot.is-down { background: #d97706; }
+.post-comments li { padding-bottom: 12px; border-bottom: 1px solid #f1f5f9; }
+.post-comments li:last-child { border-bottom: 0; padding-bottom: 0; }
+.post-comments p { margin: 4px 0; }
+.post-comment-top { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.post-comment-state { margin-left: auto; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: #fef3c7; color: #92400e; }
+.post-comment-state.is-replied { background: #dcfce7; color: #166534; }
+.post-comment-state.is-done { background: #f1f5f9; color: var(--neutral-accent); }
+.post-comment-reply { color: var(--text-sub); font-size: 13px; }
+.post-caption { margin: 0; white-space: pre-line; font-size: 14px; }
+.perf-kpis.post-stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }

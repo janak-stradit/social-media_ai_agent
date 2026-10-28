@@ -5599,6 +5599,25 @@ def post_analytics_route():
     return jsonify({"success": True, "days": days, "analytics": data})
 
 
+@api_bp.route("/analytics/posts/<int:post_id>", methods=["GET"])
+@login_required_api
+def post_detail_route(post_id):
+    """One published post for its page: numbers, how they grew, its score at
+    48 hours against the usual, why it likely did (services/insights_service.py
+    explain) and its comments."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import post_detail
+    from services.insights_service import explain
+
+    user_id = get_current_user_id()
+    post = post_detail(user_id, post_id)
+    if not post:
+        return jsonify({"error": "Post not found"}), 404
+    post["why"] = explain(user_id, post["platform"], post["item"]) if post["item"] else []
+    return jsonify({"success": True, "post": post})
+
+
 @api_bp.route("/repurpose", methods=["POST"])
 @login_required_api
 @limit_by_user("ai_user")

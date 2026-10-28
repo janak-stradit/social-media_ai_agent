@@ -3466,7 +3466,7 @@ def post_analytics(user_id: int, since: datetime, until: datetime | None = None)
             # "x your usual": against the median of the user's other scored posts on the platform
             others = [e for pid, e in finals.get(row.platform, []) if pid != row.id]
             usual = _median(others) if len(others) >= MIN_FOR_USUAL else None
-            posts.append({"platform": row.platform, "title": row.title, "permalink": row.permalink,
+            posts.append({"id": row.id, "platform": row.platform, "title": row.title, "permalink": row.permalink,
                           "published_at": _as_utc(row.published_at).isoformat(), "engagement": row.engagement,
                           "metrics": metrics, "updated_at": _as_utc(row.metrics_at).isoformat() if row.metrics_at else None,
                           "error": row.metrics_error,
@@ -3524,6 +3524,40 @@ def scored_post_items(user_id: int, days: int = USUAL_LOOKBACK_DAYS) -> list[dic
         if item:
             out.append({"platform": platform, "score": scores[post_id]["engagement"], "item": item})
     return out
+
+
+def post_detail(user_id: int, post_id: int) -> dict | None:
+    """One published post for its page (Performance -> a post): its numbers,
+    every fetch over time, its score at SCORE_AGE_HOURS against the usual on
+    its platform, what was posted, and its comments. None if not the user's."""
+    with Session(engine) as session:
+        row = session.get(PublishedPost, post_id)
+        if row is None or row.user_id != user_id:
+            return None
+        snaps = (session.query(PostMetricSnapshot.age_hours, PostMetricSnapshot.engagement)
+                 .filter(PostMetricSnapshot.post_id == post_id).order_by(PostMetricSnapshot.age_hours).all())
+        since = (_utcnow() - timedelta(days=USUAL_LOOKBACK_DAYS)).replace(tzinfo=None)
+        scores = _scores(session, user_id, min(since, row.published_at))
+        others = [s["engagement"] for pid, s in scores.items()
+                  if s["final"] and s["platform"] == row.platform and pid != post_id]
+        usual = _median(others) if len(others) >= MIN_FOR_USUAL else None
+        item = _item_for(_source_items(session, user_id, [(row.source, row.source_id)]), row.source, row.source_id, row.platform)
+        comments = [_comment_dict(c, row) for c in session.query(PostComment).filter(PostComment.post_id == post_id)
+                    .order_by(PostComment.commented_at.desc()).all()]
+        score = scores.get(post_id)
+        return {
+            "id": row.id, "platform": row.platform, "title": row.title, "permalink": row.permalink,
+            "published_at": _as_utc(row.published_at).isoformat(), "engagement": row.engagement,
+            "metrics": json.loads(row.metrics) if row.metrics else {},
+            "updated_at": _as_utc(row.metrics_at).isoformat() if row.metrics_at else None, "error": row.metrics_error,
+            "score": score["engagement"] if score else None, "score_final": bool(score and score["final"]),
+            "usual": usual, "usual_posts": len(others),
+            "vs_usual": round(score["engagement"] / usual, 1) if score and score["final"] and usual else None,
+            "snapshots": [{"age_hours": a, "engagement": int(e or 0)} for a, e in snaps],
+            "score_age_hours": SCORE_AGE_HOURS,
+            "item": {k: (item or {}).get(k) for k in ("caption", "hashtags", "media", "images")} if item else None,
+            "comments": comments,
+        }
 
 
 def proven_hashtags(user_id: int, days: int = 180, limit: int = 8) -> dict[str, list[str]]:

@@ -387,6 +387,12 @@ def create_app(config_name="development"):
         the user's usual, and what works for the brand (static/js/performance.js)."""
         return render_template("performance.html")
 
+    @app.route("/performance/posts/<int:post_id>")
+    @login_required_page
+    def performance_post_page(post_id):
+        """One published post: how it did and its comments (static/js/performance_post.js)."""
+        return render_template("performance_post.html", post_id=post_id)
+
     @app.route("/inbox")
     @login_required_page
     def inbox_page():

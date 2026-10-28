@@ -159,7 +159,9 @@
             const tr = el('tr');
             const post = el('td');
             const title = el('div', 'perf-post');
-            title.append(el('strong', '', p.title || 'Post'),
+            const details = el('a', 'perf-post-link', p.title || 'Post');  // the post's own page: results and comments
+            details.href = '/performance/posts/' + p.id;
+            title.append(details,
                 el('span', 'perf-sub', new Date(p.published_at).toLocaleString(undefined,
                     { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })));
             if (p.error && !p.updated_at) title.appendChild(el('span', 'perf-error', p.error));
@@ -169,15 +171,14 @@
             platformName.append(icon('fab ' + (ICONS[p.platform] || 'fa-share-nodes')), el('span', '', NAMES[p.platform] || p.platform));
             platform.appendChild(platformName);
             const link = el('td', 'num');
-            if (p.permalink) {
-                const open = el('a', 'perf-open', 'Open');
-                open.href = p.permalink; open.target = '_blank'; open.rel = 'noopener noreferrer';
-                open.setAttribute('aria-label', 'Open on ' + (NAMES[p.platform] || p.platform) + ': ' + (p.title || 'post'));
-                link.appendChild(open);
-            }
+            const open = el('a', 'perf-open', 'Details');
+            open.href = '/performance/posts/' + p.id;
+            open.setAttribute('aria-label', 'Details and comments: ' + (p.title || 'post'));
+            link.appendChild(open);
             tr.append(post, platform, scoreCell(p),
                 el('td', 'num', m.reach ? number(m.reach) : '–'),
                 el('td', 'num', number(p.engagement)),
+                el('td', 'num', number(m.comments)),
                 el('td', 'num', number((m.saves || 0) + (m.shares || 0))),
                 link);
             body.appendChild(tr);

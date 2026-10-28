@@ -316,3 +316,38 @@ def test_performance_page_and_its_detailed_analytics(app, platforms):
     assert len(body["all_posts"]) == 1 and body["all_posts"][0]["platform"] == "instagram"
     assert body["previous"]["posts"] == 1 and set(body["previous"]) == {"posts", "engagement", "totals", "engagement_rate"}
     assert "previous" not in client.get("/api/analytics?days=30").get_json()["analytics"]
+
+
+def test_a_posts_own_page_and_its_details(app, platforms):
+    user = db.create_user("Priya", f"{uuid.uuid4().hex[:10]}@example.com", "hash", is_admin=True)
+    other = _user()
+    post_id = f"ig_{uuid.uuid4().hex[:6]}"
+    _publish(user, "instagram", post_id, days_ago=3)
+    for n in range(5):  # the usual: five other scored Instagram posts at 100
+        _publish(user, "instagram", f"ig_{uuid.uuid4().hex[:6]}", days_ago=5 + n)
+    with Session(db.engine) as session:
+        rows = {r.platform_post_id: r.id for r in session.query(db.PublishedPost).filter(db.PublishedPost.user_id == user["id"])}
+        for pid, row_id in rows.items():
+            for age, engagement in ((6, 30), (48, 250 if pid == post_id else 100), (72, 300 if pid == post_id else 120)):
+                session.add(db.PostMetricSnapshot(post_id=row_id, age_hours=age, metrics="{}", engagement=engagement))
+        session.add(db.PostComment(user_id=user["id"], post_id=rows[post_id], platform="instagram", comment_id=f"c_{post_id}",
+                                   author="priya.s", text="Love this"))
+        session.commit()
+    client = app.test_client()
+    with client.session_transaction() as s:
+        s["user_id"] = user["id"]
+    analytics = client.get("/api/analytics?days=30&detail=1").get_json()["analytics"]
+    assert rows[post_id] in {p["id"] for p in analytics["all_posts"]}  # each row links to its page
+
+    page = client.get(f"/performance/posts/{rows[post_id]}")
+    assert page.status_code == 200 and b"js/performance_post.js" in page.data
+    post = client.get(f"/api/analytics/posts/{rows[post_id]}").get_json()["post"]
+    assert post["vs_usual"] == 2.5 and post["usual"] == 100 and post["usual_posts"] == 5
+    assert [s["age_hours"] for s in post["snapshots"]] == [6, 48, 72]
+    assert post["comments"][0]["text"] == "Love this" and post["comments"][0]["status"] == "new"
+    assert post["item"] is None and post["why"] == []  # these test posts point at no scheduled post: nothing to explain
+    # (with what was posted, "why" lists its traits - tests/test_insights.py covers explain)
+
+    with client.session_transaction() as s:  # someone else's post
+        s["user_id"] = other["id"]
+    assert client.get(f"/api/analytics/posts/{rows[post_id]}").status_code == 404

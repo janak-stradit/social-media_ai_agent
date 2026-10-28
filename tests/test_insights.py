@@ -110,3 +110,13 @@ def test_insights_endpoint(app):
         s["user_id"] = user["id"]
     body = client.get("/api/insights").get_json()
     assert body["success"] and body["posts"] == 6 and body["insights"][0]["platform"] == "linkedin"
+
+
+def test_explain_gives_each_trait_of_a_post_with_the_brands_finding():
+    user = _brand_with_history()  # LinkedIn: question openings 1.6x
+    why = insights_service.explain(user["id"], "linkedin", {"caption": "Is this your year?", "media": "none"})
+    assert why[0] == {"trait": "opening", "value": "question", "label": "Posts that open with a question", "lift": 1.6, "posts": 3}
+    assert {w["trait"] for w in why} == {"format", "opening", "length", "hashtags"}
+    # the history's other openings carry a number ("Update 0"): the other side of the same comparison
+    numbered = {w["trait"]: w for w in insights_service.explain(user["id"], "linkedin", {"caption": "We grew 2x.", "media": "none"})}
+    assert numbered["opening"]["value"] == "number" and numbered["opening"]["lift"] == 0.6

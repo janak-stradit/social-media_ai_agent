@@ -79,9 +79,10 @@ def _median(values: list[int]) -> float:
     return float(values[mid]) if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
 
 
-def compare(posts: list[dict]) -> list[dict]:
+def compare(posts: list[dict], both_sides: bool = False) -> list[dict]:
     """posts: [{platform, score, item}] -> the clear findings, strongest first:
-    [{platform, trait, value, lift, posts, others, text}]."""
+    [{platform, trait, value, lift, posts, others, text}]. both_sides keeps
+    every value's finding (explain needs the one for a post's own value)."""
     found = []
     by_platform: dict[str, list[tuple[dict, int]]] = {}
     for post in posts:
@@ -107,6 +108,8 @@ def compare(posts: list[dict]) -> list[dict]:
                 })
     # strongest either way: 2x and 0.5x are as telling as each other
     found.sort(key=lambda f: -(f["lift"] if f["lift"] >= 1 else 1 / max(f["lift"], 0.01)))
+    if both_sides:
+        return found
     # One finding per trait and platform: "carousels 2.4x" and "single images
     # 0.4x" are the same comparison seen from both sides. What does better is
     # kept; a "does worse" only when nothing in that trait does better.
@@ -126,6 +129,23 @@ def what_works(user_id: int) -> dict:
 
     posts = scored_post_items(user_id)
     return {"insights": compare(posts)[:TOP], "posts": len(posts)}
+
+
+def explain(user_id: int, platform: str, item: dict) -> list[dict]:
+    """One post's traits, each with what the brand's own posts say about it:
+    [{trait, value, label, lift (None: nothing clear)}], clear ones first -
+    for "Why it likely did well" on the post's page."""
+    from db import scored_post_items
+
+    found = {(f["trait"], f["value"]): f for f in compare(scored_post_items(user_id), both_sides=True)
+             if f["platform"] == platform}
+    out = []
+    for trait, value in traits(item).items():
+        f = found.get((trait, value))
+        out.append({"trait": trait, "value": value, "label": LABELS.get((trait, value), value),
+                    "lift": f["lift"] if f else None, "posts": f["posts"] if f else None})
+    out.sort(key=lambda t: t["lift"] is None)
+    return out
 
 
 CAPTION_TRAITS = ("opening", "length")  # what the caption writer decides; format and hashtags are chosen elsewhere

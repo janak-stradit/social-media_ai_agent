@@ -13,6 +13,9 @@
     let status = 'new';
     let comments = [];
     let openId = null;
+    // ?comment=<id> (from a post's page, performance_post.js): show all, open that one
+    let asked = Number(new URLSearchParams(window.location.search).get('comment')) || null;
+    if (asked) status = 'all';
 
     function el(tag, className, text) {
         const node = document.createElement(tag);
@@ -92,6 +95,13 @@
             .then(function (r) {
                 comments = r.comments || [];
                 renderCounts(r.counts || {});
+                if (asked && openId === null && comments.some((c) => c.id === asked)) {
+                    history.replaceState(null, '', window.location.pathname);  // a reload shouldn't reopen it
+                    const id = asked;
+                    asked = null;  // nor the next filter click
+                    open(id);
+                    return;
+                }
                 if (!comments.some((c) => c.id === openId)) openId = null;
                 renderList();
                 // on wide screens the newest is shown, without spending an AI call until asked
