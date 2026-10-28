@@ -681,6 +681,38 @@ class PublishedPost(Base):
     engagement: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     metrics_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     metrics_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    comments_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # comments last fetched
+
+
+class PostComment(Base):
+    """A comment on a post the app published, for the Inbox
+    (services/comment_service.py). status: new / replied / done. The reply is
+    only ever posted when the person approves it; draft is AVIR's suggestion
+    (kind and note come with it), cost_usd what writing it cost."""
+
+    __tablename__ = "post_comments"
+    __table_args__ = (
+        UniqueConstraint("platform", "comment_id", name="uq_post_comment"),
+        {"schema": SCHEMA} if not IS_SQLITE else {},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    post_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)  # PublishedPost.id
+    platform: Mapped[str] = mapped_column(String(16), nullable=False)
+    comment_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    author: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    commented_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    status: Mapped[str] = mapped_column(String(12), default="new", nullable=False)
+    kind: Mapped[str | None] = mapped_column(String(12), nullable=True)  # question / lead / praise / complaint / other
+    draft: Mapped[str | None] = mapped_column(Text, nullable=True)
+    note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    reply: Mapped[str | None] = mapped_column(Text, nullable=True)
+    replied_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    replied_privately: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # sent as a DM
+    reply_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
 
 
 class PostMetricSnapshot(Base):
@@ -1373,6 +1405,20 @@ def init_db():
                     sub_conn.execute(text(f"ALTER TABLE {soc_tbl} ADD COLUMN {col_name} {col_type}"))
             except Exception:
                 pass
+
+        # Published posts: when their comments were last fetched (Inbox)
+        pub_tbl = f'"{SCHEMA}".published_posts' if not IS_SQLITE else "published_posts"
+        try:
+            with engine.begin() as sub_conn:
+                sub_conn.execute(text(f"ALTER TABLE {pub_tbl} ADD COLUMN comments_at TIMESTAMP"))
+        except Exception:  # noqa: BLE001 - already there
+            pass
+        comment_tbl = f'"{SCHEMA}".post_comments' if not IS_SQLITE else "post_comments"
+        try:
+            with engine.begin() as sub_conn:
+                sub_conn.execute(text(f"ALTER TABLE {comment_tbl} ADD COLUMN replied_privately BOOLEAN DEFAULT FALSE NOT NULL"))
+        except Exception:  # noqa: BLE001 - already there
+            pass
 
         # Some source URLs (e.g. Google News RSS redirects) exceed the original
         # VARCHAR(500) post_url limit and silently fail the whole insert batch.
@@ -2870,11 +2916,14 @@ def get_system_usage_totals() -> dict:
 
 
 def _media_charges_total(session, user_id: int | None = None) -> float:
-    """Cost of images generated outside a run (run images are in the run's cost)."""
+    """Cost of images generated outside a run (run images are in the run's cost),
+    and of suggested replies to comments (Inbox), which have no run either."""
     query = session.query(func.coalesce(func.sum(ImageGeneration.cost_usd), 0.0)).filter(ImageGeneration.run_id.is_(None))
+    replies = session.query(func.coalesce(func.sum(PostComment.cost_usd), 0.0))
     if user_id is not None:
         query = query.filter(ImageGeneration.user_id == user_id)
-    return float(query.scalar() or 0.0)
+        replies = replies.filter(PostComment.user_id == user_id)
+    return float(query.scalar() or 0.0) + float(replies.scalar() or 0.0)
 
 
 def log_image_generation(
@@ -3278,6 +3327,100 @@ def follower_growth(user_id: int, since: datetime, until: datetime | None = None
         days.setdefault(platform, []).append(followers)
     return {platform: {"followers": counts[-1], "change": counts[-1] - counts[0] if len(counts) > 1 else None}
             for platform, counts in days.items()}
+
+
+# ── Comments on published posts: the Inbox (services/comment_service.py) ──
+
+COMMENT_FIELDS = ("id", "post_id", "platform", "comment_id", "author", "text", "status", "kind", "draft", "note",
+                  "reply", "reply_error", "replied_privately")
+
+
+def published_posts_due_for_comments(now: datetime, max_age_days: int = 7) -> list[dict]:
+    """Posts whose comments to fetch: every 30 minutes in their first day,
+    every 3 hours after that, for max_age_days."""
+    naive_now = now.astimezone(timezone.utc).replace(tzinfo=None)
+    with Session(engine) as session:
+        rows = session.query(PublishedPost).filter(PublishedPost.published_at >= naive_now - timedelta(days=max_age_days)).all()
+        due = []
+        for row in rows:
+            every = timedelta(minutes=30) if naive_now - row.published_at < timedelta(days=1) else timedelta(hours=3)
+            if row.comments_at is None or naive_now - row.comments_at >= every:
+                due.append({"id": row.id, "user_id": row.user_id, "platform": row.platform,
+                            "platform_post_id": row.platform_post_id})
+        return due
+
+
+def save_post_comments(post: dict, comments: list[dict] | None) -> int:
+    """Store comments not seen before ([{id, author, text, at}]) and mark the
+    post checked (None: the fetch failed - still checked, tried again later). New ones."""
+    added = 0
+    with Session(engine) as session:
+        row = session.get(PublishedPost, post["id"])
+        if row is None:
+            return 0
+        row.comments_at = _utcnow().replace(tzinfo=None)
+        known = {cid for (cid,) in session.query(PostComment.comment_id).filter(
+            PostComment.platform == row.platform, PostComment.comment_id.in_([str(c["id"]) for c in comments or []]))}
+        for c in comments or []:
+            if str(c["id"]) in known or not (c.get("text") or "").strip():
+                continue
+            at = c.get("at") or _utcnow()
+            session.add(PostComment(user_id=row.user_id, post_id=row.id, platform=row.platform, comment_id=str(c["id"])[:200],
+                                    author=(c.get("author") or "")[:120] or None, text=c["text"][:5000],
+                                    commented_at=at.astimezone(timezone.utc).replace(tzinfo=None)))
+            known.add(str(c["id"]))
+            added += 1
+        session.commit()
+    return added
+
+
+def _comment_dict(row: "PostComment", post: "PublishedPost | None") -> dict:
+    out = {k: getattr(row, k) for k in COMMENT_FIELDS}
+    out.update(commented_at=_as_utc(row.commented_at).isoformat(),
+               replied_at=_as_utc(row.replied_at).isoformat() if row.replied_at else None,
+               post_title=post.title if post else None, post_permalink=post.permalink if post else None,
+               platform_post_id=post.platform_post_id if post else None)
+    return out
+
+
+def list_post_comments(user_id: int, status: str | None = "new", limit: int = 200) -> dict:
+    """{comments: newest first (status None: all), counts: {new, replied, done, kinds of new ones}}."""
+    with Session(engine) as session:
+        query = session.query(PostComment).filter(PostComment.user_id == user_id)
+        if status:
+            query = query.filter(PostComment.status == status)
+        rows = query.order_by(PostComment.commented_at.desc()).limit(limit).all()
+        posts = {p.id: p for p in session.query(PublishedPost).filter(PublishedPost.id.in_({r.post_id for r in rows}))} if rows else {}
+        counts = {"new": 0, "replied": 0, "done": 0, "kinds": {}}
+        for state, kind, n in (session.query(PostComment.status, PostComment.kind, func.count(PostComment.id))
+                               .filter(PostComment.user_id == user_id).group_by(PostComment.status, PostComment.kind)):
+            counts[state] = counts.get(state, 0) + n
+            if state == "new" and kind:
+                counts["kinds"][kind] = counts["kinds"].get(kind, 0) + n
+        return {"comments": [_comment_dict(r, posts.get(r.post_id)) for r in rows], "counts": counts}
+
+
+def get_post_comment(user_id: int, comment_id: int) -> dict | None:
+    with Session(engine) as session:
+        row = session.get(PostComment, comment_id)
+        if row is None or row.user_id != user_id:
+            return None
+        return _comment_dict(row, session.get(PublishedPost, row.post_id))
+
+
+def update_post_comment(user_id: int, comment_id: int, add_cost: float = 0.0, **fields) -> dict | None:
+    """Change a comment's draft / kind / note / status / reply... (only the owner's)."""
+    allowed = {"draft", "kind", "note", "status", "reply", "reply_error", "replied_at", "replied_privately"}
+    with Session(engine) as session:
+        row = session.get(PostComment, comment_id)
+        if row is None or row.user_id != user_id:
+            return None
+        for key, value in fields.items():
+            if key in allowed:
+                setattr(row, key, value.astimezone(timezone.utc).replace(tzinfo=None) if isinstance(value, datetime) else value)
+        row.cost_usd = float(row.cost_usd or 0.0) + float(add_cost or 0.0)
+        session.commit()
+        return _comment_dict(row, session.get(PublishedPost, row.post_id))
 
 
 def _median(values: list[int]) -> float:

@@ -195,6 +195,13 @@ def run_scheduler(app_root_path):
                 refresh_followers()
             except Exception as e:
                 logger.warning(f"Error refreshing post metrics: {e}")
+            # New comments on published posts, for the Inbox - services/comment_service.py
+            try:
+                from services.comment_service import refresh_due as refresh_comments
+
+                refresh_comments()
+            except Exception as e:
+                logger.warning(f"Error fetching post comments: {e}")
             # Billing: renewal and plan-ending reminders (email + bell), once each
             try:
                 from services.billing_notice_service import run_billing_reminders

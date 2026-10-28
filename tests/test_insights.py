@@ -45,8 +45,16 @@ def test_a_clear_difference_is_reported_with_its_size():
     found = {(f["trait"], f["value"]): f for f in compare(posts)}
     assert found[("format", "carousel")]["lift"] == 2.0
     assert found[("format", "carousel")]["text"] == "Carousels get 2.0× the engagement of your other Instagram posts"
-    assert found[("format", "image")]["lift"] == 0.5  # the other side, as a warning
+    assert ("format", "image") not in found  # 0.5x: the same comparison from the other side, said once
     assert ("opening", "statement") not in found  # every post opens the same way: nothing to compare
+
+
+def test_a_does_worse_finding_shows_when_nothing_in_its_trait_does_better():
+    posts = [_post("facebook", s, caption="x" * 1200) for s in (40, 50, 60)]  # long
+    posts += [_post("facebook", 100, caption="x" * 200)] * 2  # short: too few to judge
+    posts += [_post("facebook", 100, caption="x" * 600)] * 2  # medium: too few to judge
+    found = {(f["trait"], f["value"]): f["lift"] for f in compare(posts)}
+    assert found == {("length", "long"): 0.5}
 
 
 def test_small_or_unclear_differences_are_not_reported():
@@ -64,6 +72,8 @@ def _published(user, platform, caption, engagement, days_ago=10):
                                          {"items": [{"platform": platform, "caption": caption, "media": "none"}]})
     db.register_published_post(user["id"], platform, post_id, None, caption, "scheduled", scheduled["id"])
     with Session(db.engine) as session:
+        # published, as it says: a pending one in the past would be picked up by other tests' publish_due
+        session.query(db.ScheduledPost).filter(db.ScheduledPost.id == scheduled["id"]).update({"status": "published"})
         row = session.query(db.PublishedPost).filter(db.PublishedPost.platform_post_id == post_id).one()
         row.published_at = (datetime.now(timezone.utc) - timedelta(days=days_ago)).replace(tzinfo=None)
         session.add(db.PostMetricSnapshot(post_id=row.id, age_hours=6, metrics="{}", engagement=1))

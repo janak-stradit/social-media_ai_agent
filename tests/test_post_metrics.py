@@ -264,12 +264,15 @@ def test_no_comparison_until_enough_posts_are_scored(platforms):
 
 def test_followers_are_counted_once_a_day(monkeypatch):
     user = _user()
-    db.save_social_account(user["id"], "instagram", "@clinic", account_id="ig_17841", access_token="tok")
+    ig_id = f"ig_{uuid.uuid4().hex[:8]}"
+    db.save_social_account(user["id"], "instagram", "@clinic", account_id=ig_id, access_token="tok")
     db.save_social_account(user["id"], "linkedin", "Priya", account_id="urn:li:person:abc", access_token="tok")
     counts = iter([1200, 1260])
-    calls = []
+    calls = []  # this user's only: other tests leave connected accounts too
 
     def get(url, params=None, headers=None, timeout=None):
+        if ig_id not in url and "urn%3Ali%3Aperson%3Aabc" not in url:
+            return FakeResponse({"followers_count": 0})
         calls.append(url)
         return FakeResponse({"followers_count": next(counts)})
 
@@ -296,3 +299,20 @@ def test_one_day_of_followers_has_no_change_yet(monkeypatch):
                         lambda url, params=None, headers=None, timeout=None: FakeResponse({"followers_count": 540}))
     metrics_service.refresh_followers()
     assert db.follower_growth(user["id"], _since(1)) == {"facebook": {"followers": 540, "change": None}}
+
+
+def test_performance_page_and_its_detailed_analytics(app, platforms):
+    # an admin skips the onboarding steps that page logins go through
+    user = db.create_user("Priya", f"{uuid.uuid4().hex[:10]}@example.com", "hash", is_admin=True)
+    _publish(user, "instagram", f"ig_{uuid.uuid4().hex[:6]}", days_ago=2)
+    _publish(user, "facebook", f"fb_{uuid.uuid4().hex[:6]}", days_ago=40)  # the period before
+    metrics_service.refresh_due()
+    client = app.test_client()
+    with client.session_transaction() as s:
+        s["user_id"] = user["id"]
+    page = client.get("/performance")
+    assert page.status_code == 200 and b"perfKpis" in page.data and b"js/performance.js" in page.data
+    body = client.get("/api/analytics?days=30&detail=1").get_json()["analytics"]
+    assert len(body["all_posts"]) == 1 and body["all_posts"][0]["platform"] == "instagram"
+    assert body["previous"]["posts"] == 1 and set(body["previous"]) == {"posts", "engagement", "totals", "engagement_rate"}
+    assert "previous" not in client.get("/api/analytics?days=30").get_json()["analytics"]

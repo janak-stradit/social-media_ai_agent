@@ -623,6 +623,9 @@
                     top.appendChild(row);
                 });
                 top.appendChild(el('p', 'cal-results-note', 'Numbers update every few hours for 30 days after a post goes out. Some platforms only share reach with business accounts.'));
+                const more = el('a', 'cal-link-btn', 'See every post and what works for you');
+                more.href = '/performance';
+                top.appendChild(more);
             })
             .catch(function () { $('calResultsSummary').textContent = 'Results unavailable right now'; });
     }

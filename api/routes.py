@@ -5588,8 +5588,14 @@ def post_analytics_route():
         days = max(1, min(365, int(request.args.get("days", 30))))
     except ValueError:
         days = 30
-    data = post_analytics(get_current_user_id(), datetime.now(timezone.utc) - timedelta(days=days))
-    data.pop("all_posts", None)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    data = post_analytics(get_current_user_id(), since)
+    if request.args.get("detail") == "1":
+        # The Performance page: every post, and the period before for comparison
+        before = post_analytics(get_current_user_id(), since - timedelta(days=days), since)
+        data["previous"] = {k: before[k] for k in ("posts", "engagement", "totals", "engagement_rate")}
+    else:
+        data.pop("all_posts", None)
     return jsonify({"success": True, "days": days, "analytics": data})
 
 
@@ -5684,6 +5690,129 @@ def insights_route():
     from services.insights_service import what_works
 
     return jsonify({"success": True, **what_works(get_current_user_id())})
+
+
+@api_bp.route("/post-score", methods=["POST"])
+@login_required_api
+def post_score_route():
+    """A quick checklist for a post being edited (services/post_score_service.py).
+    No AI call; personal where the brand's own results say more."""
+    from services.post_score_service import score
+
+    data = request.get_json(silent=True) or {}
+    caption = str(data.get("caption") or "")[:5000]
+    hashtags = [str(t)[:100] for t in (data.get("hashtags") or [])[:60] if isinstance(t, str)]
+    findings = []
+    if DB_AVAILABLE:
+        try:
+            from services.insights_service import what_works
+
+            findings = what_works(get_current_user_id())["insights"]
+        except Exception as err:  # noqa: BLE001 - the common-practice checks still work
+            logger.warning(f"Post score without insights: {err}")
+    media = data.get("media") if data.get("media") in ("none", "single", "carousel") else None
+    images = [str(i) for i in (data.get("images") or [])[:20]] if isinstance(data.get("images"), list) else []
+    return jsonify({"success": True, **score(str(data.get("platform") or ""), caption, hashtags, media, images, findings)})
+
+
+# ── Inbox: comments on published posts (services/comment_service.py) ──────
+
+
+@api_bp.route("/inbox", methods=["GET"])
+@login_required_api
+def inbox_list():
+    """Comments on the user's published posts, newest first: ?status=new
+    (default) / replied / done / all, with counts for the filters."""
+    if not DB_AVAILABLE:
+        return jsonify({"success": True, "comments": [], "counts": {"new": 0, "replied": 0, "done": 0, "kinds": {}}})
+    from db import list_post_comments
+
+    status = request.args.get("status", "new")
+    status = None if status == "all" else status if status in ("new", "replied", "done") else "new"
+    return jsonify({"success": True, **list_post_comments(get_current_user_id(), status)})
+
+
+@api_bp.route("/inbox/<int:comment_id>/suggest", methods=["POST"])
+@login_required_api
+@limit_by_user("ai_user")
+def inbox_suggest(comment_id):
+    """A suggested reply (one small AI call, counted towards credits). Nothing is posted."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import get_post_comment, update_post_comment
+    from services import comment_service
+
+    user_id = get_current_user_id()
+    comment = get_post_comment(user_id, comment_id)
+    if not comment:
+        return jsonify({"error": "Comment not found"}), 404
+    try:
+        if _credit_blocked(get_user_usage_stats(user_id)):
+            return jsonify({"error": "Credit limit reached. Please request a credit extension.", "credit_limit_exceeded": True}), 402
+    except Exception as cred_err:  # noqa: BLE001
+        current_app.logger.warning(f"[Credits] Check error: {cred_err}")
+    try:
+        suggestion, cost = comment_service.suggest(user_id, comment)
+    except comment_service.ReplyError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    except Exception as err:  # noqa: BLE001
+        current_app.logger.warning(f"[Inbox] Could not suggest a reply: {err}")
+        return jsonify({"success": False, "error": "Couldn't suggest a reply right now. Please try again or write your own."}), 502
+    updated = update_post_comment(user_id, comment_id, add_cost=cost, **suggestion)
+    log_event("inbox.suggest", comment_id=comment_id, platform=comment["platform"], kind=suggestion["kind"])
+    return jsonify({"success": True, "comment": updated})
+
+
+@api_bp.route("/inbox/<int:comment_id>/reply", methods=["POST"])
+@login_required_api
+def inbox_reply(comment_id):
+    """Post the reply the person approved (their text, as edited) under the
+    comment, or with {private: true} send it to the commenter as a private
+    message (Facebook and Instagram, within 7 days of the comment)."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from datetime import datetime, timezone
+
+    from db import get_post_comment, update_post_comment
+    from services import comment_service
+    from services.publish_service import accounts
+
+    user_id = get_current_user_id()
+    comment = get_post_comment(user_id, comment_id)
+    if not comment:
+        return jsonify({"error": "Comment not found"}), 404
+    if comment["status"] == "replied":
+        return jsonify({"success": False, "error": "This comment already has your reply."}), 409
+    data = request.get_json(silent=True) or {}
+    text = str(data.get("text") or "")
+    private = data.get("private") is True
+    send = comment_service.post_private_reply if private else comment_service.post_reply
+    try:
+        send(comment, text, accounts(user_id).get(comment["platform"]))
+    except comment_service.ReplyError as err:
+        update_post_comment(user_id, comment_id, reply_error=str(err)[:300])
+        return jsonify({"success": False, "error": str(err)}), 400
+    updated = update_post_comment(user_id, comment_id, status="replied", reply=text.strip(), reply_error=None,
+                                  replied_at=datetime.now(timezone.utc), replied_privately=private)
+    log_event("inbox.reply", comment_id=comment_id, platform=comment["platform"], private=private)
+    return jsonify({"success": True, "comment": updated})
+
+
+@api_bp.route("/inbox/<int:comment_id>/status", methods=["POST"])
+@login_required_api
+def inbox_status(comment_id):
+    """Mark a comment done (nothing to reply) or back to new."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import update_post_comment
+
+    status = (request.get_json(silent=True) or {}).get("status")
+    if status not in ("new", "done"):
+        return jsonify({"error": "status must be new or done"}), 400
+    updated = update_post_comment(get_current_user_id(), comment_id, status=status)
+    if not updated:
+        return jsonify({"error": "Comment not found"}), 404
+    return jsonify({"success": True, "comment": updated})
 
 
 @api_bp.route("/me/goal", methods=["GET"])

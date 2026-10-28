@@ -2820,8 +2820,45 @@ $(document).ready(function () {
                         <button type="button" class="btn btn-sm btn-outline-primary btn-edit-save"><i class="fas fa-check me-1"></i>Save</button>
                     </span>
                 </div>
+                ${target === 'carousel' ? '' : '<section class="post-score" aria-label="Post score" aria-live="polite" hidden></section>'}
             </div>
             </div>`;
+    }
+
+    // ── Post score: a checklist that follows the edits ──────────────────
+    // POST /api/post-score (services/post_score_service.py): no AI call, so it
+    // reruns a moment after each change. Personal once the brand's own results
+    // say something (services/insights_service.py).
+    function scheduleScore($ed) {
+        const $box = $ed.find('.post-score');
+        if (!$box.length) return;
+        clearTimeout($ed.data('scoreTimer'));
+        $ed.data('scoreTimer', setTimeout(function () {
+            const caption = $ed.find('.post-editor-caption').val();
+            if (!caption.trim()) { $box.prop('hidden', true); return; }
+            const asked = caption + '\n' + $ed.find('.post-editor-tags').val();
+            $ed.data('scoreAsked', asked);
+            $.ajax({
+                url: '/api/post-score', type: 'POST', contentType: 'application/json',
+                data: JSON.stringify({ platform: $ed.data('target'), caption: caption,
+                                       hashtags: window.PostPreview.cleanHashtags($ed.find('.post-editor-tags').val()) }),
+            }).done(function (r) {
+                if ($ed.data('scoreAsked') !== asked || !r.checks) return;  // an older answer: a newer one is coming
+                const items = r.checks.map(c => `
+                    <li class="${c.ok ? 'is-ok' : 'is-warn'}">
+                        <span class="post-score-mark" aria-hidden="true">${c.ok ? '<i class="fas fa-check"></i>' : '!'}</span>
+                        <span><strong>${escapeHtml(c.title)}</strong><span class="post-score-note">${escapeHtml(c.note)}</span></span>
+                    </li>`).join('');
+                $box.html(`
+                    <div class="post-score-head">
+                        <strong>Post score: ${escapeHtml(r.label)}</strong>
+                        <span>${r.passed} of ${r.total} checks</span>
+                    </div>
+                    <ul class="post-score-list">${items}</ul>
+                    <p class="post-score-foot">${r.personal ? 'Based on your own posts where they show something clear, otherwise common practice.' : 'Common practice for now. Once your posts have results, these checks use what works for you.'} Guidance, not a prediction.</p>`)
+                    .prop('hidden', false);
+            });  // unavailable: the editor works without it
+        }, 500));
     }
 
     function growEditorInput(el) {
@@ -2840,6 +2877,7 @@ $(document).ready(function () {
             `${length.toLocaleString()} / ${limit.toLocaleString()} characters · ${tags.length} hashtag${tags.length === 1 ? '' : 's'}`
             + (over ? ` · ${(length - limit).toLocaleString()} over the limit` : tooMany ? ` · at most ${PP.MAX_HASHTAGS}` : ''));
         $ed.find('.btn-edit-save').prop('disabled', over || tooMany || !caption.trim());
+        scheduleScore($ed);
     }
 
     function openPostEditor(msgId, target, focus) {

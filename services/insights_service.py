@@ -107,7 +107,17 @@ def compare(posts: list[dict]) -> list[dict]:
                 })
     # strongest either way: 2x and 0.5x are as telling as each other
     found.sort(key=lambda f: -(f["lift"] if f["lift"] >= 1 else 1 / max(f["lift"], 0.01)))
-    return found
+    # One finding per trait and platform: "carousels 2.4x" and "single images
+    # 0.4x" are the same comparison seen from both sides. What does better is
+    # kept; a "does worse" only when nothing in that trait does better.
+    kept, seen = [], set()
+    for f in sorted(found, key=lambda f: f["lift"] < 1):  # stable: does-better first, strength order kept
+        key = (f["platform"], f["trait"])
+        if key not in seen:
+            seen.add(key)
+            kept.append(f)
+    kept.sort(key=lambda f: -(f["lift"] if f["lift"] >= 1 else 1 / max(f["lift"], 0.01)))
+    return kept
 
 
 def what_works(user_id: int) -> dict:
