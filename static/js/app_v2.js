@@ -2884,7 +2884,7 @@ $(document).ready(function () {
             data: JSON.stringify({ caption: caption, platform: target === 'carousel' ? '' : target }),
         }).done(function (r) {
             const options = (r.options || []).map(text =>
-                `<button type="button" class="post-opening" data-text="${escapeAttr(text)}">${escapeHtml(text)}</button>`).join('');
+                `<button type="button" class="post-opening" data-text="${escapeHtml(text)}">${escapeHtml(text)}</button>`).join('');
             $box.html(`<p class="post-openings-note">Pick one to replace the first line. Nothing changes until you save.</p>
                 <div class="post-openings-list">${options}</div>`);
         }).fail(function (xhr) {

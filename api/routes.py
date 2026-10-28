@@ -1939,7 +1939,7 @@ def post_openings(run_id):
         current_app.logger.warning(f"[Credits] Check error: {cred_err}")
     data = request.get_json(silent=True) or {}
     caption = str(data.get("caption") or "")
-    platform = str(data.get("platform") or "").lower()
+    platform = str(data.get("platform") or "").lower()[:20]
     try:
         options, usage = hook_service.other_openings(caption, platform)
     except hook_service.OpeningError as err:
