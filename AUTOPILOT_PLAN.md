@@ -3,9 +3,17 @@
 Autopilot creates posts for the calendar's open slots and, once approved,
 schedules them to publish. October 2026.
 
-Decisions taken: **off by default** (a toggle in Settings), **Review first**
-(nothing is published without approval), **text only** (no images, to keep
-credit use low).
+Decisions taken: **off by default**, **Review first** (nothing is published
+without approval), **text only by default** (images are opt-in with a monthly
+cap, to keep credit use low).
+
+> Merged with a second build (28 Oct 2026): the engine below is kept as is;
+> planning and the page come from the other build. The user sets posts a
+> week, days off, a tips / offers / news mix, festivals, topics to use and
+> avoid, and optional images on the **/autopilot** page, which shows the
+> two-week plan ("planned" rows) and what waits for approval. Settings ->
+> Autopilot is now a status card linking there. A database made by the
+> other build is upgraded at start-up (db._upgrade_first_autopilot).
 
 ---
 

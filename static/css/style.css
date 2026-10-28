@@ -4018,7 +4018,6 @@ body.settings-page .st-nav .bc-nav-item.active { background: #fff7ed; color: var
 .st-pane-head-text { min-width: 0; }
 .st-pane-head h2 { margin: 0; font-size: 1.4rem; font-weight: 800; letter-spacing: -0.01em; color: var(--bp-text); }
 .st-pane-head p { margin: 4px 0 0; font-size: 0.9rem; color: var(--bp-text-sub); max-width: 760px; }
-.st-pane-head .ap-switch { margin-top: 6px; }
 body.settings-page .settings-pane-card { padding: 20px 22px; border-radius: 14px; box-shadow: none !important; }
 body.settings-page .settings-pane-card + .settings-pane-card { margin-top: 16px; }
 .st-card-title { margin: 0 0 4px; font-size: 1rem; font-weight: 700; color: var(--bp-text); }
@@ -4864,34 +4863,14 @@ a:hover > .stradit-badge, .stradit-badge:hover { background: #1e293b; }
 .st-empty { margin: 8px 12px; font-size: 0.82rem; color: var(--bp-text-sub); }
 .st-nav .is-filtered-out { display: none !important; }
 
-/* Settings -> Autopilot (autopilot.js) */
-.ap-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.ap-switch { display: flex; align-items: center; gap: 10px; margin: 4px 0 0; padding-left: 0; flex-shrink: 0; }
-.ap-switch .form-check-input { width: 3rem; height: 1.5rem; margin: 0; float: none; cursor: pointer; }
-.ap-switch .form-check-input:checked { background-color: var(--brand-strong); border-color: var(--brand-strong); }
-.ap-switch label { font-weight: 700; font-size: 0.9rem; min-width: 26px; }
-.ap-status { margin: 14px 0 0; padding: 10px 14px; border-radius: 10px; font-size: 0.86rem; background: #f8fafc; color: var(--bp-text-sub); }
-.ap-status:empty { display: none; }
-.ap-status.is-on { background: #f0fdf4; color: #14532d; }
-.ap-status.is-problem { background: #fffbeb; color: #78350f; }
-.ap-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin: 18px 0 6px; }
-.ap-field { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; border: 0; min-width: 0; }
-.ap-field legend, .ap-field label { font-size: 0.8rem; font-weight: 600; color: var(--bp-text); margin: 0; float: none; width: auto; }
-.ap-field small { font-size: 0.76rem; color: var(--bp-text-sub); }
-.ap-platforms { display: flex; flex-wrap: wrap; gap: 6px 14px; }
-.ap-platforms label { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; font-size: 0.86rem; }
-.ap-platforms .is-off { color: #9ca3af; }
-.ap-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 10px; }
-.ap-subhead { margin: 22px 0 8px; font-size: 0.78rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--bp-text-sub); }
-.ap-posts { display: flex; flex-direction: column; gap: 6px; }
-.ap-post { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--bp-border); border-radius: 10px; font-size: 0.86rem; }
-.ap-post-day { width: 110px; font-weight: 600; color: var(--bp-text); }
-.ap-post-title { flex: 1 1 200px; min-width: 0; color: var(--bp-text-sub); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ap-pill { padding: 2px 9px; border-radius: 999px; font-size: 0.72rem; font-weight: 700; background: #f1f5f9; color: #334155; }
-.ap-pill.is-awaiting_approval { background: #fff7ed; color: #9a3412; }
-.ap-pill.is-scheduled { background: #dbeafe; color: #1e3a8a; }
-.ap-pill.is-failed, .ap-pill.is-expired { background: #fee2e2; color: #7f1d1d; }
-@media (max-width: 768px) { .ap-options { grid-template-columns: 1fr; } .ap-head { flex-direction: column; } }
+/* Settings -> Autopilot: a status card linking to the /autopilot page (autopilot_settings.js) */
+.apt-card { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.apt-dot { width: 12px; height: 12px; border-radius: 50%; background: #9ca3af; flex-shrink: 0; }
+.apt-card.is-on .apt-dot { background: #047857; box-shadow: 0 0 0 5px rgba(4, 120, 87, .15); }
+.apt-card.is-paused .apt-dot { background: #d97706; }
+.apt-text { flex: 1 1 260px; min-width: 0; }
+.apt-text strong { display: block; font-size: 0.95rem; color: var(--bp-text); }
+.apt-text span { font-size: 0.85rem; color: var(--bp-text-sub); }
 
 /* Studio Chat: this week's goal, linking to the calendar (app_v2.js loadGoalPill) */
 .goal-pill {
@@ -6038,6 +6017,7 @@ details[open] > summary .compliance-caret { transform: rotate(180deg); }
   display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 16px; border-radius: 10px;
   border: 1px solid #e5e7eb; background: #fff; color: #374151; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap;
 }
+a.ap-btn { text-decoration: none; }
 .ap-btn:hover { border-color: #cbd5e1; color: #111827; }
 .ap-btn.primary { border-color: var(--brand-strong); background: var(--brand-strong); color: #fff; }
 .ap-btn.primary:hover { background: var(--brand-hover); }
@@ -6126,6 +6106,11 @@ details[open] > summary .compliance-caret { transform: rotate(180deg); }
 .ap-chip input { position: absolute; opacity: 0; pointer-events: none; }
 .ap-chip span { display: inline-flex; align-items: center; height: 36px; padding: 0 12px; border-radius: 999px; border: 1px solid #e5e7eb; background: #fff; font-size: 13px; font-weight: 600; color: #374151; cursor: pointer; }
 .ap-chip input:checked + span { border-color: var(--brand-strong); background: #fff4ec; color: #9a3412; }
+.ap-chip.is-off span { opacity: .5; cursor: not-allowed; }
+.ap-chip small { font-weight: 400; color: #6b7280; margin-left: 3px; }
+.ap-select { padding: 8px 10px; border: 1px solid #e5e7eb; border-radius: 10px; font: inherit; font-size: 14px; background: #fff; }
+.ap-post-caption { margin: 0; white-space: pre-line; font-size: 14px; line-height: 1.6; color: #111827; }
+.ap-setup .ap-alert { margin: 0; font-size: 14px; color: #92400e; }
 .ap-chip input:focus-visible + span { outline: 3px solid rgba(var(--brand-rgb), .35); outline-offset: 2px; }
 .ap-check { display: flex; gap: 8px; align-items: center; margin-top: 10px; font-size: 14px; color: #374151; }
 .ap-check input, .ap-mode input { accent-color: var(--brand-strong); width: 18px; height: 18px; flex-shrink: 0; }

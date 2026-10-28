@@ -1,40 +1,38 @@
 ---
 title: Autopilot
-summary: Let AVIR AI prepare posts for your calendar's open days and send them to you for approval.
+summary: Let AVIR AI plan your posts, write them a couple of days ahead and send them to you for approval.
 order: 7
 icon: fa-robot
 ---
 
-Autopilot prepares posts for the open days on your [Content Calendar](/calendar) and sends each one to you for approval. **Nothing is published until you approve it.** It is off until you turn it on.
+Autopilot plans your posts for the next two weeks, writes each one a couple of days before it goes out and sends it to you for approval. **Nothing is published until you approve it.** It is off until you turn it on.
 
-## Turning it on
+## Setting it up
 
-1. Go to [Settings -> Autopilot](/settings#autopilot).
-2. Choose the platforms. Autopilot writes text posts for **LinkedIn** and **Facebook**. Instagram needs an image, so it isn't available yet.
-3. Choose how far ahead it prepares posts (1 to 7 days) and the language.
-4. Switch it on and confirm.
+Open [Autopilot](/autopilot) and choose:
 
-You need a brand profile (your website on the [brand profile](/brand-profile) page) and at least one connected account. Settings tells you if something is missing.
+1. **How often**: posts a week, the platforms, your days off, and how many days ahead each post is written (1 to 7).
+2. **What about**: how many posts a week are tips, your products and offers, or industry news; festivals as they come up; topics to talk about and topics never to mention; the language.
+3. **Images & budget**: an image for each post (with your logo), up to a number of images a month. Images are off by default to keep credit use low. Instagram needs an image, so it's available when images are on.
+
+Then click **Turn on Autopilot**. You need a brand profile (your website on the [brand profile](/brand-profile) page) and at least one connected account. The page tells you if something is missing.
 
 ## What it does
 
-Every hour, Autopilot:
+Autopilot spreads your posts over the days you post on, at your best posting time, and shows the plan for this week and next. Then, every hour:
 
-- looks at your calendar's suggested days, which follow your weekly goal, and picks the ones with no post yet;
-- picks an idea for each day: the day's own suggestion, an upcoming occasion, or one from Ideas for you, never repeating a recent one;
-- writes the post in your brand voice and language, with the same compliance checks as Studio Chat;
-- sends it for approval to your reviewer (set on the brand profile page), or to you, with a note under the bell.
+- it writes the days now due, each about its kind: a festival, one of your topics, an idea from Ideas for you, or a post about your products, never repeating a recent subject;
+- it writes in your brand voice and language, with the same compliance checks as Studio Chat;
+- it sends the post for approval to your reviewer (set on the brand profile page), or to you, by email and with a note under the bell.
 
-It prepares at most 2 posts an hour, so it doesn't use up your plan in one go. Click **Prepare now** to have it check straight away.
+It writes at most 2 posts an hour, so it doesn't use up your plan in one go. Click **Prepare now** to have it check straight away. Skip any planned day you don't want.
 
 ## Approving
 
-Open the post from the bell, from Settings -> Autopilot, or from the calendar day marked **To approve**. Approve each platform, or ask for changes.
+Open the post from the Autopilot page, the email, the bell, or the calendar day marked **To approve**. Approve each platform, or ask for changes.
 
 - **Approved** platforms are scheduled for that day at your best posting time and show on the calendar with the Autopilot mark. You can still move or cancel them there.
 - **Not approved**, or not approved before its time: nothing is published.
-
-> Tip: change your weekly goal on the calendar to change how many days Autopilot fills.
 
 ## When it pauses
 
@@ -44,8 +42,8 @@ Autopilot pauses itself, and tells you under the bell, when:
 - your accounts are no longer connected;
 - the last 2 posts couldn't be prepared.
 
-Fix the cause, then turn Autopilot off and on again in Settings.
+Fix the cause, then click **Resume** on the Autopilot page. You can also pause it yourself at any time.
 
 ## Turning it off
 
-Switch it off in Settings -> Autopilot. Posts still waiting for approval are withdrawn. Posts you already approved stay scheduled; cancel them on the calendar if you don't want them.
+Click **Turn Autopilot off** on the Autopilot page. Posts still waiting for approval are withdrawn and the plan is cleared. Posts you already approved stay scheduled; cancel them on the calendar if you don't want them.

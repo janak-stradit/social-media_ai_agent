@@ -658,12 +658,12 @@
                 const a = r && r.autopilot;
                 if (!a) return;
                 const link = $('calAutopilot');
-                const waiting = (a.posts || []).filter(p => p.status === 'awaiting_approval').length;
+                const waiting = (a.needs_ok || []).length;
                 link.classList.toggle('is-on', a.enabled && !a.paused_reason);
                 link.querySelector('span').textContent = !a.enabled ? 'Autopilot: Off · Turn on'
                     : a.paused_reason ? 'Autopilot: Paused'
                         : 'Autopilot: On' + (waiting ? ' · ' + waiting + ' to approve' : '');
-                link.href = waiting ? '/approve' : '/settings#autopilot';
+                link.href = '/autopilot';
             })
             .catch(function () { /* the link still opens the settings */ });
     }

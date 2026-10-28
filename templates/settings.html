@@ -60,7 +60,7 @@
                 <i class="fas fa-calendar-days"></i><span class="st-label">Scheduled posts</span><span class="st-badge" data-badge-for="scheduled-posts-tab"></span>
             </button>
             <button class="bc-nav-item" id="autopilot-tab" data-bs-toggle="tab" data-bs-target="#autopilot-pane" type="button" role="tab" aria-controls="autopilot-pane" aria-selected="false"
-                data-keywords="autopilot automatic auto post prepare approval">
+                data-keywords="autopilot automatic auto post prepare approval plan">
                 <i class="fas fa-robot"></i><span class="st-label">Autopilot</span><span class="st-badge" data-badge-for="autopilot-tab"></span>
             </button>
 
@@ -340,52 +340,21 @@
                   </div>
                 </div>
 
-                <!-- ── AUTOPILOT (autopilot.js; services/autopilot_service.py). Off by default;
-                     Review first: nothing is published until it is approved. ── -->
+                <!-- ── AUTOPILOT: its status; set up and run on the /autopilot page
+                     (autopilot_settings.js; services/autopilot_service.py) ── -->
                 <div class="tab-pane fade" id="autopilot-pane" role="tabpanel" aria-labelledby="autopilot-tab">
                   <div class="st-pane-head">
                     <div class="st-pane-head-text">
                       <h2>Autopilot</h2>
-                      <p>Prepares posts for your calendar's open days and sends them to you for approval. <strong>Nothing is published until you approve it.</strong></p>
-                    </div>
-                    <div class="form-check form-switch ap-switch">
-                      <input class="form-check-input" type="checkbox" role="switch" id="apEnabled" aria-describedby="apStatus">
-                      <label class="form-check-label" for="apEnabled" id="apEnabledLabel">Off</label>
+                      <p>Plans your posts, writes each one a couple of days ahead and sends it for approval. <strong>Nothing is published until it is approved.</strong></p>
                     </div>
                   </div>
                   <div class="brand-config-card settings-pane-card">
-                    <div class="ap-status" id="apStatus" role="status" aria-live="polite"></div>
-
-                    <div class="ap-options">
-                        <fieldset class="ap-field">
-                            <legend>Platforms</legend>
-                            <div class="ap-platforms" id="apPlatforms"></div>
-                            <small>Autopilot writes text posts. Instagram needs an image, so it isn't available yet.</small>
-                        </fieldset>
-                        <div class="ap-field">
-                            <label for="apDays">Prepare posts</label>
-                            <select id="apDays" class="form-select form-select-sm">
-                                <option value="1">1 day ahead</option>
-                                <option value="2">2 days ahead</option>
-                                <option value="3">3 days ahead</option>
-                                <option value="5">5 days ahead</option>
-                                <option value="7">7 days ahead</option>
-                            </select>
-                            <small>Posts follow your weekly goal on the <a href="/calendar">calendar</a>, at your best posting times.</small>
-                        </div>
-                        <div class="ap-field">
-                            <label for="apLanguage">Language</label>
-                            <select id="apLanguage" class="form-select form-select-sm"><option value="en">English</option></select>
-                        </div>
+                    <div class="apt-card" id="aptCard" role="status" aria-live="polite">
+                      <span class="apt-dot" aria-hidden="true"></span>
+                      <div class="apt-text"><strong id="aptTitle">Loading...</strong><span id="aptSub"></span></div>
+                      <a class="btn btn-sm btn-primary" id="aptOpen" href="/autopilot"><i class="fas fa-plane-departure me-1"></i>Open Autopilot</a>
                     </div>
-
-                    <div class="ap-actions">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="apRunNow" disabled><i class="fas fa-wand-magic-sparkles me-1"></i>Prepare now</button>
-                        <small class="text-muted" id="apLastRun"></small>
-                    </div>
-
-                    <h6 class="ap-subhead">Recent Autopilot posts</h6>
-                    <div class="ap-posts" id="apPosts"><p class="text-muted small mb-0">Nothing prepared yet.</p></div>
                   </div>
                 </div>
 
@@ -777,7 +746,7 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="{{ url_for('static', filename='js/undo.js') }}"></script>
 <script src="{{ url_for('static', filename='js/settings.js') }}"></script>
-<script src="{{ url_for('static', filename='js/autopilot.js') }}"></script>
+<script src="{{ url_for('static', filename='js/autopilot_settings.js') }}"></script>
 {% include 'partials/guide_assets.html' %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
