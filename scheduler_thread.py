@@ -176,6 +176,17 @@ def run_scheduler(app_root_path):
                 run_monthly_recap()
             except Exception as e:
                 logger.warning(f"Error running the monthly recap: {e}")
+            # Autopilot: plan two weeks ahead, write the days now due and send them
+            # for approval (off until a user turns it on) - services/autopilot_service.py
+            try:
+                from services.autopilot_service import run as run_autopilot
+
+                outcome = run_autopilot()
+                if any(outcome.values()):
+                    logger.info(f"Autopilot: {outcome}")
+            except Exception as e:
+                logger.warning(f"Error running Autopilot: {e}")
+
             # How published posts are doing (likes, comments, reach) - services/metrics_service.py
             try:
                 from services.metrics_service import refresh_due
@@ -211,14 +222,6 @@ def run_scheduler(app_root_path):
                 notify_expiring()
             except Exception as e:
                 logger.warning(f"Error checking expiring social connections: {e}")
-            # Autopilot: plan two weeks ahead, write posts 2 days before their slot,
-            # hold anything not approved in time (services/autopilot_service.py)
-            try:
-                from services.autopilot_service import run_autopilot
-
-                run_autopilot()
-            except Exception as e:
-                logger.warning(f"Error running Autopilot: {e}")
             # Reminders for approval requests still pending after a day (APPROVAL_REMINDER_EMAILS=true)
             try:
                 from services.approval_reminder_service import run_approval_reminders

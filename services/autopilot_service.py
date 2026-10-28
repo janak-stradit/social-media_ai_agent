@@ -1,18 +1,26 @@
-"""Autopilot: plans a user's posts for the next two weeks, writes each one (and
-its image) two days before its slot, and asks the user for their OK. Nothing is
-published without that OK: an approved post goes on the Content Calendar as a
-normal scheduled post (services/schedule_service.py) and the existing publisher
-sends it; a post not approved by its deadline is held, never posted.
+"""Autopilot (AUTOPILOT_PLAN.md): plans the user's posts, writes each one a
+couple of days ahead and sends it for approval - nothing is published until it
+is approved. Off by default; set up and run from the /autopilot page.
 
-Life of a post (db.AutopilotPost.status):
-    planned  -> a slot with a kind (tips / offers / news / festival) and a reason
-    needs_ok -> written, waiting for the user (approve_by is the deadline)
-    approved -> on the calendar (scheduled_post_id)
-    posted / failed  <- what the publisher did with it
-    skipped  -> the user said no
-    held     -> not approved in time; nothing was posted
+  1. The plan: from the user's set-up (posts a week, days off, the mix of
+     tips / offers / news, festivals) the next two weeks' days get a "planned"
+     row each, at the first platform's best time (best_time_service).
+  2. Every hour (scheduler_thread.py -> run()), planned days within
+     `days_ahead` are written with the same pipeline as Studio Chat
+     (content_pipeline.generate_post: brand voice, language, plan and credit
+     limits), plus an image when the user wants images and the monthly cap and
+     plan allow one. The post goes out as an approval request (the user's
+     reviewer, else the user) with a note under the bell and an email.
+  3. When the request is decided (on_approval_decided, from the decide
+     endpoint) the approved platforms are scheduled at the day's slot and the
+     usual publisher sends them. A post not approved before its slot expires;
+     it is never published on its own.
 
-run_autopilot() is called hourly by scheduler_thread.py.
+Autopilot pauses itself (paused_reason) when the plan or credit runs out, when
+nothing is connected, or after 2 failures in a row; the user can pause it too.
+
+Post statuses: planned -> preparing -> awaiting_approval -> scheduled -> posted,
+or rejected (skipped / not approved), expired, cancelled, failed.
 """
 
 import logging
@@ -23,28 +31,55 @@ from config import Config
 
 logger = logging.getLogger(__name__)
 
-PLATFORMS = ("linkedin", "instagram", "facebook")
-NAMES = {"linkedin": "LinkedIn", "instagram": "Instagram", "facebook": "Facebook"}
+PLATFORMS = ("linkedin", "facebook", "instagram")
+TEXT_PLATFORMS = ("linkedin", "facebook")  # Instagram posts need an image
+PLATFORM_NAMES = {"linkedin": "LinkedIn", "facebook": "Facebook", "instagram": "Instagram"}
 KINDS = ("tips", "offers", "news")
 KIND_NAMES = {"tips": "tips & how-tos", "offers": "products & offers", "news": "industry news", "festival": "a festival"}
-PLAN_DAYS = 14                      # how far ahead slots are planned
-WRITE_AHEAD = timedelta(hours=48)   # posts are written this long before their slot
-DEADLINE_BEFORE = timedelta(hours=6)  # the OK is needed this long before the slot
-MIN_DEADLINE = timedelta(hours=1)   # ...but never sooner than this from when it's written
-MAX_WRITES_PER_RUN = 3              # per user per hourly run, so one user can't hold up the rest
-DEFAULT_HOUR = 10                   # local time, when no best time is known
+PLAN_DAYS = 14  # how far ahead days are planned
+MAX_DAYS_AHEAD = 7
 MAX_POSTS_PER_WEEK = 7
+MAX_POSTS_PER_RUN = 2  # per user per hour: a first run doesn't write a whole week at once
+FAILURES_BEFORE_PAUSE = 2  # preparations failing in a row pause Autopilot
+MIN_LEAD = timedelta(hours=2)  # time to approve before the slot
+DEFAULT_HOUR = 10
+RECENT_IDEAS = 40  # titles not used again
+PAUSED_BY_USER = "Paused by you."
 
 
 class AutopilotError(ValueError):
-    """A problem the user can fix (shown to them as is)."""
+    """Why Autopilot can't be turned on or changed; shown to the user as is."""
 
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# ── Settings ────────────────────────────────────────────────────────────────
+# ── Settings ──────────────────────────────────────────────────────────────
+
+
+def available_platforms(images: bool) -> tuple:
+    return PLATFORMS if images else TEXT_PLATFORMS
+
+
+def problems(user_id: int, platforms: list) -> list[str]:
+    """What stops Autopilot from working for this user, in words for the page."""
+    from db import get_user_brand_profile
+    from services.publish_service import connections
+
+    found = []
+    if not get_user_brand_profile(user_id):
+        found.append("Add your website on your brand profile first, so posts are written for your brand.")
+    if not platforms:
+        found.append("Choose at least one platform.")
+    else:
+        connected = connections(user_id)
+        missing = [PLATFORM_NAMES[p] for p in platforms if not connected.get(p)]
+        if missing and len(missing) == len(platforms):
+            found.append(f"Connect {' or '.join(missing)} in Settings -> Social accounts first.")
+    return found
+
+
 def default_mix(posts_per_week: int) -> dict:
     """An even split of tips / offers / news that adds up to posts_per_week."""
     mix = {"tips": 0, "offers": 0, "news": 0}
@@ -52,45 +87,6 @@ def default_mix(posts_per_week: int) -> dict:
     for i in range(max(1, posts_per_week)):
         mix[order[i % len(order)]] += 1
     return mix
-
-
-def clean_settings(raw: dict) -> dict:
-    """The fields a user may save, checked. Raises AutopilotError."""
-    out = {}
-    try:
-        per_week = int(raw.get("posts_per_week", 3))
-    except (TypeError, ValueError):
-        raise AutopilotError("Choose how many posts a week.") from None
-    if not 1 <= per_week <= MAX_POSTS_PER_WEEK:
-        raise AutopilotError(f"Choose between 1 and {MAX_POSTS_PER_WEEK} posts a week.")
-    out["posts_per_week"] = per_week
-    platforms = [p for p in (raw.get("platforms") or []) if p in PLATFORMS]
-    if not platforms:
-        raise AutopilotError("Choose at least one platform.")
-    out["platforms"] = list(dict.fromkeys(platforms))
-    mix = raw.get("mix") if isinstance(raw.get("mix"), dict) else {}
-    mix = {k: max(0, min(MAX_POSTS_PER_WEEK, int(mix.get(k) or 0))) for k in KINDS}
-    out["mix"] = mix if sum(mix.values()) else default_mix(per_week)
-    out["festivals"] = bool(raw.get("festivals", True))
-    out["topics"] = _clean_words(raw.get("topics"))
-    out["avoid"] = _clean_words(raw.get("avoid"))
-    days_off = sorted({int(d) for d in (raw.get("days_off") or []) if str(d).isdigit() and 0 <= int(d) <= 6})
-    if 7 - len(days_off) < 1:
-        raise AutopilotError("Leave at least one day to post on.")
-    out["days_off"] = days_off
-    out["images"] = bool(raw.get("images", True))
-    try:
-        out["image_cap_month"] = max(0, min(200, int(raw.get("image_cap_month", 12))))
-    except (TypeError, ValueError):
-        out["image_cap_month"] = 12
-    from services.language_service import normalize
-
-    out["language"] = normalize(raw.get("language") or "en")
-    try:
-        out["tz_minutes"] = max(-14 * 60, min(14 * 60, int(raw.get("tz_minutes", 0))))
-    except (TypeError, ValueError):
-        out["tz_minutes"] = 0
-    return out
 
 
 def _clean_words(value) -> list[str]:
@@ -103,7 +99,137 @@ def _clean_words(value) -> list[str]:
     return out[:15]
 
 
-# ── Planning ────────────────────────────────────────────────────────────────
+def clean_settings(raw: dict, current: dict | None = None) -> dict:
+    """The fields given in `raw`, checked. Raises AutopilotError."""
+    current = current or {}
+    out = {}
+    if "images" in raw:
+        out["images"] = bool(raw["images"])
+    images = out.get("images", current.get("images", False))
+    if "posts_per_week" in raw:
+        try:
+            per_week = int(raw["posts_per_week"])
+        except (TypeError, ValueError):
+            raise AutopilotError("Choose how many posts a week.") from None
+        if not 1 <= per_week <= MAX_POSTS_PER_WEEK:
+            raise AutopilotError(f"Choose between 1 and {MAX_POSTS_PER_WEEK} posts a week.")
+        out["posts_per_week"] = per_week
+    if "platforms" in raw:
+        out["platforms"] = list(dict.fromkeys(p for p in (raw.get("platforms") or []) if p in available_platforms(images)))
+    elif "images" in out and not images:  # images turned off: Instagram can't be posted to
+        out["platforms"] = [p for p in current.get("platforms", []) if p in TEXT_PLATFORMS]
+    if "mix" in raw:
+        mix = raw["mix"] if isinstance(raw["mix"], dict) else {}
+        try:
+            mix = {k: max(0, min(MAX_POSTS_PER_WEEK, int(mix.get(k) or 0))) for k in KINDS}
+        except (TypeError, ValueError):
+            mix = {}
+        out["mix"] = mix if sum(mix.values()) else default_mix(out.get("posts_per_week", current.get("posts_per_week", 3)))
+    if "festivals" in raw:
+        out["festivals"] = bool(raw["festivals"])
+    for key in ("topics", "avoid"):
+        if key in raw:
+            out[key] = _clean_words(raw[key])
+    if "days_off" in raw:
+        days_off = sorted({int(d) for d in (raw.get("days_off") or []) if str(d).isdigit() and 0 <= int(d) <= 6})
+        if len(days_off) >= 7:
+            raise AutopilotError("Leave at least one day to post on.")
+        out["days_off"] = days_off
+    if "image_cap_month" in raw:
+        try:
+            out["image_cap_month"] = max(0, min(200, int(raw["image_cap_month"])))
+        except (TypeError, ValueError):
+            raise AutopilotError("Enter how many images a month, or 0.") from None
+    if "days_ahead" in raw:
+        try:
+            out["days_ahead"] = max(1, min(MAX_DAYS_AHEAD, int(raw["days_ahead"])))
+        except (TypeError, ValueError) as err:
+            raise AutopilotError("Choose how many days ahead to prepare posts.") from err
+    if "language" in raw:
+        from services.language_service import normalize
+
+        out["language"] = normalize(raw.get("language"))
+    if "tz_minutes" in raw:
+        try:
+            out["tz_minutes"] = max(-840, min(840, int(raw["tz_minutes"])))
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+PLAN_FIELDS = ("posts_per_week", "platforms", "mix", "festivals", "topics", "avoid", "days_off", "tz_minutes")
+
+
+def save(user_id: int, data: dict, now: datetime | None = None) -> dict:
+    """Validated changes from the page. Turning it on checks it can work;
+    turning it off withdraws what is waiting; a changed plan is planned again;
+    {"paused": true/false} pauses or resumes it."""
+    from db import get_autopilot_settings, log_audit, save_autopilot_settings
+
+    current = get_autopilot_settings(user_id)
+    fields = clean_settings(data, current)
+    if "enabled" in data:
+        enabling = bool(data["enabled"])
+        if enabling and not current["enabled"]:
+            found = problems(user_id, fields.get("platforms", current["platforms"]))
+            if found:
+                raise AutopilotError(found[0])
+        fields["enabled"] = enabling
+    if "paused" in data:
+        if data["paused"]:
+            fields["paused_reason"] = PAUSED_BY_USER
+        else:
+            found = problems(user_id, fields.get("platforms", current["platforms"]))
+            if found:
+                raise AutopilotError(found[0])
+            fields["paused_reason"] = None
+    saved = save_autopilot_settings(user_id, **fields)
+    if "enabled" in fields and fields["enabled"] != current["enabled"]:
+        log_audit("autopilot.turned_on" if fields["enabled"] else "autopilot.turned_off", actor_user_id=user_id,
+                  target_user_id=user_id, details={"platforms": saved["platforms"], "posts_per_week": saved["posts_per_week"]})
+        if not fields["enabled"]:
+            cancel_waiting(user_id, "Autopilot was turned off.")
+    elif "paused_reason" in fields and fields["paused_reason"] != current["paused_reason"]:
+        log_audit("autopilot.paused" if fields["paused_reason"] else "autopilot.resumed", actor_user_id=user_id,
+                  target_user_id=user_id)
+    if saved["enabled"] and not saved["paused_reason"] and (
+            any(k in fields for k in PLAN_FIELDS) or fields.get("enabled") or "paused_reason" in fields):
+        replan(user_id, now)
+    return saved
+
+
+def cancel_waiting(user_id: int, reason: str) -> int:
+    """Posts still waiting for approval are withdrawn (their requests closed),
+    and the days nothing was written for yet come off the plan."""
+    from db import (
+        decide_approval_request,
+        delete_planned_autopilot_posts,
+        get_approval_request,
+        list_autopilot_posts,
+        update_autopilot_post,
+    )
+
+    count = delete_planned_autopilot_posts(user_id)
+    for post in list_autopilot_posts(user_id, limit=50, statuses=("preparing", "awaiting_approval")):
+        if post["approval_request_id"]:
+            _close_request(post["approval_request_id"], reason, get_approval_request, decide_approval_request)
+        update_autopilot_post(post["id"], status="cancelled", error=reason)
+        count += 1
+    return count
+
+
+def _close_request(request_id: int, reason: str, get_request, decide) -> None:
+    req = get_request(request_id)
+    if req and req.get("status") == "pending":
+        try:
+            decide(request_id=req["id"], decision="rejected", comments=reason, decided_by="Autopilot")
+        except Exception as err:  # noqa: BLE001 - the post is withdrawn either way
+            logger.warning(f"Autopilot could not close approval request {req['id']}: {err}")
+
+
+# ── Planning: which days, when, and what kind ─────────────────────────────
+
+
 def posting_days(per_week: int, days_off: list[int]) -> list[int]:
     """Which weekdays (0 = Monday) to post on: spread evenly over the open days."""
     open_days = [d for d in range(7) if d not in set(days_off or [])]
@@ -116,64 +242,56 @@ def posting_days(per_week: int, days_off: list[int]) -> list[int]:
 
 def kind_sequence(mix: dict, count: int) -> list[str]:
     """The week's kinds in an interleaved order (not all tips first)."""
-    pool = {k: int(mix.get(k) or 0) for k in KINDS}
-    if not sum(pool.values()):
-        pool = default_mix(count)
-    out = []
+    base = {k: int(mix.get(k) or 0) for k in KINDS}
+    if not sum(base.values()):
+        base = default_mix(count)
+    pool, out = dict(base), []
     while len(out) < count:
         for kind in KINDS:
             if pool[kind] > 0 and len(out) < count:
                 out.append(kind)
                 pool[kind] -= 1
-        if not sum(pool.values()) and len(out) < count:  # mix adds up to fewer posts: start it again
-            pool = {k: int(mix.get(k) or 0) for k in KINDS} if sum(int(mix.get(k) or 0) for k in KINDS) else default_mix(count)
+        if not sum(pool.values()):  # the mix adds up to fewer posts: start it again
+            pool = dict(base)
     return out
 
 
-def _best_hour(best: dict, platform: str) -> int:
-    hours = (best.get(platform) or {}).get("hours") or []
-    return int(hours[0]) if hours else DEFAULT_HOUR
+def _best_hour(best: dict, platforms: list) -> int:
+    for platform in platforms:
+        hours = (best.get(platform) or {}).get("hours") or []
+        if hours:
+            return int(hours[0])
+    return DEFAULT_HOUR
 
 
-def plan_slots(settings: dict, best: dict, now: datetime, regions: list[str] | None = None,
-               days: int = PLAN_DAYS) -> list[dict]:
-    """[{slot_at (UTC), platform, kind, reason, topic}] for the next `days` days."""
+def plan_days(settings: dict, best: dict, now: datetime, regions: list[str] | None = None,
+              days: int = PLAN_DAYS) -> list[dict]:
+    """[{date, slot_at (UTC), kind, reason, topic}] for the next `days` days."""
     tz = timezone(timedelta(minutes=settings.get("tz_minutes") or 0))
     local_now = now.astimezone(tz)
     weekdays = posting_days(settings["posts_per_week"], settings.get("days_off") or [])
-    platforms = settings["platforms"]
+    hour = _best_hour(best, settings["platforms"])
     festival = _upcoming_festival(regions, local_now.date(), days) if settings.get("festivals", True) else None
-    slots, platform_turn = [], 0
-    week_kinds: dict[int, list[str]] = {}
+    planned, week_kinds = [], {}
     for offset in range(days + 1):
         day = local_now.date() + timedelta(days=offset)
         if day.weekday() not in weekdays:
             continue
         week = day.isocalendar()[1]
         kinds = week_kinds.setdefault(week, kind_sequence(settings.get("mix") or {}, len(weekdays)))
-        index = sum(1 for s in slots if s["_week"] == week)
-        kind = kinds[index % len(kinds)]
-        platform = platforms[platform_turn % len(platforms)]
-        platform_turn += 1
-        hour = _best_hour(best, platform)
+        kind = kinds[weekdays.index(day.weekday()) % len(kinds)]
         when_local = datetime(day.year, day.month, day.day, hour, 0, tzinfo=tz)
-        if when_local <= local_now + timedelta(hours=1):
+        if when_local - local_now < MIN_LEAD:
             continue
-        reason = (f"Your {KIND_NAMES[kind]} slot" if kind != "offers" else "Your weekly products & offers slot")
-        if best.get(platform, {}).get("label"):
-            reason += f", at a good time for {NAMES[platform]}"
-        slots.append({"slot_at": when_local.astimezone(timezone.utc), "platform": platform, "kind": kind,
-                      "reason": reason, "topic": None, "_week": week, "_day": day})
+        reason = f"Your {KIND_NAMES[kind]} day" + (", at a good time to post" if best else "")
+        planned.append({"date": day, "slot_at": when_local.astimezone(timezone.utc), "kind": kind,
+                        "reason": reason, "topic": None})
     if festival:  # the posting day closest before it (1-3 days ahead) becomes the festival post
-        window = [s for s in slots if festival["date"] - timedelta(days=3) <= s["_day"] < festival["date"]]
+        window = [p for p in planned if festival["date"] - timedelta(days=3) <= p["date"] < festival["date"]]
         if window:
-            slot = window[-1]
-            slot.update(kind="festival", topic=festival["name"],
-                        reason=f"{festival['name']} is on {festival['date'].strftime('%a %d %b')}")
-    for slot in slots:
-        slot.pop("_week", None)
-        slot.pop("_day", None)
-    return slots
+            window[-1].update(kind="festival", topic=festival["name"],
+                              reason=f"{festival['name']} is on {festival['date'].strftime('%a %d %b')}")
+    return planned
 
 
 def _upcoming_festival(regions: list[str] | None, today: date, days: int) -> dict | None:
@@ -192,128 +310,129 @@ def _upcoming_festival(regions: list[str] | None, today: date, days: int) -> dic
 
 
 def plan_ahead(user_id: int, now: datetime | None = None) -> int:
-    """Creates the missing planned slots for the next two weeks. Returns how many."""
-    from db import create_autopilot_post, get_autopilot_settings, get_user_brand_profile
+    """Puts the next two weeks' missing days on the plan. -> days added."""
+    from db import claim_autopilot_slot, get_autopilot_settings, get_user_brand_profile
     from services.best_time_service import best_times
 
     now = now or _now()
     settings = get_autopilot_settings(user_id)
-    if not settings["enabled"] or settings["paused"] or not settings["platforms"]:
+    if not settings["enabled"] or settings["paused_reason"] or not settings["platforms"]:
         return 0
     try:
-        best = best_times(user_id, settings.get("tz_minutes") or 0, now=now)
-    except Exception as err:  # noqa: BLE001 - typical times are fine
-        logger.warning(f"Autopilot: best times unavailable for user {user_id}: {err}")
+        best = best_times(user_id, settings["tz_minutes"], now)
+    except Exception as err:  # noqa: BLE001 - a default time beats no post
+        logger.warning(f"Autopilot best times unavailable for user {user_id}: {err}")
         best = {}
     profile = get_user_brand_profile(user_id) or {}
     regions = (profile.get("website_signals") or {}).get("regions_detected") or []
-    created = 0
-    for slot in plan_slots(settings, best, now, regions):
-        if create_autopilot_post(user_id, slot["slot_at"], slot["platform"], slot["kind"], slot["reason"], slot["topic"]):
-            created += 1
-    return created
+    added = 0
+    for day in plan_days(settings, best, now, regions):
+        if claim_autopilot_slot(user_id, day["date"].isoformat(), day["slot_at"], settings["platforms"], day["topic"],
+                                status="planned", kind=day["kind"], reason=day["reason"]):
+            added += 1
+    return added
 
 
 def replan(user_id: int, now: datetime | None = None) -> int:
-    """After the settings change: the not-yet-written slots are planned again."""
-    from db import delete_future_autopilot_posts
+    """After the set-up changes: the days nothing was written for are planned again."""
+    from db import delete_planned_autopilot_posts
 
-    delete_future_autopilot_posts(user_id, ("planned",))
+    delete_planned_autopilot_posts(user_id)
     return plan_ahead(user_id, now)
 
 
-# ── Writing ─────────────────────────────────────────────────────────────────
-WRITE_SYSTEM_PROMPT = """You write ONE social media post for a specific company, as the company ("we"), in its
-brand voice. You are given the company's brand profile (from its own website) and what this post is about.
-
-Rules:
-- Platform: {platform}. {platform_rules}
-- Use only facts in the brand profile or the topic given. Never invent statistics, prices, discounts, client
-  names, awards, guarantees or dates.
-- A strong first line, short paragraphs, one soft call to action at the end. Plain text, no markdown.
-- Never mention these topics: {avoid}.
-- hashtags: 3-5 relevant hashtags, each starting with #.
-- image_prompt: a photo-style scene from the company's world for this post, with the brand colours as accents.
-  No text, words, letters, logos or brand names in the image.
-- title: 2-5 words naming the post.
-{language}
-Return ONLY JSON: {{"title": "", "caption": "", "hashtags": [], "image_prompt": ""}}"""
-
-PLATFORM_RULES = {
-    "linkedin": "Professional and useful; 80-180 words.",
-    "instagram": "Warm and visual; 40-120 words; the hook in the first line.",
-    "facebook": "Friendly and conversational; 40-120 words.",
-}
+# ── What to write about ───────────────────────────────────────────────────
 
 KIND_BRIEFS = {
-    "tips": "A practical tip, how-to or insight that the company's customers would find genuinely useful{topic}.",
-    "offers": "One of the company's own products or services and the problem it solves for customers{topic}. "
-              "No discounts or prices unless they are in the brand profile.",
-    "news": "A short take on something current in the company's industry{topic}, and what it means for its "
-            "customers. If no specific news is given, a timely observation about the industry - never invented news.",
-    "festival": "A warm, respectful post for {festival} that connects the occasion to the company in a genuine way "
-                "- not a generic greeting.",
+    "tips": "Write a post with a practical tip, how-to or insight our customers would find genuinely useful{topic}.",
+    "offers": "Write a post about one of our own products or services and the problem it solves for customers{topic}. "
+              "No discounts or prices unless they are in our brand profile.",
+    "news": "Write a short take on something current in our industry{topic} and what it means for our customers. "
+            "Never invent news.",
+    "festival": "Write a warm, respectful post for {festival} that connects the occasion to our business in a genuine "
+                "way - not a generic greeting.",
 }
 
 
-def _topic_hint(post: dict, settings: dict, recent: list[str]) -> str:
-    """The subject for this slot: the festival, else one of the user's topics (rotating), else open."""
-    if post["kind"] == "festival":
-        return ""
+def _plan_ideas(user_id: int, settings: dict, now: datetime) -> list[dict]:
+    """Ideas for you (trending, post types that work, upcoming dates), via the calendar."""
+    try:
+        from services.calendar_service import calendar_month
+
+        local = now + timedelta(minutes=settings["tz_minutes"])
+        data = calendar_month(user_id, local.year, local.month, settings["tz_minutes"], now)
+        return data.get("plan", {}).get("ideas") or []
+    except Exception as err:  # noqa: BLE001 - the kind's own brief is used instead
+        logger.warning(f"Autopilot ideas unavailable for user {user_id}: {err}")
+        return []
+
+
+def pick_idea(day_idea: dict | None, plan_ideas: list[dict], used: set[str]) -> dict | None:
+    """The day's own idea, else the first one from Ideas for you not used lately."""
+    for idea in ([day_idea] if day_idea else []) + list(plan_ideas):
+        title = (idea or {}).get("title") or ""
+        if title and title.lower() not in used and (idea.get("prompt") or title):
+            return idea
+    return None
+
+
+def brief_for(post: dict, settings: dict, plan_ideas: list[dict], used: set[str]) -> tuple[str, str]:
+    """(the brief for the pipeline, a short title) for one planned day: the
+    festival; else one of the user's topics (rotating); else an unused idea
+    from Ideas for you (tips and news); else the kind's own brief."""
+    kind = post.get("kind") or "tips"
+    avoid = settings.get("avoid") or []
+    tail = f" Do not mention: {', '.join(avoid)}." if avoid else ""
+    if kind == "festival":
+        name = post.get("idea_title") or "the festival"
+        return KIND_BRIEFS["festival"].format(festival=name) + tail, name
     topics = settings.get("topics") or []
-    if not topics:
-        return ""
-    unused = [t for t in topics if t.lower() not in " ".join(recent).lower()] or topics
-    return f", about {unused[post['id'] % len(unused)]}"
+    if topics:
+        fresh = [t for t in topics if t.lower() not in used] or topics
+        topic = fresh[post["id"] % len(fresh)]
+        return KIND_BRIEFS[kind].format(topic=f", about {topic}") + tail, topic
+    if kind in ("tips", "news"):
+        idea = pick_idea(None, plan_ideas, used)
+        if idea:
+            return (idea.get("prompt") or idea["title"]) + tail, idea["title"]
+    return KIND_BRIEFS[kind].format(topic="") + tail, KIND_NAMES[kind].capitalize()
 
 
-def write_post(post: dict, settings: dict, profile: dict, llm=None) -> tuple[dict, dict]:
-    """({title, caption, hashtags, image_prompt}, usage) - one text-model call."""
-    import json
-
-    from services.language_service import instruction
-    from services.llm_service import LLMService
-
-    brand = {key: profile.get(key) for key in ("company_name", "industry", "target_audience", "brand_voice_summary",
-                                              "tagline", "key_themes", "core_products", "primary_colors", "visual_style",
-                                              "content_dos", "content_donts")}
-    kind = post["kind"]
-    brief = KIND_BRIEFS[kind].format(topic=_topic_hint(post, settings, []), festival=post.get("topic") or "the festival")
-    system = WRITE_SYSTEM_PROMPT.format(
-        platform=NAMES.get(post["platform"], post["platform"]), platform_rules=PLATFORM_RULES.get(post["platform"], ""),
-        avoid=", ".join(settings.get("avoid") or []) or "nothing in particular",
-        language=instruction(settings.get("language"), "caption"))
-    # The brand profile leads (it is the same for every post of this user, so it can be cached)
-    user = "Brand profile:\n" + json.dumps(brand, ensure_ascii=False, indent=1) + f"\n\nThis post: {brief}"
-    result, usage = (llm or LLMService()).generate_json(system, user, temperature=0.6, max_tokens=900,
-                                                        return_usage=True, reasoning_effort="low")
-    result = result if isinstance(result, dict) else {}
-    caption = str(result.get("caption") or "").strip()[:3000]
-    if not caption:
-        raise RuntimeError("The writer returned no caption.")
-    tags = result.get("hashtags") if isinstance(result.get("hashtags"), list) else []
-    tags = [t if t.startswith("#") else f"#{t}" for t in (str(t).strip().replace(" ", "") for t in tags) if t][:5]
-    return {"title": str(result.get("title") or "").strip()[:60], "caption": caption, "hashtags": tags,
-            "image_prompt": str(result.get("image_prompt") or "").strip()[:800]}, usage or {}
+# ── Preparing one post ────────────────────────────────────────────────────
 
 
-def _image_prompt(written: dict, profile: dict) -> str:
-    colors = ", ".join(str(c) for c in (profile.get("primary_colors") or [])[:3])
-    style = profile.get("visual_style") or "clean, modern, professional"
-    return (f"A high-quality, photo-realistic square social media image for a {profile.get('industry') or 'business'} "
-            f"company. Scene: {written.get('image_prompt') or written.get('title')}. Style: {style}."
-            + (f" Use these brand colours as accents: {colors}." if colors else "")
-            + " No text, words, letters or numbers anywhere in the image.")
+def _reviewer_for(user_id: int) -> str | None:
+    from db import get_user_by_id
+
+    user = get_user_by_id(user_id)
+    return (getattr(user, "approval_reviewer_email", None) or Config.APPROVAL_NOTIFY_EMAIL
+            or (user.email if user else None))
 
 
-def image_allowance(user_id: int, settings: dict, now: datetime | None = None) -> tuple[bool, str]:
-    """(may make an image, why not). Respects the plan's limits and the Autopilot monthly cap."""
+def _items_from(result: dict, platforms: list, image_url: str | None) -> list[dict]:
+    items = []
+    for platform in platforms:
+        entry = (result.get("content") or {}).get(platform) or {}
+        caption = ((entry.get("caption") or {}).get("primary_caption") or "").strip()
+        if not caption:
+            continue
+        hashtags = (entry.get("hashtags") or {}).get("hashtags") or []
+        if image_url:
+            items.append({"platform": platform, "caption": caption, "media": "single", "images": [image_url],
+                          "hashtags": hashtags})
+        elif platform in TEXT_PLATFORMS:  # Instagram without an image can't be posted
+            items.append({"platform": platform, "caption": caption, "media": "none", "hashtags": hashtags})
+    return items
+
+
+def image_allowance(user_id: int, settings: dict, slot_at: datetime) -> tuple[bool, str]:
+    """(may make an image, why not): the user's choice, the Autopilot monthly
+    cap (for the month the post goes out in) and the plan's image allowance."""
     from db import autopilot_images_since, get_image_quota
 
-    if not settings.get("images", True):
-        return False, "Images are off in Autopilot"
-    now = now or _now()
-    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    if not settings.get("images"):
+        return False, "Images are off"
+    month_start = slot_at.astimezone(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     if autopilot_images_since(user_id, month_start) >= int(settings.get("image_cap_month") or 0):
         return False, "This month's Autopilot images are used"
     quota = get_image_quota(user_id)
@@ -322,297 +441,344 @@ def image_allowance(user_id: int, settings: dict, now: datetime | None = None) -
     return True, ""
 
 
-def _checks(written: dict, platform: str, user_id: int, llm=None) -> tuple[str, list[dict]]:
-    """(caption, [{label, ok, note}]): the code-based quality check, and the
-    user's compliance rules when they have any (which may fix the caption)."""
-    checks = []
-    caption = written["caption"]
-    try:
-        from agents.reviewer_agent import ReviewerAgent
+def _make_image(user_id: int, result: dict, platforms: list, title: str, media=None) -> tuple[str | None, float]:
+    """One square image for the post from the pipeline's image prompt (logged like any image)."""
+    from db import get_image_quota, get_user_brand_profile, log_image_generation
+    from services.media_service import MediaGenerationService
 
-        review = ReviewerAgent().evaluate(platform, caption, written["hashtags"])
-        issues = review.get("issues") or []
-        checks.append({"label": "Quality", "ok": not issues,
-                       "note": "Length, format and hashtags look right" if not issues else issues[0]})
-    except Exception as err:  # noqa: BLE001
-        logger.warning(f"Autopilot: quality check skipped: {err}")
-    try:
-        from services.compliance_service import active_rules_for_user, check_caption
-        from services.llm_service import LLMService
-
-        rules = active_rules_for_user(user_id)
-        if rules:
-            result, _usage = check_caption(caption, platform, rules, llm or LLMService())
-            if result:
-                caption = result.get("caption") or caption
-                attention = int(result.get("needs_attention") or 0)
-                checks.append({"label": "Rules", "ok": not attention,
-                               "note": f"{result.get('rules_checked', len(rules))} checked"
-                                       + (f", {attention} need{'s' if attention == 1 else ''} your attention" if attention else ", no issues")})
-    except Exception as err:  # noqa: BLE001
-        logger.warning(f"Autopilot: compliance check skipped: {err}")
-    if re.search(r"\d+\s*%|\boff\b|\bfree\b|₹|\$", caption, re.IGNORECASE):
-        checks.append({"label": "Check the facts", "ok": False, "note": "It mentions a price or offer: is it still true?"})
-    return caption, checks
-
-
-def draft(post: dict, now: datetime | None = None, llm=None, media=None) -> dict:
-    """Writes one planned post (and its image when allowed); it then needs the user's OK."""
-    from db import get_autopilot_settings, get_image_quota, get_user_brand_profile, log_image_generation, update_autopilot_post
-
-    now = now or _now()
-    user_id = post["user_id"]
-    settings = get_autopilot_settings(user_id)
+    prompt = ""
+    for platform in platforms:
+        prompt = ((result.get("content") or {}).get(platform) or {}).get("media_prompt") or ""
+        if prompt:
+            break
     profile = get_user_brand_profile(user_id) or {}
-    update_autopilot_post(post["id"], status="drafting", error=None)
+    colors = ", ".join(str(c) for c in (profile.get("primary_colors") or [])[:3])
+    full = (f"A high-quality, photo-realistic square social media image. Scene: {prompt or title}. "
+            f"Style: {profile.get('visual_style') or 'clean, modern, professional'}."
+            + (f" Brand colours as accents: {colors}." if colors else "")
+            + " No text, words, letters or numbers anywhere in the image.")
+    logo_path = None
+    if profile.get("logo_url"):
+        from services.brand_logo_service import _cached_logo
+
+        logo_path = _cached_logo(profile["logo_url"])
+    made = (media or MediaGenerationService()).create_preset_image(
+        full, None, "1:1", logo_path=logo_path, model=get_image_quota(user_id).get("model"), require_reference=False)
+    if not made.get("success"):
+        return None, 0.0
+    cost = float(made.get("cost") or 0.0)
+    log_image_generation(user_id, cost, kind="image", platform=platforms[0], model=made.get("model"),
+                         description=f"Autopilot: {title}"[:500], media_url=made["url"], prompt=made.get("prompt"),
+                         clean_url=made.get("clean_url"), width=made.get("width"), height=made.get("height"))
+    return made["url"], cost
+
+
+def _day_taken(user_id: int, post: dict, tz_minutes: int) -> bool:
+    """The user already scheduled something themselves for that day."""
+    from db import scheduled_posts_between
+
+    day = date.fromisoformat(post["slot_date"])
+    tz = timezone(timedelta(minutes=tz_minutes))
+    start = datetime(day.year, day.month, day.day, tzinfo=tz).astimezone(timezone.utc)
+    return any(not p.get("autopilot") for p in scheduled_posts_between(user_id, start, start + timedelta(days=1)))
+
+
+def prepare(user_id: int, settings: dict, post: dict, now: datetime, plan_ideas: list[dict] | None = None,
+            used: set[str] | None = None, media=None) -> dict | None:
+    """Writes one planned day's post and sends it for approval. None when it
+    can't be done in time or the day was taken meanwhile. Raises
+    content_pipeline.PostBlocked (plan or credit)."""
+    from api import routes as r
+    from db import create_approval_request, create_notification, log_audit, update_autopilot_post
+    from services.approval_bundle_service import normalize_items, prepare_items, summary
+    from services.content_pipeline import PostBlocked, generate_post
+
+    slot_at = datetime.fromisoformat(post["slot_at"])
+    if slot_at - now < MIN_LEAD:
+        update_autopilot_post(post["id"], status="expired", error="It was too late to write it in time.")
+        return None
+    if _day_taken(user_id, post, settings["tz_minutes"]):
+        update_autopilot_post(post["id"], status="cancelled", error="You already have a post scheduled that day.")
+        return None
+    brief, title = brief_for(post, settings, plan_ideas or [], used or set())
+    platforms = [p for p in settings["platforms"] if p in available_platforms(settings.get("images"))]
+    update_autopilot_post(post["id"], status="preparing", idea_title=title, platforms=platforms, error=None)
     try:
-        written, _usage = write_post(post, settings, profile, llm=llm)
-        caption, checks = _checks(written, post["platform"], user_id, llm=llm)
-    except Exception as err:  # noqa: BLE001
-        logger.warning(f"Autopilot: writing post {post['id']} failed: {err}")
-        return update_autopilot_post(post["id"], status="planned", error="Couldn't write it yet; trying again soon")
-    image_url, cost = None, 0.0
-    allowed, why_not = image_allowance(user_id, settings, now)
-    if allowed:
-        try:
-            from services.brand_logo_service import _cached_logo
-            from services.media_service import MediaGenerationService
-
-            logo_path = _cached_logo(profile["logo_url"]) if profile.get("logo_url") else None
-            result = (media or MediaGenerationService()).create_preset_image(
-                _image_prompt(written, profile), None, "1:1", logo_path=logo_path,
-                model=get_image_quota(user_id).get("model"), require_reference=False)
-            if result.get("success"):
-                image_url, cost = result["url"], float(result.get("cost") or 0.0)
-                log_image_generation(user_id, cost, kind="image", platform=post["platform"], model=result.get("model"),
-                                     description=f"Autopilot: {written.get('title') or post['kind']}"[:500],
-                                     media_url=image_url, prompt=result.get("prompt"), clean_url=result.get("clean_url"),
-                                     width=result.get("width"), height=result.get("height"))
-            else:
-                checks.append({"label": "Image", "ok": False, "note": "The image couldn't be made; it can go out as text"})
-        except Exception as err:  # noqa: BLE001
-            logger.warning(f"Autopilot: image for post {post['id']} failed: {err}")
-            checks.append({"label": "Image", "ok": False, "note": "The image couldn't be made; it can go out as text"})
-    elif settings.get("images", True):
-        checks.append({"label": "Image", "ok": True, "note": f"Text only: {why_not.lower()}"})
-    if post["platform"] == "instagram" and not image_url:
-        checks.append({"label": "Image", "ok": False, "note": "Instagram needs an image; add one or skip this post"})
-    slot = datetime.fromisoformat(post["slot_at"])
-    approve_by = max(slot - DEADLINE_BEFORE, now + MIN_DEADLINE)
-    updated = update_autopilot_post(post["id"], status="needs_ok", caption=caption, hashtags=written["hashtags"],
-                                    image_url=image_url, checks=checks, approve_by=approve_by, cost_usd=cost,
-                                    topic=post.get("topic") or written.get("title") or None)
-    _notify_needs_ok(updated)
-    return updated
-
-
-def _notify_needs_ok(post: dict) -> None:
-    from db import create_notification
-
-    when = datetime.fromisoformat(post["slot_at"]).strftime("%a %d %b")
-    try:
-        create_notification(post["user_id"], "autopilot", f"Autopilot: a {NAMES.get(post['platform'], '')} post needs your OK",
-                            f"Planned for {when}. It won't go out until you approve it.", "/autopilot",
-                            f"autopilot-ok-{post['id']}")
-    except Exception as err:  # noqa: BLE001
-        logger.warning(f"Autopilot: notification failed: {err}")
-
-
-# ── The user's decisions ─────────────────────────────────────────────────────
-def approve(user_id: int, post_id: int, caption: str | None = None, hashtags: list | None = None,
-            upload_folder: str | None = None, now: datetime | None = None) -> dict:
-    """Puts the post on the calendar for its slot. Raises AutopilotError."""
-    from db import get_autopilot_post, update_autopilot_post
-    from services.schedule_service import ScheduleError, create
-
-    now = now or _now()
-    post = get_autopilot_post(user_id, post_id)
-    if post is None:
-        raise AutopilotError("That post wasn't found.")
-    if post["status"] not in ("needs_ok", "held"):
-        raise AutopilotError("This post isn't waiting for your OK.")
-    caption = (caption if caption is not None else post["caption"] or "").strip()
-    tags = hashtags if hashtags is not None else post["hashtags"]
-    slot = datetime.fromisoformat(post["slot_at"])
-    when = slot if slot > now + timedelta(minutes=2) else now + timedelta(minutes=5)  # a held post goes out now
-    item = {"platform": post["platform"], "caption": caption, "hashtags": tags,
-            "media": "single" if post["image_url"] else "none", "images": [post["image_url"]] if post["image_url"] else []}
-    try:
-        scheduled = create(user_id, [item], when.isoformat(), upload_folder or Config.UPLOAD_FOLDER,
-                           story=f"Autopilot: {post.get('topic') or post['kind']}", now=now)
-    except ScheduleError as err:
-        raise AutopilotError(str(err)) from err
-    return update_autopilot_post(post_id, status="approved", caption=caption, hashtags=tags,
-                                 scheduled_post_id=scheduled["id"], slot_at=when, error=None)
-
-
-def skip(user_id: int, post_id: int) -> dict:
-    from db import get_autopilot_post, update_autopilot_post
-
-    post = get_autopilot_post(user_id, post_id)
-    if post is None:
-        raise AutopilotError("That post wasn't found.")
-    if post["status"] in ("approved", "posted"):
-        raise AutopilotError("This post is already on the calendar; cancel it there.")
-    return update_autopilot_post(post_id, status="skipped")
-
-
-def edit(user_id: int, post_id: int, caption: str | None = None, hashtags: list | None = None) -> dict:
-    from db import get_autopilot_post, update_autopilot_post
-
-    post = get_autopilot_post(user_id, post_id)
-    if post is None or post["status"] not in ("needs_ok", "held"):
-        raise AutopilotError("Only a post waiting for your OK can be edited here.")
-    fields = {}
-    if caption is not None:
-        fields["caption"] = str(caption).strip()[:3000]
-    if hashtags is not None:
-        fields["hashtags"] = [t if str(t).startswith("#") else f"#{t}" for t in hashtags if str(t).strip()][:10]
-    return update_autopilot_post(post_id, **fields)
-
-
-# ── The hourly run ──────────────────────────────────────────────────────────
-def hold_missed(now: datetime | None = None) -> int:
-    """Posts still waiting after their deadline are held: never posted."""
-    from db import autopilot_posts_with_status, create_notification, update_autopilot_post
-
-    now = now or _now()
-    held = 0
-    for post in autopilot_posts_with_status(("needs_ok",)):
-        if post["approve_by"] and datetime.fromisoformat(post["approve_by"]) < now:
-            update_autopilot_post(post["id"], status="held")
-            held += 1
+        result = generate_post(user_id, {"story": brief, "platforms": platforms, "language": settings["language"],
+                                         "selected_outputs": ["text"]})
+        image_url, cost = None, 0.0
+        allowed, _why_not = image_allowance(user_id, settings, slot_at)
+        if allowed:
             try:
-                create_notification(post["user_id"], "autopilot", "Autopilot: a post wasn't approved in time",
-                                    "It didn't go out. You can still post it or pick a new time.", "/autopilot",
-                                    f"autopilot-held-{post['id']}")
-            except Exception as err:  # noqa: BLE001
-                logger.warning(f"Autopilot: notification failed: {err}")
-    return held
+                image_url, cost = _make_image(user_id, result, platforms, title, media=media)
+            except Exception as err:  # noqa: BLE001 - the post can still go out as text
+                logger.warning(f"Autopilot image for post {post['id']} failed: {err}")
+        upload_folder = Config.UPLOAD_FOLDER
+        items = normalize_items(_items_from(result, platforms, image_url), upload_folder)
+        rules = r.active_rules_for_user(user_id)
+
+        def _check(caption, platform, active_rules):
+            checked, _usage = r.check_caption(caption, platform, active_rules, r.refine_llm)
+            return checked
+
+        items = prepare_items(items, upload_folder, rules, _check)
+        totals = summary(items)
+        reviewer = _reviewer_for(user_id)
+        req = create_approval_request(
+            user_id=user_id, pipeline_client_id=f"autopilot-{post['id']}", platform=totals["platform"],
+            asset_type=totals["asset_type"], caption=totals["caption"], story_context=brief,
+            image_urls=totals["image_urls"], reviewer_email=reviewer, items=items,
+        )
+    except PostBlocked:
+        update_autopilot_post(post["id"], status="planned")  # nothing was made: the day stays on the plan
+        raise
+    except Exception as err:  # noqa: BLE001 - kept as failed so the day isn't retried every hour
+        logger.warning(f"Autopilot could not prepare {post['slot_date']} for user {user_id}: {err}")
+        update_autopilot_post(post["id"], status="failed", error=str(err))
+        return None
+
+    post = update_autopilot_post(post["id"], status="awaiting_approval", run_id=result.get("run_id"),
+                                 approval_request_id=req["id"], image_url=image_url, cost_usd=cost,
+                                 platforms=[i["platform"] for i in items])
+    local = slot_at.astimezone(timezone(timedelta(minutes=settings["tz_minutes"])))
+    when = local.strftime("%a %d %b, %H:%M")
+    create_notification(user_id, "autopilot", f"Autopilot prepared a post for {when}",
+                        f'"{title}" is ready for review. Approve it to schedule it; nothing is posted until you do.',
+                        f"/approve/{req['id']}", f"autopilot:{post['id']}")
+    if reviewer and Config.APP_BASE_URL:
+        try:
+            from services.email_service import EmailService
+
+            EmailService().send_approval_bundle_request(
+                approval_url=f"{Config.APP_BASE_URL.rstrip('/')}/approve/{req['id']}", story=brief, items=items,
+                company=None, to_email=reviewer)
+        except Exception as err:  # noqa: BLE001 - the request is under the bell either way
+            logger.warning(f"Autopilot approval email failed: {err}")
+    log_audit("autopilot.prepared", actor_user_id=user_id, target_user_id=user_id,
+              details={"day": post["slot_date"], "idea": title, "approval_request_id": req["id"]})
+    return post
 
 
-def sync_published() -> int:
-    """Approved posts follow what the publisher did with their scheduled post."""
+# ── The hourly run ────────────────────────────────────────────────────────
+
+
+def expire_overdue(now: datetime) -> int:
+    """Posts still waiting when their slot passed: never published on their own."""
+    from db import AutopilotPost, Session, create_notification, engine, update_autopilot_post
+
+    cutoff = now.astimezone(timezone.utc).replace(tzinfo=None)
+    with Session(engine) as session:
+        overdue = [(p.id, p.user_id, p.slot_date, p.status) for p in session.query(AutopilotPost).filter(
+            AutopilotPost.status.in_(("awaiting_approval", "planned")), AutopilotPost.slot_at <= cutoff)]
+    for post_id, user_id, slot_date, status in overdue:
+        if status == "planned":  # never written (paused, or out of credit): just off the plan
+            update_autopilot_post(post_id, status="cancelled", error="It wasn't written in time.")
+            continue
+        update_autopilot_post(post_id, status="expired", error="Not approved before its time.")
+        create_notification(user_id, "autopilot", "An Autopilot post wasn't approved in time",
+                            f"The post for {slot_date} was not published. You can still publish it from its approval request.",
+                            "/autopilot", f"autopilot-expired:{post_id}")
+    return len(overdue)
+
+
+def sync_posted() -> int:
+    """Scheduled posts follow what the publisher did with them (for the page's counts)."""
     from db import autopilot_posts_with_status, get_scheduled_post, update_autopilot_post
 
     changed = 0
-    for post in autopilot_posts_with_status(("approved",)):
-        if not post["scheduled_post_id"]:
-            continue
-        scheduled = get_scheduled_post(post["user_id"], post["scheduled_post_id"]) or {}
-        status = scheduled.get("status")
-        new = {"published": "posted", "partial": "posted", "failed": "failed", "cancelled": "skipped"}.get(status)
+    for post in autopilot_posts_with_status(("scheduled",)):
+        scheduled = get_scheduled_post(post["user_id"], post["scheduled_post_id"]) if post["scheduled_post_id"] else None
+        new = {"published": "posted", "partial": "posted", "failed": "failed", "cancelled": "cancelled"}.get(
+            (scheduled or {}).get("status"))
         if new:
             update_autopilot_post(post["id"], status=new)
             changed += 1
     return changed
 
 
-def run_for_user(user_id: int, now: datetime | None = None, llm=None, media=None) -> dict:
-    from db import autopilot_posts_with_status
+def run_for_user(user_id: int, now: datetime, media=None) -> int:
+    """Plans this user's next two weeks and writes the days now due. -> posts prepared."""
+    from db import autopilot_posts_with_status, get_autopilot_settings, list_autopilot_posts, save_autopilot_settings
+    from services.content_pipeline import PostBlocked
 
-    now = now or _now()
-    planned = plan_ahead(user_id, now)
-    written, ready = 0, []
-    for post in autopilot_posts_with_status(("planned",), user_id=user_id):
-        if written >= MAX_WRITES_PER_RUN:
+    settings = get_autopilot_settings(user_id)
+    if not settings["enabled"] or settings["paused_reason"]:
+        return 0
+    found = problems(user_id, settings["platforms"])
+    if found:
+        save_autopilot_settings(user_id, paused_reason=found[0])
+        return 0
+    plan_ahead(user_id, now)
+    today = (now + timedelta(minutes=settings["tz_minutes"])).date()
+    due = [p for p in autopilot_posts_with_status(("planned",), user_id=user_id)
+           if date.fromisoformat(p["slot_date"]) <= today + timedelta(days=settings["days_ahead"])]
+    plan_ideas = _plan_ideas(user_id, settings, now) if due else []
+    used = {(p["idea_title"] or "").lower() for p in list_autopilot_posts(user_id, limit=RECENT_IDEAS)
+            if p["status"] != "planned"}
+    made = tried = 0
+    for post in due:
+        if tried >= MAX_POSTS_PER_RUN:  # failures count too: a broken AI service isn't retried for every day
             break
-        if datetime.fromisoformat(post["slot_at"]) - now <= WRITE_AHEAD:
-            result = draft(post, now, llm=llm, media=media)
-            written += 1
-            if result and result["status"] == "needs_ok":
-                ready.append(result)
-    emailed = email_needs_ok(user_id, ready)
-    return {"planned": planned, "written": written, "emailed": emailed}
+        tried += 1
+        try:
+            prepared = prepare(user_id, settings, post, now, plan_ideas, used, media=media)
+        except PostBlocked as blocked:
+            save_autopilot_settings(user_id, paused_reason=str(blocked)[:300])
+            break
+        if prepared:
+            made += 1
+            used.add((prepared["idea_title"] or "").lower())
+    save_autopilot_settings(user_id, last_run_at=now.astimezone(timezone.utc).replace(tzinfo=None))
+    _pause_after_failures(user_id)
+    return made
 
 
-def email_needs_ok(user_id: int, posts: list[dict]) -> bool:
-    """One email for the posts this run wrote: they won't go out without the
-    user's OK, so the user has to hear about them outside the app. Sent like an
-    account email (not marketing), and only when the app's address is set."""
-    if not posts or not Config.APP_BASE_URL:
-        return False
-    from db import get_autopilot_settings, get_user_by_id
+def _pause_after_failures(user_id: int) -> None:
+    """The last preparations all failed: stop and tell the user, rather than retry every hour."""
+    from db import (
+        AutopilotPost,
+        Session,
+        create_notification,
+        engine,
+        get_autopilot_settings,
+        log_audit,
+        save_autopilot_settings,
+    )
 
-    user = get_user_by_id(user_id)
-    if not user or not user.email:
-        return False
-    tz = timezone(timedelta(minutes=get_autopilot_settings(user_id).get("tz_minutes") or 0))
-
-    def local(iso: str) -> str:
-        when = datetime.fromisoformat(iso).astimezone(tz)
-        return f"{when:%a} {when.day} {when:%b}, {when:%I:%M %p}".replace(" 0", " ")
-
-    count = len(posts)
-    lines = [f"{NAMES.get(p['platform'], p['platform'])} post for {local(p['slot_at'])} - "
-             f"approve by {local(p['approve_by'])}" for p in posts]
-    lines.append("Nothing goes out until you approve it. A post that isn't approved in time is held, never posted.")
-    try:
-        from services.email_service import EmailService
-
-        EmailService().send_billing_email(
-            to_email=user.email, name=user.name or "there",
-            subject=f"{count} post{'s' if count > 1 else ''} need{'' if count > 1 else 's'} your OK",
-            headline=f"Autopilot wrote {count} post{'s' if count > 1 else ''} for you",
-            lines=lines, button="Review and approve", url=Config.APP_BASE_URL.rstrip("/") + "/autopilot",
-            footer="You get this because Autopilot is on. Pause or turn it off on the Autopilot page.")
-        return True
-    except Exception as err:  # noqa: BLE001 - the bell notification is still there
-        logger.warning(f"Autopilot email to user {user_id} failed: {err}")
-        return False
+    with Session(engine) as session:
+        last = [(r.status, r.error) for r in session.query(AutopilotPost).filter(
+            AutopilotPost.user_id == user_id, AutopilotPost.status != "planned")
+            .order_by(AutopilotPost.updated_at.desc(), AutopilotPost.id.desc()).limit(FAILURES_BEFORE_PAUSE)]
+    if len(last) < FAILURES_BEFORE_PAUSE or any(status != "failed" for status, _ in last):
+        return
+    if get_autopilot_settings(user_id)["paused_reason"]:
+        return
+    reason = f"The last {FAILURES_BEFORE_PAUSE} posts couldn't be prepared ({(last[0][1] or 'unknown error')[:120]})."
+    save_autopilot_settings(user_id, paused_reason=reason)
+    create_notification(user_id, "autopilot", "Autopilot is paused", reason + " Check the Autopilot page.",
+                        "/autopilot", f"autopilot-paused:{datetime.now(timezone.utc):%Y-%m-%d}")
+    log_audit("autopilot.paused", target_user_id=user_id, details={"reason": reason})
 
 
-def run_autopilot(now: datetime | None = None) -> dict:
+def run(now: datetime | None = None) -> dict:
+    """The scheduler's hourly call. -> {"prepared": n, "expired": n, "posted": n}"""
     from db import autopilot_user_ids
 
     now = now or _now()
-    totals = {"users": 0, "planned": 0, "written": 0, "emailed": 0, "held": hold_missed(now), "synced": sync_published()}
+    prepared = 0
+    expired = expire_overdue(now)
+    posted = sync_posted()
     for user_id in autopilot_user_ids():
         try:
-            result = run_for_user(user_id, now)
-        except Exception as err:  # noqa: BLE001 - one user's problem never stops the rest
+            prepared += run_for_user(user_id, now)
+        except Exception as err:  # noqa: BLE001 - one user's problem must not stop the others
             logger.warning(f"Autopilot run failed for user {user_id}: {err}")
-            continue
-        totals["users"] += 1
-        totals["planned"] += result["planned"]
-        totals["written"] += result["written"]
-        totals["emailed"] += int(result["emailed"])
-    return totals
+    return {"prepared": prepared, "expired": expired, "posted": posted}
 
 
-# ── The page's data ──────────────────────────────────────────────────────────
-def overview(user_id: int, now: datetime | None = None) -> dict:
-    from db import autopilot_images_since, get_autopilot_settings, list_autopilot_posts
+# ── The user's decisions ──────────────────────────────────────────────────
+
+
+def on_approval_decided(req: dict, now: datetime | None = None) -> dict | None:
+    """Called after an approval request is decided. For an Autopilot post the
+    approved platforms are scheduled at the day's slot. -> the updated post."""
+    from db import autopilot_post_for_approval, log_audit, update_autopilot_post
+    from services import schedule_service
+
+    if not req or not str(req.get("pipeline_client_id") or "").startswith("autopilot-"):
+        return None
+    post = autopilot_post_for_approval(req["id"])
+    if not post or post["status"] != "awaiting_approval":
+        return None
+    approved = [i for i in req.get("items") or [] if i.get("decision") == "approved"]
+    if not approved:
+        return update_autopilot_post(post["id"], status="rejected")
+    now = now or _now()
+    slot_at = datetime.fromisoformat(post["slot_at"])
+    if slot_at - now < timedelta(minutes=2):
+        return update_autopilot_post(post["id"], status="expired", error="Approved after its time.")
+    try:
+        scheduled = schedule_service.create(post["user_id"], [{k: i.get(k) for k in ("platform", "caption", "hashtags", "media", "images")}
+                                                              for i in approved], slot_at.isoformat(), Config.UPLOAD_FOLDER,
+                                            story=req.get("story_context"), run_id=post["run_id"], now=now)
+    except schedule_service.ScheduleError as err:
+        return update_autopilot_post(post["id"], status="failed", error=str(err))
+    log_audit("autopilot.scheduled", actor_user_id=post["user_id"], target_user_id=post["user_id"],
+              details={"day": post["slot_date"], "scheduled_post_id": scheduled["id"],
+                       "platforms": [i["platform"] for i in approved]})
+    return update_autopilot_post(post["id"], status="scheduled", scheduled_post_id=scheduled["id"])
+
+
+def skip(user_id: int, post_id: int) -> dict:
+    """The user doesn't want this day's post: off the plan, or its request closed."""
+    from db import decide_approval_request, get_approval_request, get_autopilot_post, update_autopilot_post
+
+    post = get_autopilot_post(user_id, post_id)
+    if post is None:
+        raise AutopilotError("That post wasn't found.")
+    if post["status"] not in ("planned", "awaiting_approval"):
+        raise AutopilotError("Only a planned post or one waiting for approval can be skipped.")
+    if post["approval_request_id"]:
+        _close_request(post["approval_request_id"], "Skipped on the Autopilot page.", get_approval_request,
+                       decide_approval_request)
+    return update_autopilot_post(post_id, status="rejected", error="Skipped by you.")
+
+
+# ── What the pages show ───────────────────────────────────────────────────
+
+
+def state(user_id: int, now: datetime | None = None) -> dict:
+    """Everything the /autopilot page (and the calendar strip) shows."""
+    from db import (
+        autopilot_images_since,
+        autopilot_posts_between,
+        get_approval_request,
+        get_autopilot_settings,
+        list_autopilot_posts,
+    )
+    from services.publish_service import connections
 
     now = now or _now()
     settings = get_autopilot_settings(user_id)
-    tz = timezone(timedelta(minutes=settings.get("tz_minutes") or 0))
+    connected = connections(user_id)
+    tz = timezone(timedelta(minutes=settings["tz_minutes"]))
     local = now.astimezone(tz)
     week_start = (local - timedelta(days=local.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
-    posts = list_autopilot_posts(user_id, now - timedelta(days=30), week_start + timedelta(days=PLAN_DAYS + 1))
-    this_week = [p for p in posts if week_start <= datetime.fromisoformat(p["slot_at"]) < week_start + timedelta(days=7)]
-    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    last30 = [p for p in posts if datetime.fromisoformat(p["slot_at"]) < now]
-    images_used = autopilot_images_since(user_id, month_start)
+    plan = autopilot_posts_between(user_id, now - timedelta(days=30), week_start + timedelta(days=PLAN_DAYS + 1))
+    for post in plan:  # the written caption, from its approval request
+        post["caption"] = None
+        if post["approval_request_id"]:
+            req = get_approval_request(post["approval_request_id"]) or {}
+            items = req.get("items") or []
+            post["caption"] = (items[0].get("caption") if items else req.get("caption")) or None
+    this_week = [p for p in plan if week_start <= datetime.fromisoformat(p["slot_at"]) < week_start + timedelta(days=7)]
+    past = [p for p in plan if datetime.fromisoformat(p["slot_at"]) < now]
+    upcoming = [p for p in plan if p["status"] in ("planned", "preparing", "awaiting_approval", "scheduled")
+                and datetime.fromisoformat(p["slot_at"]) >= now]
     image_price = 0.0
     try:
         from db import get_image_quota, image_model_price
 
         image_price = image_model_price(get_image_quota(user_id).get("model"))
-    except Exception:  # noqa: BLE001
+    except Exception:  # noqa: BLE001 - the page just doesn't show a price
         pass
-    upcoming = [p for p in posts if p["status"] in ("approved", "needs_ok", "planned")
-                and datetime.fromisoformat(p["slot_at"]) >= now]
+    month_start = now.astimezone(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     return {
-        "settings": settings,
-        "posts": posts,
-        "needs_ok": [p for p in posts if p["status"] in ("needs_ok", "held")],
+        **settings,
+        "platform_choices": [{"id": p, "name": PLATFORM_NAMES[p], "connected": bool(connected.get(p)),
+                              "available": p in available_platforms(settings["images"])} for p in PLATFORMS],
+        "problems": problems(user_id, settings["platforms"]) if settings["enabled"] else [],
+        "posts": list_autopilot_posts(user_id, limit=10, statuses=("preparing", "awaiting_approval", "scheduled",
+                                                                       "posted", "rejected", "expired", "failed")),
+        "plan": plan,
+        "needs_ok": [p for p in plan if p["status"] == "awaiting_approval"],
         "next": upcoming[0] if upcoming else None,
         "week": {"start": week_start.isoformat(), "goal": settings["posts_per_week"],
                  "done": sum(1 for p in this_week if p["status"] == "posted"),
-                 "planned": sum(1 for p in this_week if p["status"] not in ("skipped",))},
-        "images": {"used": images_used, "cap": settings["image_cap_month"], "price": image_price},
-        "last30": {"posted": sum(1 for p in last30 if p["status"] == "posted"),
-                   "approved": sum(1 for p in last30 if p["status"] in ("posted", "approved")),
-                   "skipped": sum(1 for p in last30 if p["status"] in ("skipped", "held"))},
+                 "planned": sum(1 for p in this_week if p["status"] not in ("rejected", "cancelled"))},
+        "image_use": {"used": autopilot_images_since(user_id, month_start), "cap": settings["image_cap_month"],
+                      "price": image_price},
+        "last30": {"posted": sum(1 for p in past if p["status"] == "posted"),
+                   "approved": sum(1 for p in past if p["status"] in ("posted", "scheduled")),
+                   "skipped": sum(1 for p in past if p["status"] in ("rejected", "expired"))},
     }

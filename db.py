@@ -925,6 +925,68 @@ class AppSetting(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
 
 
+# ── Autopilot (AUTOPILOT_PLAN.md, services/autopilot_service.py) ──────────
+class AutopilotSettings(Base):
+    """One user's Autopilot: off until they turn it on (Settings -> Autopilot)."""
+
+    __tablename__ = "autopilot_settings"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), primary_key=True
+    )
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    platforms: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON list
+    days_ahead: Mapped[int] = mapped_column(Integer, default=2, nullable=False)
+    language: Mapped[str] = mapped_column(String(16), default="en", nullable=False)
+    tz_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)  # the user's clock, from the browser
+    paused_reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    enabled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+    # The plan (the /autopilot page): how often, which days, what about
+    posts_per_week: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
+    days_off: Mapped[str] = mapped_column(Text, nullable=False, default="[6]")  # JSON weekdays, 0 = Monday
+    mix: Mapped[str] = mapped_column(Text, nullable=False, default="{}")  # JSON {"tips": n, "offers": n, "news": n}
+    festivals: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    topics: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON list
+    avoid: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON list
+    images: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # off: text only, low credit use
+    image_cap_month: Mapped[int] = mapped_column(Integer, default=12, nullable=False)
+
+
+class AutopilotPost(Base):
+    """A post Autopilot prepared for one calendar day: written, sent for the
+    user's approval, then scheduled at the slot once approved."""
+
+    __tablename__ = "autopilot_posts"
+    __table_args__ = (
+        UniqueConstraint("user_id", "slot_date", name="uq_autopilot_post_per_day"),
+        {"schema": SCHEMA} if not IS_SQLITE else {},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey(f"{SCHEMA}.users.id" if not IS_SQLITE else "users.id"), nullable=False, index=True
+    )
+    slot_date: Mapped[str] = mapped_column(String(10), nullable=False)  # YYYY-MM-DD in the user's clock
+    slot_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)  # when it should go out (UTC)
+    platforms: Mapped[str] = mapped_column(Text, nullable=False, default="[]")  # JSON list
+    idea_title: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    approval_request_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    scheduled_post_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # planned -> preparing -> awaiting_approval -> scheduled -> posted | rejected | expired | cancelled; failed
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="preparing")
+    kind: Mapped[str | None] = mapped_column(String(24), nullable=True)  # tips / offers / news / festival
+    reason: Mapped[str | None] = mapped_column(String(300), nullable=True)  # why this day and subject, for the page
+    image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
+
+
 class BrandAsset(Base):
     """A brand character or logo reference image, manageable from
     /brand-configuration's "Logo & Character" tab - an extensible list
@@ -1006,61 +1068,6 @@ class ScheduledPost(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
-class AutopilotSettings(Base):
-    """A user's Autopilot set-up (services/autopilot_service.py): how often,
-    where, what about, and the monthly image cap. JSON lists/dicts as text."""
-
-    __tablename__ = "autopilot_settings"
-    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
-
-    user_id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    paused: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    posts_per_week: Mapped[int] = mapped_column(Integer, default=3, nullable=False)
-    platforms: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    mix: Mapped[str] = mapped_column(Text, nullable=False, default="{}")
-    festivals: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    topics: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    avoid: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    days_off: Mapped[str] = mapped_column(Text, nullable=False, default="[6]")  # 0 = Monday
-    images: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    image_cap_month: Mapped[int] = mapped_column(Integer, default=12, nullable=False)
-    language: Mapped[str] = mapped_column(String(16), default="en", nullable=False)
-    tz_minutes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
-
-
-class AutopilotPost(Base):
-    """One planned Autopilot post: planned -> needs_ok (written, waiting for the
-    user) -> approved (on the calendar as a ScheduledPost) -> posted, or
-    skipped / held (not approved in time) / failed."""
-
-    __tablename__ = "autopilot_posts"
-    __table_args__ = (
-        UniqueConstraint("user_id", "slot_at", "platform", name="uq_autopilot_slot"),
-        {"schema": SCHEMA} if not IS_SQLITE else {},
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    slot_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, index=True)  # UTC
-    platform: Mapped[str] = mapped_column(String(24), nullable=False)
-    kind: Mapped[str] = mapped_column(String(24), nullable=False)  # tips / offers / news / festival
-    reason: Mapped[str | None] = mapped_column(String(300), nullable=True)
-    topic: Mapped[str | None] = mapped_column(String(300), nullable=True)
-    status: Mapped[str] = mapped_column(String(16), default="planned", nullable=False, index=True)
-    caption: Mapped[str | None] = mapped_column(Text, nullable=True)
-    hashtags: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    image_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    checks: Mapped[str] = mapped_column(Text, nullable=False, default="[]")
-    approve_by: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    scheduled_post_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    cost_usd: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
-    error: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
-
-
 class SavedBrief(Base):
     """A brief the user starred in Studio Chat to use again (the text they
     typed, and the platforms it was for)."""
@@ -1104,6 +1111,51 @@ class CompetitorPostEmbedding(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
 
 
+def _upgrade_first_autopilot() -> None:
+    """Two Autopilot builds were merged (Oct 2026). A database made by the first
+    one has different tables: its autopilot_posts (one row per platform, no
+    slot_date) is kept as autopilot_posts_v1 so create_all makes the new one,
+    and its autopilot_settings gets the columns it lacks (its `paused` flag
+    becomes paused_reason). Does nothing on any other database."""
+    from sqlalchemy import inspect as sa_inspect
+
+    schema = None if IS_SQLITE else SCHEMA
+    inspector = sa_inspect(engine)
+    tables = set(inspector.get_table_names(schema=schema))
+
+    def tbl(name: str) -> str:
+        return f'"{SCHEMA}".{name}' if not IS_SQLITE else name
+
+    if "autopilot_posts" in tables and "autopilot_posts_v1" not in tables:
+        columns = {c["name"] for c in inspector.get_columns("autopilot_posts", schema=schema)}
+        if "slot_date" not in columns:
+            indexes = [i["name"] for i in inspector.get_indexes("autopilot_posts", schema=schema) if i.get("name")]
+            with engine.begin() as conn:
+                conn.execute(text(f"ALTER TABLE {tbl('autopilot_posts')} RENAME TO autopilot_posts_v1"))
+                if IS_SQLITE:  # index names are database-wide: free them for the new table
+                    for name in indexes:
+                        conn.execute(text(f'DROP INDEX IF EXISTS "{name}"'))
+                else:  # indexes, the primary key and the id sequence keep their names: rename them too
+                    conn.execute(text(f"""DO $$ DECLARE r record; BEGIN
+                        FOR r IN SELECT indexname FROM pg_indexes WHERE schemaname = '{SCHEMA}' AND tablename = 'autopilot_posts_v1' LOOP
+                            EXECUTE format('ALTER INDEX %I.%I RENAME TO %I', '{SCHEMA}', r.indexname, left(r.indexname, 55) || '_v1');
+                        END LOOP; END $$;"""))
+                    conn.execute(text(f'ALTER SEQUENCE IF EXISTS "{SCHEMA}".autopilot_posts_id_seq RENAME TO autopilot_posts_v1_id_seq'))
+            logger.warning("Autopilot: the first build's autopilot_posts table was kept as autopilot_posts_v1.")
+    if "autopilot_settings" in tables:
+        columns = {c["name"] for c in inspector.get_columns("autopilot_settings", schema=schema)}
+        if "paused" in columns and "paused_reason" not in columns:
+            for sql in (f"ALTER TABLE {tbl('autopilot_settings')} ADD COLUMN days_ahead INTEGER DEFAULT 2 NOT NULL",
+                        f"ALTER TABLE {tbl('autopilot_settings')} ADD COLUMN paused_reason VARCHAR(300)",
+                        f"ALTER TABLE {tbl('autopilot_settings')} ADD COLUMN last_run_at TIMESTAMP",
+                        f"ALTER TABLE {tbl('autopilot_settings')} ADD COLUMN enabled_at TIMESTAMP",
+                        f"UPDATE {tbl('autopilot_settings')} SET paused_reason = 'Paused by you.' WHERE paused",
+                        f"ALTER TABLE {tbl('autopilot_settings')} DROP COLUMN paused"):
+                with engine.begin() as conn:
+                    conn.execute(text(sql))
+            logger.warning("Autopilot: the first build's autopilot_settings table was upgraded.")
+
+
 def init_db():
     """Create schema, tables, and apply lightweight migrations."""
     if not IS_SQLITE:
@@ -1111,6 +1163,7 @@ def init_db():
             conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS "{SCHEMA}"'))
             conn.commit()
 
+    _upgrade_first_autopilot()
     Base.metadata.create_all(engine)
     _seed_plans()
 
@@ -1185,6 +1238,19 @@ def init_db():
             f"ALTER TABLE {usr_tbl} ADD COLUMN recap_email_last_month VARCHAR(7)",
             f"ALTER TABLE {_tbl('memory_embeddings')} ADD COLUMN user_id INTEGER",
             f"CREATE INDEX IF NOT EXISTS ix_memory_embeddings_user_id ON {_tbl('memory_embeddings')} (user_id)",
+            # Autopilot: the plan (posts a week, days off, mix, topics, images) and why each post
+            f"ALTER TABLE {_tbl('autopilot_settings')} ADD COLUMN posts_per_week INTEGER DEFAULT 3 NOT NULL",
+            f"ALTER TABLE {_tbl('autopilot_settings')} ADD COLUMN days_off TEXT DEFAULT '[6]' NOT NULL",
+            f"ALTER TABLE {_tbl('autopilot_settings')} ADD COLUMN mix TEXT DEFAULT '{{}}' NOT NULL",
+            f"ALTER TABLE {_tbl('autopilot_settings')} ADD COLUMN festivals BOOLEAN DEFAULT TRUE NOT NULL",
+            f"ALTER TABLE {_tbl('autopilot_settings')} ADD COLUMN topics TEXT DEFAULT '[]' NOT NULL",
+            f"ALTER TABLE {_tbl('autopilot_settings')} ADD COLUMN avoid TEXT DEFAULT '[]' NOT NULL",
+            f"ALTER TABLE {_tbl('autopilot_settings')} ADD COLUMN images BOOLEAN DEFAULT FALSE NOT NULL",
+            f"ALTER TABLE {_tbl('autopilot_settings')} ADD COLUMN image_cap_month INTEGER DEFAULT 12 NOT NULL",
+            f"ALTER TABLE {_tbl('autopilot_posts')} ADD COLUMN kind VARCHAR(24)",
+            f"ALTER TABLE {_tbl('autopilot_posts')} ADD COLUMN reason VARCHAR(300)",
+            f"ALTER TABLE {_tbl('autopilot_posts')} ADD COLUMN image_url VARCHAR(500)",
+            f"ALTER TABLE {_tbl('autopilot_posts')} ADD COLUMN cost_usd FLOAT DEFAULT 0 NOT NULL",
         ]:
             try:
                 with engine.begin() as sub_conn:
@@ -1878,11 +1944,14 @@ def scheduled_posts_between(user_id: int, start: datetime, end: datetime) -> lis
             .order_by(ScheduledPost.scheduled_at.asc())
             .all()
         )
+        by_autopilot = {i for (i,) in session.query(AutopilotPost.scheduled_post_id).filter(
+            AutopilotPost.user_id == user_id, AutopilotPost.scheduled_post_id.isnot(None))}
         out = []
         for row in rows:
             post = _scheduled_post_dict(row)
             out.append({**{k: post[k] for k in ("id", "status", "platforms", "title", "thumb", "results", "media", "conversation_id")},
-                        "scheduled_at": _as_utc(row.scheduled_at), "movable": row.status == "pending"})
+                        "scheduled_at": _as_utc(row.scheduled_at), "movable": row.status == "pending",
+                        "autopilot": row.id in by_autopilot})
         return out
 
 
@@ -3508,6 +3577,188 @@ IMAGE_UNLIMITED = -1
 def _day_start_utc(now: datetime | None = None) -> datetime:
     now = now or datetime.now(timezone.utc)
     return now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+# ── Autopilot ─────────────────────────────────────────────────────────────
+def _json_list(raw) -> list:
+    try:
+        value = json.loads(raw or "[]")
+    except (TypeError, ValueError):
+        return []
+    return value if isinstance(value, list) else []
+
+
+AUTOPILOT_DEFAULTS = {"enabled": False, "platforms": [], "days_ahead": 2, "language": "en", "tz_minutes": 0,
+                      "paused_reason": None, "last_run_at": None, "enabled_at": None, "configured": False,
+                      "posts_per_week": 3, "days_off": [6], "mix": {}, "festivals": True, "topics": [], "avoid": [],
+                      "images": False, "image_cap_month": 12}
+AUTOPILOT_JSON_LISTS = ("platforms", "days_off", "topics", "avoid")
+AUTOPILOT_PLAIN = ("days_ahead", "language", "tz_minutes", "paused_reason", "last_run_at", "posts_per_week",
+                   "festivals", "images", "image_cap_month")
+
+
+def _autopilot_settings_dict(row: "AutopilotSettings | None") -> dict:
+    if row is None:
+        return {**AUTOPILOT_DEFAULTS, "days_off": [6], "mix": {}, "platforms": [], "topics": [], "avoid": []}
+    try:
+        mix = json.loads(row.mix or "{}")
+    except (TypeError, ValueError):
+        mix = {}
+    return {"enabled": row.enabled, "platforms": _json_list(row.platforms), "days_ahead": row.days_ahead,
+            "language": row.language, "tz_minutes": row.tz_minutes, "paused_reason": row.paused_reason,
+            "last_run_at": _as_utc(row.last_run_at).isoformat() if row.last_run_at else None,
+            "enabled_at": _as_utc(row.enabled_at).isoformat() if row.enabled_at else None, "configured": True,
+            "posts_per_week": row.posts_per_week if row.posts_per_week is not None else 3,
+            "days_off": _json_list(row.days_off) if row.days_off is not None else [6],
+            "mix": mix if isinstance(mix, dict) else {}, "festivals": bool(row.festivals if row.festivals is not None else True),
+            "topics": _json_list(row.topics), "avoid": _json_list(row.avoid), "images": bool(row.images),
+            "image_cap_month": row.image_cap_month if row.image_cap_month is not None else 12}
+
+
+def get_autopilot_settings(user_id: int) -> dict:
+    with Session(engine) as session:
+        return _autopilot_settings_dict(session.get(AutopilotSettings, user_id))
+
+
+def save_autopilot_settings(user_id: int, **fields) -> dict:
+    """Changes only the fields given. Turning it on clears a pause."""
+    with Session(engine) as session:
+        row = session.get(AutopilotSettings, user_id)
+        if row is None:
+            row = AutopilotSettings(user_id=user_id, platforms="[]")
+            session.add(row)
+        for key in AUTOPILOT_PLAIN:
+            if key in fields:
+                setattr(row, key, fields[key])
+        for key in AUTOPILOT_JSON_LISTS:
+            if key in fields:
+                setattr(row, key, json.dumps(list(fields[key] or [])))
+        if "mix" in fields:
+            row.mix = json.dumps(dict(fields["mix"] or {}))
+        if "enabled" in fields:
+            turning_on = bool(fields["enabled"]) and not row.enabled
+            row.enabled = bool(fields["enabled"])
+            if turning_on:
+                row.enabled_at, row.paused_reason = _utcnow(), None
+        session.commit()
+        return _autopilot_settings_dict(row)
+
+
+def autopilot_user_ids() -> list[int]:
+    """Users with Autopilot on and not paused."""
+    with Session(engine) as session:
+        return [u for (u,) in session.query(AutopilotSettings.user_id).filter(
+            AutopilotSettings.enabled.is_(True), AutopilotSettings.paused_reason.is_(None))]
+
+
+def _autopilot_post_dict(row: "AutopilotPost") -> dict:
+    return {"id": row.id, "user_id": row.user_id, "slot_date": row.slot_date, "slot_at": _as_utc(row.slot_at).isoformat(),
+            "platforms": _json_list(row.platforms), "idea_title": row.idea_title, "run_id": row.run_id,
+            "approval_request_id": row.approval_request_id, "scheduled_post_id": row.scheduled_post_id,
+            "status": row.status, "error": row.error, "created_at": _as_utc(row.created_at).isoformat(),
+            "kind": row.kind, "reason": row.reason, "image_url": row.image_url, "cost_usd": float(row.cost_usd or 0.0)}
+
+
+def claim_autopilot_slot(user_id: int, slot_date: str, slot_at: datetime, platforms: list, idea_title: str | None,
+                         status: str = "preparing", kind: str | None = None, reason: str | None = None) -> dict | None:
+    """Reserve a day for one Autopilot post. None when that day already has one
+    (so two server processes can't both prepare it). status="planned" puts a
+    day on the plan before anything is written."""
+    from sqlalchemy.exc import IntegrityError
+
+    with Session(engine) as session:
+        row = AutopilotPost(user_id=user_id, slot_date=slot_date, slot_at=slot_at.astimezone(timezone.utc).replace(tzinfo=None),
+                            platforms=json.dumps(platforms), idea_title=(idea_title or "")[:300] or None, status=status,
+                            kind=kind, reason=(reason or "")[:300] or None)
+        session.add(row)
+        try:
+            session.commit()
+        except IntegrityError:
+            session.rollback()
+            return None
+        session.refresh(row)
+        return _autopilot_post_dict(row)
+
+
+def update_autopilot_post(post_id: int, **fields) -> dict | None:
+    with Session(engine) as session:
+        row = session.get(AutopilotPost, post_id)
+        if row is None:
+            return None
+        for key in ("status", "error", "run_id", "approval_request_id", "scheduled_post_id", "idea_title", "kind",
+                    "reason", "image_url", "cost_usd"):
+            if key in fields:
+                setattr(row, key, fields[key] if key != "error" else (fields[key] or None) and str(fields[key])[:500])
+        if "platforms" in fields:
+            row.platforms = json.dumps(list(fields["platforms"] or []))
+        if "slot_at" in fields:
+            row.slot_at = fields["slot_at"].astimezone(timezone.utc).replace(tzinfo=None)
+        session.commit()
+        return _autopilot_post_dict(row)
+
+
+def delete_autopilot_post(post_id: int) -> None:
+    """Free a day again (its preparation failed before anything was made)."""
+    with Session(engine) as session:
+        session.query(AutopilotPost).filter(AutopilotPost.id == post_id).delete(synchronize_session=False)
+        session.commit()
+
+
+def delete_planned_autopilot_posts(user_id: int) -> int:
+    """Removes days on the plan that nothing was written for yet (the plan changed)."""
+    with Session(engine) as session:
+        count = session.query(AutopilotPost).filter(AutopilotPost.user_id == user_id,
+                                                    AutopilotPost.status == "planned").delete(synchronize_session=False)
+        session.commit()
+        return int(count or 0)
+
+
+def list_autopilot_posts(user_id: int, limit: int = 20, statuses: tuple | None = None) -> list[dict]:
+    with Session(engine) as session:
+        rows = session.query(AutopilotPost).filter(AutopilotPost.user_id == user_id)
+        if statuses:
+            rows = rows.filter(AutopilotPost.status.in_(statuses))
+        return [_autopilot_post_dict(r) for r in rows.order_by(AutopilotPost.slot_date.desc()).limit(limit)]
+
+
+def autopilot_posts_between(user_id: int, start: datetime, end: datetime) -> list[dict]:
+    """Posts whose slot is in [start, end), soonest first (the /autopilot page)."""
+    start, end = (t.astimezone(timezone.utc).replace(tzinfo=None) if t.tzinfo else t for t in (start, end))
+    with Session(engine) as session:
+        rows = (session.query(AutopilotPost).filter(AutopilotPost.user_id == user_id, AutopilotPost.slot_at >= start,
+                                                    AutopilotPost.slot_at < end)
+                .order_by(AutopilotPost.slot_at.asc(), AutopilotPost.id.asc()))
+        return [_autopilot_post_dict(r) for r in rows]
+
+
+def autopilot_posts_with_status(statuses: tuple, user_id: int | None = None) -> list[dict]:
+    with Session(engine) as session:
+        rows = session.query(AutopilotPost).filter(AutopilotPost.status.in_(statuses))
+        if user_id is not None:
+            rows = rows.filter(AutopilotPost.user_id == user_id)
+        return [_autopilot_post_dict(r) for r in rows.order_by(AutopilotPost.slot_at.asc())]
+
+
+def get_autopilot_post(user_id: int, post_id: int) -> dict | None:
+    with Session(engine) as session:
+        row = session.get(AutopilotPost, post_id)
+        return _autopilot_post_dict(row) if row and row.user_id == user_id else None
+
+
+def autopilot_images_since(user_id: int, since: datetime) -> int:
+    """Images made for Autopilot posts whose slot is in the month starting at `since`."""
+    since = since.astimezone(timezone.utc).replace(tzinfo=None) if since.tzinfo else since
+    until = (since.replace(day=28) + timedelta(days=4)).replace(day=1)
+    with Session(engine) as session:
+        return int(session.query(func.count(AutopilotPost.id)).filter(
+            AutopilotPost.user_id == user_id, AutopilotPost.image_url.isnot(None),
+            AutopilotPost.slot_at >= since, AutopilotPost.slot_at < until).scalar() or 0)
+
+
+def autopilot_post_for_approval(approval_request_id: int) -> dict | None:
+    with Session(engine) as session:
+        row = session.query(AutopilotPost).filter(AutopilotPost.approval_request_id == approval_request_id).first()
+        return _autopilot_post_dict(row) if row else None
 
 
 def get_image_settings() -> dict:
@@ -6074,142 +6325,3 @@ def guide_progress_facts(user_id: int) -> dict:
             or exists(session.query(ApprovalRequest.id).filter(ApprovalRequest.user_id == user_id,
                                                                ApprovalRequest.items.like('%"published": {%'))),
         }
-
-
-
-# ── Autopilot (services/autopilot_service.py) ─────────────────────────────
-AUTOPILOT_LIST_FIELDS = ("platforms", "topics", "avoid", "days_off")
-
-
-def _autopilot_settings_dict(row: "AutopilotSettings | None", user_id: int) -> dict:
-    if row is None:
-        return {"user_id": user_id, "configured": False, "enabled": False, "paused": False, "posts_per_week": 3,
-                "platforms": [], "mix": {}, "festivals": True, "topics": [], "avoid": [], "days_off": [6],
-                "images": True, "image_cap_month": 12, "language": "en", "tz_minutes": 0}
-    out = {"user_id": user_id, "configured": True, "enabled": bool(row.enabled), "paused": bool(row.paused),
-           "posts_per_week": int(row.posts_per_week), "festivals": bool(row.festivals), "images": bool(row.images),
-           "image_cap_month": int(row.image_cap_month), "language": row.language or "en", "tz_minutes": int(row.tz_minutes or 0)}
-    for field in AUTOPILOT_LIST_FIELDS:
-        try:
-            out[field] = list(json.loads(getattr(row, field) or "[]"))
-        except ValueError:
-            out[field] = []
-    try:
-        out["mix"] = dict(json.loads(row.mix or "{}"))
-    except ValueError:
-        out["mix"] = {}
-    return out
-
-
-def get_autopilot_settings(user_id: int) -> dict:
-    with Session(engine) as session:
-        return _autopilot_settings_dict(session.get(AutopilotSettings, user_id), user_id)
-
-
-def save_autopilot_settings(user_id: int, **fields) -> dict:
-    with Session(engine) as session:
-        row = session.get(AutopilotSettings, user_id)
-        if row is None:
-            row = AutopilotSettings(user_id=user_id)
-            session.add(row)
-        for key, value in fields.items():
-            if key in AUTOPILOT_LIST_FIELDS or key == "mix":
-                value = json.dumps(value)
-            setattr(row, key, value)
-        row.updated_at = _utcnow()
-        session.commit()
-        return _autopilot_settings_dict(row, user_id)
-
-
-def autopilot_user_ids() -> list[int]:
-    """Users whose Autopilot is on and not paused."""
-    with Session(engine) as session:
-        return [r[0] for r in session.query(AutopilotSettings.user_id)
-                .filter(AutopilotSettings.enabled.is_(True), AutopilotSettings.paused.is_(False)).all()]
-
-
-def _autopilot_post_dict(row: "AutopilotPost") -> dict:
-    def _list(text):
-        try:
-            return list(json.loads(text or "[]"))
-        except ValueError:
-            return []
-    return {"id": row.id, "user_id": row.user_id, "slot_at": row.slot_at.replace(tzinfo=timezone.utc).isoformat(),
-            "platform": row.platform, "kind": row.kind, "reason": row.reason, "topic": row.topic, "status": row.status,
-            "caption": row.caption, "hashtags": _list(row.hashtags), "image_url": row.image_url, "checks": _list(row.checks),
-            "approve_by": row.approve_by.replace(tzinfo=timezone.utc).isoformat() if row.approve_by else None,
-            "scheduled_post_id": row.scheduled_post_id, "cost_usd": float(row.cost_usd or 0.0), "error": row.error}
-
-
-def list_autopilot_posts(user_id: int, start: datetime, end: datetime) -> list[dict]:
-    """Posts whose slot is in [start, end) (aware or naive UTC), soonest first."""
-    start = start.astimezone(timezone.utc).replace(tzinfo=None) if start.tzinfo else start
-    end = end.astimezone(timezone.utc).replace(tzinfo=None) if end.tzinfo else end
-    with Session(engine) as session:
-        rows = (session.query(AutopilotPost)
-                .filter(AutopilotPost.user_id == user_id, AutopilotPost.slot_at >= start, AutopilotPost.slot_at < end)
-                .order_by(AutopilotPost.slot_at.asc(), AutopilotPost.id.asc()).all())
-        return [_autopilot_post_dict(r) for r in rows]
-
-
-def autopilot_posts_with_status(statuses: tuple[str, ...], user_id: int | None = None) -> list[dict]:
-    with Session(engine) as session:
-        query = session.query(AutopilotPost).filter(AutopilotPost.status.in_(statuses))
-        if user_id is not None:
-            query = query.filter(AutopilotPost.user_id == user_id)
-        return [_autopilot_post_dict(r) for r in query.order_by(AutopilotPost.slot_at.asc()).all()]
-
-
-def get_autopilot_post(user_id: int, post_id: int) -> dict | None:
-    with Session(engine) as session:
-        row = session.get(AutopilotPost, post_id)
-        return _autopilot_post_dict(row) if row and row.user_id == user_id else None
-
-
-def create_autopilot_post(user_id: int, slot_at: datetime, platform: str, kind: str, reason: str | None = None,
-                          topic: str | None = None) -> dict | None:
-    """None when that slot already has a post for the platform."""
-    slot = slot_at.astimezone(timezone.utc).replace(tzinfo=None) if slot_at.tzinfo else slot_at
-    with Session(engine) as session:
-        if session.query(AutopilotPost.id).filter(AutopilotPost.user_id == user_id, AutopilotPost.slot_at == slot,
-                                                  AutopilotPost.platform == platform).first():
-            return None
-        row = AutopilotPost(user_id=user_id, slot_at=slot, platform=platform, kind=kind,
-                            reason=(reason or "")[:300] or None, topic=(topic or "")[:300] or None)
-        session.add(row)
-        session.commit()
-        return _autopilot_post_dict(row)
-
-
-def update_autopilot_post(post_id: int, **fields) -> dict | None:
-    with Session(engine) as session:
-        row = session.get(AutopilotPost, post_id)
-        if row is None:
-            return None
-        for key, value in fields.items():
-            if key in ("hashtags", "checks"):
-                value = json.dumps(value or [])
-            elif isinstance(value, datetime) and value.tzinfo:
-                value = value.astimezone(timezone.utc).replace(tzinfo=None)
-            setattr(row, key, value)
-        row.updated_at = _utcnow()
-        session.commit()
-        return _autopilot_post_dict(row)
-
-
-def delete_future_autopilot_posts(user_id: int, statuses: tuple[str, ...] = ("planned",)) -> int:
-    """Removes not-yet-written slots (after the plan's settings change)."""
-    with Session(engine) as session:
-        count = (session.query(AutopilotPost)
-                 .filter(AutopilotPost.user_id == user_id, AutopilotPost.status.in_(statuses),
-                         AutopilotPost.slot_at > _utcnow()).delete(synchronize_session=False))
-        session.commit()
-        return int(count or 0)
-
-
-def autopilot_images_since(user_id: int, since: datetime) -> int:
-    since = since.astimezone(timezone.utc).replace(tzinfo=None) if since.tzinfo else since
-    with Session(engine) as session:
-        return int(session.query(func.count(AutopilotPost.id))
-                   .filter(AutopilotPost.user_id == user_id, AutopilotPost.image_url.isnot(None),
-                           AutopilotPost.created_at >= since).scalar() or 0)

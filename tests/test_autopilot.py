@@ -1,35 +1,44 @@
-"""Autopilot (services/autopilot_service.py): planning the next two weeks,
-writing posts 2 days ahead, the user's OK before anything goes out, and
-holding posts that weren't approved in time. The text and image models are faked."""
+"""Autopilot (services/autopilot_service.py, AUTOPILOT_PLAN.md): off by
+default; the user's set-up plans the next two weeks; days coming up are
+written with the Studio pipeline and sent for approval; only approved posts
+are scheduled, and nothing is published on its own. The AI, the image model
+and the social accounts are faked."""
 
 import uuid
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from sqlalchemy.orm import Session
 
 import db
 from services import autopilot_service as ap
+from services import content_pipeline
 
-NOW = datetime(2026, 10, 26, 6, 0, tzinfo=timezone.utc)  # a Monday
-
-
-class FakeLLM:
-    def __init__(self, caption="Three ways to plan your posts so they go out on time. Save this for later."):
-        self.caption, self.calls = caption, []
-
-    def generate_json(self, system, user, **kw):
-        self.calls.append((system, user))
-        return {"title": "Planning tips", "caption": self.caption, "hashtags": ["planning", "#SmallBusiness"],
-                "image_prompt": "a desk with a planner"}, {"total_tokens": 100}
+def _a_tuesday_ahead() -> datetime:
+    """06:00 UTC (11:30 in India) on a Tuesday at least a week away: approving goes
+    through the real endpoint, which uses the real clock, so slots must be ahead."""
+    day = datetime.now(timezone.utc).date() + timedelta(days=7)
+    day += timedelta(days=(1 - day.weekday()) % 7)
+    while (day + timedelta(days=3)).month != day.month:  # the posts written in tests stay in one month
+        day += timedelta(days=7)
+    return datetime(day.year, day.month, day.day, 6, 0, tzinfo=timezone.utc)
 
 
-class FakeMedia:
-    def __init__(self):
-        self.calls = 0
+NOW = _a_tuesday_ahead()
+TODAY = NOW.date()
+IST = 330
 
-    def create_preset_image(self, prompt, image_path, aspect, logo_path=None, model=None, require_reference=True):
-        self.calls += 1
-        return {"success": True, "url": f"/static/uploads/ap{self.calls}.jpg", "cost": 0.55, "model": "fake"}
+
+def _day(n: int) -> str:
+    return (TODAY + timedelta(days=n)).isoformat()
+
+
+def _nine_ist(n: int) -> datetime:
+    """09:00 in India (the best hour in these tests) n days after NOW's day, in UTC."""
+    day = TODAY + timedelta(days=n)
+    return datetime(day.year, day.month, day.day, 3, 30, tzinfo=timezone.utc)
+SETUP = {"enabled": True, "platforms": ["linkedin"], "posts_per_week": 7, "days_off": [], "days_ahead": 3,
+         "festivals": False, "tz_minutes": IST}
 
 
 @pytest.fixture
@@ -41,28 +50,60 @@ def app():
     return app
 
 
-def _user():
-    return db.create_user("Priya", f"{uuid.uuid4().hex[:10]}@example.com", "h")
+@pytest.fixture
+def user():
+    user = db.create_user("Asha", f"{uuid.uuid4().hex[:8]}@example.com", "h")
+    with Session(db.engine) as session:
+        session.query(db.User).filter(db.User.id == user["id"]).update({"email_verified": True, "onboarding_completed": True})
+        session.commit()
+    return user
+
+
+@pytest.fixture
+def ready(user, monkeypatch):
+    """A brand profile, LinkedIn connected, ideas to write about, and a fake writer."""
+    db.save_user_brand_profile(user["id"], "https://acme.in", "Acme", "Logistics", None, None, [], [], [], [])
+    from services import best_time_service, publish_service
+
+    monkeypatch.setattr(publish_service, "connections", lambda uid: {"linkedin": "Acme Ltd", "facebook": None, "instagram": None})
+    monkeypatch.setattr(best_time_service, "best_times", lambda uid, tz=0, now=None: {"linkedin": {"hours": [9]}})
+    ideas = [{"title": "Same-day delivery", "prompt": "Explain same-day delivery."},
+             {"title": "Meet the team", "prompt": "Introduce the warehouse team."}]
+    monkeypatch.setattr(ap, "_plan_ideas", lambda uid, settings, now: list(ideas))
+    written = []
+
+    def fake_generate(uid, data):
+        written.append(data)
+        return {"success": True, "run_id": None, "content": {p: {
+            "caption": {"primary_caption": f"{data['story']} Faster deliveries for every customer in Pune, every day."},
+            "hashtags": {"hashtags": ["#Logistics"]}, "media_prompt": "a delivery van at dawn"} for p in data["platforms"]}}
+
+    monkeypatch.setattr(content_pipeline, "generate_post", fake_generate)
+    from api import routes
+
+    monkeypatch.setattr(routes, "active_rules_for_user", lambda uid: [])
+    return written
 
 
 def _client(app, user):
     client = app.test_client()
     with client.session_transaction() as s:
         s["user_id"] = user["id"]
-        s["sv"] = db.get_session_version(user["id"]) or 0
     return client
 
 
-SETTINGS = {"posts_per_week": 3, "platforms": ["linkedin"], "days_off": [6], "mix": {"tips": 2, "offers": 1, "news": 0},
-            "festivals": False, "images": False, "image_cap_month": 4, "tz_minutes": 0}
+def _turn_on(user, **extra):
+    return ap.save(user["id"], {**SETUP, **extra}, now=NOW)
 
 
-def _turn_on(user_id, **extra):
-    fields = ap.clean_settings({**SETTINGS, **extra})
-    db.save_autopilot_settings(user_id, enabled=True, **fields)
+def _posts(user, *statuses):
+    posts = sorted(db.list_autopilot_posts(user["id"], limit=100), key=lambda p: p["slot_date"])
+    return [p for p in posts if not statuses or p["status"] in statuses]
 
 
-# ── Planning ────────────────────────────────────────────────────────────
+# ── Planning ─────────────────────────────────────────────────────────────
+
+
 def test_posting_days_spread_over_the_open_days():
     assert ap.posting_days(3, [6]) == [0, 2, 4]
     assert ap.posting_days(7, [5, 6]) == [0, 1, 2, 3, 4]  # never more than the open days
@@ -71,229 +112,274 @@ def test_posting_days_spread_over_the_open_days():
 
 def test_kinds_follow_the_mix_interleaved():
     assert ap.kind_sequence({"tips": 2, "offers": 1, "news": 1}, 4) == ["tips", "offers", "news", "tips"]
-    assert ap.kind_sequence({}, 3).count("tips") >= 1  # no mix: an even split
+    assert ap.kind_sequence({"tips": 1}, 3) == ["tips", "tips", "tips"]  # a short mix repeats
 
 
-def test_plan_covers_two_weeks_on_posting_days_at_the_best_hour():
-    settings = {**ap.clean_settings(SETTINGS), "enabled": True, "paused": False}
-    best = {"linkedin": {"hours": [9], "label": "Tue around 9 am"}}
-    slots = ap.plan_slots(settings, best, NOW)
-    assert slots and all(s["slot_at"].weekday() in (0, 2, 4) for s in slots)
-    assert all(s["slot_at"].hour == 9 for s in slots)
-    assert all(s["slot_at"] > NOW for s in slots)
-    assert len(slots) in (6, 7)  # 3 a week for two weeks (+ today's if still ahead)
-    assert {s["kind"] for s in slots} <= {"tips", "offers"}  # news is 0 in this mix
+def test_the_plan_covers_two_weeks_at_the_best_hour():
+    settings = {**db.AUTOPILOT_DEFAULTS, **ap.clean_settings({**SETUP, "posts_per_week": 3, "days_off": [6],
+                                                               "mix": {"tips": 2, "offers": 1}})}
+    days = ap.plan_days(settings, {"linkedin": {"hours": [9]}}, NOW)
+    assert days and all(d["date"].weekday() in (0, 2, 4) for d in days)
+    assert all(d["slot_at"].astimezone(timezone(timedelta(minutes=IST))).hour == 9 for d in days)
+    assert len(days) == 6 and {d["kind"] for d in days} <= {"tips", "offers"}
 
 
-def test_a_festival_takes_a_slot_shortly_before_it(monkeypatch):
+def test_a_festival_takes_the_posting_day_before_it(monkeypatch):
     from services import festival_service
 
     monkeypatch.setattr(festival_service, "next_celebration",
-                        lambda regions, today=None, days_ahead=120: {"name": "Diwali", "date": "2026-10-30"})
-    settings = {**ap.clean_settings({**SETTINGS, "festivals": True, "days_off": []}), "enabled": True, "paused": False}
-    slots = ap.plan_slots(settings, {}, NOW)
-    festival = [s for s in slots if s["kind"] == "festival"]
+                        lambda regions, today=None, days_ahead=120: {"name": "Diwali", "date": _day(12)})
+    settings = {**db.AUTOPILOT_DEFAULTS, **ap.clean_settings({**SETUP, "festivals": True})}
+    festival = [d for d in ap.plan_days(settings, {}, NOW) if d["kind"] == "festival"]
     assert len(festival) == 1 and festival[0]["topic"] == "Diwali"
-    assert festival[0]["slot_at"].date().isoformat() == "2026-10-28" and "Diwali" in festival[0]["reason"]
+    assert festival[0]["date"] == TODAY + timedelta(days=11) and "Diwali" in festival[0]["reason"]
 
 
 @pytest.mark.parametrize("raw,error", [
-    ({**SETTINGS, "platforms": []}, "at least one platform"),
-    ({**SETTINGS, "posts_per_week": 9}, "between 1 and 7"),
-    ({**SETTINGS, "days_off": [0, 1, 2, 3, 4, 5, 6]}, "at least one day"),
+    ({"posts_per_week": 9}, "between 1 and 7"),
+    ({"days_off": [0, 1, 2, 3, 4, 5, 6]}, "at least one day"),
 ])
 def test_settings_are_checked(raw, error):
     with pytest.raises(ap.AutopilotError, match=error):
         ap.clean_settings(raw)
 
 
-def test_planning_twice_never_duplicates_slots():
-    user = _user()
-    _turn_on(user["id"])
-    first = ap.plan_ahead(user["id"], NOW)
-    assert first > 0 and ap.plan_ahead(user["id"], NOW) == 0
+def test_turning_it_on_plans_two_weeks_once(user, ready):
+    _turn_on(user)
+    planned = _posts(user, "planned")
+    assert len(planned) == 14 and planned[0]["slot_date"] == _day(1)  # today's 09:00 has passed
+    assert ap.plan_ahead(user["id"], NOW) == 0  # never twice
+    ap.save(user["id"], {"posts_per_week": 2, "days_off": []}, now=NOW)  # a new plan
+    assert len(_posts(user, "planned")) == 4
 
 
-def test_paused_autopilot_plans_nothing():
-    user = _user()
-    _turn_on(user["id"])
-    db.save_autopilot_settings(user["id"], paused=True)
-    assert ap.plan_ahead(user["id"], NOW) == 0
+# ── The switch ───────────────────────────────────────────────────────────
 
 
-# ── Writing and the user's OK ───────────────────────────────────────────
-def _first_planned(user_id):
-    return db.autopilot_posts_with_status(("planned",), user_id=user_id)[0]
+def test_it_is_off_by_default(app, user):
+    state = _client(app, user).get("/api/autopilot").get_json()["autopilot"]
+    assert state["enabled"] is False and state["posts"] == [] and state["plan"] == []
+    assert [p["id"] for p in state["platform_choices"] if not p["available"]] == ["instagram"]  # needs an image
 
 
-def test_posts_are_written_two_days_ahead_and_wait_for_the_ok():
-    user = _user()
-    _turn_on(user["id"])
-    llm = FakeLLM()
-    result = ap.run_for_user(user["id"], NOW, llm=llm)
-    assert result["planned"] > 0 and result["written"] >= 1
-    waiting = db.autopilot_posts_with_status(("needs_ok",), user_id=user["id"])
-    assert waiting and all(datetime.fromisoformat(p["slot_at"]) - NOW <= ap.WRITE_AHEAD for p in waiting)
-    post = waiting[0]
-    assert post["caption"].startswith("Three ways") and "#planning" in post["hashtags"]
-    deadline = datetime.fromisoformat(post["approve_by"])
-    assert NOW < deadline <= datetime.fromisoformat(post["slot_at"])
-    # the brand profile leads the prompt, the post's brief comes last
-    assert llm.calls[0][1].startswith("Brand profile:")
-    # nothing is scheduled until the user approves
-    assert db.scheduled_posts_between(user["id"], NOW - timedelta(days=1), NOW + timedelta(days=30)) == []
-
-
-def test_a_price_or_offer_is_flagged_for_checking():
-    user = _user()
-    _turn_on(user["id"])
-    ap.plan_ahead(user["id"], NOW)
-    post = ap.draft(_first_planned(user["id"]), NOW, llm=FakeLLM("This week only: 20% off every plan."))
-    assert any(c["label"] == "Check the facts" and not c["ok"] for c in post["checks"])
-
-
-def test_images_stop_at_the_monthly_cap(monkeypatch):
-    user = _user()
-    _turn_on(user["id"], images=True, image_cap_month=1, days_off=[])
-    monkeypatch.setattr(db, "get_image_quota", lambda uid: {"unlimited": True, "remaining": 99, "model": None})
-    ap.plan_ahead(user["id"], NOW)
-    media = FakeMedia()
-    first = ap.draft(_first_planned(user["id"]), NOW, llm=FakeLLM(), media=media)
-    second = ap.draft(_first_planned(user["id"]), NOW, llm=FakeLLM(), media=media)
-    assert first["image_url"] and first["cost_usd"] == 0.55
-    assert second["image_url"] is None and media.calls == 1
-    assert any("used" in c["note"] for c in second["checks"])
-
-
-def test_approving_puts_the_post_on_the_calendar(monkeypatch):
-    from services import publish_service
-
-    monkeypatch.setattr(publish_service, "connections", lambda uid: {"linkedin": "Your Brand"})
-    user = _user()
-    _turn_on(user["id"])
-    ap.plan_ahead(user["id"], NOW)
-    post = ap.draft(_first_planned(user["id"]), NOW, llm=FakeLLM())
-    approved = ap.approve(user["id"], post["id"], caption="Edited caption.", now=NOW)
-    assert approved["status"] == "approved" and approved["caption"] == "Edited caption."
-    scheduled = db.get_scheduled_post(user["id"], approved["scheduled_post_id"])
-    assert scheduled and scheduled["status"] == "pending"
-    with pytest.raises(ap.AutopilotError):  # not twice
-        ap.approve(user["id"], post["id"], now=NOW)
-    # leave nothing due for other tests' publish_due runs
-    assert db.cancel_scheduled_post(user["id"], approved["scheduled_post_id"])
-
-
-def test_approving_without_a_connected_account_says_what_to_do(monkeypatch):
+def test_it_cant_be_turned_on_without_a_brand_or_an_account(app, user, monkeypatch):
     from services import publish_service
 
     monkeypatch.setattr(publish_service, "connections", lambda uid: {})
-    user = _user()
-    _turn_on(user["id"])
-    ap.plan_ahead(user["id"], NOW)
-    post = ap.draft(_first_planned(user["id"]), NOW, llm=FakeLLM())
-    with pytest.raises(ap.AutopilotError, match="Connect your LinkedIn"):
-        ap.approve(user["id"], post["id"], now=NOW)
-    assert db.get_autopilot_post(user["id"], post["id"])["status"] == "needs_ok"
+    res = _client(app, user).put("/api/autopilot", json={"enabled": True, "platforms": ["linkedin"]})
+    assert res.status_code == 400 and "brand profile" in res.get_json()["error"]
+    db.save_user_brand_profile(user["id"], "https://acme.in", "Acme", "Logistics", None, None, [], [], [], [])
+    res = _client(app, user).put("/api/autopilot", json={"enabled": True, "platforms": ["linkedin"]})
+    assert res.status_code == 400 and "Connect LinkedIn" in res.get_json()["error"]
+    assert db.get_autopilot_settings(user["id"])["enabled"] is False
 
 
-def test_not_approved_in_time_is_held_never_posted():
-    user = _user()
-    _turn_on(user["id"])
-    ap.plan_ahead(user["id"], NOW)
-    post = ap.draft(_first_planned(user["id"]), NOW, llm=FakeLLM())
-    later = datetime.fromisoformat(post["approve_by"]) + timedelta(minutes=1)
-    assert ap.hold_missed(later) >= 1
-    assert db.get_autopilot_post(user["id"], post["id"])["status"] == "held"
+def test_turning_it_on_is_audited_and_instagram_needs_images(app, user, ready):
+    state = _client(app, user).put("/api/autopilot", json={**SETUP, "platforms": ["linkedin", "instagram"],
+                                                           "days_ahead": 30}).get_json()["autopilot"]
+    assert state["enabled"] and state["platforms"] == ["linkedin"] and state["days_ahead"] == ap.MAX_DAYS_AHEAD
+    assert any(e["action"] == "autopilot.turned_on" for e in db.list_audit_log(10, user["id"]))
+    state = _client(app, user).put("/api/autopilot", json={"images": True, "platforms": ["linkedin", "instagram"]}).get_json()["autopilot"]
+    assert state["platforms"] == ["linkedin", "instagram"]
 
 
-def test_skipped_posts_stay_skipped():
-    user = _user()
-    _turn_on(user["id"])
-    ap.plan_ahead(user["id"], NOW)
-    post = ap.draft(_first_planned(user["id"]), NOW, llm=FakeLLM())
-    assert ap.skip(user["id"], post["id"])["status"] == "skipped"
-
-
-# ── The API ─────────────────────────────────────────────────────────────
-def test_turning_it_on_plans_the_next_two_weeks(app):
-    user = _user()
+def test_pausing_and_resuming(app, user, ready):
+    _turn_on(user)
     client = _client(app, user)
-    off = client.get("/api/autopilot").get_json()
-    assert off["settings"]["configured"] is False and off["posts"] == []
-    on = client.put("/api/autopilot/settings", json={**SETTINGS, "enabled": True}).get_json()
-    assert on["success"] and on["planned"] > 0 and on["settings"]["enabled"]
-    assert all(p["status"] == "planned" for p in on["posts"])
-    paused = client.post("/api/autopilot/pause").get_json()
-    assert paused["settings"]["paused"] is True
+    state = client.put("/api/autopilot", json={"paused": True}).get_json()["autopilot"]
+    assert state["paused_reason"] == ap.PAUSED_BY_USER and user["id"] not in db.autopilot_user_ids()
+    assert ap.run_for_user(user["id"], NOW) == 0
+    state = client.put("/api/autopilot", json={"paused": False}).get_json()["autopilot"]
+    assert state["paused_reason"] is None and user["id"] in db.autopilot_user_ids()
 
 
-def test_bad_settings_are_refused(app):
-    client = _client(app, _user())
-    reply = client.put("/api/autopilot/settings", json={**SETTINGS, "platforms": []})
-    assert reply.status_code == 400 and "platform" in reply.get_json()["error"]
+# ── Preparing posts ──────────────────────────────────────────────────────
 
 
-def test_someone_elses_post_cannot_be_approved_or_skipped(app):
-    owner, stranger = _user(), _user()
-    _turn_on(owner["id"])
-    ap.plan_ahead(owner["id"], NOW)
-    post = _first_planned(owner["id"])
-    client = _client(app, stranger)
-    for action in ("approve", "skip", "edit"):
-        assert client.post(f"/api/autopilot/posts/{post['id']}/{action}").status_code == 400
+def test_due_days_are_sent_for_approval_never_published(user, ready):
+    _turn_on(user)
+    assert ap.run_for_user(user["id"], NOW) == ap.MAX_POSTS_PER_RUN  # two per hour, not the whole week at once
+    waiting = _posts(user, "awaiting_approval")
+    assert [p["slot_date"] for p in waiting] == [_day(1), _day(2)]
+    assert waiting[0]["slot_at"] == _nine_ist(1).isoformat()  # 09:00 in India, the best hour
+    assert ready[0]["selected_outputs"] == ["text"] and ready[0]["platforms"] == ["linkedin"]
+    assert {p["idea_title"] for p in waiting} <= {"Same-day delivery", "Meet the team", "Products & offers"}
+
+    req = db.get_approval_request(waiting[0]["approval_request_id"])
+    assert req["status"] == "pending" and req["pipeline_client_id"] == f"autopilot-{waiting[0]['id']}"
+    assert req["items"][0]["platform"] == "linkedin" and req["items"][0]["media"] == "none"
+    from db import ScheduledPost
+
+    with Session(db.engine) as session:  # nothing is scheduled before it is approved
+        assert session.query(ScheduledPost).filter(ScheduledPost.user_id == user["id"]).count() == 0
+
+    # the next run writes the last due day (days_ahead=3: up to Friday), then nothing
+    assert ap.run_for_user(user["id"], NOW) == 1
+    assert ap.run_for_user(user["id"], NOW) == 0
+    assert len(_posts(user, "awaiting_approval")) == 3
+
+
+def test_topics_and_avoid_shape_the_brief(user, ready):
+    _turn_on(user, topics="same-day delivery, cold chain", avoid="competitors")
+    ap.run_for_user(user["id"], NOW)
+    assert all("Do not mention: competitors." in w["story"] for w in ready)
+    assert all("same-day delivery" in w["story"] or "cold chain" in w["story"] for w in ready)
+
+
+def test_images_stop_at_the_monthly_cap(user, ready, monkeypatch):
+    class FakeMedia:
+        calls = 0
+
+        def create_preset_image(self, prompt, image_path, aspect, logo_path=None, model=None, require_reference=True):
+            FakeMedia.calls += 1
+            return {"success": True, "url": "/static/img/landing/channel-square.webp", "cost": 0.55, "model": "fake"}
+
+    from services import approval_bundle_service
+
+    monkeypatch.setattr(db, "get_image_quota", lambda uid: {"unlimited": True, "remaining": 99, "model": None})
+    monkeypatch.setattr(approval_bundle_service, "_image_path", lambda url, folder: "/tmp/x.webp")
+    _turn_on(user, images=True, image_cap_month=1)
+    ap.run_for_user(user["id"], NOW, media=FakeMedia())
+    first, second = _posts(user, "awaiting_approval")
+    assert first["image_url"] and first["cost_usd"] == 0.55 and second["image_url"] is None
+    assert FakeMedia.calls == 1
+    assert db.get_approval_request(first["approval_request_id"])["items"][0]["media"] == "single"
+
+
+def test_a_used_up_plan_pauses_autopilot(user, ready, monkeypatch):
+    _turn_on(user)
+
+    def blocked(uid, data):
+        raise content_pipeline.PostBlocked({"error": "No posts left this month."}, 403)
+
+    monkeypatch.setattr(content_pipeline, "generate_post", blocked)
+    assert ap.run_for_user(user["id"], NOW) == 0
+    assert db.get_autopilot_settings(user["id"])["paused_reason"] == "No posts left this month."
+    assert not _posts(user, "preparing", "failed")  # the day stays on the plan
+    assert user["id"] not in db.autopilot_user_ids()
+
+
+def test_two_failed_preparations_in_a_row_pause_it(user, ready, monkeypatch):
+    _turn_on(user)
+
+    def broken(uid, data):
+        raise RuntimeError("the AI service didn't answer")
+
+    monkeypatch.setattr(content_pipeline, "generate_post", broken)
+    ap.run_for_user(user["id"], NOW)
+    settings = db.get_autopilot_settings(user["id"])
+    assert settings["paused_reason"] and "couldn't be prepared" in settings["paused_reason"]
+    assert len(_posts(user, "failed")) == 2
+    assert any(e["action"] == "autopilot.paused" for e in db.list_audit_log(10, user["id"]))
+    assert ap.run_for_user(user["id"], NOW) == 0  # paused: nothing more is tried
+
+
+# ── Approval decides what is scheduled ───────────────────────────────────
+
+
+def test_approving_schedules_the_post_at_its_slot(app, user, ready):
+    _turn_on(user)
+    ap.run_for_user(user["id"], NOW)
+    post = _posts(user, "awaiting_approval")[0]
+    res = _client(app, user).post(f"/api/approval-requests/{post['approval_request_id']}/decide", json={"decision": "approved"})
+    body = res.get_json()
+    assert body["success"] and body["autopilot"]["status"] == "scheduled"
+    scheduled = db.get_scheduled_post(user["id"], body["autopilot"]["scheduled_post_id"])
+    assert scheduled["platforms"] == ["linkedin"] and scheduled["status"] == "pending"
+    when = datetime.fromisoformat(scheduled["scheduled_at"])
+    when = when if when.tzinfo else when.replace(tzinfo=timezone.utc)  # stored in UTC
+    assert when == _nine_ist(1)  # 09:00 in India
+    assert db.cancel_scheduled_post(user["id"], scheduled["id"])  # leave nothing due for other tests
+
+
+def test_rejected_skipped_and_late_posts_are_not_scheduled(app, user, ready):
+    _turn_on(user)
+    ap.run_for_user(user["id"], NOW)
+    first, second = _posts(user, "awaiting_approval")
+    client = _client(app, user)
+    assert client.post(f"/api/approval-requests/{first['approval_request_id']}/decide",
+                       json={"decision": "rejected"}).get_json()["autopilot"]["status"] == "rejected"
+    # its slot passes before anyone approves it
+    assert ap.expire_overdue(datetime.fromisoformat(second["slot_at"]) + timedelta(minutes=1)) >= 1
+    assert db.get_autopilot_post(user["id"], second["id"])["status"] == "expired"
+    # a planned day skipped on the page
+    planned = _posts(user, "planned")[0]
+    res = client.post(f"/api/autopilot/posts/{planned['id']}/skip").get_json()
+    assert res["post"]["status"] == "rejected"
+
+
+def test_turning_it_off_withdraws_what_waits_for_approval(user, ready):
+    _turn_on(user)
+    ap.run_for_user(user["id"], NOW)
+    ap.save(user["id"], {"enabled": False}, now=NOW)
+    posts = _posts(user)
+    assert posts and all(p["status"] == "cancelled" for p in posts)  # the planned days are gone
+    assert all(db.get_approval_request(p["approval_request_id"])["status"] == "rejected" for p in posts)
+    assert ap.run_for_user(user["id"], NOW) == 0
+
+
+def test_someone_elses_post_cannot_be_skipped(app, user, ready):
+    _turn_on(user)
+    post = _posts(user, "planned")[0]
+    stranger = db.create_user("Ravi", f"{uuid.uuid4().hex[:8]}@example.com", "h")
+    assert _client(app, stranger).post(f"/api/autopilot/posts/{post['id']}/skip").status_code == 400
     assert app.test_client().get("/api/autopilot").status_code == 401
-    assert db.get_autopilot_post(owner["id"], post["id"])["status"] == "planned"
+    assert db.get_autopilot_post(user["id"], post["id"])["status"] == "planned"
 
 
-def test_the_page_loads(app):
-    client = _client(app, _user())
-    page = client.get("/autopilot")
-    assert page.status_code in (200, 302)  # 302 = onboarding not finished for a bare test user
+# ── The pages ────────────────────────────────────────────────────────────
 
 
-# ── Email when posts need the user's OK ─────────────────────────────────
-class FakeEmail:
-    sent = []
-
-    def send_billing_email(self, **kw):
-        FakeEmail.sent.append(kw)
-        return {"success": True}
-
-
-def test_one_email_lists_every_post_that_needs_the_ok(monkeypatch):
-    from config import Config
-    from services import email_service
-
-    FakeEmail.sent = []
-    monkeypatch.setattr(email_service, "EmailService", FakeEmail)
-    monkeypatch.setattr(Config, "APP_BASE_URL", "https://app.example.com")
-    user = _user()
-    _turn_on(user["id"], posts_per_week=7, days_off=[])  # several posts inside the 48h window
-    result = ap.run_for_user(user["id"], NOW, llm=FakeLLM())
-    assert result["written"] >= 2 and result["emailed"] is True
-    assert len(FakeEmail.sent) == 1
-    mail = FakeEmail.sent[0]
-    assert mail["to_email"] == user["email"] and mail["url"] == "https://app.example.com/autopilot"
-    assert mail["subject"].startswith(f"{result['written']} posts need your OK")
-    assert sum("approve by" in line for line in mail["lines"]) == result["written"]
-    # the next hourly run writes nothing new, so no second email
-    assert ap.run_for_user(user["id"], NOW, llm=FakeLLM())["emailed"] is False and len(FakeEmail.sent) == 1
+def test_the_page_shows_the_plan_and_what_waits(app, user, ready):
+    _turn_on(user)
+    ap.run_for_user(user["id"], NOW)
+    state = ap.state(user["id"], NOW)
+    assert len(state["needs_ok"]) == 2 and state["needs_ok"][0]["caption"]
+    assert state["next"]["slot_date"] == _day(1) and state["week"]["goal"] == 7
+    assert state["image_use"] == {"used": 0, "cap": 12, "price": state["image_use"]["price"]}
+    page = _client(app, user).get("/autopilot")
+    assert page.status_code == 200 and b"js/autopilot.js" in page.data
 
 
-def test_no_email_without_the_apps_address_or_on_failure(monkeypatch):
-    from config import Config
-    from services import email_service
+def test_settings_links_to_autopilot_and_the_calendar_shows_it(app, user):
+    client = _client(app, user)
+    html = client.get("/settings").get_data(as_text=True)
+    for marker in ('id="autopilot-tab"', 'id="autopilot-pane"', 'id="aptCard"', 'href="/autopilot"', "js/autopilot_settings.js"):
+        assert marker in html, marker
+    assert 'id="calAutopilot" href="/autopilot"' in client.get("/calendar").get_data(as_text=True)
 
-    class Broken:
-        def send_billing_email(self, **kw):
-            raise RuntimeError("SMTP is not configured")
 
-    user = _user()
-    _turn_on(user["id"])
-    ap.plan_ahead(user["id"], NOW)
-    post = ap.draft(_first_planned(user["id"]), NOW, llm=FakeLLM())
-    monkeypatch.setattr(Config, "APP_BASE_URL", "")
-    assert ap.email_needs_ok(user["id"], [post]) is False
-    monkeypatch.setattr(Config, "APP_BASE_URL", "https://app.example.com")
-    monkeypatch.setattr(email_service, "EmailService", Broken)
-    assert ap.email_needs_ok(user["id"], [post]) is False  # logged; the bell notification still stands
+def test_settings_has_a_grouped_sidebar_with_badges_and_search(app, user):
+    html = _client(app, user).get("/settings").get_data(as_text=True)
+    assert 'id="settingsSearch"' in html and html.count('class="st-group"') == 3
+    publishing, account = html.index(">Publishing<"), html.index(">Account<")
+    assert publishing < html.index('id="connected-accounts-tab"') < html.index('id="autopilot-tab"') < account
+    assert account < html.index('id="plan-tab"') < html.index('id="security-tab"') < html.index('id="notifications-tab"')
+    for tab in ("connected-accounts-tab", "scheduled-posts-tab", "autopilot-tab", "plan-tab", "security-tab"):
+        assert f'data-badge-for="{tab}"' in html, tab
+    assert html.count('role="tab"') == 7  # every tab kept, so /settings#... links still work
+
+
+def test_the_calendar_marks_autopilot_posts(app, user, ready):
+    from services import calendar_service
+
+    _turn_on(user)
+    ap.run_for_user(user["id"], NOW)
+    first, second = _posts(user, "awaiting_approval")
+    _client(app, user).post(f"/api/approval-requests/{first['approval_request_id']}/decide", json={"decision": "approved"})
+
+    days = {}
+    for slot_date in (first["slot_date"], second["slot_date"]):  # the two days may be in different months
+        month = datetime.fromisoformat(slot_date)
+        days.update({d["date"]: d for d in calendar_service.calendar_month(user["id"], month.year, month.month, IST, NOW)["days"]})
+    waiting = days[second["slot_date"]]
+    assert waiting["autopilot"]["approval_request_id"] == second["approval_request_id"] and waiting["suggestion"] is None
+    scheduled = days[first["slot_date"]]["scheduled"]
+    assert len(scheduled) == 1 and scheduled[0]["autopilot"] is True
+    assert days[first["slot_date"]]["autopilot"] is None  # approved: now an ordinary scheduled post
+    db.cancel_scheduled_post(user["id"], db.get_autopilot_post(user["id"], first["id"])["scheduled_post_id"])
+
+
+def test_the_help_center_explains_autopilot(app, user):
+    page = _client(app, user).get("/help/autopilot")
+    assert page.status_code == 200 and b"Nothing is published until you approve it" in page.data

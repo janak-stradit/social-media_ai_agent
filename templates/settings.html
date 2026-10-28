@@ -39,80 +39,71 @@
 <div class="bc-main">
     <!-- Side panel: the page's tabs. Still real Bootstrap tabs (role="tablist"
          + data-bs-toggle) so settings.js's shown.bs.tab / Tab.show() work. -->
-    <aside class="bc-sidebar">
-        <div class="bc-sidebar-header">
-            <i class="fas fa-plug"></i>
-            <div>
-                <div style="font-weight: 700; font-size: 1rem; color: var(--bp-text);">Publishing Setup</div>
-                <div style="font-size: 0.75rem; color: var(--bp-text-sub);">Accounts, guides &amp; schedule</div>
-            </div>
-        </div>
-        <nav class="bc-nav" id="socialSettingsTab" role="tablist">
-            <button class="bc-nav-item active" id="connected-accounts-tab" data-bs-toggle="tab" data-bs-target="#connected-accounts-pane" type="button" role="tab" aria-controls="connected-accounts-pane" aria-selected="true">
-                <i class="fas fa-link"></i>Connected Accounts
+    <aside class="bc-sidebar st-sidebar">
+        <h1 class="st-title">Settings</h1>
+        <label class="st-search">
+            <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+            <span class="visually-hidden">Search settings</span>
+            <input type="search" id="settingsSearch" placeholder="Search settings" autocomplete="off">
+        </label>
+        <!-- Grouped tabs. Still real Bootstrap tabs (role="tablist" + data-bs-toggle)
+             so settings.js's shown.bs.tab / Tab.show() work. Each entry's badge is
+             its state (settings.js setSettingsBadge); data-keywords feed the search. -->
+        <nav class="bc-nav st-nav" id="socialSettingsTab" role="tablist">
+            <div class="st-group" role="presentation">Publishing</div>
+            <button class="bc-nav-item active" id="connected-accounts-tab" data-bs-toggle="tab" data-bs-target="#connected-accounts-pane" type="button" role="tab" aria-controls="connected-accounts-pane" aria-selected="true"
+                data-keywords="social accounts connect linkedin instagram facebook youtube disconnect reconnect">
+                <i class="fas fa-link"></i><span class="st-label">Social accounts</span><span class="st-badge" data-badge-for="connected-accounts-tab"></span>
             </button>
-            <button class="bc-nav-item d-none" id="setup-guides-tab" data-bs-toggle="tab" data-bs-target="#setup-guides-pane" type="button" role="tab" aria-controls="setup-guides-pane" aria-selected="false">
-                <i class="fas fa-book-open"></i>Connection Guides
+            <button class="bc-nav-item" id="scheduled-posts-tab" data-bs-toggle="tab" data-bs-target="#scheduled-posts-pane" type="button" role="tab" aria-controls="scheduled-posts-pane" aria-selected="false"
+                data-keywords="scheduled posts queue calendar retry cancel publish">
+                <i class="fas fa-calendar-days"></i><span class="st-label">Scheduled posts</span><span class="st-badge" data-badge-for="scheduled-posts-tab"></span>
             </button>
-            <button class="bc-nav-item" id="scheduled-posts-tab" data-bs-toggle="tab" data-bs-target="#scheduled-posts-pane" type="button" role="tab" aria-controls="scheduled-posts-pane" aria-selected="false">
-                <i class="fas fa-calendar-days"></i>Scheduled Posts
+            <button class="bc-nav-item" id="autopilot-tab" data-bs-toggle="tab" data-bs-target="#autopilot-pane" type="button" role="tab" aria-controls="autopilot-pane" aria-selected="false"
+                data-keywords="autopilot automatic auto post prepare approval plan">
+                <i class="fas fa-robot"></i><span class="st-label">Autopilot</span><span class="st-badge" data-badge-for="autopilot-tab"></span>
             </button>
-            <button class="bc-nav-item" id="notifications-tab" data-bs-toggle="tab" data-bs-target="#notifications-pane" type="button" role="tab" aria-controls="notifications-pane" aria-selected="false">
-                <i class="fas fa-bell"></i>Notifications
+
+            <div class="st-group" role="presentation">Account</div>
+            <button class="bc-nav-item" id="plan-tab" data-bs-toggle="tab" data-bs-target="#plan-pane" type="button" role="tab" aria-controls="plan-pane" aria-selected="false"
+                data-keywords="plan billing usage invoice payment upgrade credits packs renew subscription">
+                <i class="fas fa-gem"></i><span class="st-label">Plan &amp; billing</span><span class="st-badge" data-badge-for="plan-tab"></span>
             </button>
-            <button class="bc-nav-item" id="security-tab" data-bs-toggle="tab" data-bs-target="#security-pane" type="button" role="tab" aria-controls="security-pane" aria-selected="false">
-                <i class="fas fa-shield-halved"></i>Security
+            <button class="bc-nav-item" id="security-tab" data-bs-toggle="tab" data-bs-target="#security-pane" type="button" role="tab" aria-controls="security-pane" aria-selected="false"
+                data-keywords="security password two-step 2fa authenticator sign out sessions devices">
+                <i class="fas fa-shield-halved"></i><span class="st-label">Security</span><span class="st-badge" data-badge-for="security-tab"></span>
             </button>
-            <button class="bc-nav-item" id="plan-tab" data-bs-toggle="tab" data-bs-target="#plan-pane" type="button" role="tab" aria-controls="plan-pane" aria-selected="false">
-                <i class="fas fa-gem"></i>Plan &amp; usage
+            <button class="bc-nav-item" id="notifications-tab" data-bs-toggle="tab" data-bs-target="#notifications-pane" type="button" role="tab" aria-controls="notifications-pane" aria-selected="false"
+                data-keywords="notifications email emails reminders weekly ideas recap bell">
+                <i class="fas fa-bell"></i><span class="st-label">Notifications</span><span class="st-badge" data-badge-for="notifications-tab"></span>
             </button>
+
+            <div class="st-group" role="presentation">Help</div>
+            <button class="bc-nav-item d-none" id="setup-guides-tab" data-bs-toggle="tab" data-bs-target="#setup-guides-pane" type="button" role="tab" aria-controls="setup-guides-pane" aria-selected="false"
+                data-keywords="connection guides setup help ids tokens">
+                <i class="fas fa-book-open"></i><span class="st-label">Connection guides</span>
+            </button>
+            <a class="bc-nav-item st-link" href="/help" data-keywords="help center guide how">
+                <i class="fas fa-circle-question"></i><span class="st-label">Help Center</span>
+            </a>
+            <p class="st-empty d-none" id="settingsSearchEmpty">No settings match.</p>
         </nav>
     </aside>
 
     <main class="bc-content">
         <div class="bc-content-inner">
 
-            <!-- HERO -->
-            <div class="bp-hero">
-                <div class="bp-hero-copy">
-                    <div class="bp-hero-eyebrow">Social Accounts &amp; Scheduling</div>
-                    <h1 class="bp-hero-title">Publishing Setup</h1>
-                    <p class="bp-hero-desc">Connect your Facebook, Instagram, LinkedIn and YouTube accounts, follow the setup guides, and manage scheduled posts.</p>
-                    <div class="settings-hero-actions">
-                        <button type="button" class="btn-primary-save" onclick="openManualPostModal()">
-                            <i class="fas fa-edit me-2"></i>Create Manual Post
-                        </button>
-                        <a href="/dashboard" class="btn-xs-outline-info text-decoration-none">
-                            <i class="fas fa-plus me-2"></i>Create New Campaign
-                        </a>
-                    </div>
-                </div>
-                <div class="bp-hero-graphic" aria-hidden="true">
-                    <div class="bp-hero-caption">
-                        Connect once<br>
-                        <strong>publish everywhere</strong>
-                    </div>
-                    <div class="bp-hero-mock">
-                        <div style="display: flex; gap: 8px; margin-bottom: 1rem;">
-                            <div class="platform-icon-circle bg-fb"><i class="fab fa-facebook-f"></i></div>
-                            <div class="platform-icon-circle bg-ig"><i class="fab fa-instagram"></i></div>
-                            <div class="platform-icon-circle bg-li"><i class="fab fa-linkedin-in"></i></div>
-                            <div class="platform-icon-circle bg-yt"><i class="fab fa-youtube"></i></div>
-                        </div>
-                        <div class="bp-mock-bar" style="width: 100%;"></div>
-                        <div class="bp-mock-bar" style="width: 85%;"></div>
-                        <div class="bp-mock-bar" style="width: 60%; margin-bottom: 0;"></div>
-                    </div>
-                </div>
-            </div>
-
             <div class="tab-content" id="socialSettingsTabContent">
                 
                 <!-- ── TAB 1: CONNECTED ACCOUNTS ── -->
                 <div class="tab-pane fade show active" id="connected-accounts-pane" role="tabpanel" aria-labelledby="connected-accounts-tab">
-                  <div class="brand-config-card settings-pane-card">
-                    <h6><div class="card-icon-circle"><i class="fas fa-link"></i></div> Connected Accounts</h6>
-                    <div class="brand-config-card-desc" id="accountsIntro">Connect the accounts you post to. Click Connect, sign in on the platform and approve - nothing to copy.</div>
+                  <div class="st-pane-head">
+                    <div class="st-pane-head-text">
+                      <h2>Social accounts</h2>
+                      <p id="accountsIntro">Connect the accounts you post to. Click Connect, sign in on the platform and approve - nothing to copy.</p>
+                    </div>
+                  </div>
+                  <div class="settings-pane-body">
                     <!-- What the last one-click sign-in did (settings.js: showOAuthResult) -->
                     <div class="oauth-banner d-none" id="oauthBanner" role="status"></div>
                     <!-- One simple card per network (settings.js renderSocialCards) -->
@@ -143,9 +134,13 @@
 
                 <!-- ── TAB 2: STEP-BY-STEP GUIDES ── -->
                 <div class="tab-pane fade" id="setup-guides-pane" role="tabpanel" aria-labelledby="setup-guides-tab">
-                  <div class="brand-config-card settings-pane-card">
-                    <h6><div class="card-icon-circle"><i class="fas fa-book-open"></i></div> Connection Guides</h6>
-                    <div class="brand-config-card-desc">Step-by-step instructions for getting the credentials each platform needs.</div>
+                  <div class="st-pane-head">
+                    <div class="st-pane-head-text">
+                      <h2>Connection guides</h2>
+                      <p>Step-by-step instructions for getting the credentials each platform needs.</p>
+                    </div>
+                  </div>
+                  <div class="settings-pane-body">
                     <div class="accordion guide-accordion" id="platformGuidesAccordion">
                         
                         <!-- Facebook Guide -->
@@ -314,9 +309,14 @@
 
                 <!-- ── TAB 3: UPCOMING SCHEDULED POSTS ── -->
                 <div class="tab-pane fade" id="scheduled-posts-pane" role="tabpanel" aria-labelledby="scheduled-posts-tab">
+                  <div class="st-pane-head">
+                    <div class="st-pane-head-text">
+                      <h2>Scheduled posts</h2>
+                      <p>Posts waiting to go out, and what happened to the ones that did.</p>
+                    </div>
+                    <button type="button" class="btn-primary-save" onclick="openManualPostModal()"><i class="fas fa-edit me-2"></i>Create manual post</button>
+                  </div>
                   <div class="brand-config-card settings-pane-card">
-                    <h6><div class="card-icon-circle"><i class="fas fa-calendar-days"></i></div> Scheduled Posts</h6>
-                    <div class="brand-config-card-desc">Upcoming and past scheduled campaigns - automated AI runs and manual posts.</div>
 
                     <div class="table-responsive">
                         <table class="table table-hover align-middle scheduled-posts-table">
@@ -340,10 +340,34 @@
                   </div>
                 </div>
 
+                <!-- ── AUTOPILOT: its status; set up and run on the /autopilot page
+                     (autopilot_settings.js; services/autopilot_service.py) ── -->
+                <div class="tab-pane fade" id="autopilot-pane" role="tabpanel" aria-labelledby="autopilot-tab">
+                  <div class="st-pane-head">
+                    <div class="st-pane-head-text">
+                      <h2>Autopilot</h2>
+                      <p>Plans your posts, writes each one a couple of days ahead and sends it for approval. <strong>Nothing is published until it is approved.</strong></p>
+                    </div>
+                  </div>
+                  <div class="brand-config-card settings-pane-card">
+                    <div class="apt-card" id="aptCard" role="status" aria-live="polite">
+                      <span class="apt-dot" aria-hidden="true"></span>
+                      <div class="apt-text"><strong id="aptTitle">Loading...</strong><span id="aptSub"></span></div>
+                      <a class="btn btn-sm btn-primary" id="aptOpen" href="/autopilot"><i class="fas fa-plane-departure me-1"></i>Open Autopilot</a>
+                    </div>
+                  </div>
+                </div>
+
                 <!-- ── TAB 6: SECURITY - two-step sign-in (settings.js loadTwoFactor) ── -->
                 <div class="tab-pane fade" id="security-pane" role="tabpanel" aria-labelledby="security-tab">
+                  <div class="st-pane-head">
+                    <div class="st-pane-head-text">
+                      <h2>Security</h2>
+                      <p>Two-step sign-in and where you are signed in.</p>
+                    </div>
+                  </div>
                   <div class="brand-config-card settings-pane-card">
-                    <h6><div class="card-icon-circle"><i class="fas fa-shield-halved"></i></div> Two-step sign-in</h6>
+                    <h6 class="st-card-title">Two-step sign-in</h6>
                     <div class="brand-config-card-desc" id="tfaStatus">Loading...</div>
                     <div class="alert-inline alert-inline-warning d-none mb-3" id="tfaRequired">Admins must turn this on to use the Admin Control Center.</div>
 
@@ -378,7 +402,7 @@
                   </div>
                   <!-- Ends every other signed-in browser (auth/routes.py end_other_sessions) -->
                   <div class="brand-config-card settings-pane-card mt-4">
-                    <h6><div class="card-icon-circle"><i class="fas fa-right-from-bracket"></i></div> Signed-in devices</h6>
+                    <h6 class="st-card-title">Signed-in devices</h6>
                     <div class="brand-config-card-desc">Lost a phone, or signed in on a shared computer? Sign out everywhere except this browser.
                         Changing your password or two-step sign-in does this too.</div>
                     <button type="button" class="btn btn-sm btn-outline-danger" id="endSessionsBtn"><i class="fas fa-right-from-bracket me-1"></i>Sign out everywhere else</button>
@@ -387,8 +411,14 @@
 
                 <!-- ── TAB 5: PLAN & USAGE (settings.js loadPlan; PRICING.md) ── -->
                 <div class="tab-pane fade" id="plan-pane" role="tabpanel" aria-labelledby="plan-tab">
+                  <div class="st-pane-head">
+                    <div class="st-pane-head-text">
+                      <h2>Plan &amp; billing</h2>
+                      <p>Your plan, what is left this month, top-ups and invoices.</p>
+                    </div>
+                  </div>
                   <div class="brand-config-card settings-pane-card">
-                    <h6><div class="card-icon-circle"><i class="fas fa-gem"></i></div> Plan &amp; usage</h6>
+                    <h6 class="st-card-title">Plan &amp; usage</h6>
                     <div class="brand-config-card-desc" id="planSummary">Loading your plan...</div>
                     <div class="plan-meters" id="planMeters"></div>
                     <!-- Top-up packs, shown when online payment is on (billing_service.py) -->
@@ -421,9 +451,13 @@
 
                 <!-- ── TAB 4: NOTIFICATIONS (weekly ideas email) ── -->
                 <div class="tab-pane fade" id="notifications-pane" role="tabpanel" aria-labelledby="notifications-tab">
+                  <div class="st-pane-head">
+                    <div class="st-pane-head-text">
+                      <h2>Notifications</h2>
+                      <p>Choose what we email you about.</p>
+                    </div>
+                  </div>
                   <div class="brand-config-card settings-pane-card">
-                    <h6><div class="card-icon-circle"><i class="fas fa-bell"></i></div> Notifications</h6>
-                    <div class="brand-config-card-desc">Choose what we email you about.</div>
 
                     <div class="d-flex align-items-start justify-content-between gap-3 py-3 border-top">
                         <div>
@@ -712,6 +746,7 @@
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="{{ url_for('static', filename='js/undo.js') }}"></script>
 <script src="{{ url_for('static', filename='js/settings.js') }}"></script>
+<script src="{{ url_for('static', filename='js/autopilot_settings.js') }}"></script>
 {% include 'partials/guide_assets.html' %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
