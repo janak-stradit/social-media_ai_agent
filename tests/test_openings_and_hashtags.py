@@ -159,8 +159,11 @@ def _published(user, platform, engagement, hashtags, source="scheduled"):
     if source == "scheduled":
         from datetime import datetime, timedelta, timezone
 
-        source_id = db.create_scheduled_post(user["id"], [platform], datetime.now(timezone.utc) + timedelta(days=1),
+        source_id = db.create_scheduled_post(user["id"], [platform], datetime.now(timezone.utc) - timedelta(days=1),
                                              {"v": 2, "items": [item]})["id"]
+        with Session(db.engine) as session:  # it went out (so other tests' publishing runs leave it alone)
+            session.query(db.ScheduledPost).filter(db.ScheduledPost.id == source_id).update({"status": "published"})
+            session.commit()
     else:
         source_id = db.create_approval_request(user["id"], uuid.uuid4().hex, platform, "post", caption="A post",
                                                items=[item])["id"]
