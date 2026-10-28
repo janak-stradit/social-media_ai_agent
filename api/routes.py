@@ -5674,6 +5674,18 @@ def best_times_route():
     return jsonify({"success": True, "platforms": best_times(get_current_user_id(), _tz_minutes())})
 
 
+@api_bp.route("/insights", methods=["GET"])
+@login_required_api
+def insights_route():
+    """What works for this brand: kinds of post that did clearly better or
+    worse than its others, each scored at 48 hours (services/insights_service.py)."""
+    if not DB_AVAILABLE:
+        return jsonify({"success": True, "insights": [], "posts": 0})
+    from services.insights_service import what_works
+
+    return jsonify({"success": True, **what_works(get_current_user_id())})
+
+
 @api_bp.route("/me/goal", methods=["GET"])
 @login_required_api
 def my_weekly_goal():

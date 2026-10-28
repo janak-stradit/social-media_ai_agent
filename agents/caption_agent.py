@@ -188,9 +188,12 @@ class CaptionAgent:
         brand_profile_block=None,
         on_partial=None,
         language=None,
+        performance_notes=None,
     ):
         """Generate a platform-specific caption.
         language: a services/language_service.py code (None / "en" = English).
+        performance_notes: what has worked on this brand's own posts on the
+        platform (services/insights_service.py prompt_notes), "" until it knows.
         on_partial(text_so_far): streamed answer for a live preview (LLMService.generate_json).
 
         has_project_context: True when this brief is tied to a specific StradIT
@@ -347,6 +350,8 @@ primary_caption
             brand_voice,
             brand_profile_block,
         )
+        if performance_notes:
+            user_prompt += f"\n\n{performance_notes}"
 
         try:
             parsed, usage = self.llm.generate_json(

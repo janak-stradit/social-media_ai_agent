@@ -683,6 +683,41 @@ class PublishedPost(Base):
     metrics_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
 
+class PostMetricSnapshot(Base):
+    """A published post's numbers as they were at one fetch, age_hours after
+    it went out. PublishedPost.metrics only keeps the latest, which flatters
+    older posts; comparing every post at the same age (SCORE_AGE_HOURS) is fair."""
+
+    __tablename__ = "post_metric_snapshots"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    post_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    age_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    taken_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    metrics: Mapped[str] = mapped_column(Text, nullable=False)  # JSON
+    engagement: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class FollowerCount(Base):
+    """A connected account's follower count, once a day (services/metrics_service.py).
+    followers is None when the platform wouldn't say that day (error says why),
+    so a failing account is still only asked once a day."""
+
+    __tablename__ = "follower_counts"
+    __table_args__ = (
+        UniqueConstraint("user_id", "platform", "day", name="uq_follower_count_day"),
+        {"schema": SCHEMA} if not IS_SQLITE else {},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    platform: Mapped[str] = mapped_column(String(16), nullable=False)
+    day: Mapped[str] = mapped_column(String(10), nullable=False)  # YYYY-MM-DD, UTC
+    followers: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
 class Subscription(Base):
     """An automatically renewing plan (a Stripe subscription). Each charge is
     also a Payment, applied once, which extends the plan
@@ -3143,18 +3178,27 @@ def register_published_post(user_id: int, platform: str, platform_post_id: str |
             session.rollback()
 
 
+SCORE_AGE_HOURS = 48  # every post is scored at this age (post_analytics)
+MIN_FOR_USUAL = 5  # scored posts on a platform before "x your usual" is shown
+USUAL_LOOKBACK_DAYS = 180
+
+
 def published_posts_due_for_metrics(now: datetime, max_age_days: int = 30) -> list[dict]:
     """Posts to refresh: published within max_age_days, never fetched, or last
-    fetched over 6 hours ago (first 2 days) / 24 hours ago (after that)."""
+    fetched over 6 hours ago (first 2 days) / 24 hours ago (after that). Also
+    once as soon as a post turns SCORE_AGE_HOURS old, so its score is taken then."""
     oldest = (now - timedelta(days=max_age_days)).astimezone(timezone.utc).replace(tzinfo=None)
     naive_now = now.astimezone(timezone.utc).replace(tzinfo=None)
+    score_age = timedelta(hours=SCORE_AGE_HOURS)
     with Session(engine) as session:
         rows = session.query(PublishedPost).filter(PublishedPost.published_at >= oldest).all()
         due = []
         for row in rows:
             fresh = naive_now - row.published_at < timedelta(days=2)
             every = timedelta(hours=6) if fresh else timedelta(hours=24)
-            if row.metrics_at is None or naive_now - row.metrics_at >= every:
+            score_due = (row.metrics_at is not None and row.metrics_at < row.published_at + score_age
+                         <= naive_now)
+            if row.metrics_at is None or naive_now - row.metrics_at >= every or score_due:
                 due.append({"id": row.id, "user_id": row.user_id, "platform": row.platform,
                             "platform_post_id": row.platform_post_id})
         return due
@@ -3170,7 +3214,76 @@ def save_post_metrics(post_id: int, metrics: dict | None, error: str | None = No
         if metrics is not None:
             row.metrics = json.dumps(metrics)
             row.engagement = sum(int(metrics.get(k) or 0) for k in ("likes", "comments", "shares", "saves"))
+            age = max(0, int((_as_utc(row.metrics_at) - _as_utc(row.published_at)).total_seconds() // 3600))
+            session.add(PostMetricSnapshot(post_id=row.id, age_hours=age, taken_at=row.metrics_at,
+                                           metrics=row.metrics, engagement=row.engagement))
         session.commit()
+
+
+def _scores(session, user_id: int, since: datetime) -> dict[int, dict]:
+    """{post id: {platform, engagement, final}} for the user's posts since
+    `since`, each at SCORE_AGE_HOURS old: the first snapshot taken at that age
+    or later (final), else the latest one of a post still younger than that.
+    Posts with no snapshots (published before snapshots were kept) are left out."""
+    rows = (session.query(PublishedPost.id, PublishedPost.platform, PostMetricSnapshot.age_hours,
+                          PostMetricSnapshot.engagement)
+            .join(PostMetricSnapshot, PostMetricSnapshot.post_id == PublishedPost.id)
+            .filter(PublishedPost.user_id == user_id, PublishedPost.published_at >= since)
+            .order_by(PostMetricSnapshot.age_hours).all())
+    scores: dict[int, dict] = {}
+    for post_id, platform, age, engagement in rows:
+        current = scores.get(post_id)
+        if current and current["final"]:
+            continue  # already have the first snapshot at the scoring age
+        scores[post_id] = {"platform": platform, "engagement": int(engagement or 0), "final": age >= SCORE_AGE_HOURS}
+    return scores
+
+
+def accounts_due_for_follower_count(now: datetime) -> list[tuple[int, str]]:
+    """(user id, platform) of connected accounts not yet counted today (UTC)."""
+    day = now.astimezone(timezone.utc).strftime("%Y-%m-%d")
+    with Session(engine) as session:
+        counted = {(u, p) for u, p in session.query(FollowerCount.user_id, FollowerCount.platform)
+                   .filter(FollowerCount.day == day)}
+        connected = session.query(SocialAccount.user_id, SocialAccount.platform).filter(
+            SocialAccount.status == "connected").distinct().all()
+        return [(u, p) for u, p in connected if (u, p) not in counted]
+
+
+def save_follower_count(user_id: int, platform: str, now: datetime, followers: int | None,
+                        error: str | None = None) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    with Session(engine) as session:
+        session.add(FollowerCount(user_id=user_id, platform=platform, day=now.astimezone(timezone.utc).strftime("%Y-%m-%d"),
+                                  followers=followers, error=(error or "")[:300] or None))
+        try:
+            session.commit()
+        except IntegrityError:  # already counted today
+            session.rollback()
+
+
+def follower_growth(user_id: int, since: datetime, until: datetime | None = None) -> dict[str, dict]:
+    """{platform: {followers, change}}: the latest count up to `until`, and how
+    much it moved since the first count in the period (None with only one day)."""
+    lo = since.astimezone(timezone.utc).strftime("%Y-%m-%d")
+    hi = (until or _utcnow()).astimezone(timezone.utc).strftime("%Y-%m-%d")
+    with Session(engine) as session:
+        rows = (session.query(FollowerCount.platform, FollowerCount.day, FollowerCount.followers)
+                .filter(FollowerCount.user_id == user_id, FollowerCount.day >= lo, FollowerCount.day <= hi,
+                        FollowerCount.followers.isnot(None))
+                .order_by(FollowerCount.day).all())
+    days: dict[str, list[int]] = {}
+    for platform, _, followers in rows:
+        days.setdefault(platform, []).append(followers)
+    return {platform: {"followers": counts[-1], "change": counts[-1] - counts[0] if len(counts) > 1 else None}
+            for platform, counts in days.items()}
+
+
+def _median(values: list[int]) -> float:
+    values = sorted(values)
+    mid = len(values) // 2
+    return float(values[mid]) if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
 
 
 def published_posts_for_timing(user_id: int, since: datetime) -> list[dict]:
@@ -3190,6 +3303,11 @@ def post_analytics(user_id: int, since: datetime, until: datetime | None = None)
     with Session(engine) as session:
         rows = session.query(PublishedPost).filter(PublishedPost.user_id == user_id, PublishedPost.published_at >= lo,
                                                    PublishedPost.published_at < hi).all()
+        scores = _scores(session, user_id, min(lo, (_utcnow() - timedelta(days=USUAL_LOOKBACK_DAYS)).replace(tzinfo=None)))
+        finals: dict[str, list[tuple[int, int]]] = {}  # platform -> [(post id, engagement at the scoring age)]
+        for post_id, score in scores.items():
+            if score["final"]:
+                finals.setdefault(score["platform"], []).append((post_id, score["engagement"]))
         totals = {k: 0 for k in keys}
         platforms: dict[str, dict] = {}
         posts = []
@@ -3201,15 +3319,68 @@ def post_analytics(user_id: int, since: datetime, until: datetime | None = None)
             for k in keys:
                 totals[k] += int(metrics.get(k) or 0)
                 per[k] += int(metrics.get(k) or 0)
+            score = scores.get(row.id)
+            # "x your usual": against the median of the user's other scored posts on the platform
+            others = [e for pid, e in finals.get(row.platform, []) if pid != row.id]
+            usual = _median(others) if len(others) >= MIN_FOR_USUAL else None
             posts.append({"platform": row.platform, "title": row.title, "permalink": row.permalink,
                           "published_at": _as_utc(row.published_at).isoformat(), "engagement": row.engagement,
                           "metrics": metrics, "updated_at": _as_utc(row.metrics_at).isoformat() if row.metrics_at else None,
-                          "error": row.metrics_error})
+                          "error": row.metrics_error,
+                          "score": score["engagement"] if score else None,
+                          "score_final": bool(score and score["final"]),
+                          "vs_usual": round(score["engagement"] / usual, 1) if score and score["final"] and usual else None})
         posts.sort(key=lambda p: p["engagement"], reverse=True)
         engagement = sum(p["engagement"] for p in posts)
         return {"posts": len(posts), "engagement": engagement, "totals": totals,
                 "engagement_rate": round(100 * engagement / totals["reach"], 1) if totals["reach"] else None,
-                "platforms": platforms, "top_posts": posts[:5], "all_posts": posts}
+                "platforms": platforms, "top_posts": posts[:5], "all_posts": posts, "score_age_hours": SCORE_AGE_HOURS,
+                "followers": follower_growth(user_id, since, until)}
+
+
+def _source_items(session, user_id: int, sources: list[tuple[str, int | None]]) -> dict[tuple, list]:
+    """{(source, source id): the platform items} of the scheduled posts and
+    approval requests that published posts came from - what was actually posted."""
+    items: dict[tuple, list] = {}
+    scheduled = {sid for src, sid in sources if src == "scheduled" and sid}
+    approval = {sid for src, sid in sources if src == "approval" and sid}
+    if scheduled:
+        for post in session.query(ScheduledPost).filter(ScheduledPost.id.in_(scheduled), ScheduledPost.user_id == user_id):
+            try:
+                items[("scheduled", post.id)] = (json.loads(post.content_json) or {}).get("items") or []
+            except (TypeError, ValueError, AttributeError):
+                continue
+    if approval:
+        for req in session.query(ApprovalRequest).filter(ApprovalRequest.id.in_(approval), ApprovalRequest.user_id == user_id):
+            try:
+                items[("approval", req.id)] = json.loads(req.items) if req.items else []
+            except (TypeError, ValueError):
+                continue
+    return items
+
+
+def _item_for(items: dict[tuple, list], source: str, source_id: int | None, platform: str) -> dict | None:
+    return next((i for i in items.get((source, source_id), []) if isinstance(i, dict) and i.get("platform") == platform), None)
+
+
+def scored_post_items(user_id: int, days: int = USUAL_LOOKBACK_DAYS) -> list[dict]:
+    """[{platform, score, item}] for the user's posts scored at SCORE_AGE_HOURS
+    (final scores only) in the last `days`, with what was posted - for
+    services/insights_service.py. Posts whose item can't be found are left out."""
+    since = (_utcnow() - timedelta(days=days)).replace(tzinfo=None)
+    with Session(engine) as session:
+        scores = {pid: s for pid, s in _scores(session, user_id, since).items() if s["final"]}
+        if not scores:
+            return []
+        rows = session.query(PublishedPost.id, PublishedPost.platform, PublishedPost.source, PublishedPost.source_id).filter(
+            PublishedPost.id.in_(scores)).all()
+        items = _source_items(session, user_id, [(src, sid) for _, _, src, sid in rows])
+    out = []
+    for post_id, platform, source, source_id in rows:
+        item = _item_for(items, source, source_id, platform)
+        if item:
+            out.append({"platform": platform, "score": scores[post_id]["engagement"], "item": item})
+    return out
 
 
 def proven_hashtags(user_id: int, days: int = 180, limit: int = 8) -> dict[str, list[str]]:
@@ -3224,24 +3395,10 @@ def proven_hashtags(user_id: int, days: int = 180, limit: int = 8) -> dict[str, 
                 .order_by(PublishedPost.engagement.desc()).limit(50).all())
         if not rows:
             return {}
-        items: dict[tuple, list] = {}
-        scheduled = {sid for _, src, sid, _ in rows if src == "scheduled" and sid}
-        approval = {sid for _, src, sid, _ in rows if src == "approval" and sid}
-        if scheduled:
-            for post in session.query(ScheduledPost).filter(ScheduledPost.id.in_(scheduled), ScheduledPost.user_id == user_id):
-                try:
-                    items[("scheduled", post.id)] = (json.loads(post.content_json) or {}).get("items") or []
-                except (TypeError, ValueError, AttributeError):
-                    continue
-        if approval:
-            for req in session.query(ApprovalRequest).filter(ApprovalRequest.id.in_(approval), ApprovalRequest.user_id == user_id):
-                try:
-                    items[("approval", req.id)] = json.loads(req.items) if req.items else []
-                except (TypeError, ValueError):
-                    continue
+        items = _source_items(session, user_id, [(src, sid) for _, src, sid, _ in rows])
     scores: dict[str, dict[str, list]] = {}  # platform -> {tag lower: [tag, score]}
     for platform, source, source_id, engagement in rows:
-        item = next((i for i in items.get((source, source_id), []) if isinstance(i, dict) and i.get("platform") == platform), None)
+        item = _item_for(items, source, source_id, platform)
         for tag in (item or {}).get("hashtags") or []:
             tag = str(tag).strip()
             if len(tag) < 2:

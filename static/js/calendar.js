@@ -598,7 +598,11 @@
                 }
                 [['Posts published', a.posts], ['Likes', a.totals.likes], ['Comments', a.totals.comments],
                  ['Shares', a.totals.shares], ['Reach', a.totals.reach],
-                 ['Engagement rate', a.engagement_rate === null ? '–' : a.engagement_rate + '%']].forEach(function (k) {
+                 ['Engagement rate', a.engagement_rate === null ? '–' : a.engagement_rate + '%']]
+                    // followers counted once a day; a change needs at least two days of counts
+                    .concat(Object.values(a.followers || {}).some((f) => f.change !== null)
+                        ? [['New followers', Object.values(a.followers).reduce((sum, f) => sum + (f.change || 0), 0)]] : [])
+                    .forEach(function (k) {
                     const tile = el('div', 'cal-kpi');
                     tile.append(el('strong', '', typeof k[1] === 'number' ? number(k[1]) : k[1]), el('span', '', k[0]));
                     kpis.appendChild(tile);
@@ -611,7 +615,9 @@
                     name.append(icon('fab ' + (PLATFORM_ICONS[p.platform] || 'fa-share-nodes')), el('span', '', p.title || 'Post'));
                     const m = p.metrics || {};
                     const stats = el('span', 'cal-top-stats',
-                        `${number(m.likes)} likes · ${number(m.comments)} comments` + (m.reach ? ` · ${number(m.reach)} reached` : ''));
+                        `${number(m.likes)} likes · ${number(m.comments)} comments` + (m.reach ? ` · ${number(m.reach)} reached` : '')
+                        // scored at the same age as the user's other posts (db.post_analytics)
+                        + (p.vs_usual ? ` · ${p.vs_usual}× your usual` : ''));
                     row.append(name, stats);
                     if (p.error && !p.updated_at) row.title = p.error;
                     top.appendChild(row);

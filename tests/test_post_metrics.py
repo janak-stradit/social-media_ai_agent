@@ -193,3 +193,106 @@ def test_analytics_endpoint(app, platforms):
         and body["analytics"]["totals"]["likes"] == 80
         and "all_posts" not in body["analytics"]
     )
+
+
+def _snapshot(post_id, age_hours, engagement):
+    with Session(db.engine) as session:
+        row = session.query(db.PublishedPost).filter(db.PublishedPost.platform_post_id == post_id).one()
+        session.add(db.PostMetricSnapshot(post_id=row.id, age_hours=age_hours, metrics="{}", engagement=engagement))
+        session.commit()
+
+
+def test_each_fetch_keeps_a_snapshot_at_the_posts_age(platforms):
+    user = _user()
+    post_id = f"fb_{uuid.uuid4().hex[:6]}"
+    _publish(user, "facebook", post_id, days_ago=1)
+    metrics_service.refresh_due()
+    with Session(db.engine) as session:
+        snaps = (session.query(db.PostMetricSnapshot).join(db.PublishedPost, db.PublishedPost.id == db.PostMetricSnapshot.post_id)
+                 .filter(db.PublishedPost.platform_post_id == post_id).all())
+    assert len(snaps) == 1 and snaps[0].age_hours == 24 and snaps[0].engagement == 50 + 7 + 3
+
+
+def test_a_post_is_fetched_again_as_it_turns_48_hours_old(platforms):
+    user = _user()
+    post_id = f"fb_{uuid.uuid4().hex[:6]}"
+    _publish(user, "facebook", post_id)
+    now = datetime.now(timezone.utc)
+    metrics_service.refresh_due(now)
+    with Session(db.engine) as session:  # last fetched at 45 hours old
+        session.query(db.PublishedPost).filter(db.PublishedPost.platform_post_id == post_id).update(
+            {"published_at": (now - timedelta(hours=45)).replace(tzinfo=None), "metrics_at": now.replace(tzinfo=None)})
+        session.commit()
+    due = lambda when: post_id in {p["platform_post_id"] for p in db.published_posts_due_for_metrics(when)}  # noqa: E731
+    assert not due(now + timedelta(hours=2))  # 47 hours old
+    assert due(now + timedelta(hours=3, minutes=1))  # just past 48: not 24 hours after the last fetch
+
+
+def test_posts_are_compared_at_48_hours_against_the_usual(platforms):
+    user = _user()
+    ids = [f"ig_{uuid.uuid4().hex[:6]}" for _ in range(7)]
+    for n, post_id in enumerate(ids[:6]):
+        _publish(user, "instagram", post_id, days_ago=10 + n)
+        _snapshot(post_id, 6, 10)
+        _snapshot(post_id, 49, 100)  # the score: first snapshot at 48 hours or later
+        _snapshot(post_id, 200, 900)  # later growth doesn't count
+    _snapshot(ids[0], 52, 1)  # a second one past 48 hours is ignored too
+    with Session(db.engine) as session:  # the best post: 250 at 48 hours
+        row = session.query(db.PublishedPost).filter(db.PublishedPost.platform_post_id == ids[5]).one()
+        session.query(db.PostMetricSnapshot).filter(db.PostMetricSnapshot.post_id == row.id,
+                                                    db.PostMetricSnapshot.age_hours == 49).update({"engagement": 250})
+        session.commit()
+    _publish(user, "instagram", ids[6])  # still young: a score so far, no comparison yet
+    _snapshot(ids[6], 3, 40)
+
+    posts = {p["permalink"].rsplit("/", 1)[1]: p for p in db.post_analytics(user["id"], _since(60))["all_posts"]}
+    assert posts[ids[5]]["score"] == 250 and posts[ids[5]]["score_final"]
+    assert posts[ids[5]]["vs_usual"] == 2.5  # median of the other five is 100
+    assert posts[ids[0]]["vs_usual"] == round(100 / 100, 1)
+    assert posts[ids[6]]["score"] == 40 and not posts[ids[6]]["score_final"] and posts[ids[6]]["vs_usual"] is None
+
+
+def test_no_comparison_until_enough_posts_are_scored(platforms):
+    user = _user()
+    ids = [f"ig_{uuid.uuid4().hex[:6]}" for _ in range(3)]
+    for n, post_id in enumerate(ids):
+        _publish(user, "instagram", post_id, days_ago=5 + n)
+        _snapshot(post_id, 48, 100)
+    posts = db.post_analytics(user["id"], _since())["all_posts"]
+    assert all(p["score"] == 100 and p["vs_usual"] is None for p in posts)
+
+
+def test_followers_are_counted_once_a_day(monkeypatch):
+    user = _user()
+    db.save_social_account(user["id"], "instagram", "@clinic", account_id="ig_17841", access_token="tok")
+    db.save_social_account(user["id"], "linkedin", "Priya", account_id="urn:li:person:abc", access_token="tok")
+    counts = iter([1200, 1260])
+    calls = []
+
+    def get(url, params=None, headers=None, timeout=None):
+        calls.append(url)
+        return FakeResponse({"followers_count": next(counts)})
+
+    monkeypatch.setattr(metrics_service.requests, "get", get)
+    day1 = datetime.now(timezone.utc) - timedelta(days=3)
+    mine = lambda now: [p for u, p in db.accounts_due_for_follower_count(now) if u == user["id"]]  # noqa: E731
+
+    assert sorted(mine(day1)) == ["instagram", "linkedin"]
+    metrics_service.refresh_followers(day1)
+    assert mine(day1) == []  # a person's LinkedIn profile has no count, but isn't asked again today
+    metrics_service.refresh_followers(day1)
+    assert len(calls) == 1  # LinkedIn profile: no call at all
+
+    metrics_service.refresh_followers(day1 + timedelta(days=2))
+    growth = db.follower_growth(user["id"], day1 - timedelta(hours=1))
+    assert growth == {"instagram": {"followers": 1260, "change": 60}}
+    assert db.post_analytics(user["id"], _since())["followers"] == growth
+
+
+def test_one_day_of_followers_has_no_change_yet(monkeypatch):
+    user = _user()
+    db.save_social_account(user["id"], "facebook", "Clinic", account_id="1234", access_token="tok")
+    monkeypatch.setattr(metrics_service.requests, "get",
+                        lambda url, params=None, headers=None, timeout=None: FakeResponse({"followers_count": 540}))
+    metrics_service.refresh_followers()
+    assert db.follower_growth(user["id"], _since(1)) == {"facebook": {"followers": 540, "change": None}}

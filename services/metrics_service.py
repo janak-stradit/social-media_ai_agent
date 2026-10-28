@@ -11,8 +11,10 @@ views, fetched from each platform for the posts the app published
 
 A platform that refuses one of the extra numbers (missing permission, post
 type without insights) still gives what it can; nothing here ever raises.
-The scheduler refreshes posts every 6 hours in their first two days, then
-daily, and stops after 30 days.
+The scheduler refreshes posts every 6 hours in their first two days (and once
+right at 48 hours, the age every post is scored at), then daily, and stops
+after 30 days. Each fetch is kept (db.PostMetricSnapshot). Follower counts
+for each connected account are taken once a day (refresh_followers).
 """
 
 import logging
@@ -108,6 +110,68 @@ def fetch_linkedin(post_urn: str, token: str) -> dict:
 
 
 FETCHERS = {"facebook": fetch_facebook, "instagram": fetch_instagram, "linkedin": fetch_linkedin}
+
+
+# ── Followers, once a day per connected account ───────────────────────
+
+
+def followers_facebook(page_id: str, token: str) -> int:
+    body = _graph(page_id, token, fields="followers_count,fan_count")
+    return int(body.get("followers_count") or body.get("fan_count") or 0)
+
+
+def followers_instagram(ig_user_id: str, token: str) -> int:
+    return int(_graph(ig_user_id, token, fields="followers_count").get("followers_count") or 0)
+
+
+def followers_linkedin(author_urn: str, token: str) -> int:
+    """Company pages only: LinkedIn doesn't give apps a person's follower count."""
+    if not author_urn.startswith("urn:li:organization:"):
+        raise RuntimeError("LinkedIn only shares follower counts for company pages.")
+    resp = requests.get(
+        f"https://api.linkedin.com/rest/networkSizes/{quote(author_urn, safe='')}",
+        params={"edgeType": "COMPANY_FOLLOWED_BY_COMPANY"},
+        headers={
+            "Authorization": f"Bearer {token}",
+            "LinkedIn-Version": Config.LINKEDIN_API_VERSION,
+            "X-Restli-Protocol-Version": "2.0.0",
+        },
+        timeout=TIMEOUT,
+    )
+    if resp.status_code >= 400:
+        raise RuntimeError(f"LinkedIn answered {resp.status_code}")
+    return int(resp.json().get("firstDegreeSize") or 0)
+
+
+FOLLOWER_FETCHERS = {"facebook": followers_facebook, "instagram": followers_instagram, "linkedin": followers_linkedin}
+
+
+def refresh_followers(now: datetime | None = None) -> dict:
+    """Scheduler: count followers for every connected account not counted today.
+    A refusal is saved too (as no count), so each account is asked once a day."""
+    from db import accounts_due_for_follower_count, save_follower_count
+    from services.publish_service import accounts
+
+    now = now or datetime.now(timezone.utc)
+    result = {"counted": 0, "failed": 0}
+    by_user: dict[int, dict] = {}
+    for user_id, platform in accounts_due_for_follower_count(now):
+        fetcher = FOLLOWER_FETCHERS.get(platform)
+        if user_id not in by_user:
+            by_user[user_id] = accounts(user_id)
+        account = by_user[user_id].get(platform)
+        if not fetcher or not account or not account.get("token") or account.get("expired") or not account.get("account_id"):
+            save_follower_count(user_id, platform, now, None, "Not available for this account.")
+            continue
+        try:
+            save_follower_count(user_id, platform, now, fetcher(account["account_id"], account["token"]))
+            result["counted"] += 1
+        except Exception as err:  # noqa: BLE001 - one account's error must not stop the others
+            save_follower_count(user_id, platform, now, None, str(err))
+            result["failed"] += 1
+    if result["counted"] or result["failed"]:
+        logger.info(f"Follower counts: {result}")
+    return result
 
 
 def refresh_post(post: dict, account: dict | None) -> bool:

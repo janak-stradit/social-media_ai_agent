@@ -189,9 +189,10 @@ def run_scheduler(app_root_path):
 
             # How published posts are doing (likes, comments, reach) - services/metrics_service.py
             try:
-                from services.metrics_service import refresh_due
+                from services.metrics_service import refresh_due, refresh_followers
 
                 refresh_due()
+                refresh_followers()
             except Exception as e:
                 logger.warning(f"Error refreshing post metrics: {e}")
             # Billing: renewal and plan-ending reminders (email + bell), once each
