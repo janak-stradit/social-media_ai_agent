@@ -222,6 +222,14 @@ def run_scheduler(app_root_path):
                 notify_expiring()
             except Exception as e:
                 logger.warning(f"Error checking expiring social connections: {e}")
+            # Autopilot: plan two weeks ahead, write posts 2 days before their slot,
+            # hold anything not approved in time (services/autopilot_service.py)
+            try:
+                from services.autopilot_service import run_autopilot
+
+                run_autopilot()
+            except Exception as e:
+                logger.warning(f"Error running Autopilot: {e}")
             # Reminders for approval requests still pending after a day (APPROVAL_REMINDER_EMAILS=true)
             try:
                 from services.approval_reminder_service import run_approval_reminders
