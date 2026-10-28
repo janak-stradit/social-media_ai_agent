@@ -1916,6 +1916,42 @@ def edit_history_run(run_id):
     return jsonify({"success": True, "run_id": run_id, "target": target, "node": node})
 
 
+@api_bp.route("/history/<int:run_id>/openings", methods=["POST"])
+@login_required_api
+@limit_by_user("ai_user")
+def post_openings(run_id):
+    """Other first lines for a post's caption (Studio Chat "Edit" -> "Other
+    openings"): one small AI call, only when asked, charged to the post's
+    run. Nothing is saved - the person picks one in the editor and saves it
+    like any hand edit. Body: {caption, platform} (services/hook_service.py)."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import add_run_cost
+    from services import hook_service
+
+    user_id = get_current_user_id()
+    if not get_run_by_id(run_id, user_id=user_id):
+        return jsonify({"error": "Post not found"}), 404
+    try:
+        if _credit_blocked(get_user_usage_stats(user_id)):
+            return jsonify({"error": "Credit limit reached. Please request a credit extension.", "credit_limit_exceeded": True}), 402
+    except Exception as cred_err:  # noqa: BLE001
+        current_app.logger.warning(f"[Credits] Check error: {cred_err}")
+    data = request.get_json(silent=True) or {}
+    caption = str(data.get("caption") or "")
+    platform = str(data.get("platform") or "").lower()
+    try:
+        options, usage = hook_service.other_openings(caption, platform)
+    except hook_service.OpeningError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    except Exception as err:  # noqa: BLE001
+        current_app.logger.warning(f"[Openings] Could not write openings: {err}")
+        return jsonify({"success": False, "error": "Couldn't write other openings right now. Please try again."}), 502
+    add_run_cost(run_id, float(usage.get("cost_usd") or 0.0), user_id)
+    log_event("post.openings", run_id=run_id, platform=platform, count=len(options))
+    return jsonify({"success": True, "opening": hook_service.opening_of(caption), "options": options})
+
+
 @api_bp.route("/history/<int:run_id>", methods=["GET"])
 @login_required_api
 def get_history_run(run_id):

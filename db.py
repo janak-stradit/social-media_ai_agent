@@ -3212,6 +3212,47 @@ def post_analytics(user_id: int, since: datetime, until: datetime | None = None)
                 "platforms": platforms, "top_posts": posts[:5], "all_posts": posts}
 
 
+def proven_hashtags(user_id: int, days: int = 180, limit: int = 8) -> dict[str, list[str]]:
+    """{platform: hashtags} from the user's own published posts that got
+    engagement, best first: each tag scores the engagement of every post it
+    was on. Read from what was actually posted (the scheduled post's or the
+    approval request's item for that platform). Empty without results."""
+    since = (_utcnow() - timedelta(days=days)).replace(tzinfo=None)
+    with Session(engine) as session:
+        rows = (session.query(PublishedPost.platform, PublishedPost.source, PublishedPost.source_id, PublishedPost.engagement)
+                .filter(PublishedPost.user_id == user_id, PublishedPost.published_at >= since, PublishedPost.engagement > 0)
+                .order_by(PublishedPost.engagement.desc()).limit(50).all())
+        if not rows:
+            return {}
+        items: dict[tuple, list] = {}
+        scheduled = {sid for _, src, sid, _ in rows if src == "scheduled" and sid}
+        approval = {sid for _, src, sid, _ in rows if src == "approval" and sid}
+        if scheduled:
+            for post in session.query(ScheduledPost).filter(ScheduledPost.id.in_(scheduled), ScheduledPost.user_id == user_id):
+                try:
+                    items[("scheduled", post.id)] = (json.loads(post.content_json) or {}).get("items") or []
+                except (TypeError, ValueError, AttributeError):
+                    continue
+        if approval:
+            for req in session.query(ApprovalRequest).filter(ApprovalRequest.id.in_(approval), ApprovalRequest.user_id == user_id):
+                try:
+                    items[("approval", req.id)] = json.loads(req.items) if req.items else []
+                except (TypeError, ValueError):
+                    continue
+    scores: dict[str, dict[str, list]] = {}  # platform -> {tag lower: [tag, score]}
+    for platform, source, source_id, engagement in rows:
+        item = next((i for i in items.get((source, source_id), []) if isinstance(i, dict) and i.get("platform") == platform), None)
+        for tag in (item or {}).get("hashtags") or []:
+            tag = str(tag).strip()
+            if len(tag) < 2:
+                continue
+            tag = tag if tag.startswith("#") else f"#{tag}"
+            entry = scores.setdefault(platform, {}).setdefault(tag.lower(), [tag, 0])
+            entry[1] += engagement
+    return {platform: [tag for tag, _ in sorted(tags.values(), key=lambda t: -t[1])][:limit]
+            for platform, tags in scores.items()}
+
+
 def current_subscription(user_id: int) -> dict | None:
     """The user's renewing subscription (active, or active but cancelled at period end)."""
     with Session(engine) as session:
