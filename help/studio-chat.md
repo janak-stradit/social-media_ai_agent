@@ -36,7 +36,7 @@ Under a message you sent, click **Save brief** to keep it. Saved briefs are list
 Each platform has its own tab with:
 
 - the **caption**, with **Edit** and **Copy** buttons;
-- **hashtags** chosen for that platform;
+- **hashtags** chosen for that platform. Spam tags such as #follow4follow are left out, and once your posts have results, tags that did well on them are reused where they fit;
 - **compliance notes**, if your industry has advertising rules that the caption should respect;
 - the **image**, if you asked for one. One image is shared across platforms unless you ask for a separate one. **Enlarge** shows it full size.
 
@@ -47,6 +47,7 @@ When the post is ready, **Send for approval** emails it to your reviewer. **Sche
 ## Improving a post
 
 - **Edit it yourself.** Click **Edit** on the caption or the hashtags, change the text and click **Save**. Nothing is regenerated and it costs nothing. A counter shows how much room the platform leaves you. **Restore original** brings back the text AVIR AI wrote.
+- **Try a different first line.** Click **Other openings** on the caption. AVIR AI suggests a few other first lines; click one to put it in place of the current first line, then **Save**. The rest of the caption stays as it is, and nothing changes until you save.
 - **Just type the change.** *"Make it shorter"*, *"more formal"*, *"change the background to blue"*. The next message edits the post above.
 - **Rewrite caption** writes the text again as a new version and keeps your image. Use the arrows (1 / 2) to switch between versions.
 - **New image**, on the picture, makes a different picture and keeps the caption.

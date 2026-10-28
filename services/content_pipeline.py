@@ -25,6 +25,7 @@ import typing
 import uuid
 
 from config import Config
+from services import hashtag_service
 
 logger = logging.getLogger(__name__)
 
@@ -160,6 +161,17 @@ def generate_post(user_id, data: dict) -> dict:
     retrieved_memories = r.memory_service.retrieve_context(story, user_id=user_id, n_results=3)
     mem_prompt = r.memory_service.format_memory_prompt(retrieved_memories)
 
+    # Hashtags that did well on this brand's own posts, offered to the
+    # hashtag agent to reuse where they fit (none until posts have results)
+    proven_tags = {}
+    if generate_text and platforms and user_id:
+        try:
+            from db import proven_hashtags
+
+            proven_tags = {p: tags for p, tags in proven_hashtags(user_id).items() if p in platforms}
+        except Exception as tag_err:  # noqa: BLE001 - hashtags are written without them
+            logger.warning(f"Proven hashtags unavailable: {tag_err}")
+
     # Hashtags only need the post's themes, which the brief already gives:
     # they start now, alongside the research, instead of after it (each AI
     # call can take 10-30s, so waiting for one another is what makes it slow).
@@ -177,6 +189,7 @@ def generate_post(user_id, data: dict) -> dict:
             memory_context=mem_prompt,
             brand_profile_block=brand_profile_block,
             language=language,
+            proven=proven_tags,
         )
         early_pool.shutdown(wait=False)  # the thread finishes the call; nothing else runs on it
         _progress("hashtag", "active")
@@ -280,6 +293,7 @@ def generate_post(user_id, data: dict) -> dict:
                     memory_context=mem_prompt,
                     brand_profile_block=brand_profile_block,
                     language=language,
+                    proven=proven_tags,
                 )
             except Exception as tag_err:  # a post without hashtags beats no post at all
                 logger.warning(f"Hashtags failed: {tag_err}")
@@ -330,7 +344,8 @@ def generate_post(user_id, data: dict) -> dict:
             {
                 "agent": "HashtagAgent",
                 "name": "Hashtag Agent",
-                "role": "Curated broad, niche & brand hashtags for each platform",
+                "role": "Curated broad, niche & brand hashtags for each platform"
+                + (", reusing ones that did well on your posts where they fit" if proven_tags else ""),
                 "status": "completed",
             }
         )
@@ -479,7 +494,8 @@ def generate_post(user_id, data: dict) -> dict:
                     if changed:
                         guardrail_corrections += 1
                     fixed_list.append(fixed_tag)
-                tags["hashtags"] = fixed_list
+                # No spam tags (#follow4follow...), repeats or broken tags (services/hashtag_service.py)
+                tags["hashtags"] = hashtag_service.tidy(fixed_list)
         _progress("guardrail", "done")
 
         agents_executed.append(

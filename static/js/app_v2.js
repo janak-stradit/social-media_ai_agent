@@ -2709,6 +2709,7 @@ $(document).ready(function () {
     function editActionsHtml(msgId, target, post, focus) {
         if (!post.runId) return '';
         return `${post.node.edited && !focus ? `<button type="button" class="btn-copy-sm btn-restore-post" data-msg="${msgId}" data-target="${target}" title="Go back to the text AVIR AI wrote"><i class="fas fa-rotate-left me-1"></i>Restore original</button>` : ''}
+                ${focus ? '' : `<button type="button" class="btn-copy-sm btn-edit-post" data-msg="${msgId}" data-target="${target}" data-focus="openings" title="See other ways to start this post"><i class="fas fa-shuffle me-1"></i>Other openings</button>`}
                 <button type="button" class="btn-copy-sm btn-edit-post" data-msg="${msgId}" data-target="${target}"${focus ? ` data-focus="${focus}"` : ''}><i class="fas fa-pen me-1"></i>Edit</button>`;
     }
 
@@ -2803,7 +2804,11 @@ $(document).ready(function () {
                     <span class="post-box-title"><i class="fas fa-pen me-1"></i>Edit ${escapeHtml(name)} post</span>
                     <span class="post-editor-hint">Your changes are saved to this post. Nothing is regenerated.</span>
                 </div>
-                <label class="post-editor-label" for="${id}_caption">Caption</label>
+                <div class="post-editor-label-row">
+                    <label class="post-editor-label" for="${id}_caption">Caption</label>
+                    <button type="button" class="btn-copy-sm btn-openings" title="AVIR AI suggests other first lines; pick one to use it"><i class="fas fa-shuffle me-1"></i>Other openings</button>
+                </div>
+                <div class="post-openings" aria-live="polite" hidden></div>
                 <textarea class="post-editor-input post-editor-caption" id="${id}_caption" rows="6">${escapeHtml(post.caption)}</textarea>
                 <label class="post-editor-label" for="${id}_tags">Hashtags <span>separated by spaces</span></label>
                 <textarea class="post-editor-input post-editor-tags" id="${id}_tags" rows="2">${escapeHtml(post.tags.join(' '))}</textarea>
@@ -2847,7 +2852,61 @@ $(document).ready(function () {
         const field = $ed.find(focus === 'tags' ? '.post-editor-tags' : '.post-editor-caption')[0];
         field.focus();
         field.setSelectionRange(field.value.length, field.value.length);
+        if (focus === 'openings') loadOpenings($ed);
     }
+
+    // ── "Other openings": different first lines for the caption ─────────
+    // One small AI call, only when asked (POST /api/history/<run>/openings,
+    // services/hook_service.py). Picking one only replaces the first line in
+    // the editor; nothing is saved until Save, like any hand edit.
+    function firstLineRange(text) {
+        const match = /^\s*([^\n]*\S)/.exec(text);
+        if (!match) return null;
+        const start = match[0].length - match[1].length;
+        return { start: start, end: start + match[1].length };
+    }
+
+    function loadOpenings($ed) {
+        const msgId = $ed.data('msg'), target = $ed.data('target');
+        const post = postTextOf(msgId, target);
+        const $box = $ed.find('.post-openings');
+        const $btn = $ed.find('.btn-openings');
+        const caption = $ed.find('.post-editor-caption').val();
+        if (!post || !post.runId) return;
+        if (!firstLineRange(caption)) {
+            $box.html('<p class="post-openings-note">Write the post first, then try other openings.</p>').prop('hidden', false);
+            return;
+        }
+        $btn.prop('disabled', true);
+        $box.html('<p class="post-openings-note"><i class="fas fa-spinner fa-spin me-1"></i>Writing other openings...</p>').prop('hidden', false);
+        $.ajax({
+            url: `/api/history/${post.runId}/openings`, type: 'POST', contentType: 'application/json',
+            data: JSON.stringify({ caption: caption, platform: target === 'carousel' ? '' : target }),
+        }).done(function (r) {
+            const options = (r.options || []).map(text =>
+                `<button type="button" class="post-opening" data-text="${escapeHtml(text)}">${escapeHtml(text)}</button>`).join('');
+            $box.html(`<p class="post-openings-note">Pick one to replace the first line. Nothing changes until you save.</p>
+                <div class="post-openings-list">${options}</div>`);
+        }).fail(function (xhr) {
+            const message = (xhr.responseJSON && xhr.responseJSON.error) || 'Couldn\'t write other openings right now. Please try again.';
+            $box.html(`<p class="post-openings-note is-error">${escapeHtml(message)}</p>`);
+        }).always(function () {
+            $btn.prop('disabled', false).html('<i class="fas fa-shuffle me-1"></i>More openings');
+        });
+    }
+
+    $(document).on('click', '.btn-openings', function () {
+        loadOpenings($(this).closest('.post-editor'));
+    });
+    $(document).on('click', '.post-opening', function () {
+        const $ed = $(this).closest('.post-editor');
+        const field = $ed.find('.post-editor-caption')[0];
+        const range = firstLineRange(field.value);
+        if (!range) return;
+        field.value = field.value.slice(0, range.start) + $(this).attr('data-text') + field.value.slice(range.end);
+        $(this).addClass('is-picked').siblings().removeClass('is-picked');
+        $(field).trigger('input');
+    });
 
     // "Send for approval" again after an edit: the request already sent holds the old text
     function refreshApprovalButton(msgId) {

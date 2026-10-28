@@ -17,9 +17,11 @@ class HashtagAgent:
 
     def generate_hashtags(
         self, platform, story_analysis, vision_analysis=None, count=None, memory_context=None, brand_profile_block=None,
-        language=None,
+        language=None, proven=None,
     ):
         """Generate platform-optimized hashtags.
+        proven: hashtags from this brand's best-performing posts on the
+        platform (db.proven_hashtags), offered to reuse where they fit.
         brand_profile_block (see services/brand_profile_service.py): a Studio
         Chat user's own onboarding-derived brand context - when present, the
         branded-hashtag rule below defers to their actual company instead of
@@ -43,7 +45,8 @@ class HashtagAgent:
 
         system_prompt += instruction(language, "hashtags")
 
-        user_prompt = self._user_prompt(story_analysis, vision_analysis, trending, memory_context, brand_profile_block)
+        user_prompt = self._user_prompt(story_analysis, vision_analysis, trending, memory_context, brand_profile_block,
+                                        {platform: proven} if proven else None)
 
         # A hashtag list needs no deep reasoning - "minimal" answers in seconds
         result, usage = self.llm.generate_json(
@@ -93,7 +96,7 @@ class HashtagAgent:
         )
 
     @staticmethod
-    def _user_prompt(story_analysis, vision_analysis, trending, memory_context, brand_profile_block):
+    def _user_prompt(story_analysis, vision_analysis, trending, memory_context, brand_profile_block, proven=None):
         user_prompt = f"""Story Themes: {story_analysis.get("themes", [])}
         Emotions: {story_analysis.get("emotions", [])}
         Visual Elements: {vision_analysis.get("colors", []) if vision_analysis else "N/A"}
@@ -103,11 +106,18 @@ class HashtagAgent:
             user_prompt += f"\n{memory_context}"
         if brand_profile_block:
             user_prompt += f"\n{brand_profile_block}"
+        proven = {p: tags for p, tags in (proven or {}).items() if tags}
+        if proven:
+            lines = "\n".join(f"        {p}: {' '.join(tags)}" for p, tags in proven.items())
+            user_prompt += (
+                "\nHashtags that did well on this brand's own past posts (reuse the ones that fit THIS post's "
+                f"topic; never add one that doesn't):\n{lines}\n"
+            )
         return user_prompt
 
     def generate_hashtags_batch(
         self, platforms, story_analysis, vision_analysis=None, memory_context=None, brand_profile_block=None,
-        language=None,
+        language=None, proven=None,
     ):
         """Every platform's hashtag set in ONE call - same inputs and rules as
         generate_hashtags(). Each AI call carries ~4k tokens of fixed provider
@@ -117,7 +127,8 @@ class HashtagAgent:
         platforms = list(platforms)
         if len(platforms) <= 1:
             return {p: self.generate_hashtags(p, story_analysis, vision_analysis, memory_context=memory_context,
-                                              brand_profile_block=brand_profile_block, language=language) for p in platforms}
+                                              brand_profile_block=brand_profile_block, language=language,
+                                              proven=(proven or {}).get(p)) for p in platforms}
         trending = self.memory.get_trending_hashtags(category=story_analysis.get("themes", ["general"])[0])
         per_platform = "\n".join(
             f"        - {p}: exactly {self.PLATFORM_HASHTAG_LIMITS.get(p, 10)} hashtags" for p in platforms
@@ -136,7 +147,7 @@ class HashtagAgent:
         from services.language_service import instruction
 
         system_prompt += instruction(language, "hashtags")
-        user_prompt = self._user_prompt(story_analysis, vision_analysis, trending, memory_context, brand_profile_block)
+        user_prompt = self._user_prompt(story_analysis, vision_analysis, trending, memory_context, brand_profile_block, proven)
         try:
             batch, usage = self.llm.generate_json(system_prompt, user_prompt, return_usage=True, reasoning_effort="minimal")
         except Exception as err:  # noqa: BLE001 - fall back to one call per platform
@@ -150,7 +161,7 @@ class HashtagAgent:
             if not isinstance(tags, list) or not tags:
                 results[platform] = self.generate_hashtags(platform, story_analysis, vision_analysis,
                                                            memory_context=memory_context, brand_profile_block=brand_profile_block,
-                                                           language=language)
+                                                           language=language, proven=(proven or {}).get(platform))
                 continue
             result = {"hashtags": [str(t) for t in tags], "engagement_prediction": entry.get("engagement_prediction"),
                       "_usage": {}}
