@@ -513,21 +513,60 @@ def run_for_user(user_id: int, now: datetime | None = None, llm=None, media=None
 
     now = now or _now()
     planned = plan_ahead(user_id, now)
-    written = 0
+    written, ready = 0, []
     for post in autopilot_posts_with_status(("planned",), user_id=user_id):
         if written >= MAX_WRITES_PER_RUN:
             break
         if datetime.fromisoformat(post["slot_at"]) - now <= WRITE_AHEAD:
-            draft(post, now, llm=llm, media=media)
+            result = draft(post, now, llm=llm, media=media)
             written += 1
-    return {"planned": planned, "written": written}
+            if result and result["status"] == "needs_ok":
+                ready.append(result)
+    emailed = email_needs_ok(user_id, ready)
+    return {"planned": planned, "written": written, "emailed": emailed}
+
+
+def email_needs_ok(user_id: int, posts: list[dict]) -> bool:
+    """One email for the posts this run wrote: they won't go out without the
+    user's OK, so the user has to hear about them outside the app. Sent like an
+    account email (not marketing), and only when the app's address is set."""
+    if not posts or not Config.APP_BASE_URL:
+        return False
+    from db import get_autopilot_settings, get_user_by_id
+
+    user = get_user_by_id(user_id)
+    if not user or not user.email:
+        return False
+    tz = timezone(timedelta(minutes=get_autopilot_settings(user_id).get("tz_minutes") or 0))
+
+    def local(iso: str) -> str:
+        when = datetime.fromisoformat(iso).astimezone(tz)
+        return f"{when:%a} {when.day} {when:%b}, {when:%I:%M %p}".replace(" 0", " ")
+
+    count = len(posts)
+    lines = [f"{NAMES.get(p['platform'], p['platform'])} post for {local(p['slot_at'])} - "
+             f"approve by {local(p['approve_by'])}" for p in posts]
+    lines.append("Nothing goes out until you approve it. A post that isn't approved in time is held, never posted.")
+    try:
+        from services.email_service import EmailService
+
+        EmailService().send_billing_email(
+            to_email=user.email, name=user.name or "there",
+            subject=f"{count} post{'s' if count > 1 else ''} need{'' if count > 1 else 's'} your OK",
+            headline=f"Autopilot wrote {count} post{'s' if count > 1 else ''} for you",
+            lines=lines, button="Review and approve", url=Config.APP_BASE_URL.rstrip("/") + "/autopilot",
+            footer="You get this because Autopilot is on. Pause or turn it off on the Autopilot page.")
+        return True
+    except Exception as err:  # noqa: BLE001 - the bell notification is still there
+        logger.warning(f"Autopilot email to user {user_id} failed: {err}")
+        return False
 
 
 def run_autopilot(now: datetime | None = None) -> dict:
     from db import autopilot_user_ids
 
     now = now or _now()
-    totals = {"users": 0, "planned": 0, "written": 0, "held": hold_missed(now), "synced": sync_published()}
+    totals = {"users": 0, "planned": 0, "written": 0, "emailed": 0, "held": hold_missed(now), "synced": sync_published()}
     for user_id in autopilot_user_ids():
         try:
             result = run_for_user(user_id, now)
@@ -537,6 +576,7 @@ def run_autopilot(now: datetime | None = None) -> dict:
         totals["users"] += 1
         totals["planned"] += result["planned"]
         totals["written"] += result["written"]
+        totals["emailed"] += int(result["emailed"])
     return totals
 
 

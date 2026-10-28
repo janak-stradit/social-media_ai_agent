@@ -179,6 +179,8 @@ def test_approving_puts_the_post_on_the_calendar(monkeypatch):
     assert scheduled and scheduled["status"] == "pending"
     with pytest.raises(ap.AutopilotError):  # not twice
         ap.approve(user["id"], post["id"], now=NOW)
+    # leave nothing due for other tests' publish_due runs
+    assert db.cancel_scheduled_post(user["id"], approved["scheduled_post_id"])
 
 
 def test_approving_without_a_connected_account_says_what_to_do(monkeypatch):
@@ -247,3 +249,51 @@ def test_the_page_loads(app):
     client = _client(app, _user())
     page = client.get("/autopilot")
     assert page.status_code in (200, 302)  # 302 = onboarding not finished for a bare test user
+
+
+# ── Email when posts need the user's OK ─────────────────────────────────
+class FakeEmail:
+    sent = []
+
+    def send_billing_email(self, **kw):
+        FakeEmail.sent.append(kw)
+        return {"success": True}
+
+
+def test_one_email_lists_every_post_that_needs_the_ok(monkeypatch):
+    from config import Config
+    from services import email_service
+
+    FakeEmail.sent = []
+    monkeypatch.setattr(email_service, "EmailService", FakeEmail)
+    monkeypatch.setattr(Config, "APP_BASE_URL", "https://app.example.com")
+    user = _user()
+    _turn_on(user["id"], posts_per_week=7, days_off=[])  # several posts inside the 48h window
+    result = ap.run_for_user(user["id"], NOW, llm=FakeLLM())
+    assert result["written"] >= 2 and result["emailed"] is True
+    assert len(FakeEmail.sent) == 1
+    mail = FakeEmail.sent[0]
+    assert mail["to_email"] == user["email"] and mail["url"] == "https://app.example.com/autopilot"
+    assert mail["subject"].startswith(f"{result['written']} posts need your OK")
+    assert sum("approve by" in line for line in mail["lines"]) == result["written"]
+    # the next hourly run writes nothing new, so no second email
+    assert ap.run_for_user(user["id"], NOW, llm=FakeLLM())["emailed"] is False and len(FakeEmail.sent) == 1
+
+
+def test_no_email_without_the_apps_address_or_on_failure(monkeypatch):
+    from config import Config
+    from services import email_service
+
+    class Broken:
+        def send_billing_email(self, **kw):
+            raise RuntimeError("SMTP is not configured")
+
+    user = _user()
+    _turn_on(user["id"])
+    ap.plan_ahead(user["id"], NOW)
+    post = ap.draft(_first_planned(user["id"]), NOW, llm=FakeLLM())
+    monkeypatch.setattr(Config, "APP_BASE_URL", "")
+    assert ap.email_needs_ok(user["id"], [post]) is False
+    monkeypatch.setattr(Config, "APP_BASE_URL", "https://app.example.com")
+    monkeypatch.setattr(email_service, "EmailService", Broken)
+    assert ap.email_needs_ok(user["id"], [post]) is False  # logged; the bell notification still stands
