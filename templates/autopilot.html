@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Autopilot — AVIR AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body class="autopilot-page">
+
+<header class="app-header">
+    <div class="header-brand">
+        <div class="brand-logo">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+            </svg>
+        </div>
+        <div class="brand-text">
+            <span class="brand-name">AVIR AI <span class="beta-badge">Beta</span></span>
+            <span class="brand-tagline">Autopilot</span>
+        </div>
+    </div>
+    <nav class="header-nav">
+        <a href="/dashboard" class="header-nav-item"><i class="fas fa-comments me-2"></i>Studio Chat</a>
+        <a href="/autopilot" class="header-nav-item active"><i class="fas fa-plane-departure me-2"></i>Autopilot</a>
+        <a href="/calendar" class="header-nav-item"><i class="fas fa-calendar-days me-2"></i>Calendar</a>
+    </nav>
+    <div class="header-actions">
+        {% include 'partials/user_menu.html' %}
+    </div>
+</header>
+
+<!-- Filled in by static/js/autopilot.js from /api/autopilot (services/autopilot_service.py):
+     the set-up form until Autopilot is on, then the dashboard. -->
+<main class="ap-main" id="apMain" aria-busy="true">
+    <p class="ap-loading"><i class="fas fa-spinner fa-spin me-2" aria-hidden="true"></i>Loading Autopilot…</p>
+</main>
+
+<!-- One planned post: why it, what was checked, change it, approve or skip -->
+<div class="modal fade modal-task" id="apPostModal" tabindex="-1" aria-labelledby="apPostTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div>
+                    <h5 class="modal-title" id="apPostTitle"></h5>
+                    <small id="apPostSub"></small>
+                </div>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body" id="apPostBody"></div>
+            <div class="modal-footer" id="apPostFooter"></div>
+        </div>
+    </div>
+</div>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="toast" class="ent-toast" role="alert">
+        <div class="ent-toast-body" id="toastBody"></div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="{{ url_for('static', filename='js/autopilot.js') }}"></script>
+<script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
+    {% include 'partials/cookie_consent.html' %}
+</body>
+</html>

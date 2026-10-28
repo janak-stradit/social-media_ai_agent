@@ -2364,6 +2364,99 @@ def conversation_unarchive(conversation_id):
     return jsonify({"success": True, "is_archived": False})
 
 
+# ── Autopilot (services/autopilot_service.py) ─────────────────────────────
+@api_bp.route("/autopilot", methods=["GET"])
+@login_required_api
+def autopilot_overview_route():
+    """The Autopilot page: settings, the plan, what needs the user's OK, spend."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from services import autopilot_service
+
+    return jsonify({"success": True, **autopilot_service.overview(get_current_user_id())})
+
+
+@api_bp.route("/autopilot/settings", methods=["PUT"])
+@login_required_api
+def autopilot_settings_route():
+    """Saves the set-up; turning it on (or changing it) plans the next two weeks."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import save_autopilot_settings
+    from services import autopilot_service
+
+    data = request.get_json(silent=True) or {}
+    try:
+        fields = autopilot_service.clean_settings(data)
+    except autopilot_service.AutopilotError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    user_id = get_current_user_id()
+    fields["enabled"] = bool(data.get("enabled", True))
+    save_autopilot_settings(user_id, **fields)
+    planned = autopilot_service.replan(user_id) if fields["enabled"] else 0
+    _audit("autopilot.settings", details={"enabled": fields["enabled"], "posts_per_week": fields["posts_per_week"]})
+    return jsonify({"success": True, "planned": planned, **autopilot_service.overview(user_id)})
+
+
+@api_bp.route("/autopilot/<action>", methods=["POST"])
+@login_required_api
+def autopilot_switch_route(action):
+    """pause / resume / turn-off. Pausing stops writing and planning; posts the
+    user already approved stay on the calendar (they cancel them there)."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import get_autopilot_settings, save_autopilot_settings
+    from services import autopilot_service
+
+    user_id = get_current_user_id()
+    if not get_autopilot_settings(user_id)["configured"]:
+        return jsonify({"success": False, "error": "Set up Autopilot first."}), 400
+    if action == "pause":
+        save_autopilot_settings(user_id, paused=True)
+    elif action == "resume":
+        save_autopilot_settings(user_id, paused=False, enabled=True)
+        autopilot_service.plan_ahead(user_id)
+    elif action == "turn-off":
+        save_autopilot_settings(user_id, enabled=False, paused=False)
+    else:
+        return jsonify({"error": "Unknown action"}), 404
+    _audit(f"autopilot.{action}")
+    return jsonify({"success": True, **autopilot_service.overview(user_id)})
+
+
+@api_bp.route("/autopilot/posts/<int:post_id>/<action>", methods=["POST"])
+@login_required_api
+def autopilot_post_route(post_id, action):
+    """approve (optionally with an edited caption / hashtags), skip, edit, or
+    write-now (writes a planned post straight away instead of 2 days ahead)."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import get_autopilot_post
+    from services import autopilot_service
+
+    user_id = get_current_user_id()
+    data = request.get_json(silent=True) or {}
+    caption = data.get("caption") if isinstance(data.get("caption"), str) else None
+    hashtags = data.get("hashtags") if isinstance(data.get("hashtags"), list) else None
+    try:
+        if action == "approve":
+            post = autopilot_service.approve(user_id, post_id, caption, hashtags, current_app.config["UPLOAD_FOLDER"])
+        elif action == "skip":
+            post = autopilot_service.skip(user_id, post_id)
+        elif action == "edit":
+            post = autopilot_service.edit(user_id, post_id, caption, hashtags)
+        elif action == "write-now":
+            found = get_autopilot_post(user_id, post_id)
+            if found is None or found["status"] != "planned":
+                return jsonify({"success": False, "error": "Only a planned post can be written now."}), 400
+            post = autopilot_service.draft(found)
+        else:
+            return jsonify({"error": "Unknown action"}), 404
+    except autopilot_service.AutopilotError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    return jsonify({"success": True, "post": post})
+
+
 @api_bp.route("/conversations/<int:conversation_id>/pin", methods=["POST"])
 @login_required_api
 def conversation_pin(conversation_id):

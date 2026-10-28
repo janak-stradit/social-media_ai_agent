@@ -380,6 +380,12 @@ def create_app(config_name="development"):
         scheduled and suggested on each day (services/calendar_service.py)."""
         return render_template("calendar.html")
 
+    @app.route("/autopilot")
+    @login_required_page
+    def autopilot_page():
+        """Autopilot: set it up, see the plan, approve posts (static/js/autopilot.js)."""
+        return render_template("autopilot.html")
+
     @app.route("/library")
     @login_required_page
     def library_page():
