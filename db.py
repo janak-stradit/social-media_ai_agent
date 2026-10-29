@@ -142,6 +142,10 @@ class User(Base):
     # recap_email_last_month: the month ("2026-09") the last recap covered, so each month is sent once.
     recap_email_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     recap_email_last_month: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    # Weekly results email (services/results_email_service.py). None = on.
+    # results_email_last_week: the week ("2026-W44") the last one covered, so each week is sent once.
+    results_email_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    results_email_last_week: Mapped[str | None] = mapped_column(String(8), nullable=True)
     # Two-step sign-in (auth/two_factor.py): the authenticator secret,
     # encrypted; set while being set up, turned on once a code is confirmed.
     totp_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -1303,6 +1307,8 @@ def init_db():
             f"ALTER TABLE {usr_tbl} ADD COLUMN guide_state TEXT",
             f"ALTER TABLE {usr_tbl} ADD COLUMN recap_email_enabled BOOLEAN",
             f"ALTER TABLE {usr_tbl} ADD COLUMN recap_email_last_month VARCHAR(7)",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN results_email_enabled BOOLEAN",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN results_email_last_week VARCHAR(8)",
             f"ALTER TABLE {_tbl('memory_embeddings')} ADD COLUMN user_id INTEGER",
             f"CREATE INDEX IF NOT EXISTS ix_memory_embeddings_user_id ON {_tbl('memory_embeddings')} (user_id)",
             # Autopilot: the plan (posts a week, days off, mix, topics, images) and why each post
@@ -2176,6 +2182,39 @@ def users_due_recap(month_key: str) -> list[dict]:
         return [{"id": u.id, "name": u.name, "email": u.email} for u in rows]
 
 
+def set_results_email_enabled(user_id: int, enabled: bool) -> bool:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if not user:
+            return False
+        user.results_email_enabled = bool(enabled)
+        session.commit()
+        return True
+
+
+def mark_results_email_sent(user_id: int, week_key: str) -> None:
+    with Session(engine) as session:
+        session.query(User).filter(User.id == user_id).update({"results_email_last_week": week_key})
+        session.commit()
+
+
+def users_due_results(week_key: str) -> list[dict]:
+    """Active, verified users who haven't switched the weekly results email
+    off and haven't been sent the one for `week_key` ("2026-W44") yet."""
+    with Session(engine) as session:
+        rows = (
+            session.query(User)
+            .filter(
+                User.is_active.isnot(False),
+                User.email_verified.is_(True),
+                User.results_email_enabled.isnot(False),
+                (User.results_email_last_week.is_(None)) | (User.results_email_last_week != week_key),
+            )
+            .all()
+        )
+        return [{"id": u.id, "name": u.name, "email": u.email} for u in rows]
+
+
 def set_nudge_email_enabled(user_id: int, enabled: bool) -> bool:
     with Session(engine) as session:
         user = session.get(User, user_id)
@@ -2196,6 +2235,7 @@ def get_ideas_email_settings(user_id: int) -> dict | None:
             "nudges_enabled": user.nudge_email_enabled is not False,
             "recap_enabled": user.recap_email_enabled is not False,
             "recap_last_month": user.recap_email_last_month,
+            "results_enabled": user.results_email_enabled is not False,
             "email": user.email,
             "last_sent_at": _as_utc(user.ideas_email_last_sent_at).isoformat() if user.ideas_email_last_sent_at else None,
         }
@@ -6490,7 +6530,8 @@ def update_scheduled_post_status(user_id: int, post_id: int, status: str) -> boo
 
 EMAIL_KINDS = {
     "weekly_ideas": "Weekly ideas", "nudge": "Festival / trend nudge", "festival_idea": "Festival idea (admin)",
-    "ideas_campaign": "Ideas (admin)", "monthly_recap": "Monthly recap", "verification": "Email verification",
+    "ideas_campaign": "Ideas (admin)", "monthly_recap": "Monthly recap", "weekly_results": "Weekly results",
+    "verification": "Email verification",
     "password_reset": "Password reset", "invitation": "Invitation", "approval_request": "Approval request",
     "approval_notification": "Approval notification", "approval_decision": "Approval decision",
     "credit_decision": "Credit decision", "sales_lead": "Sales lead", "approval_reminder": "Approval reminder",
@@ -6585,7 +6626,8 @@ def emailed_recently(user_id: int, kinds: tuple[str, ...], hours: int = 24) -> b
 # values (WEEKLY_IDEAS_EMAIL, NUDGE_EMAILS, MONTHLY_RECAP_EMAIL) are the
 # defaults until an admin changes a switch.
 EMAIL_AUTOMATIONS = {"weekly_ideas": "WEEKLY_IDEAS_EMAIL", "nudge_emails": "NUDGE_EMAILS",
-                     "monthly_recap": "MONTHLY_RECAP_EMAIL", "approval_reminders": "APPROVAL_REMINDER_EMAILS"}
+                     "monthly_recap": "MONTHLY_RECAP_EMAIL", "weekly_results": "WEEKLY_RESULTS_EMAIL",
+                     "approval_reminders": "APPROVAL_REMINDER_EMAILS"}
 
 
 def get_email_automation() -> dict:

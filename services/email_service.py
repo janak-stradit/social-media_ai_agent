@@ -638,6 +638,126 @@ def _build_nudge_html(name: str, headline: str, intro: str, idea: dict, settings
 """
 
 
+def _build_weekly_results_html(
+    name: str, company_name: str | None, results: dict, performance_url: str, best_url: str,
+    inbox_url: str, settings_url: str, unsubscribe_url: str,
+) -> str:
+    """The weekly results email (services/results_email_service.py week_results):
+    posts, reach, engagement (+ changes), followers, best, finding,
+    comments_waiting, leads_waiting, week_label."""
+    def tile(value, label, note=None):
+        colour = "#15803d" if (note or "").startswith("+") else "#92400e"  # up green, down amber
+        note_html = f'<div style="color: {colour}; font-size: 11px; margin-top: 4px;">{_escape(note)}</div>' if note else ""
+        return f"""
+                                    <td width="25%" align="center" valign="top" style="padding: 14px 4px; border: 1px solid #e6e8ef; border-radius: 10px;">
+                                        <div style="color: #172033; font-size: 22px; font-weight: 700;">{value}</div>
+                                        <div style="color: #667085; font-size: 12px; margin-top: 2px;">{label}</div>{note_html}
+                                    </td>"""
+
+    followers = results.get("followers")
+    tiles = "".join([
+        tile(results.get("posts", 0), "published"),
+        tile(f"{results.get('reach', 0):,}" if results.get("reach") else "&ndash;", "reached", results.get("reach_change")),
+        tile(f"{results.get('engagement', 0):,}", "engagements", results.get("engagement_change")),
+        tile(f"{'+' if followers >= 0 else ''}{followers:,}" if followers is not None else "&ndash;", "new followers"),
+    ])
+    best = results.get("best")
+    best_html = ""
+    if best:
+        score = (f"{best['vs_usual']}&times; your usual" if best.get("vs_usual")
+                 else f"{best.get('engagement', 0):,} engagements")
+        best_html = f"""
+                    <tr>
+                        <td style="padding: 0 32px 16px 32px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border: 1px solid #e6e8ef; border-radius: 12px;">
+                                <tr>
+                                    <td style="padding: 16px 20px;">
+                                        <div style="color: #c2410c; font-size: 12px; font-weight: 700;">Best post of the week &middot; {_escape(best.get("platform"))}</div>
+                                        <div style="color: #172033; font-size: 16px; font-weight: 700; line-height: 1.35; margin-top: 5px;">{_escape(best.get("title"))}</div>
+                                        <div style="color: #15803d; font-size: 14px; font-weight: 700; margin-top: 5px;">{score}</div>
+                                        <div style="margin-top: 12px;">
+                                            <a href="{_escape(best_url)}" style="display: inline-block; background-color: #c2410c; color: #ffffff; font-size: 14px; font-weight: 700; text-decoration: none; padding: 10px 20px; border-radius: 6px;">See how it did</a>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>"""
+    finding_html = (f"""
+                    <tr>
+                        <td style="padding: 0 32px 16px 32px; color: #475569; font-size: 14px; line-height: 1.55;">
+                            <strong style="color: #172033;">What works for you:</strong> {_escape(results["finding"])}.
+                            AVIR uses this when it writes your next posts.
+                        </td>
+                    </tr>""" if results.get("finding") else "")
+    waiting = results.get("comments_waiting") or 0
+    leads = results.get("leads_waiting") or 0
+    inbox_html = (f"""
+                    <tr>
+                        <td style="padding: 0 32px 18px 32px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #fff7ed; border-radius: 12px;">
+                                <tr>
+                                    <td style="padding: 14px 20px; color: #7c2d12; font-size: 14px; line-height: 1.55;">
+                                        <strong>{waiting} comment{"s" if waiting != 1 else ""} waiting for a reply</strong>{f" ({leads} possible lead{'s' if leads != 1 else ''})" if leads else ""}.
+                                        Suggested replies are ready.
+                                        <a href="{_escape(inbox_url)}" style="color: #c2410c; font-weight: 700; text-decoration: none;">Open your Inbox &rarr;</a>
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>""" if waiting else "")
+    posts = results.get("posts", 0)
+    intro = (f"Here's how your {posts} {'post' if posts == 1 else 'posts'} did last week."
+             if posts else "You didn't publish through AVIR AI last week, but people are talking to you.")
+    brand = f" at {_escape(company_name)}" if company_name else ""
+    return f"""<!DOCTYPE html>
+<html>
+<body style="margin: 0; padding: 0; background-color: #f8f9fc; font-family: 'Segoe UI', Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color: #f8f9fc; padding: 32px 0;">
+        <tr>
+            <td align="center">
+                <table role="presentation" width="560" cellpadding="0" cellspacing="0"
+                       style="background-color: #ffffff; border: 1px solid #e6e8ef; border-radius: 16px; overflow: hidden;">
+                    <tr>
+                        <td style="background-color: #e85a1c; background-image: linear-gradient(135deg, #ffa066 0%, #e85a1c 100%); padding: 28px 32px; text-align: center;">
+                            <span style="color: #ffffff; font-size: 22px; font-weight: 700;">Your week{brand}</span>
+                            <div style="color: #fff7ed; font-size: 13px; margin-top: 4px;">{_escape(results.get("week_label"))}</div>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 26px 32px 16px 32px; color: #172033; font-size: 15px; line-height: 1.6;">
+                            Hi {_escape(name)},<br><br>{_escape(intro)}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 0 32px 16px 32px;">
+                            <table role="presentation" width="100%" cellpadding="0" cellspacing="8" style="border-collapse: separate; margin: 0 -8px; width: calc(100% + 16px);">
+                                <tr>{tiles}
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>{best_html}{finding_html}{inbox_html}
+                    <tr>
+                        <td style="padding: 0 32px 24px 32px; color: #475569; font-size: 14px;">
+                            <a href="{_escape(performance_url)}" style="color: #c2410c; font-weight: 700; text-decoration: none;">See all your results &rarr;</a>
+                        </td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 16px 32px; background-color: #f8f9fc; border-top: 1px solid #e6e8ef; color: #667085; font-size: 12px; line-height: 1.6;">
+                            You get this once a week, when you have posts or comments to report.
+                            <a href="{_escape(settings_url)}" style="color: #c2410c; text-decoration: none;">Email settings</a> &middot;
+                            <a href="{_escape(unsubscribe_url)}" style="color: #c2410c; text-decoration: none;">Unsubscribe</a>
+                            <div style="margin-top: 8px; color: #9ca3af; font-size: 11px;">AVIR AI is a product of <a href="https://stradit.com/" style="color: #c2410c; text-decoration: none; font-weight: 600;">StradIT</a>.</div>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>"""
+
+
 def _build_monthly_recap_html(
     name: str, company_name: str | None, stats: dict, tips: list[str], ideas: list[dict],
     calendar_url: str, settings_url: str, unsubscribe_url: str,
@@ -1631,6 +1751,32 @@ class EmailService:
         ))
 
         self._deliver(msg, [to_email], "monthly_recap")
+
+        return {"success": True, "recipient": to_email}
+
+    def send_weekly_results_email(
+        self, to_email: str, name: str, company_name: str | None, results: dict, performance_url: str,
+        best_url: str, inbox_url: str, settings_url: str, unsubscribe_url: str,
+    ) -> dict:
+        """The weekly results email (services/results_email_service.py)."""
+        if not self.enabled:
+            raise RuntimeError(
+                "SMTP is not configured. Set SMTP_HOST, SMTP_USERNAME and SMTP_PASSWORD in .env."
+            )
+
+        msg = MIMEMultipart("mixed")
+        msg["Subject"] = f"Your week on social: {results.get('week_label')} - AVIR AI"
+        msg["From"] = self.from_email
+        msg["To"] = to_email
+        msg["List-Unsubscribe"] = f"<{unsubscribe_url}>"
+        msg["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+        msg.attach(MIMEText(
+            _build_weekly_results_html(name, company_name, results, performance_url, best_url, inbox_url,
+                                       settings_url, unsubscribe_url),
+            "html",
+        ))
+
+        self._deliver(msg, [to_email], "weekly_results")
 
         return {"success": True, "recipient": to_email}
 

@@ -176,6 +176,13 @@ def run_scheduler(app_root_path):
                 run_monthly_recap()
             except Exception as e:
                 logger.warning(f"Error running the monthly recap: {e}")
+            # Weekly results: sends only on RESULTS_EMAIL_WEEKDAY with WEEKLY_RESULTS_EMAIL on
+            try:
+                from services.results_email_service import run_weekly_results
+
+                run_weekly_results()
+            except Exception as e:
+                logger.warning(f"Error running the weekly results email: {e}")
             # Autopilot: plan two weeks ahead, write the days now due and send them
             # for approval (off until a user turns it on) - services/autopilot_service.py
             try:

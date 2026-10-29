@@ -3987,6 +3987,8 @@ def _email_automation_payload():
             "nudge_emails": f"Checked hourly: a festival {Config.NUDGE_OCCASION_DAYS} days ahead, this week's trend, "
                             f"or a reminder after {Config.NUDGE_INACTIVE_DAYS} quiet days. Max {Config.IDEA_EMAILS_PER_WEEK} idea emails a week.",
             "monthly_recap": f"From day {Config.RECAP_EMAIL_DAY} of each month, {Config.IDEAS_EMAIL_HOUR_UTC:02d}:00 UTC",
+            "weekly_results": f"{['Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays', 'Sundays'][Config.RESULTS_EMAIL_WEEKDAY % 7]} "
+                              f"from {Config.IDEAS_EMAIL_HOUR_UTC:02d}:00 UTC: last week's results, only when there is something to report",
             "approval_reminders": "Checked hourly: one reminder after 24 hours and a last one after 3 days. "
                                   "Requests older than 14 days are left alone.",
         },
@@ -5431,8 +5433,9 @@ def update_my_notifications():
     from db import get_ideas_email_settings, set_ideas_email_enabled
 
     data = request.get_json() or {}
-    if not any(k in data for k in ("ideas_email_enabled", "nudges_email_enabled", "recap_email_enabled")):
-        return jsonify({"success": False, "error": "ideas_email_enabled, nudges_email_enabled or recap_email_enabled (bool) is required"}), 400
+    if not any(k in data for k in ("ideas_email_enabled", "nudges_email_enabled", "recap_email_enabled", "results_email_enabled")):
+        return jsonify({"success": False, "error": "ideas_email_enabled, nudges_email_enabled, recap_email_enabled or "
+                                                   "results_email_enabled (bool) is required"}), 400
     user_id = get_current_user_id()
     if "ideas_email_enabled" in data:
         set_ideas_email_enabled(user_id, bool(data["ideas_email_enabled"]))
@@ -5444,7 +5447,37 @@ def update_my_notifications():
         from db import set_recap_email_enabled
 
         set_recap_email_enabled(user_id, bool(data["recap_email_enabled"]))
+    if "results_email_enabled" in data:
+        from db import set_results_email_enabled
+
+        set_results_email_enabled(user_id, bool(data["results_email_enabled"]))
     return jsonify({"success": True, "ideas_email": get_ideas_email_settings(user_id)})
+
+
+@api_bp.route("/me/notifications/results-email/send-now", methods=["POST"])
+@login_required_api
+@limit_by_user("email_user")
+def send_my_results_email_now():
+    """Settings -> Notifications -> "Send me last week's results now": the same
+    email the weekly run sends, to the logged-in user's own address."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from datetime import datetime, timezone
+
+    from db import get_ideas_email_settings
+    from services.results_email_service import last_week, send_results_email
+
+    user_id = get_current_user_id()
+    start, end, key = last_week(datetime.now(timezone.utc))
+    try:
+        outcome = send_results_email(user_id, Config.APP_BASE_URL or request.host_url, start, end, key)
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.warning(f"[Results email] Could not send to user {user_id}: {e}")
+        return jsonify({"success": False, "error": "The email could not be sent. Please try again later."}), 502
+    if not outcome["sent"]:
+        return jsonify({"success": False, "error": "Nothing was published through AVIR AI last week and no comments are "
+                                                   "waiting, so there is nothing to report yet."}), 409
+    return jsonify({"success": True, "email": (get_ideas_email_settings(user_id) or {}).get("email"), "posts": outcome["posts"]})
 
 
 @api_bp.route("/me/notifications/recap-email/send-now", methods=["POST"])
@@ -6262,6 +6295,7 @@ _UNSUBSCRIBE_PAGE = """<!DOCTYPE html>
 @api_bp.route("/notifications/ideas-email/unsubscribe/<token>", methods=["GET", "POST"], defaults={"kind": "ideas"})
 @api_bp.route("/notifications/nudges-email/unsubscribe/<token>", methods=["GET", "POST"], defaults={"kind": "nudges"})
 @api_bp.route("/notifications/recap-email/unsubscribe/<token>", methods=["GET", "POST"], defaults={"kind": "recap"})
+@api_bp.route("/notifications/results-email/unsubscribe/<token>", methods=["GET", "POST"], defaults={"kind": "results"})
 def unsubscribe_ideas_email(token, kind):
     """The unsubscribe link of the weekly ideas email (kind "ideas") or of
     the nudge emails ("nudges") - works without logging in (the token is
@@ -6272,7 +6306,8 @@ def unsubscribe_ideas_email(token, kind):
 
     from services.idea_digest_service import user_from_unsubscribe_token
 
-    what = {"ideas": "weekly ideas email", "nudges": "reminder emails", "recap": "monthly recap email"}[kind]
+    what = {"ideas": "weekly ideas email", "nudges": "reminder emails", "recap": "monthly recap email",
+            "results": "weekly results email"}[kind]
     user_id = user_from_unsubscribe_token(token, kind)
     if not user_id or not DB_AVAILABLE:
         return _UNSUBSCRIBE_PAGE.format(
@@ -6280,9 +6315,15 @@ def unsubscribe_ideas_email(token, kind):
             text="We couldn't read this unsubscribe link. You can switch these emails off under Settings &rarr; Notifications.",
         ), 400
     if request.method == "POST":
-        from db import set_ideas_email_enabled, set_nudge_email_enabled, set_recap_email_enabled
+        from db import (
+            set_ideas_email_enabled,
+            set_nudge_email_enabled,
+            set_recap_email_enabled,
+            set_results_email_enabled,
+        )
 
-        {"ideas": set_ideas_email_enabled, "nudges": set_nudge_email_enabled, "recap": set_recap_email_enabled}[kind](user_id, False)
+        {"ideas": set_ideas_email_enabled, "nudges": set_nudge_email_enabled, "recap": set_recap_email_enabled,
+         "results": set_results_email_enabled}[kind](user_id, False)
         return _UNSUBSCRIBE_PAGE.format(
             title="You're unsubscribed", action="",
             text=f"You won't get the {what} any more. You can switch it back on any time under Settings &rarr; Notifications.",

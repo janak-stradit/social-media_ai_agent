@@ -203,6 +203,13 @@ class Config:
     # only to users who created at least one post that month.
     MONTHLY_RECAP_EMAIL = os.getenv("MONTHLY_RECAP_EMAIL", "false").lower() == "true"
     RECAP_EMAIL_DAY = int(os.getenv("RECAP_EMAIL_DAY", "1"))
+    # Weekly results email (services/results_email_service.py): last week's
+    # reach and engagement, the best post against the user's usual, what works
+    # and comments waiting. Off until WEEKLY_RESULTS_EMAIL=true. Sent on
+    # RESULTS_EMAIL_WEEKDAY (0 = Monday) from IDEAS_EMAIL_HOUR_UTC, only to
+    # users with something to report (a published post or a waiting comment).
+    WEEKLY_RESULTS_EMAIL = os.getenv("WEEKLY_RESULTS_EMAIL", "false").lower() == "true"
+    RESULTS_EMAIL_WEEKDAY = int(os.getenv("RESULTS_EMAIL_WEEKDAY", "0"))
     # Reminder to a reviewer whose approval request is still pending after a
     # day, and once more after three (services/approval_reminder_service.py).
     # Off until APPROVAL_REMINDER_EMAILS=true or switched on in Admin > Emails.

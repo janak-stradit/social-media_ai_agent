@@ -268,15 +268,17 @@ $(document).ready(function () {
             $('#ideasEmailSwitch').prop('checked', !!s.enabled).prop('disabled', false);
             $('#nudgesEmailSwitch').prop('checked', !!s.nudges_enabled).prop('disabled', false);
             $('#recapEmailSwitch').prop('checked', !!s.recap_enabled).prop('disabled', false);
+            $('#resultsEmailSwitch').prop('checked', !!s.results_enabled).prop('disabled', false);
             $('#ideasEmailMeta').text(ideasEmailMeta(s));
         });
     }
     const EMAIL_SWITCHES = {
         ideasEmailSwitch: ['ideas_email_enabled', 'Weekly ideas email'],
         nudgesEmailSwitch: ['nudges_email_enabled', 'Reminder emails'],
-        recapEmailSwitch: ['recap_email_enabled', 'Monthly recap']
+        recapEmailSwitch: ['recap_email_enabled', 'Monthly recap'],
+        resultsEmailSwitch: ['results_email_enabled', 'Weekly results']
     };
-    $('#ideasEmailSwitch, #nudgesEmailSwitch, #recapEmailSwitch').on('change', function () {
+    $('#ideasEmailSwitch, #nudgesEmailSwitch, #recapEmailSwitch, #resultsEmailSwitch').on('change', function () {
         const $switch = $(this).prop('disabled', true);
         const enabled = $switch.prop('checked');
         const [field, what] = EMAIL_SWITCHES[this.id];
@@ -316,6 +318,18 @@ $(document).ready(function () {
             url: '/api/me/notifications/recap-email/send-now',
             type: 'POST',
             success: function (r) { showToast(`Sent your recap (${r.posts} posts) to ${r.email}.`, 'success'); },
+            error: function (xhr) { showToast((xhr.responseJSON || {}).error || 'The email could not be sent.', 'error'); },
+            complete: function () { $btn.prop('disabled', false).html(label); }
+        });
+    });
+    $('#sendResultsEmailNowBtn').on('click', function () {
+        const $btn = $(this).prop('disabled', true);
+        const label = $btn.html();
+        $btn.html('<span class="spinner-border spinner-border-sm me-1" role="status"></span>Putting your results together...');
+        $.ajax({
+            url: '/api/me/notifications/results-email/send-now',
+            type: 'POST',
+            success: function (r) { showToast(`Sent last week's results to ${r.email}.`, 'success'); },
             error: function (xhr) { showToast((xhr.responseJSON || {}).error || 'The email could not be sent.', 'error'); },
             complete: function () { $btn.prop('disabled', false).html(label); }
         });
