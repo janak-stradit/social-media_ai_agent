@@ -114,6 +114,12 @@ class Config:
     INSTAGRAM_APP_ID = os.getenv("INSTAGRAM_APP_ID", "")
     INSTAGRAM_APP_SECRET = os.getenv("INSTAGRAM_APP_SECRET", "")
     INSTAGRAM_OAUTH_SCOPES = os.getenv("INSTAGRAM_OAUTH_SCOPES", "instagram_business_basic,instagram_business_content_publish")
+    # New comments pushed by Meta as they happen (/api/webhooks/meta,
+    # services/comment_service.py handle_webhook), instead of waiting for the
+    # next check. Any random string; type the same one as the "Verify token"
+    # in the Meta app -> Webhooks. Empty: the webhook is off and comments are
+    # only fetched on the schedule.
+    META_WEBHOOK_VERIFY_TOKEN = os.getenv("META_WEBHOOK_VERIFY_TOKEN", "")
     # Public HTTPS address Instagram downloads post images from (Meta fetches
     # them itself). Defaults to APP_BASE_URL; set it if images are served elsewhere.
     PUBLIC_MEDIA_BASE_URL = os.getenv("PUBLIC_MEDIA_BASE_URL", "")

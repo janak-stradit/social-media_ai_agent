@@ -3390,6 +3390,15 @@ def published_posts_due_for_comments(now: datetime, max_age_days: int = 7) -> li
         return due
 
 
+def find_published_post(platform: str, platform_post_id: str) -> dict | None:
+    """{id, user_id, platform, platform_post_id} of a post the app published, by the platform's id for it."""
+    with Session(engine) as session:
+        row = session.query(PublishedPost).filter(PublishedPost.platform == platform,
+                                                  PublishedPost.platform_post_id == str(platform_post_id)).first()
+        return {"id": row.id, "user_id": row.user_id, "platform": row.platform,
+                "platform_post_id": row.platform_post_id} if row else None
+
+
 def save_post_comments(post: dict, comments: list[dict] | None) -> int:
     """Store comments not seen before ([{id, author, text, at}]) and mark the
     post checked (None: the fetch failed - still checked, tried again later). New ones."""

@@ -250,3 +250,80 @@ def test_new_comments_ring_the_bell_once_a_day_per_post(platforms):
         session.commit()
     comment_service.refresh_due(now)
     assert len(db.list_notifications(user["id"])["items"]) == 2
+
+
+# ── Meta webhooks: comments as they happen ─────────────────────────────
+
+def _signed(client, payload, secret="app-secret"):
+    import hashlib
+    import hmac
+    import json as _json
+
+    raw = _json.dumps(payload).encode()
+    sig = "sha256=" + hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
+    return client.post("/api/webhooks/meta", data=raw, content_type="application/json",
+                       headers={"X-Hub-Signature-256": sig})
+
+
+@pytest.fixture
+def webhooks(monkeypatch):
+    from config import Config
+
+    monkeypatch.setattr(Config, "META_WEBHOOK_VERIFY_TOKEN", "verify-me")
+    monkeypatch.setattr(Config, "META_APP_SECRET", "app-secret")
+    monkeypatch.setattr(Config, "INSTAGRAM_APP_SECRET", "ig-secret")
+
+
+def test_meta_checks_the_verify_token(app, webhooks, monkeypatch):
+    client = app.test_client()
+    ok = client.get("/api/webhooks/meta?hub.mode=subscribe&hub.verify_token=verify-me&hub.challenge=12345")
+    assert ok.status_code == 200 and ok.data == b"12345"
+    assert client.get("/api/webhooks/meta?hub.mode=subscribe&hub.verify_token=wrong&hub.challenge=1").status_code == 403
+    from config import Config
+
+    monkeypatch.setattr(Config, "META_WEBHOOK_VERIFY_TOKEN", "")
+    assert client.get("/api/webhooks/meta?hub.mode=subscribe&hub.verify_token=&hub.challenge=1").status_code == 404
+
+
+def test_a_pushed_comment_lands_in_the_inbox_and_rings_the_bell(app, webhooks):
+    user = _user()
+    ig_post = _published(user, "instagram")
+    fb_post = _published(user, "facebook")
+    with Session(db.engine) as session:
+        ig_media = session.get(db.PublishedPost, ig_post).platform_post_id
+        fb_id = session.get(db.PublishedPost, fb_post).platform_post_id
+    client = app.test_client()
+    instagram = {"object": "instagram", "entry": [{"id": "ig_owner", "changes": [
+        {"field": "comments", "value": {"id": f"w_{uuid.uuid4().hex}", "text": "Is this in Pune?", "from": {"id": "u1", "username": "neha.k"},
+                                        "media": {"id": ig_media}}},
+        {"field": "comments", "value": {"id": f"w_{uuid.uuid4().hex}", "text": "Yes!", "from": {"id": "ig_owner", "username": "clinic"},
+                                        "media": {"id": ig_media}}},  # the account's own
+        {"field": "comments", "value": {"id": f"w_{uuid.uuid4().hex}", "text": "Me too", "parent_id": "x", "from": {"id": "u2"},
+                                        "media": {"id": ig_media}}},  # a reply
+        {"field": "comments", "value": {"id": f"w_{uuid.uuid4().hex}", "text": "Hi", "from": {"id": "u3"},
+                                        "media": {"id": "not_ours"}}},  # a post AVIR didn't publish
+    ]}]}
+    assert _signed(client, instagram, "ig-secret").get_json()["new_comments"] == 1
+    page = {"object": "page", "entry": [{"id": "page_1", "changes": [{"field": "feed", "value": {
+        "item": "comment", "verb": "add", "post_id": fb_id, "comment_id": f"fbw_{uuid.uuid4().hex}", "message": "Book me in",
+        "from": {"id": "u9", "name": "Arjun Rao"}, "created_time": 1793300000}}]}]}
+    assert _signed(client, page).get_json()["new_comments"] == 1
+    assert _signed(client, page).get_json()["new_comments"] == 0  # sent twice: stored once
+
+    texts = {c["text"]: c for c in _mine(user)["comments"]}
+    assert set(texts) == {"Is this in Pune?", "Book me in"} and texts["Book me in"]["author"] == "Arjun Rao"
+    assert {n["title"] for n in db.list_notifications(user["id"])["items"]} == {
+        "1 new comment on your Instagram post", "1 new comment on your Facebook post"}
+
+
+def test_an_unsigned_or_wrongly_signed_webhook_is_refused(app, webhooks):
+    user = _user()
+    post = _published(user, "instagram")
+    with Session(db.engine) as session:
+        media = session.get(db.PublishedPost, post).platform_post_id
+    payload = {"object": "instagram", "entry": [{"id": "o", "changes": [{"field": "comments", "value": {
+        "id": f"w_{uuid.uuid4().hex}", "text": "Spam", "from": {"id": "u"}, "media": {"id": media}}}]}]}
+    client = app.test_client()
+    assert _signed(client, payload, "someone-elses-secret").status_code == 403
+    assert client.post("/api/webhooks/meta", json=payload).status_code == 403
+    assert _mine(user)["comments"] == []

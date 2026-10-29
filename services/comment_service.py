@@ -155,6 +155,67 @@ def refresh_due(now: datetime | None = None) -> dict:
     return result
 
 
+# ── Pushed by Meta as they happen (webhooks) ──────────────────────────
+
+
+def webhook_signature_ok(raw: bytes, signature: str) -> bool:
+    """X-Hub-Signature-256 is "sha256=<HMAC of the body>" with the app's secret:
+    the Facebook app's for Pages (and Instagram through a Page), the Instagram
+    app's for accounts connected with Instagram Login."""
+    import hashlib
+    import hmac
+
+    sent = (signature or "").removeprefix("sha256=")
+    secrets = [s for s in (Config.META_APP_SECRET, Config.INSTAGRAM_APP_SECRET) if s]
+    return bool(sent) and any(
+        hmac.compare_digest(hmac.new(s.encode(), raw, hashlib.sha256).hexdigest(), sent) for s in secrets)
+
+
+def _webhook_comments(payload: dict) -> list[tuple[str, str, dict]]:
+    """[(platform, the post's platform id, {id, author, text, at})] for new
+    top-level comments by other people in a Meta webhook payload."""
+    out = []
+    obj = payload.get("object")
+    for entry in payload.get("entry") or []:
+        owner = str(entry.get("id") or "")  # the Page or Instagram account the webhook is for
+        for change in entry.get("changes") or []:
+            value = change.get("value") or {}
+            author = value.get("from") or {}
+            if str(author.get("id") or "") == owner:
+                continue  # the account's own comment
+            if obj == "instagram" and change.get("field") == "comments" and not value.get("parent_id"):
+                media = (value.get("media") or {}).get("id")
+                if media and value.get("id"):
+                    out.append(("instagram", str(media), {"id": value["id"], "author": author.get("username"),
+                                                          "text": value.get("text") or "", "at": datetime.now(timezone.utc)}))
+            elif obj == "page" and change.get("field") == "feed" and value.get("item") == "comment" \
+                    and value.get("verb") == "add" and value.get("parent_id") in (None, value.get("post_id")):
+                if value.get("post_id") and value.get("comment_id"):
+                    at = value.get("created_time")
+                    out.append(("facebook", str(value["post_id"]), {
+                        "id": value["comment_id"], "author": author.get("name"), "text": value.get("message") or "",
+                        "at": datetime.fromtimestamp(at, tz=timezone.utc) if isinstance(at, (int, float)) else datetime.now(timezone.utc)}))
+    return out
+
+
+def handle_webhook(payload: dict, now: datetime | None = None) -> int:
+    """Store the new comments in a (signature-checked) Meta webhook and ring
+    the bell for them. Comments on posts the app didn't publish are ignored. New ones."""
+    from db import find_published_post, save_post_comments
+
+    now = now or datetime.now(timezone.utc)
+    added = 0
+    for platform, post_id, comment in _webhook_comments(payload):
+        post = find_published_post(platform, post_id)
+        if not post:
+            continue
+        new = save_post_comments(post, [comment])
+        if new:
+            notify(post, now)
+        added += new
+    return added
+
+
 # ── Suggesting a reply ────────────────────────────────────────────────
 
 

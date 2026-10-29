@@ -5993,6 +5993,35 @@ def billing_stripe_webhook():
     return jsonify({"success": True, "status": status})
 
 
+@api_bp.route("/webhooks/meta", methods=["GET", "POST"])
+def meta_webhook():
+    """Meta -> us: new comments on Facebook Pages and Instagram accounts as
+    they happen (services/comment_service.py handle_webhook). GET is Meta's
+    one-time check of the verify token; POST is signed (X-Hub-Signature-256).
+    Off while META_WEBHOOK_VERIFY_TOKEN is empty."""
+    from services import comment_service
+
+    if not Config.META_WEBHOOK_VERIFY_TOKEN:
+        return jsonify({"success": False, "error": "Webhooks are not set up"}), 404
+    if request.method == "GET":
+        import hmac
+
+        if request.args.get("hub.mode") == "subscribe" and hmac.compare_digest(
+                request.args.get("hub.verify_token", ""), Config.META_WEBHOOK_VERIFY_TOKEN):
+            return request.args.get("hub.challenge", ""), 200, {"Content-Type": "text/plain"}
+        return jsonify({"success": False}), 403
+    raw = request.get_data()
+    if not comment_service.webhook_signature_ok(raw, request.headers.get("X-Hub-Signature-256", "")):
+        current_app.logger.warning("Meta webhook with a bad signature was refused")
+        return jsonify({"success": False}), 403
+    try:
+        added = comment_service.handle_webhook(request.get_json(silent=True) or {})
+    except Exception as err:  # noqa: BLE001 - 200 anyway, so Meta doesn't keep resending: the scheduled check picks them up
+        current_app.logger.warning(f"Meta webhook not handled: {err}")
+        added = 0
+    return jsonify({"success": True, "new_comments": added})
+
+
 @api_bp.route("/me/billing-profile", methods=["GET"])
 @login_required_api
 def my_billing_profile():
