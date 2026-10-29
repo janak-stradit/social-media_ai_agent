@@ -3374,6 +3374,17 @@ def save_post_comments(post: dict, comments: list[dict] | None) -> int:
     return added
 
 
+def count_new_comments(post_id: int) -> tuple[int, str | None, bool]:
+    """(comments waiting for a reply on the post, its title, published in the last day)."""
+    with Session(engine) as session:
+        row = session.get(PublishedPost, post_id)
+        if row is None:
+            return 0, None, False
+        waiting = session.query(func.count(PostComment.id)).filter(
+            PostComment.post_id == post_id, PostComment.status == "new").scalar() or 0
+        return int(waiting), row.title, _utcnow() - _as_utc(row.published_at) < timedelta(days=1)
+
+
 def _comment_dict(row: "PostComment", post: "PublishedPost | None") -> dict:
     out = {k: getattr(row, k) for k in COMMENT_FIELDS}
     out.update(commented_at=_as_utc(row.commented_at).isoformat(),

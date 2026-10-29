@@ -107,6 +107,25 @@ def fetch_linkedin(post_urn: str, account: dict) -> list[dict]:
 FETCHERS = {"facebook": fetch_facebook, "instagram": fetch_instagram, "linkedin": fetch_linkedin}
 
 
+def notify(post: dict, now: datetime) -> None:
+    """A bell notification for new comments on a post: once per post per day
+    (dedupe_key), counting what is waiting on it. In a post's first day it
+    says so - early replies are when they help a post most."""
+    from db import count_new_comments, create_notification
+
+    waiting, title, young = count_new_comments(post["id"])
+    if not waiting:
+        return
+    where = (post["platform"] or "").capitalize()
+    create_notification(
+        post["user_id"], "comments",
+        f"{waiting} new comment{'s' if waiting != 1 else ''} on your {where} post",
+        (f"“{title}”. " if title else "") + ("It went out today: replying now helps it keep going."
+                                             if young else "Suggested replies are ready to review in your Inbox."),
+        "/inbox", f"comments:{post['id']}:{now.astimezone(timezone.utc).date().isoformat()}", when=now,
+    )
+
+
 def refresh_due(now: datetime | None = None) -> dict:
     """Scheduler: fetch comments for every post that is due."""
     from db import published_posts_due_for_comments, save_post_comments
@@ -123,7 +142,10 @@ def refresh_due(now: datetime | None = None) -> dict:
             save_post_comments(post, None)
             continue
         try:
-            result["new"] += save_post_comments(post, fetcher(post["platform_post_id"], account))
+            added = save_post_comments(post, fetcher(post["platform_post_id"], account))
+            result["new"] += added
+            if added:
+                notify(post, now or datetime.now(timezone.utc))
         except Exception as err:  # noqa: BLE001 - one platform's error must not stop the others
             save_post_comments(post, None)
             result["failed"] += 1

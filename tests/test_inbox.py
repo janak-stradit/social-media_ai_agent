@@ -231,3 +231,22 @@ def test_the_private_reply_endpoint_marks_it(app, platforms):
         s["user_id"] = user["id"]
     body = client.post(f"/api/inbox/{comment['id']}/reply", json={"text": "Thanks, we'll message you.", "private": True}).get_json()
     assert body["comment"]["status"] == "replied" and body["comment"]["replied_privately"] is True
+
+
+def test_new_comments_ring_the_bell_once_a_day_per_post(platforms):
+    user = _user()
+    young = _published(user, "instagram", hours_ago=2)
+    _published(user, "facebook", hours_ago=30)
+    now = datetime.now(timezone.utc)
+    comment_service.refresh_due(now)
+    bell = {n["title"]: n for n in db.list_notifications(user["id"])["items"]}
+    assert set(bell) == {"1 new comment on your Instagram post", "1 new comment on your Facebook post"}
+    assert "replying now helps" in bell["1 new comment on your Instagram post"]["body"]  # its first day
+    assert "Inbox" in bell["1 new comment on your Facebook post"]["body"]
+    assert all(n["url"] == "/inbox" and n["kind"] == "comments" for n in bell.values())
+
+    with Session(db.engine) as session:  # fetched again the same day with nothing new: no second bell
+        session.query(db.PublishedPost).filter(db.PublishedPost.id == young).update({"comments_at": None})
+        session.commit()
+    comment_service.refresh_due(now)
+    assert len(db.list_notifications(user["id"])["items"]) == 2
