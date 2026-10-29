@@ -1852,6 +1852,7 @@ $(document).ready(function () {
 
     // ── Generate Content (Main Chat Flow) ──────────────────────────────
     window.generateContent = function () {
+        setComposerOptions(false);  // the options panel closes on every send, so the chat is in view
         if (imageUploading) {
             showToast('Wait until the image has finished uploading - then send.', 'warning');
             return;
