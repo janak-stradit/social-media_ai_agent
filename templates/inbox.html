@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inbox — AVIR AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body class="inbox-page">
+
+<!-- ═══════════════════════ TOP HEADER ═══════════════════════ -->
+<header class="app-header">
+    <div class="header-brand">
+        <div class="brand-logo">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+            </svg>
+        </div>
+        <div class="brand-text">
+            <span class="brand-name">AVIR AI <span class="beta-badge">Beta</span></span>
+            <span class="brand-tagline">Inbox</span>
+        </div>
+    </div>
+    <nav class="header-nav">
+        <a href="/dashboard" class="header-nav-item"><i class="fas fa-comments me-2"></i>Studio Chat</a>
+        <a href="/performance" class="header-nav-item"><i class="fas fa-chart-simple me-2"></i>Performance</a>
+        <a href="/inbox" class="header-nav-item active" aria-current="page"><i class="fas fa-inbox me-2"></i>Inbox</a>
+    </nav>
+    <div class="header-actions">
+        {% include 'partials/user_menu.html' %}
+    </div>
+</header>
+
+<!-- Comments on published posts (static/js/inbox.js; /api/inbox, services/comment_service.py).
+     A reply is only posted when the person approves it. -->
+<main class="perf-main inbox-main">
+    <div class="perf-head">
+        <div>
+            <h1>Inbox</h1>
+            <p>Comments on posts AVIR published. Replies are drafted in your brand voice; nothing is posted until you approve it.</p>
+        </div>
+    </div>
+
+    <div class="inbox-row">
+        <section class="perf-card inbox-list-card" aria-label="Comments">
+            <div class="inbox-filters" role="group" aria-label="Show">
+                <button type="button" data-status="new" aria-pressed="true">Needs reply <span data-count="new"></span></button>
+                <button type="button" data-status="replied" aria-pressed="false">Replied <span data-count="replied"></span></button>
+                <button type="button" data-status="done" aria-pressed="false">Done <span data-count="done"></span></button>
+                <button type="button" data-status="all" aria-pressed="false">All</button>
+            </div>
+            <ul class="inbox-list" id="inboxList"></ul>
+        </section>
+
+        <section class="perf-card inbox-detail" id="inboxDetail" aria-live="polite">
+            <p class="perf-empty">Pick a comment to see it and its suggested reply.</p>
+        </section>
+    </div>
+    <p class="perf-note perf-foot">New comments are checked every 30 minutes in a post’s first day, then every 3 hours for a week. Replying needs the comment permissions on your connected accounts.</p>
+</main>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="toast" class="ent-toast" role="alert">
+        <div class="ent-toast-body" id="toastBody"></div>
+    </div>
+</div>
+
+<script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
+<script src="{{ url_for('static', filename='js/inbox.js') }}"></script>
+    {% include 'partials/cookie_consent.html' %}
+</body>
+</html>

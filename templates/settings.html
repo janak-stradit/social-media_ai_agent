@@ -487,12 +487,24 @@
                             <input class="form-check-input" type="checkbox" role="switch" id="recapEmailSwitch" aria-label="Monthly recap email" disabled>
                         </div>
                     </div>
+                    <div class="d-flex align-items-start justify-content-between gap-3 py-3 border-top">
+                        <div>
+                            <label class="fw-bold text-navy mb-1 d-block" for="resultsEmailSwitch">Weekly results</label>
+                            <div class="small text-slate-500">Every week: how last week's posts did, your best post against your usual, what works for you, and comments waiting for a reply. Only sent when there is something to report.</div>
+                        </div>
+                        <div class="form-check form-switch m-0">
+                            <input class="form-check-input" type="checkbox" role="switch" id="resultsEmailSwitch" aria-label="Weekly results email" disabled>
+                        </div>
+                    </div>
                     <div class="border-top pt-3">
                         <button type="button" class="btn btn-sm btn-outline-secondary" id="sendIdeasEmailNowBtn">
                             <i class="fas fa-paper-plane me-1"></i>Send me this week's ideas now
                         </button>
                         <button type="button" class="btn btn-sm btn-outline-secondary ms-1" id="sendRecapEmailNowBtn">
                             <i class="fas fa-chart-simple me-1"></i>Send me last month's recap now
+                        </button>
+                        <button type="button" class="btn btn-sm btn-outline-secondary ms-1" id="sendResultsEmailNowBtn">
+                            <i class="fas fa-chart-line me-1"></i>Send me last week's results now
                         </button>
                         <div class="small text-slate-500 mt-2">Sends the email to your own address so you can see what it looks like. It can take a minute or two.</div>
                     </div>

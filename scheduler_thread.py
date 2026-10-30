@@ -89,45 +89,17 @@ def process_due_posts(app_root_path):
 
 
 def refresh_youtube_tokens():
-    """Refresh YouTube tokens for accounts that have a refresh token."""
-    from db import SocialAccount
-    from services.social_publisher_service import SocialPublisherService
+    """Renew YouTube access tokens (they last an hour) a few minutes before
+    they run out, from each connection's refresh token (services/youtube_service.py)."""
+    from services.youtube_service import refresh_tokens
 
-    with Session(engine) as session:
-        yt_accounts = (
-            session.query(SocialAccount)
-            .filter(
-                SocialAccount.platform == "youtube",
-                SocialAccount.status == "connected",
-                SocialAccount.refresh_token.isnot(None),
-                # False positive: filter condition, not a hardcoded credential.
-                SocialAccount.refresh_token != "",  # nosec B105
-            )
-            .all()
-        )
-
-        if not yt_accounts:
-            return
-
-        publisher = SocialPublisherService()
-        for acc in yt_accounts:
-            try:
-                logger.info(f"Refreshing YouTube access token for account ID {acc.id}...")
-                # KNOWN BUG (pre-existing): SocialPublisherService has no refresh_youtube_token
-                # method, so this always raises and is swallowed by the except below -- YouTube
-                # tokens are never actually refreshed. Needs a real OAuth2 refresh-token-grant
-                # implementation; flagged during lint adoption, not fixed here.
-                new_token = publisher.refresh_youtube_token(acc.refresh_token)  # pylint: disable=no-member
-                acc.access_token = new_token
-                session.commit()
-                logger.info(f"Successfully refreshed YouTube token for account ID {acc.id}")
-            except Exception as e:
-                logger.warning(f"Failed to refresh YouTube token for account ID {acc.id}: {e}")
+    renewed = refresh_tokens()
+    if renewed:
+        logger.info(f"Renewed {renewed} YouTube token(s).")
 
 
 def run_scheduler(app_root_path):
     logger.info("Background scheduling thread started...")
-    last_refresh_time = 0
     last_trends_time = 0
     last_digest_time = 0
 
@@ -137,14 +109,12 @@ def run_scheduler(app_root_path):
         except Exception as e:
             logger.warning(f"Error processing posts: {e}")
 
-        # Refresh tokens every 45 minutes (2700 seconds)
+        # YouTube tokens last an hour: each loop renews the ones about to run out
         current_time = time.time()
-        if current_time - last_refresh_time >= 2700:
-            try:
-                refresh_youtube_tokens()
-                last_refresh_time = current_time
-            except Exception as e:
-                logger.warning(f"Error running token refresh: {e}")
+        try:
+            refresh_youtube_tokens()
+        except Exception as e:
+            logger.warning(f"Error running token refresh: {e}")
 
         # Industry trends for "Ideas for you": once an hour, look up again the
         # industries whose trends are over a day old (services/trend_service.py)
@@ -176,6 +146,13 @@ def run_scheduler(app_root_path):
                 run_monthly_recap()
             except Exception as e:
                 logger.warning(f"Error running the monthly recap: {e}")
+            # Weekly results: sends only on RESULTS_EMAIL_WEEKDAY with WEEKLY_RESULTS_EMAIL on
+            try:
+                from services.results_email_service import run_weekly_results
+
+                run_weekly_results()
+            except Exception as e:
+                logger.warning(f"Error running the weekly results email: {e}")
             # Autopilot: plan two weeks ahead, write the days now due and send them
             # for approval (off until a user turns it on) - services/autopilot_service.py
             try:
@@ -189,11 +166,19 @@ def run_scheduler(app_root_path):
 
             # How published posts are doing (likes, comments, reach) - services/metrics_service.py
             try:
-                from services.metrics_service import refresh_due
+                from services.metrics_service import refresh_due, refresh_followers
 
                 refresh_due()
+                refresh_followers()
             except Exception as e:
                 logger.warning(f"Error refreshing post metrics: {e}")
+            # New comments on published posts, for the Inbox - services/comment_service.py
+            try:
+                from services.comment_service import refresh_due as refresh_comments
+
+                refresh_comments()
+            except Exception as e:
+                logger.warning(f"Error fetching post comments: {e}")
             # Billing: renewal and plan-ending reminders (email + bell), once each
             try:
                 from services.billing_notice_service import run_billing_reminders

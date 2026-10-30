@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Performance — AVIR AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body class="performance-page">
+
+<!-- ═══════════════════════ TOP HEADER ═══════════════════════ -->
+<header class="app-header">
+    <div class="header-brand">
+        <div class="brand-logo">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+            </svg>
+        </div>
+        <div class="brand-text">
+            <span class="brand-name">AVIR AI <span class="beta-badge">Beta</span></span>
+            <span class="brand-tagline">Performance</span>
+        </div>
+    </div>
+    <nav class="header-nav">
+        <a href="/dashboard" class="header-nav-item"><i class="fas fa-comments me-2"></i>Studio Chat</a>
+        <a href="/calendar" class="header-nav-item"><i class="fas fa-calendar-days me-2"></i>Content Calendar</a>
+        <a href="/performance" class="header-nav-item active" aria-current="page"><i class="fas fa-chart-simple me-2"></i>Performance</a>
+    </nav>
+    <div class="header-actions">
+        {% include 'partials/user_menu.html' %}
+    </div>
+</header>
+
+<!-- How published posts did (static/js/performance.js). Data: /api/analytics?detail=1
+     (each post scored at 48 hours against the user's usual, db.post_analytics),
+     /api/insights (services/insights_service.py) and /api/best-times. -->
+<main class="perf-main">
+
+    <div class="perf-head">
+        <div>
+            <h1>Performance</h1>
+            <p>How your published posts are doing, compared with your own usual.</p>
+        </div>
+        <div class="perf-period" role="group" aria-label="Period">
+            <button type="button" data-days="7" aria-pressed="false">7 days</button>
+            <button type="button" data-days="30" aria-pressed="true">30 days</button>
+            <button type="button" data-days="90" aria-pressed="false">90 days</button>
+        </div>
+    </div>
+
+    <section class="perf-kpis" id="perfKpis" aria-label="Summary" aria-live="polite"></section>
+
+    <!-- Posts well above the usual: make more like them, or give them more reach (performance.js renderWinners) -->
+    <section class="perf-card perf-winners d-none" id="perfWinnersCard" aria-labelledby="perfWinnersTitle">
+        <div class="perf-card-head">
+            <h2 id="perfWinnersTitle">Do more of what worked</h2>
+            <span class="perf-sub">Posts at 2× your usual or more. Good ones to build on, or to boost if you run ads.</span>
+        </div>
+        <div id="perfWinners"></div>
+    </section>
+
+    <div class="perf-row">
+        <section class="perf-card perf-insights" aria-labelledby="perfInsightsTitle">
+            <div class="perf-card-head">
+                <h2 id="perfInsightsTitle">What works for you</h2>
+                <span class="perf-sub" id="perfInsightsSub"></span>
+            </div>
+            <div id="perfInsights"></div>
+            <p class="perf-note">Shown only when enough posts back it up. Patterns from your own posts, not promises. AVIR uses them when it writes your next posts.</p>
+        </section>
+
+        <section class="perf-card perf-platforms" aria-labelledby="perfPlatformsTitle">
+            <h2 id="perfPlatformsTitle">By platform</h2>
+            <div id="perfPlatforms"></div>
+            <div class="perf-best">
+                <h3>Best time to post</h3>
+                <div id="perfBestTimes"></div>
+            </div>
+        </section>
+    </div>
+
+    <section class="perf-card" aria-labelledby="perfPostsTitle">
+        <div class="perf-card-head">
+            <h2 id="perfPostsTitle">Your posts</h2>
+            <span class="perf-sub">Each post is scored at 48 hours old, so new posts aren’t compared with month-old ones</span>
+        </div>
+        <div class="perf-table-wrap">
+            <table class="perf-table">
+                <thead>
+                    <tr>
+                        <th scope="col">Post</th>
+                        <th scope="col">Platform</th>
+                        <th scope="col">Score at 48h</th>
+                        <th scope="col" class="num">Reach</th>
+                        <th scope="col" class="num">Engagement</th>
+                        <th scope="col" class="num">Comments</th>
+                        <th scope="col" class="num">Saves + shares</th>
+                        <th scope="col"><span class="visually-hidden">Details</span></th>
+                    </tr>
+                </thead>
+                <tbody id="perfPosts"></tbody>
+            </table>
+        </div>
+        <p class="perf-empty d-none" id="perfPostsEmpty">Nothing published through AVIR AI in this period. Once you schedule or publish posts, their results show up here.</p>
+    </section>
+
+    <p class="perf-note perf-foot">Numbers refresh every 6 hours for a post’s first 2 days, then daily for 30 days. Some platforms only share reach with business accounts.</p>
+</main>
+
+<script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
+<script src="{{ url_for('static', filename='js/performance.js') }}"></script>
+    {% include 'partials/cookie_consent.html' %}
+</body>
+</html>

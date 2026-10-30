@@ -276,7 +276,8 @@ def test_only_an_approved_item_can_be_published_and_only_once(app, graph, approv
 
     view = owner.get(f"/api/approval-requests/{rid}").get_json()["request"]
     assert view["publishing"] == {"can_publish": True, "instagram": "@acme.logistics",
-                                  "accounts": {"linkedin": None, "instagram": "@acme.logistics", "facebook": None}}
+                                  "accounts": {"linkedin": None, "instagram": "@acme.logistics", "facebook": None,
+                                               "youtube": None}}
     reviewer_view = _login(app, approved["reviewer"]).get(f"/api/approval-requests/{rid}").get_json()["request"]
     assert reviewer_view["publishing"] == {"can_publish": False}
     assert _login(app, approved["reviewer"]).post(f"/api/approval-requests/{rid}/publish",

@@ -186,3 +186,34 @@ How it behaves:
   less are left (`refresh_instagram_tokens`), so users don't have to sign in
   again. If renewal fails, the usual reminders (bell and email) still go out
   before it expires.
+
+## Comments as they happen (Meta webhooks)
+
+The Inbox checks for new comments every 30 minutes in a post's first day,
+then every 3 hours (`services/comment_service.py refresh_due`). With
+webhooks, Meta tells AVIR AI about a new comment within seconds, so the bell
+and the Inbox show it straight away - the first hour is when replies help a
+post most. The scheduled check keeps running as a safety net.
+
+1. Pick any long random string and set it as `META_WEBHOOK_VERIFY_TOKEN` in
+   `.env`. While it is empty the webhook is off (`/api/webhooks/meta` answers 404).
+2. Meta app -> **Webhooks**:
+   - **Page**: callback URL `https://<your domain>/api/webhooks/meta`, verify
+     token as above, subscribe to the **feed** field.
+   - **Instagram**: same URL and token, subscribe to **comments**.
+   Meta calls the URL once to check the token; the app answers with the
+   challenge.
+3. Each connected Page must be subscribed to the app
+   (`POST /{page-id}/subscribed_apps?subscribed_fields=feed` with the Page
+   token). Instagram accounts connected with Instagram Login are subscribed
+   from Meta app -> Instagram -> Webhooks.
+4. Live data needs the comment permissions approved in App Review
+   (`pages_read_engagement`, `pages_manage_metadata`, `instagram_manage_comments`
+   or `instagram_business_manage_comments`). Until then only the app's testers'
+   accounts send webhooks.
+
+Every POST is checked against `X-Hub-Signature-256`, signed with
+`META_APP_SECRET` (Pages, and Instagram through a Page) or
+`INSTAGRAM_APP_SECRET` (Instagram Login); anything else is refused. Only new
+top-level comments on posts AVIR AI published are stored; the account's own
+comments, replies and edits are ignored.

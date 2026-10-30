@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Post results — AVIR AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body class="performance-page">
+
+<!-- ═══════════════════════ TOP HEADER ═══════════════════════ -->
+<header class="app-header">
+    <div class="header-brand">
+        <div class="brand-logo">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+            </svg>
+        </div>
+        <div class="brand-text">
+            <span class="brand-name">AVIR AI <span class="beta-badge">Beta</span></span>
+            <span class="brand-tagline">Performance</span>
+        </div>
+    </div>
+    <nav class="header-nav">
+        <a href="/dashboard" class="header-nav-item"><i class="fas fa-comments me-2"></i>Studio Chat</a>
+        <a href="/performance" class="header-nav-item active"><i class="fas fa-chart-simple me-2"></i>Performance</a>
+        <a href="/inbox" class="header-nav-item"><i class="fas fa-inbox me-2"></i>Inbox</a>
+    </nav>
+    <div class="header-actions">
+        {% include 'partials/user_menu.html' %}
+    </div>
+</header>
+
+<!-- One published post (static/js/performance_post.js; /api/analytics/posts/<id>) -->
+<main class="perf-main" id="postMain" data-post-id="{{ post_id }}">
+    <a href="/performance" class="perf-back"><i class="fas fa-chevron-left" aria-hidden="true"></i>Back to Performance</a>
+
+    <div class="perf-head">
+        <div class="post-head">
+            <div class="post-badges" id="postBadges"></div>
+            <h1 id="postTitle">Loading...</h1>
+            <p id="postMeta"></p>
+        </div>
+        <div class="perf-winner-actions" id="postActions"></div>
+    </div>
+
+    <section class="perf-kpis post-stats" id="postStats" aria-label="Results"></section>
+
+    <div class="perf-row">
+        <section class="perf-card perf-insights" aria-labelledby="postCurveTitle">
+            <div class="perf-card-head">
+                <h2 id="postCurveTitle">How it grew</h2>
+                <span class="perf-sub" id="postCurveLegend"></span>
+            </div>
+            <figure class="post-curve" id="postCurve"></figure>
+        </section>
+        <section class="perf-card perf-platforms" aria-labelledby="postWhyTitle">
+            <h2 id="postWhyTitle">What likely explains it</h2>
+            <ul class="post-why" id="postWhy"></ul>
+            <p class="perf-note">Based on how your other posts with the same traits did. Platforms don’t publish their ranking rules.</p>
+        </section>
+    </div>
+
+    <div class="perf-row">
+        <section class="perf-card perf-insights" aria-labelledby="postCommentsTitle">
+            <div class="perf-card-head">
+                <h2 id="postCommentsTitle">Comments</h2>
+                <a class="perf-open" href="/inbox">Open Inbox</a>
+            </div>
+            <ul class="post-comments" id="postComments"></ul>
+        </section>
+        <section class="perf-card perf-platforms" aria-labelledby="postTextTitle">
+            <h2 id="postTextTitle">What was posted</h2>
+            <p class="post-caption" id="postCaption"></p>
+            <p class="perf-sub" id="postTags"></p>
+        </section>
+    </div>
+</main>
+
+<script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
+<script src="{{ url_for('static', filename='js/performance_post.js') }}"></script>
+    {% include 'partials/cookie_consent.html' %}
+</body>
+</html>

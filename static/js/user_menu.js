@@ -137,7 +137,8 @@ window.avirSetMoney = function (r) {
         const list = $('notifBellList');
         const count = $('notifBellCount');
         const readAll = $('notifBellReadAll');
-        const ICONS = { occasion: 'fa-calendar-day', trend: 'fa-arrow-trend-up', inactive: 'fa-lightbulb', brand_ready: 'fa-palette', billing: 'fa-receipt' };
+        const ICONS = { occasion: 'fa-calendar-day', trend: 'fa-arrow-trend-up', inactive: 'fa-lightbulb', brand_ready: 'fa-palette', billing: 'fa-receipt',
+                        comments: 'fa-comments' };
 
         function ago(iso) {
             const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));

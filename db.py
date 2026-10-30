@@ -142,6 +142,10 @@ class User(Base):
     # recap_email_last_month: the month ("2026-09") the last recap covered, so each month is sent once.
     recap_email_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     recap_email_last_month: Mapped[str | None] = mapped_column(String(7), nullable=True)
+    # Weekly results email (services/results_email_service.py). None = on.
+    # results_email_last_week: the week ("2026-W44") the last one covered, so each week is sent once.
+    results_email_enabled: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    results_email_last_week: Mapped[str | None] = mapped_column(String(8), nullable=True)
     # Two-step sign-in (auth/two_factor.py): the authenticator secret,
     # encrypted; set while being set up, turned on once a code is confirmed.
     totp_secret: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -681,6 +685,73 @@ class PublishedPost(Base):
     engagement: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     metrics_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     metrics_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    comments_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)  # comments last fetched
+
+
+class PostComment(Base):
+    """A comment on a post the app published, for the Inbox
+    (services/comment_service.py). status: new / replied / done. The reply is
+    only ever posted when the person approves it; draft is AVIR's suggestion
+    (kind and note come with it), cost_usd what writing it cost."""
+
+    __tablename__ = "post_comments"
+    __table_args__ = (
+        UniqueConstraint("platform", "comment_id", name="uq_post_comment"),
+        {"schema": SCHEMA} if not IS_SQLITE else {},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    post_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)  # PublishedPost.id
+    platform: Mapped[str] = mapped_column(String(16), nullable=False)
+    comment_id: Mapped[str] = mapped_column(String(200), nullable=False)
+    author: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    commented_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    status: Mapped[str] = mapped_column(String(12), default="new", nullable=False)
+    kind: Mapped[str | None] = mapped_column(String(12), nullable=True)  # question / lead / praise / complaint / other
+    draft: Mapped[str | None] = mapped_column(Text, nullable=True)
+    note: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    reply: Mapped[str | None] = mapped_column(Text, nullable=True)
+    replied_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    replied_privately: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # sent as a DM
+    reply_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+
+class PostMetricSnapshot(Base):
+    """A published post's numbers as they were at one fetch, age_hours after
+    it went out. PublishedPost.metrics only keeps the latest, which flatters
+    older posts; comparing every post at the same age (SCORE_AGE_HOURS) is fair."""
+
+    __tablename__ = "post_metric_snapshots"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    post_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    age_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    taken_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False)
+    metrics: Mapped[str] = mapped_column(Text, nullable=False)  # JSON
+    engagement: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+
+class FollowerCount(Base):
+    """A connected account's follower count, once a day (services/metrics_service.py).
+    followers is None when the platform wouldn't say that day (error says why),
+    so a failing account is still only asked once a day."""
+
+    __tablename__ = "follower_counts"
+    __table_args__ = (
+        UniqueConstraint("user_id", "platform", "day", name="uq_follower_count_day"),
+        {"schema": SCHEMA} if not IS_SQLITE else {},
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    platform: Mapped[str] = mapped_column(String(16), nullable=False)
+    day: Mapped[str] = mapped_column(String(10), nullable=False)  # YYYY-MM-DD, UTC
+    followers: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    error: Mapped[str | None] = mapped_column(String(300), nullable=True)
 
 
 class Subscription(Base):
@@ -1236,6 +1307,8 @@ def init_db():
             f"ALTER TABLE {usr_tbl} ADD COLUMN guide_state TEXT",
             f"ALTER TABLE {usr_tbl} ADD COLUMN recap_email_enabled BOOLEAN",
             f"ALTER TABLE {usr_tbl} ADD COLUMN recap_email_last_month VARCHAR(7)",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN results_email_enabled BOOLEAN",
+            f"ALTER TABLE {usr_tbl} ADD COLUMN results_email_last_week VARCHAR(8)",
             f"ALTER TABLE {_tbl('memory_embeddings')} ADD COLUMN user_id INTEGER",
             f"CREATE INDEX IF NOT EXISTS ix_memory_embeddings_user_id ON {_tbl('memory_embeddings')} (user_id)",
             # Autopilot: the plan (posts a week, days off, mix, topics, images) and why each post
@@ -1338,6 +1411,20 @@ def init_db():
                     sub_conn.execute(text(f"ALTER TABLE {soc_tbl} ADD COLUMN {col_name} {col_type}"))
             except Exception:
                 pass
+
+        # Published posts: when their comments were last fetched (Inbox)
+        pub_tbl = f'"{SCHEMA}".published_posts' if not IS_SQLITE else "published_posts"
+        try:
+            with engine.begin() as sub_conn:
+                sub_conn.execute(text(f"ALTER TABLE {pub_tbl} ADD COLUMN comments_at TIMESTAMP"))
+        except Exception:  # noqa: BLE001 - already there
+            pass
+        comment_tbl = f'"{SCHEMA}".post_comments' if not IS_SQLITE else "post_comments"
+        try:
+            with engine.begin() as sub_conn:
+                sub_conn.execute(text(f"ALTER TABLE {comment_tbl} ADD COLUMN replied_privately BOOLEAN DEFAULT FALSE NOT NULL"))
+        except Exception:  # noqa: BLE001 - already there
+            pass
 
         # Some source URLs (e.g. Google News RSS redirects) exceed the original
         # VARCHAR(500) post_url limit and silently fail the whole insert batch.
@@ -2095,6 +2182,39 @@ def users_due_recap(month_key: str) -> list[dict]:
         return [{"id": u.id, "name": u.name, "email": u.email} for u in rows]
 
 
+def set_results_email_enabled(user_id: int, enabled: bool) -> bool:
+    with Session(engine) as session:
+        user = session.get(User, user_id)
+        if not user:
+            return False
+        user.results_email_enabled = bool(enabled)
+        session.commit()
+        return True
+
+
+def mark_results_email_sent(user_id: int, week_key: str) -> None:
+    with Session(engine) as session:
+        session.query(User).filter(User.id == user_id).update({"results_email_last_week": week_key})
+        session.commit()
+
+
+def users_due_results(week_key: str) -> list[dict]:
+    """Active, verified users who haven't switched the weekly results email
+    off and haven't been sent the one for `week_key` ("2026-W44") yet."""
+    with Session(engine) as session:
+        rows = (
+            session.query(User)
+            .filter(
+                User.is_active.isnot(False),
+                User.email_verified.is_(True),
+                User.results_email_enabled.isnot(False),
+                (User.results_email_last_week.is_(None)) | (User.results_email_last_week != week_key),
+            )
+            .all()
+        )
+        return [{"id": u.id, "name": u.name, "email": u.email} for u in rows]
+
+
 def set_nudge_email_enabled(user_id: int, enabled: bool) -> bool:
     with Session(engine) as session:
         user = session.get(User, user_id)
@@ -2115,6 +2235,7 @@ def get_ideas_email_settings(user_id: int) -> dict | None:
             "nudges_enabled": user.nudge_email_enabled is not False,
             "recap_enabled": user.recap_email_enabled is not False,
             "recap_last_month": user.recap_email_last_month,
+            "results_enabled": user.results_email_enabled is not False,
             "email": user.email,
             "last_sent_at": _as_utc(user.ideas_email_last_sent_at).isoformat() if user.ideas_email_last_sent_at else None,
         }
@@ -2835,11 +2956,14 @@ def get_system_usage_totals() -> dict:
 
 
 def _media_charges_total(session, user_id: int | None = None) -> float:
-    """Cost of images generated outside a run (run images are in the run's cost)."""
+    """Cost of images generated outside a run (run images are in the run's cost),
+    and of suggested replies to comments (Inbox), which have no run either."""
     query = session.query(func.coalesce(func.sum(ImageGeneration.cost_usd), 0.0)).filter(ImageGeneration.run_id.is_(None))
+    replies = session.query(func.coalesce(func.sum(PostComment.cost_usd), 0.0))
     if user_id is not None:
         query = query.filter(ImageGeneration.user_id == user_id)
-    return float(query.scalar() or 0.0)
+        replies = replies.filter(PostComment.user_id == user_id)
+    return float(query.scalar() or 0.0) + float(replies.scalar() or 0.0)
 
 
 def log_image_generation(
@@ -3143,18 +3267,27 @@ def register_published_post(user_id: int, platform: str, platform_post_id: str |
             session.rollback()
 
 
+SCORE_AGE_HOURS = 48  # every post is scored at this age (post_analytics)
+MIN_FOR_USUAL = 5  # scored posts on a platform before "x your usual" is shown
+USUAL_LOOKBACK_DAYS = 180
+
+
 def published_posts_due_for_metrics(now: datetime, max_age_days: int = 30) -> list[dict]:
     """Posts to refresh: published within max_age_days, never fetched, or last
-    fetched over 6 hours ago (first 2 days) / 24 hours ago (after that)."""
+    fetched over 6 hours ago (first 2 days) / 24 hours ago (after that). Also
+    once as soon as a post turns SCORE_AGE_HOURS old, so its score is taken then."""
     oldest = (now - timedelta(days=max_age_days)).astimezone(timezone.utc).replace(tzinfo=None)
     naive_now = now.astimezone(timezone.utc).replace(tzinfo=None)
+    score_age = timedelta(hours=SCORE_AGE_HOURS)
     with Session(engine) as session:
         rows = session.query(PublishedPost).filter(PublishedPost.published_at >= oldest).all()
         due = []
         for row in rows:
             fresh = naive_now - row.published_at < timedelta(days=2)
             every = timedelta(hours=6) if fresh else timedelta(hours=24)
-            if row.metrics_at is None or naive_now - row.metrics_at >= every:
+            score_due = (row.metrics_at is not None and row.metrics_at < row.published_at + score_age
+                         <= naive_now)
+            if row.metrics_at is None or naive_now - row.metrics_at >= every or score_due:
                 due.append({"id": row.id, "user_id": row.user_id, "platform": row.platform,
                             "platform_post_id": row.platform_post_id})
         return due
@@ -3170,7 +3303,190 @@ def save_post_metrics(post_id: int, metrics: dict | None, error: str | None = No
         if metrics is not None:
             row.metrics = json.dumps(metrics)
             row.engagement = sum(int(metrics.get(k) or 0) for k in ("likes", "comments", "shares", "saves"))
+            age = max(0, int((_as_utc(row.metrics_at) - _as_utc(row.published_at)).total_seconds() // 3600))
+            session.add(PostMetricSnapshot(post_id=row.id, age_hours=age, taken_at=row.metrics_at,
+                                           metrics=row.metrics, engagement=row.engagement))
         session.commit()
+
+
+def _scores(session, user_id: int, since: datetime) -> dict[int, dict]:
+    """{post id: {platform, engagement, final}} for the user's posts since
+    `since`, each at SCORE_AGE_HOURS old: the first snapshot taken at that age
+    or later (final), else the latest one of a post still younger than that.
+    Posts with no snapshots (published before snapshots were kept) are left out."""
+    rows = (session.query(PublishedPost.id, PublishedPost.platform, PostMetricSnapshot.age_hours,
+                          PostMetricSnapshot.engagement)
+            .join(PostMetricSnapshot, PostMetricSnapshot.post_id == PublishedPost.id)
+            .filter(PublishedPost.user_id == user_id, PublishedPost.published_at >= since)
+            .order_by(PostMetricSnapshot.age_hours).all())
+    scores: dict[int, dict] = {}
+    for post_id, platform, age, engagement in rows:
+        current = scores.get(post_id)
+        if current and current["final"]:
+            continue  # already have the first snapshot at the scoring age
+        scores[post_id] = {"platform": platform, "engagement": int(engagement or 0), "final": age >= SCORE_AGE_HOURS}
+    return scores
+
+
+def accounts_due_for_follower_count(now: datetime) -> list[tuple[int, str]]:
+    """(user id, platform) of connected accounts not yet counted today (UTC)."""
+    day = now.astimezone(timezone.utc).strftime("%Y-%m-%d")
+    with Session(engine) as session:
+        counted = {(u, p) for u, p in session.query(FollowerCount.user_id, FollowerCount.platform)
+                   .filter(FollowerCount.day == day)}
+        connected = session.query(SocialAccount.user_id, SocialAccount.platform).filter(
+            SocialAccount.status == "connected").distinct().all()
+        return [(u, p) for u, p in connected if (u, p) not in counted]
+
+
+def save_follower_count(user_id: int, platform: str, now: datetime, followers: int | None,
+                        error: str | None = None) -> None:
+    from sqlalchemy.exc import IntegrityError
+
+    with Session(engine) as session:
+        session.add(FollowerCount(user_id=user_id, platform=platform, day=now.astimezone(timezone.utc).strftime("%Y-%m-%d"),
+                                  followers=followers, error=(error or "")[:300] or None))
+        try:
+            session.commit()
+        except IntegrityError:  # already counted today
+            session.rollback()
+
+
+def follower_growth(user_id: int, since: datetime, until: datetime | None = None) -> dict[str, dict]:
+    """{platform: {followers, change}}: the latest count up to `until`, and how
+    much it moved since the first count in the period (None with only one day)."""
+    lo = since.astimezone(timezone.utc).strftime("%Y-%m-%d")
+    hi = (until or _utcnow()).astimezone(timezone.utc).strftime("%Y-%m-%d")
+    with Session(engine) as session:
+        rows = (session.query(FollowerCount.platform, FollowerCount.day, FollowerCount.followers)
+                .filter(FollowerCount.user_id == user_id, FollowerCount.day >= lo, FollowerCount.day <= hi,
+                        FollowerCount.followers.isnot(None))
+                .order_by(FollowerCount.day).all())
+    days: dict[str, list[int]] = {}
+    for platform, _, followers in rows:
+        days.setdefault(platform, []).append(followers)
+    return {platform: {"followers": counts[-1], "change": counts[-1] - counts[0] if len(counts) > 1 else None}
+            for platform, counts in days.items()}
+
+
+# ── Comments on published posts: the Inbox (services/comment_service.py) ──
+
+COMMENT_FIELDS = ("id", "post_id", "platform", "comment_id", "author", "text", "status", "kind", "draft", "note",
+                  "reply", "reply_error", "replied_privately")
+
+
+def published_posts_due_for_comments(now: datetime, max_age_days: int = 7) -> list[dict]:
+    """Posts whose comments to fetch: every 30 minutes in their first day,
+    every 3 hours after that, for max_age_days."""
+    naive_now = now.astimezone(timezone.utc).replace(tzinfo=None)
+    with Session(engine) as session:
+        rows = session.query(PublishedPost).filter(PublishedPost.published_at >= naive_now - timedelta(days=max_age_days)).all()
+        due = []
+        for row in rows:
+            every = timedelta(minutes=30) if naive_now - row.published_at < timedelta(days=1) else timedelta(hours=3)
+            if row.comments_at is None or naive_now - row.comments_at >= every:
+                due.append({"id": row.id, "user_id": row.user_id, "platform": row.platform,
+                            "platform_post_id": row.platform_post_id})
+        return due
+
+
+def find_published_post(platform: str, platform_post_id: str) -> dict | None:
+    """{id, user_id, platform, platform_post_id} of a post the app published, by the platform's id for it."""
+    with Session(engine) as session:
+        row = session.query(PublishedPost).filter(PublishedPost.platform == platform,
+                                                  PublishedPost.platform_post_id == str(platform_post_id)).first()
+        return {"id": row.id, "user_id": row.user_id, "platform": row.platform,
+                "platform_post_id": row.platform_post_id} if row else None
+
+
+def save_post_comments(post: dict, comments: list[dict] | None) -> int:
+    """Store comments not seen before ([{id, author, text, at}]) and mark the
+    post checked (None: the fetch failed - still checked, tried again later). New ones."""
+    added = 0
+    with Session(engine) as session:
+        row = session.get(PublishedPost, post["id"])
+        if row is None:
+            return 0
+        row.comments_at = _utcnow().replace(tzinfo=None)
+        known = {cid for (cid,) in session.query(PostComment.comment_id).filter(
+            PostComment.platform == row.platform, PostComment.comment_id.in_([str(c["id"]) for c in comments or []]))}
+        for c in comments or []:
+            if str(c["id"]) in known or not (c.get("text") or "").strip():
+                continue
+            at = c.get("at") or _utcnow()
+            session.add(PostComment(user_id=row.user_id, post_id=row.id, platform=row.platform, comment_id=str(c["id"])[:200],
+                                    author=(c.get("author") or "")[:120] or None, text=c["text"][:5000],
+                                    commented_at=at.astimezone(timezone.utc).replace(tzinfo=None)))
+            known.add(str(c["id"]))
+            added += 1
+        session.commit()
+    return added
+
+
+def count_new_comments(post_id: int) -> tuple[int, str | None, bool]:
+    """(comments waiting for a reply on the post, its title, published in the last day)."""
+    with Session(engine) as session:
+        row = session.get(PublishedPost, post_id)
+        if row is None:
+            return 0, None, False
+        waiting = session.query(func.count(PostComment.id)).filter(
+            PostComment.post_id == post_id, PostComment.status == "new").scalar() or 0
+        return int(waiting), row.title, _utcnow() - _as_utc(row.published_at) < timedelta(days=1)
+
+
+def _comment_dict(row: "PostComment", post: "PublishedPost | None") -> dict:
+    out = {k: getattr(row, k) for k in COMMENT_FIELDS}
+    out.update(commented_at=_as_utc(row.commented_at).isoformat(),
+               replied_at=_as_utc(row.replied_at).isoformat() if row.replied_at else None,
+               post_title=post.title if post else None, post_permalink=post.permalink if post else None,
+               platform_post_id=post.platform_post_id if post else None)
+    return out
+
+
+def list_post_comments(user_id: int, status: str | None = "new", limit: int = 200) -> dict:
+    """{comments: newest first (status None: all), counts: {new, replied, done, kinds of new ones}}."""
+    with Session(engine) as session:
+        query = session.query(PostComment).filter(PostComment.user_id == user_id)
+        if status:
+            query = query.filter(PostComment.status == status)
+        rows = query.order_by(PostComment.commented_at.desc()).limit(limit).all()
+        posts = {p.id: p for p in session.query(PublishedPost).filter(PublishedPost.id.in_({r.post_id for r in rows}))} if rows else {}
+        counts = {"new": 0, "replied": 0, "done": 0, "kinds": {}}
+        for state, kind, n in (session.query(PostComment.status, PostComment.kind, func.count(PostComment.id))
+                               .filter(PostComment.user_id == user_id).group_by(PostComment.status, PostComment.kind)):
+            counts[state] = counts.get(state, 0) + n
+            if state == "new" and kind:
+                counts["kinds"][kind] = counts["kinds"].get(kind, 0) + n
+        return {"comments": [_comment_dict(r, posts.get(r.post_id)) for r in rows], "counts": counts}
+
+
+def get_post_comment(user_id: int, comment_id: int) -> dict | None:
+    with Session(engine) as session:
+        row = session.get(PostComment, comment_id)
+        if row is None or row.user_id != user_id:
+            return None
+        return _comment_dict(row, session.get(PublishedPost, row.post_id))
+
+
+def update_post_comment(user_id: int, comment_id: int, add_cost: float = 0.0, **fields) -> dict | None:
+    """Change a comment's draft / kind / note / status / reply... (only the owner's)."""
+    allowed = {"draft", "kind", "note", "status", "reply", "reply_error", "replied_at", "replied_privately"}
+    with Session(engine) as session:
+        row = session.get(PostComment, comment_id)
+        if row is None or row.user_id != user_id:
+            return None
+        for key, value in fields.items():
+            if key in allowed:
+                setattr(row, key, value.astimezone(timezone.utc).replace(tzinfo=None) if isinstance(value, datetime) else value)
+        row.cost_usd = float(row.cost_usd or 0.0) + float(add_cost or 0.0)
+        session.commit()
+        return _comment_dict(row, session.get(PublishedPost, row.post_id))
+
+
+def _median(values: list[int]) -> float:
+    values = sorted(values)
+    mid = len(values) // 2
+    return float(values[mid]) if len(values) % 2 else (values[mid - 1] + values[mid]) / 2
 
 
 def published_posts_for_timing(user_id: int, since: datetime) -> list[dict]:
@@ -3190,6 +3506,11 @@ def post_analytics(user_id: int, since: datetime, until: datetime | None = None)
     with Session(engine) as session:
         rows = session.query(PublishedPost).filter(PublishedPost.user_id == user_id, PublishedPost.published_at >= lo,
                                                    PublishedPost.published_at < hi).all()
+        scores = _scores(session, user_id, min(lo, (_utcnow() - timedelta(days=USUAL_LOOKBACK_DAYS)).replace(tzinfo=None)))
+        finals: dict[str, list[tuple[int, int]]] = {}  # platform -> [(post id, engagement at the scoring age)]
+        for post_id, score in scores.items():
+            if score["final"]:
+                finals.setdefault(score["platform"], []).append((post_id, score["engagement"]))
         totals = {k: 0 for k in keys}
         platforms: dict[str, dict] = {}
         posts = []
@@ -3201,15 +3522,102 @@ def post_analytics(user_id: int, since: datetime, until: datetime | None = None)
             for k in keys:
                 totals[k] += int(metrics.get(k) or 0)
                 per[k] += int(metrics.get(k) or 0)
-            posts.append({"platform": row.platform, "title": row.title, "permalink": row.permalink,
+            score = scores.get(row.id)
+            # "x your usual": against the median of the user's other scored posts on the platform
+            others = [e for pid, e in finals.get(row.platform, []) if pid != row.id]
+            usual = _median(others) if len(others) >= MIN_FOR_USUAL else None
+            posts.append({"id": row.id, "platform": row.platform, "title": row.title, "permalink": row.permalink,
                           "published_at": _as_utc(row.published_at).isoformat(), "engagement": row.engagement,
                           "metrics": metrics, "updated_at": _as_utc(row.metrics_at).isoformat() if row.metrics_at else None,
-                          "error": row.metrics_error})
+                          "error": row.metrics_error,
+                          "score": score["engagement"] if score else None,
+                          "score_final": bool(score and score["final"]),
+                          "vs_usual": round(score["engagement"] / usual, 1) if score and score["final"] and usual else None})
         posts.sort(key=lambda p: p["engagement"], reverse=True)
         engagement = sum(p["engagement"] for p in posts)
         return {"posts": len(posts), "engagement": engagement, "totals": totals,
                 "engagement_rate": round(100 * engagement / totals["reach"], 1) if totals["reach"] else None,
-                "platforms": platforms, "top_posts": posts[:5], "all_posts": posts}
+                "platforms": platforms, "top_posts": posts[:5], "all_posts": posts, "score_age_hours": SCORE_AGE_HOURS,
+                "followers": follower_growth(user_id, since, until)}
+
+
+def _source_items(session, user_id: int, sources: list[tuple[str, int | None]]) -> dict[tuple, list]:
+    """{(source, source id): the platform items} of the scheduled posts and
+    approval requests that published posts came from - what was actually posted."""
+    items: dict[tuple, list] = {}
+    scheduled = {sid for src, sid in sources if src == "scheduled" and sid}
+    approval = {sid for src, sid in sources if src == "approval" and sid}
+    if scheduled:
+        for post in session.query(ScheduledPost).filter(ScheduledPost.id.in_(scheduled), ScheduledPost.user_id == user_id):
+            try:
+                items[("scheduled", post.id)] = (json.loads(post.content_json) or {}).get("items") or []
+            except (TypeError, ValueError, AttributeError):
+                continue
+    if approval:
+        for req in session.query(ApprovalRequest).filter(ApprovalRequest.id.in_(approval), ApprovalRequest.user_id == user_id):
+            try:
+                items[("approval", req.id)] = json.loads(req.items) if req.items else []
+            except (TypeError, ValueError):
+                continue
+    return items
+
+
+def _item_for(items: dict[tuple, list], source: str, source_id: int | None, platform: str) -> dict | None:
+    return next((i for i in items.get((source, source_id), []) if isinstance(i, dict) and i.get("platform") == platform), None)
+
+
+def scored_post_items(user_id: int, days: int = USUAL_LOOKBACK_DAYS) -> list[dict]:
+    """[{platform, score, item}] for the user's posts scored at SCORE_AGE_HOURS
+    (final scores only) in the last `days`, with what was posted - for
+    services/insights_service.py. Posts whose item can't be found are left out."""
+    since = (_utcnow() - timedelta(days=days)).replace(tzinfo=None)
+    with Session(engine) as session:
+        scores = {pid: s for pid, s in _scores(session, user_id, since).items() if s["final"]}
+        if not scores:
+            return []
+        rows = session.query(PublishedPost.id, PublishedPost.platform, PublishedPost.source, PublishedPost.source_id).filter(
+            PublishedPost.id.in_(scores)).all()
+        items = _source_items(session, user_id, [(src, sid) for _, _, src, sid in rows])
+    out = []
+    for post_id, platform, source, source_id in rows:
+        item = _item_for(items, source, source_id, platform)
+        if item:
+            out.append({"platform": platform, "score": scores[post_id]["engagement"], "item": item})
+    return out
+
+
+def post_detail(user_id: int, post_id: int) -> dict | None:
+    """One published post for its page (Performance -> a post): its numbers,
+    every fetch over time, its score at SCORE_AGE_HOURS against the usual on
+    its platform, what was posted, and its comments. None if not the user's."""
+    with Session(engine) as session:
+        row = session.get(PublishedPost, post_id)
+        if row is None or row.user_id != user_id:
+            return None
+        snaps = (session.query(PostMetricSnapshot.age_hours, PostMetricSnapshot.engagement)
+                 .filter(PostMetricSnapshot.post_id == post_id).order_by(PostMetricSnapshot.age_hours).all())
+        since = (_utcnow() - timedelta(days=USUAL_LOOKBACK_DAYS)).replace(tzinfo=None)
+        scores = _scores(session, user_id, min(since, row.published_at))
+        others = [s["engagement"] for pid, s in scores.items()
+                  if s["final"] and s["platform"] == row.platform and pid != post_id]
+        usual = _median(others) if len(others) >= MIN_FOR_USUAL else None
+        item = _item_for(_source_items(session, user_id, [(row.source, row.source_id)]), row.source, row.source_id, row.platform)
+        comments = [_comment_dict(c, row) for c in session.query(PostComment).filter(PostComment.post_id == post_id)
+                    .order_by(PostComment.commented_at.desc()).all()]
+        score = scores.get(post_id)
+        return {
+            "id": row.id, "platform": row.platform, "title": row.title, "permalink": row.permalink,
+            "published_at": _as_utc(row.published_at).isoformat(), "engagement": row.engagement,
+            "metrics": json.loads(row.metrics) if row.metrics else {},
+            "updated_at": _as_utc(row.metrics_at).isoformat() if row.metrics_at else None, "error": row.metrics_error,
+            "score": score["engagement"] if score else None, "score_final": bool(score and score["final"]),
+            "usual": usual, "usual_posts": len(others),
+            "vs_usual": round(score["engagement"] / usual, 1) if score and score["final"] and usual else None,
+            "snapshots": [{"age_hours": a, "engagement": int(e or 0)} for a, e in snaps],
+            "score_age_hours": SCORE_AGE_HOURS,
+            "item": {k: (item or {}).get(k) for k in ("caption", "hashtags", "media", "images", "video")} if item else None,
+            "comments": comments,
+        }
 
 
 def proven_hashtags(user_id: int, days: int = 180, limit: int = 8) -> dict[str, list[str]]:
@@ -3224,24 +3632,10 @@ def proven_hashtags(user_id: int, days: int = 180, limit: int = 8) -> dict[str, 
                 .order_by(PublishedPost.engagement.desc()).limit(50).all())
         if not rows:
             return {}
-        items: dict[tuple, list] = {}
-        scheduled = {sid for _, src, sid, _ in rows if src == "scheduled" and sid}
-        approval = {sid for _, src, sid, _ in rows if src == "approval" and sid}
-        if scheduled:
-            for post in session.query(ScheduledPost).filter(ScheduledPost.id.in_(scheduled), ScheduledPost.user_id == user_id):
-                try:
-                    items[("scheduled", post.id)] = (json.loads(post.content_json) or {}).get("items") or []
-                except (TypeError, ValueError, AttributeError):
-                    continue
-        if approval:
-            for req in session.query(ApprovalRequest).filter(ApprovalRequest.id.in_(approval), ApprovalRequest.user_id == user_id):
-                try:
-                    items[("approval", req.id)] = json.loads(req.items) if req.items else []
-                except (TypeError, ValueError):
-                    continue
+        items = _source_items(session, user_id, [(src, sid) for _, src, sid, _ in rows])
     scores: dict[str, dict[str, list]] = {}  # platform -> {tag lower: [tag, score]}
     for platform, source, source_id, engagement in rows:
-        item = next((i for i in items.get((source, source_id), []) if isinstance(i, dict) and i.get("platform") == platform), None)
+        item = _item_for(items, source, source_id, platform)
         for tag in (item or {}).get("hashtags") or []:
             tag = str(tag).strip()
             if len(tag) < 2:
@@ -5202,6 +5596,18 @@ def get_global_cost_history(
 # ── SOCIAL ACCOUNTS & POST SCHEDULING HELPERS ─────────────────────────
 
 
+def social_account_expired(acc: "SocialAccount") -> bool:
+    """Whether the connection needs the user to sign in again. A YouTube token
+    lasts an hour but is renewed from its refresh token
+    (services/youtube_service.py), so only a refresh Google refused
+    (status "expired") counts there."""
+    if acc.status == "expired":
+        return True
+    if acc.platform == "youtube" and acc.refresh_token:
+        return False
+    return bool(acc.token_expires_at and acc.token_expires_at <= _utcnow().replace(tzinfo=None))
+
+
 def get_user_social_accounts(user_id: int) -> list[dict]:
     """Fetch all connected social media accounts for a user."""
     with Session(engine) as session:
@@ -5220,7 +5626,7 @@ def get_user_social_accounts(user_id: int) -> list[dict]:
                     "status": acc.status,
                     "connected_via": getattr(acc, "connected_via", None) or "manual",
                     "token_expires_at": _as_utc(acc.token_expires_at).isoformat() if getattr(acc, "token_expires_at", None) else None,
-                    "expired": bool(getattr(acc, "token_expires_at", None) and acc.token_expires_at <= _utcnow().replace(tzinfo=None)),
+                    "expired": social_account_expired(acc),
                     "updated_at": acc.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
                 }
             )
@@ -6145,7 +6551,8 @@ def update_scheduled_post_status(user_id: int, post_id: int, status: str) -> boo
 
 EMAIL_KINDS = {
     "weekly_ideas": "Weekly ideas", "nudge": "Festival / trend nudge", "festival_idea": "Festival idea (admin)",
-    "ideas_campaign": "Ideas (admin)", "monthly_recap": "Monthly recap", "verification": "Email verification",
+    "ideas_campaign": "Ideas (admin)", "monthly_recap": "Monthly recap", "weekly_results": "Weekly results",
+    "verification": "Email verification",
     "password_reset": "Password reset", "invitation": "Invitation", "approval_request": "Approval request",
     "approval_notification": "Approval notification", "approval_decision": "Approval decision",
     "credit_decision": "Credit decision", "sales_lead": "Sales lead", "approval_reminder": "Approval reminder",
@@ -6240,7 +6647,8 @@ def emailed_recently(user_id: int, kinds: tuple[str, ...], hours: int = 24) -> b
 # values (WEEKLY_IDEAS_EMAIL, NUDGE_EMAILS, MONTHLY_RECAP_EMAIL) are the
 # defaults until an admin changes a switch.
 EMAIL_AUTOMATIONS = {"weekly_ideas": "WEEKLY_IDEAS_EMAIL", "nudge_emails": "NUDGE_EMAILS",
-                     "monthly_recap": "MONTHLY_RECAP_EMAIL", "approval_reminders": "APPROVAL_REMINDER_EMAILS"}
+                     "monthly_recap": "MONTHLY_RECAP_EMAIL", "weekly_results": "WEEKLY_RESULTS_EMAIL",
+                     "approval_reminders": "APPROVAL_REMINDER_EMAILS"}
 
 
 def get_email_automation() -> dict:

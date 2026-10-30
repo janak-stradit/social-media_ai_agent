@@ -172,6 +172,17 @@ def generate_post(user_id, data: dict) -> dict:
         except Exception as tag_err:  # noqa: BLE001 - hashtags are written without them
             logger.warning(f"Proven hashtags unavailable: {tag_err}")
 
+    # How openings and lengths did on this brand's own posts, for the
+    # caption writer (services/insights_service.py; none until posts have results)
+    performance_notes = {}
+    if generate_text and platforms and user_id:
+        try:
+            from services.insights_service import prompt_notes
+
+            performance_notes = prompt_notes(user_id, platforms)
+        except Exception as notes_err:  # noqa: BLE001 - captions are written without them
+            logger.warning(f"Performance notes unavailable: {notes_err}")
+
     # Hashtags only need the post's themes, which the brief already gives:
     # they start now, alongside the research, instead of after it (each AI
     # call can take 10-30s, so waiting for one another is what makes it slow).
@@ -276,6 +287,7 @@ def generate_post(user_id, data: dict) -> dict:
                 brand_profile_block,
                 on_partial=_draft if progress_store.valid_id(progress_id) else None,
                 language=language,
+                performance_notes=performance_notes.get(platform),
             )
 
         def _all_hashtags():

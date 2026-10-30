@@ -178,7 +178,8 @@ def test_one_page_is_connected_straight_away_with_its_instagram(app, platforms):
     assert (facebook.account_id, facebook.account_name, facebook.access_token) == ("PAGE1", "Acme Logistics", "PAGE-TOKEN-1")
     assert (instagram.account_id, instagram.account_name, instagram.access_token) == ("IG1", "@acme.logistics", "PAGE-TOKEN-1")
     assert facebook.connected_via == "oauth" and facebook.token_expires_at is None and facebook.status == "connected"
-    assert publish_service.connections(user["id"]) == {"linkedin": None, "instagram": "@acme.logistics", "facebook": "Acme Logistics"}
+    assert publish_service.connections(user["id"]) == {"linkedin": None, "instagram": "@acme.logistics", "facebook": "Acme Logistics",
+                                                       "youtube": None}
 
     # the code was exchanged with the app's secret, then for a long-lived sign-in, and the Pages asked with that
     exchange, long_lived, pages = (c[2]["params"] for c in platforms.calls)

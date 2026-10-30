@@ -380,6 +380,26 @@ def create_app(config_name="development"):
         scheduled and suggested on each day (services/calendar_service.py)."""
         return render_template("calendar.html")
 
+    @app.route("/performance")
+    @login_required_page
+    def performance_page():
+        """Performance: how published posts did, each scored at 48 hours against
+        the user's usual, and what works for the brand (static/js/performance.js)."""
+        return render_template("performance.html")
+
+    @app.route("/performance/posts/<int:post_id>")
+    @login_required_page
+    def performance_post_page(post_id):
+        """One published post: how it did and its comments (static/js/performance_post.js)."""
+        return render_template("performance_post.html", post_id=post_id)
+
+    @app.route("/inbox")
+    @login_required_page
+    def inbox_page():
+        """Inbox: comments on published posts, each with a suggested reply the
+        person approves before it's posted (static/js/inbox.js)."""
+        return render_template("inbox.html")
+
     @app.route("/autopilot")
     @login_required_page
     def autopilot_page():

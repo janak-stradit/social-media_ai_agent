@@ -3987,6 +3987,8 @@ def _email_automation_payload():
             "nudge_emails": f"Checked hourly: a festival {Config.NUDGE_OCCASION_DAYS} days ahead, this week's trend, "
                             f"or a reminder after {Config.NUDGE_INACTIVE_DAYS} quiet days. Max {Config.IDEA_EMAILS_PER_WEEK} idea emails a week.",
             "monthly_recap": f"From day {Config.RECAP_EMAIL_DAY} of each month, {Config.IDEAS_EMAIL_HOUR_UTC:02d}:00 UTC",
+            "weekly_results": f"{['Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays', 'Sundays'][Config.RESULTS_EMAIL_WEEKDAY % 7]} "
+                              f"from {Config.IDEAS_EMAIL_HOUR_UTC:02d}:00 UTC: last week's results, only when there is something to report",
             "approval_reminders": "Checked hourly: one reminder after 24 hours and a last one after 3 days. "
                                   "Requests older than 14 days are left alone.",
         },
@@ -4225,6 +4227,8 @@ def youtube_auth_redirect():
 def youtube_auth_callback():
     """Google sends the user back here. The channel is saved for the signed-in
     user who started the sign-in; the outcome is shown in Settings."""
+    from datetime import datetime, timedelta, timezone
+
     from flask import redirect, session
 
     saved = session.pop("oauth_state", None)  # one use
@@ -4286,6 +4290,8 @@ def youtube_auth_callback():
             refresh_token=refresh_token,
             connection_type="direct",
             connected_via="oauth",
+            # an hour: renewed from the refresh token before then (services/youtube_service.py)
+            token_expires_at=(datetime.now(timezone.utc) + timedelta(seconds=int(tokens.get("expires_in") or 3600))).replace(tzinfo=None),
         )
         log_event("social.oauth", provider="youtube", status="connected")
         return _oauth_done("youtube", True, f"Connected YouTube ({channel_name}).")
@@ -5431,8 +5437,9 @@ def update_my_notifications():
     from db import get_ideas_email_settings, set_ideas_email_enabled
 
     data = request.get_json() or {}
-    if not any(k in data for k in ("ideas_email_enabled", "nudges_email_enabled", "recap_email_enabled")):
-        return jsonify({"success": False, "error": "ideas_email_enabled, nudges_email_enabled or recap_email_enabled (bool) is required"}), 400
+    if not any(k in data for k in ("ideas_email_enabled", "nudges_email_enabled", "recap_email_enabled", "results_email_enabled")):
+        return jsonify({"success": False, "error": "ideas_email_enabled, nudges_email_enabled, recap_email_enabled or "
+                                                   "results_email_enabled (bool) is required"}), 400
     user_id = get_current_user_id()
     if "ideas_email_enabled" in data:
         set_ideas_email_enabled(user_id, bool(data["ideas_email_enabled"]))
@@ -5444,7 +5451,37 @@ def update_my_notifications():
         from db import set_recap_email_enabled
 
         set_recap_email_enabled(user_id, bool(data["recap_email_enabled"]))
+    if "results_email_enabled" in data:
+        from db import set_results_email_enabled
+
+        set_results_email_enabled(user_id, bool(data["results_email_enabled"]))
     return jsonify({"success": True, "ideas_email": get_ideas_email_settings(user_id)})
+
+
+@api_bp.route("/me/notifications/results-email/send-now", methods=["POST"])
+@login_required_api
+@limit_by_user("email_user")
+def send_my_results_email_now():
+    """Settings -> Notifications -> "Send me last week's results now": the same
+    email the weekly run sends, to the logged-in user's own address."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from datetime import datetime, timezone
+
+    from db import get_ideas_email_settings
+    from services.results_email_service import last_week, send_results_email
+
+    user_id = get_current_user_id()
+    start, end, key = last_week(datetime.now(timezone.utc))
+    try:
+        outcome = send_results_email(user_id, Config.APP_BASE_URL or request.host_url, start, end, key)
+    except Exception as e:  # noqa: BLE001
+        current_app.logger.warning(f"[Results email] Could not send to user {user_id}: {e}")
+        return jsonify({"success": False, "error": "The email could not be sent. Please try again later."}), 502
+    if not outcome["sent"]:
+        return jsonify({"success": False, "error": "Nothing was published through AVIR AI last week and no comments are "
+                                                   "waiting, so there is nothing to report yet."}), 409
+    return jsonify({"success": True, "email": (get_ideas_email_settings(user_id) or {}).get("email"), "posts": outcome["posts"]})
 
 
 @api_bp.route("/me/notifications/recap-email/send-now", methods=["POST"])
@@ -5588,9 +5625,34 @@ def post_analytics_route():
         days = max(1, min(365, int(request.args.get("days", 30))))
     except ValueError:
         days = 30
-    data = post_analytics(get_current_user_id(), datetime.now(timezone.utc) - timedelta(days=days))
-    data.pop("all_posts", None)
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    data = post_analytics(get_current_user_id(), since)
+    if request.args.get("detail") == "1":
+        # The Performance page: every post, and the period before for comparison
+        before = post_analytics(get_current_user_id(), since - timedelta(days=days), since)
+        data["previous"] = {k: before[k] for k in ("posts", "engagement", "totals", "engagement_rate")}
+    else:
+        data.pop("all_posts", None)
     return jsonify({"success": True, "days": days, "analytics": data})
+
+
+@api_bp.route("/analytics/posts/<int:post_id>", methods=["GET"])
+@login_required_api
+def post_detail_route(post_id):
+    """One published post for its page: numbers, how they grew, its score at
+    48 hours against the usual, why it likely did (services/insights_service.py
+    explain) and its comments."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import post_detail
+    from services.insights_service import explain
+
+    user_id = get_current_user_id()
+    post = post_detail(user_id, post_id)
+    if not post:
+        return jsonify({"error": "Post not found"}), 404
+    post["why"] = explain(user_id, post["platform"], post["item"]) if post["item"] else []
+    return jsonify({"success": True, "post": post})
 
 
 @api_bp.route("/repurpose", methods=["POST"])
@@ -5672,6 +5734,141 @@ def best_times_route():
     from services.best_time_service import best_times
 
     return jsonify({"success": True, "platforms": best_times(get_current_user_id(), _tz_minutes())})
+
+
+@api_bp.route("/insights", methods=["GET"])
+@login_required_api
+def insights_route():
+    """What works for this brand: kinds of post that did clearly better or
+    worse than its others, each scored at 48 hours (services/insights_service.py)."""
+    if not DB_AVAILABLE:
+        return jsonify({"success": True, "insights": [], "posts": 0})
+    from services.insights_service import what_works
+
+    return jsonify({"success": True, **what_works(get_current_user_id())})
+
+
+@api_bp.route("/post-score", methods=["POST"])
+@login_required_api
+def post_score_route():
+    """A quick checklist for a post being edited (services/post_score_service.py).
+    No AI call; personal where the brand's own results say more."""
+    from services.post_score_service import score
+
+    data = request.get_json(silent=True) or {}
+    caption = str(data.get("caption") or "")[:5000]
+    hashtags = [str(t)[:100] for t in (data.get("hashtags") or [])[:60] if isinstance(t, str)]
+    findings = []
+    if DB_AVAILABLE:
+        try:
+            from services.insights_service import what_works
+
+            findings = what_works(get_current_user_id())["insights"]
+        except Exception as err:  # noqa: BLE001 - the common-practice checks still work
+            logger.warning(f"Post score without insights: {err}")
+    media = data.get("media") if data.get("media") in ("none", "single", "carousel") else None
+    images = [str(i) for i in (data.get("images") or [])[:20]] if isinstance(data.get("images"), list) else []
+    return jsonify({"success": True, **score(str(data.get("platform") or ""), caption, hashtags, media, images, findings)})
+
+
+# ── Inbox: comments on published posts (services/comment_service.py) ──────
+
+
+@api_bp.route("/inbox", methods=["GET"])
+@login_required_api
+def inbox_list():
+    """Comments on the user's published posts, newest first: ?status=new
+    (default) / replied / done / all, with counts for the filters."""
+    if not DB_AVAILABLE:
+        return jsonify({"success": True, "comments": [], "counts": {"new": 0, "replied": 0, "done": 0, "kinds": {}}})
+    from db import list_post_comments
+
+    status = request.args.get("status", "new")
+    status = None if status == "all" else status if status in ("new", "replied", "done") else "new"
+    return jsonify({"success": True, **list_post_comments(get_current_user_id(), status)})
+
+
+@api_bp.route("/inbox/<int:comment_id>/suggest", methods=["POST"])
+@login_required_api
+@limit_by_user("ai_user")
+def inbox_suggest(comment_id):
+    """A suggested reply (one small AI call, counted towards credits). Nothing is posted."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import get_post_comment, update_post_comment
+    from services import comment_service
+
+    user_id = get_current_user_id()
+    comment = get_post_comment(user_id, comment_id)
+    if not comment:
+        return jsonify({"error": "Comment not found"}), 404
+    try:
+        if _credit_blocked(get_user_usage_stats(user_id)):
+            return jsonify({"error": "Credit limit reached. Please request a credit extension.", "credit_limit_exceeded": True}), 402
+    except Exception as cred_err:  # noqa: BLE001
+        current_app.logger.warning(f"[Credits] Check error: {cred_err}")
+    try:
+        suggestion, cost = comment_service.suggest(user_id, comment)
+    except comment_service.ReplyError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    except Exception as err:  # noqa: BLE001
+        current_app.logger.warning(f"[Inbox] Could not suggest a reply: {err}")
+        return jsonify({"success": False, "error": "Couldn't suggest a reply right now. Please try again or write your own."}), 502
+    updated = update_post_comment(user_id, comment_id, add_cost=cost, **suggestion)
+    log_event("inbox.suggest", comment_id=comment_id, platform=comment["platform"], kind=suggestion["kind"])
+    return jsonify({"success": True, "comment": updated})
+
+
+@api_bp.route("/inbox/<int:comment_id>/reply", methods=["POST"])
+@login_required_api
+def inbox_reply(comment_id):
+    """Post the reply the person approved (their text, as edited) under the
+    comment, or with {private: true} send it to the commenter as a private
+    message (Facebook and Instagram, within 7 days of the comment)."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from datetime import datetime, timezone
+
+    from db import get_post_comment, update_post_comment
+    from services import comment_service
+    from services.publish_service import accounts
+
+    user_id = get_current_user_id()
+    comment = get_post_comment(user_id, comment_id)
+    if not comment:
+        return jsonify({"error": "Comment not found"}), 404
+    if comment["status"] == "replied":
+        return jsonify({"success": False, "error": "This comment already has your reply."}), 409
+    data = request.get_json(silent=True) or {}
+    text = str(data.get("text") or "")
+    private = data.get("private") is True
+    send = comment_service.post_private_reply if private else comment_service.post_reply
+    try:
+        send(comment, text, accounts(user_id).get(comment["platform"]))
+    except comment_service.ReplyError as err:
+        update_post_comment(user_id, comment_id, reply_error=str(err)[:300])
+        return jsonify({"success": False, "error": str(err)}), 400
+    updated = update_post_comment(user_id, comment_id, status="replied", reply=text.strip(), reply_error=None,
+                                  replied_at=datetime.now(timezone.utc), replied_privately=private)
+    log_event("inbox.reply", comment_id=comment_id, platform=comment["platform"], private=private)
+    return jsonify({"success": True, "comment": updated})
+
+
+@api_bp.route("/inbox/<int:comment_id>/status", methods=["POST"])
+@login_required_api
+def inbox_status(comment_id):
+    """Mark a comment done (nothing to reply) or back to new."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import update_post_comment
+
+    status = (request.get_json(silent=True) or {}).get("status")
+    if status not in ("new", "done"):
+        return jsonify({"error": "status must be new or done"}), 400
+    updated = update_post_comment(get_current_user_id(), comment_id, status=status)
+    if not updated:
+        return jsonify({"error": "Comment not found"}), 404
+    return jsonify({"success": True, "comment": updated})
 
 
 @api_bp.route("/me/goal", methods=["GET"])
@@ -5798,6 +5995,35 @@ def billing_stripe_webhook():
         current_app.logger.warning("Stripe webhook with a bad signature was refused")
         return jsonify({"success": False}), 400
     return jsonify({"success": True, "status": status})
+
+
+@api_bp.route("/webhooks/meta", methods=["GET", "POST"])
+def meta_webhook():
+    """Meta -> us: new comments on Facebook Pages and Instagram accounts as
+    they happen (services/comment_service.py handle_webhook). GET is Meta's
+    one-time check of the verify token; POST is signed (X-Hub-Signature-256).
+    Off while META_WEBHOOK_VERIFY_TOKEN is empty."""
+    from services import comment_service
+
+    if not Config.META_WEBHOOK_VERIFY_TOKEN:
+        return jsonify({"success": False, "error": "Webhooks are not set up"}), 404
+    if request.method == "GET":
+        import hmac
+
+        if request.args.get("hub.mode") == "subscribe" and hmac.compare_digest(
+                request.args.get("hub.verify_token", ""), Config.META_WEBHOOK_VERIFY_TOKEN):
+            return request.args.get("hub.challenge", ""), 200, {"Content-Type": "text/plain"}
+        return jsonify({"success": False}), 403
+    raw = request.get_data()
+    if not comment_service.webhook_signature_ok(raw, request.headers.get("X-Hub-Signature-256", "")):
+        current_app.logger.warning("Meta webhook with a bad signature was refused")
+        return jsonify({"success": False}), 403
+    try:
+        added = comment_service.handle_webhook(request.get_json(silent=True) or {})
+    except Exception as err:  # noqa: BLE001 - 200 anyway, so Meta doesn't keep resending: the scheduled check picks them up
+        current_app.logger.warning(f"Meta webhook not handled: {err}")
+        added = 0
+    return jsonify({"success": True, "new_comments": added})
 
 
 @api_bp.route("/me/billing-profile", methods=["GET"])
@@ -6102,6 +6328,7 @@ _UNSUBSCRIBE_PAGE = """<!DOCTYPE html>
 @api_bp.route("/notifications/ideas-email/unsubscribe/<token>", methods=["GET", "POST"], defaults={"kind": "ideas"})
 @api_bp.route("/notifications/nudges-email/unsubscribe/<token>", methods=["GET", "POST"], defaults={"kind": "nudges"})
 @api_bp.route("/notifications/recap-email/unsubscribe/<token>", methods=["GET", "POST"], defaults={"kind": "recap"})
+@api_bp.route("/notifications/results-email/unsubscribe/<token>", methods=["GET", "POST"], defaults={"kind": "results"})
 def unsubscribe_ideas_email(token, kind):
     """The unsubscribe link of the weekly ideas email (kind "ideas") or of
     the nudge emails ("nudges") - works without logging in (the token is
@@ -6112,7 +6339,8 @@ def unsubscribe_ideas_email(token, kind):
 
     from services.idea_digest_service import user_from_unsubscribe_token
 
-    what = {"ideas": "weekly ideas email", "nudges": "reminder emails", "recap": "monthly recap email"}[kind]
+    what = {"ideas": "weekly ideas email", "nudges": "reminder emails", "recap": "monthly recap email",
+            "results": "weekly results email"}[kind]
     user_id = user_from_unsubscribe_token(token, kind)
     if not user_id or not DB_AVAILABLE:
         return _UNSUBSCRIBE_PAGE.format(
@@ -6120,9 +6348,15 @@ def unsubscribe_ideas_email(token, kind):
             text="We couldn't read this unsubscribe link. You can switch these emails off under Settings &rarr; Notifications.",
         ), 400
     if request.method == "POST":
-        from db import set_ideas_email_enabled, set_nudge_email_enabled, set_recap_email_enabled
+        from db import (
+            set_ideas_email_enabled,
+            set_nudge_email_enabled,
+            set_recap_email_enabled,
+            set_results_email_enabled,
+        )
 
-        {"ideas": set_ideas_email_enabled, "nudges": set_nudge_email_enabled, "recap": set_recap_email_enabled}[kind](user_id, False)
+        {"ideas": set_ideas_email_enabled, "nudges": set_nudge_email_enabled, "recap": set_recap_email_enabled,
+         "results": set_results_email_enabled}[kind](user_id, False)
         return _UNSUBSCRIBE_PAGE.format(
             title="You're unsubscribed", action="",
             text=f"You won't get the {what} any more. You can switch it back on any time under Settings &rarr; Notifications.",

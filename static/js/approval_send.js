@@ -13,7 +13,7 @@
     const ICONS = { linkedin: 'fa-linkedin', instagram: 'fa-instagram', facebook: 'fa-facebook', youtube: 'fa-youtube' };
     const LIMITS = { instagram: [2, 10], linkedin: [2, 20], facebook: [2, 10] };
     const ORDER = ['linkedin', 'instagram', 'facebook', 'youtube'];
-    const SCHEDULABLE = ['linkedin', 'instagram', 'facebook'];
+    const SCHEDULABLE = ['linkedin', 'instagram', 'facebook', 'youtube'];
 
     let state = null;   // { mode, source, sections: {platform: {...}}, images, reviewer, when, connections }
     let picker = null;  // { platform, multi, chosen: [], from: 'conversation' | 'library' }
@@ -189,6 +189,11 @@
     function problems(platform, sec) {
         const out = [];
         if (scheduling() && state.connections && !state.connections[platform]) out.push(`Connect your ${NAMES[platform]} account to schedule to it.`);
+        if (platform === 'youtube' && sec.video) return out;  // the video and its caption: no images to check
+        if (platform === 'youtube' && scheduling()) {  // published by itself: it needs the video
+            out.push('YouTube posts need a video. Make one in Studio Chat (Video) first.');
+            return out;
+        }
         if (sec.media !== 'none' && !sec.images.length) out.push('Pick an image.');
         if (platform === 'instagram' && (sec.media === 'none' || !sec.images.length)) out.push('Instagram posts need an image.');
         if (sec.media === 'carousel') {
@@ -260,6 +265,16 @@
         const sec = state.sections[platform];
         const mediaChoice = (value, label) => `<label class="sa-pill${sec.media === value ? ' on' : ''}">
             <input type="radio" name="saMedia_${platform}" value="${value}" ${sec.media === value ? 'checked' : ''} data-media="${platform}"> ${label}</label>`;
+        if (platform === 'youtube' && sec.video) {  // the post's video, uploaded with the caption as its description
+            return `
+                ${sec.video ? `<video class="sa-video" src="${esc(sec.video)}" controls preload="metadata"></video>
+                <div class="sa-help">Uploaded as a public video. The caption's first line is its title; the caption and hashtags are its description.</div>` : ''}
+                <label class="sa-label" for="saCaption_${platform}">Caption</label>
+                <textarea class="form-control form-control-sm" id="saCaption_${platform}" rows="4" data-caption="${platform}">${esc(sec.caption)}</textarea>
+                <label class="sa-label" for="saTags_${platform}">Hashtags</label>
+                <input class="form-control form-control-sm" id="saTags_${platform}" data-tags="${platform}" value="${esc(sec.hashtags.join(' '))}" placeholder="#shorts #marketing">
+                ${issues.length ? `<div class="sa-issues">${issues.map(t => `<div><i class="fas fa-triangle-exclamation me-1"></i>${esc(t)}</div>`).join('')}</div>` : ''}`;
+        }
         return `
                 <div class="sa-media-row">
                     ${platform === 'instagram' ? '' : mediaChoice('none', 'Text only')}
@@ -560,6 +575,7 @@
             const item = { platform: p, caption: sec.caption, hashtags: sec.hashtags, media: sec.media, images: sec.images,
                            slide_titles: sec.images.map(u => sec.titles[u] || '') };
             if (p === 'linkedin' && sec.media === 'carousel') item.linkedin_format = sec.format;
+            if (p === 'youtube' && sec.video) { item.media = 'video'; item.images = []; item.slide_titles = []; item.video = sec.video; }
             return item;
         });
     }
@@ -612,7 +628,7 @@
             sections[p.platform] = {
                 on: p.on !== false, caption: p.caption || '', hashtags: p.hashtags || [], images: images, lastImages: images.slice(),
                 media: p.media || (images.length > 1 ? 'carousel' : images.length ? 'single' : (p.platform === 'instagram' ? 'single' : 'none')),
-                format: 'multi_image', titles: titles,
+                format: 'multi_image', titles: titles, video: p.video || null,
             };
         });
         state = { mode: mode, source, sections, images: [], reviewer: null, dims: {}, when: plannedWhen() || defaultWhen(), connections: null, best: null, customWhen: false };

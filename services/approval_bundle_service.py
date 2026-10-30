@@ -59,6 +59,19 @@ def normalize_items(raw_items, upload_folder: str) -> list[dict]:
         if platform not in PLATFORMS or platform in seen:
             continue
         seen.add(platform)
+        video = raw.get("video") if platform == "youtube" else None
+        if video:  # YouTube publishes a video and its caption (without one it is only reviewed, as before)
+            if not (isinstance(video, str) and video.lower().endswith(".mp4") and _image_path(video, upload_folder)):
+                raise BundleError("YouTube: the video could not be found. Make it again in Studio Chat and send it again.")
+            tags = []
+            for tag in (str(t).strip() for t in raw.get("hashtags") or []):
+                tag = tag if not tag or tag.startswith("#") else "#" + tag
+                if tag and tag[:60] not in tags:
+                    tags.append(tag[:60])
+            items.append({"platform": platform, "caption": str(raw.get("caption") or "").strip()[:MAX_CAPTION],
+                          "hashtags": tags, "media": "video", "images": [], "video": video, "slide_titles": [],
+                          "decision": "pending", "comment": None})
+            continue
         images = []
         for url in raw.get("images") or []:
             path = _image_path(url, upload_folder)

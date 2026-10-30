@@ -11,6 +11,11 @@ import os
 import tempfile
 
 os.environ.setdefault("SECRET_KEY", "test-secret-key")
+# Never send real email from tests: a developer's .env SMTP settings would
+# otherwise be used (load_dotenv doesn't override what is set here), and each
+# attempt also waits up to 30 seconds. Empty means "not configured".
+for _smtp in ("SMTP_HOST", "SMTP_USERNAME", "SMTP_PASSWORD"):
+    os.environ[_smtp] = ""
 
 _db_fd, _db_path = tempfile.mkstemp(suffix=".db")
 os.close(_db_fd)
