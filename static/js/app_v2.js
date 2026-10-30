@@ -2333,6 +2333,7 @@ $(document).ready(function () {
                 base_run_id: base.runId,
                 conversation_id: currentConversationId,
                 version_of_run_id: (window.chatHistory[msgId]?.responses || [])[0]?.runId,
+                language: responseLanguage({ content: base.content, qualitySummary: base.qualitySummary }, null) || undefined,
                 preset: (window.chatHistory[base.msgId] || {}).presetRun || undefined,
                 reference_image_path: opts.attachedImage,
                 base: toRefinePayload(base.content, opts.platforms)
@@ -2744,7 +2745,7 @@ $(document).ready(function () {
                             </span>
                         </div>
 
-                        <div class="post-caption-text" id="${cardId}">${escapeHtml(primaryCap)}</div>
+                        <div class="post-caption-text" id="${cardId}" dir="auto">${escapeHtml(primaryCap)}</div>
                     </div>
 
                     ${buildComplianceHtml(pData.compliance)}
@@ -2766,7 +2767,7 @@ $(document).ready(function () {
                                     </button>
                                 </span>
                             </div>
-                            <div class="hashtags-container" id="${tagsCardId}">${tagsHtml}</div>
+                            <div class="hashtags-container" id="${tagsCardId}" dir="auto">${tagsHtml}</div>
                         </div>
                     </details>
                     </div>`;
@@ -3151,6 +3152,149 @@ $(document).ready(function () {
             </div>`;
     }
 
+    // ── "Translate": the same post in other languages ──────────────────
+    // Each language is another version of the post (POST
+    // /api/history/<run>/translate, services/translate_service.py), so
+    // Edit, Schedule, Send for approval and Preview work on it as on any
+    // version. The bar shows a tab per language once there is more than one.
+    const languageNames = {};  // code -> short English name, from the Language menu and translate replies
+
+    function languageName(code) {
+        if (languageNames[code]) return languageNames[code];
+        const $opt = $(`#languageSelect option[value="${code}"]`);
+        return $opt.length ? ($opt.data('short') || $opt.text()) : (code === 'en' ? 'English' : String(code || '').toUpperCase());
+    }
+
+    // The language a version is written in ("en" when it doesn't say;
+    // pass fallback null to tell "unknown" apart)
+    function responseLanguage(r, fallback = 'en') {
+        const c = (r && r.content) || {};
+        return (c._meta && c._meta.language) || (c._quality && c._quality.language)
+            || (r && r.qualitySummary && r.qualitySummary.language) || fallback;
+    }
+
+    function languageBarHtml(msgId) {
+        const h = window.chatHistory[msgId];
+        const current = h.responses[h.currentIndex] || {};
+        if (!current.runId) return '';
+        const here = responseLanguage(current);
+        const langs = [];
+        h.responses.forEach(r => { const l = responseLanguage(r); if (!langs.includes(l)) langs.push(l); });
+        const tabs = langs.length > 1 ? `<div class="post-lang-tabs" role="tablist" aria-label="Post language">${langs.map(l => `
+                <button type="button" class="post-lang-tab${l === here ? ' active' : ''}" role="tab" aria-selected="${l === here}"
+                    data-msg="${msgId}" data-lang="${escapeAttr(l)}">${escapeHtml(languageName(l))}</button>`).join('')}</div>` : '';
+        return `
+            <div class="post-lang-bar" id="${msgId}_langbar">
+                ${tabs}
+                <button type="button" class="btn-copy-sm btn-translate-post" data-msg="${msgId}"
+                    title="Make this post in other languages: each one is checked again and can be scheduled on its own">
+                    <i class="fas fa-language me-1"></i>Translate
+                </button>
+            </div>
+            <div class="translate-picker" id="${msgId}_translate" hidden></div>`;
+    }
+
+    function translatePickerHtml(msgId) {
+        const h = window.chatHistory[msgId];
+        const here = responseLanguage(h.responses[h.currentIndex]);
+        const made = h.responses.map(r => responseLanguage(r));
+        const options = $('#languageSelect option').map(function () {
+            return { code: this.value, name: $(this).text() };
+        }).get().filter(o => o.code && o.code !== here);
+        if (!options.length) {
+            return `<p class="translate-empty">No other languages for your country yet. Set your Country on the
+                <a href="/brand-profile">brand profile</a> page to see its languages.</p>`;
+        }
+        return `
+            <div class="translate-head">
+                <strong>Make this post in</strong>
+                <button type="button" class="btn btn-link btn-sm p-0 translate-all">Select all</button>
+            </div>
+            <div class="translate-options">${options.map(o => `
+                <label class="translate-option">
+                    <input type="checkbox" value="${escapeAttr(o.code)}">
+                    <span>${escapeHtml(o.name)}</span>${made.includes(o.code) ? '<small>made</small>' : ''}
+                </label>`).join('')}</div>
+            <p class="translate-note">Written the way a native speaker would post it. Names, prices and links stay as they are.
+                Each language gets its own compliance check. Images stay the same. Up to 5 at a time.</p>
+            <p class="translate-error" role="alert" hidden></p>
+            <div class="translate-actions">
+                <button type="button" class="btn btn-sm btn-light translate-cancel">Cancel</button>
+                <button type="button" class="btn btn-sm btn-primary translate-go" data-msg="${msgId}" disabled>Pick languages</button>
+            </div>`;
+    }
+
+    function updateTranslateButton($picker) {
+        const n = $picker.find('.translate-options input:checked').length;
+        $picker.find('.translate-go').prop('disabled', !n || n > 5)
+            .text(n > 5 ? 'Pick up to 5' : n ? `Create ${n} version${n === 1 ? '' : 's'}` : 'Pick languages');
+    }
+
+    $(document).on('click', '.btn-translate-post', function () {
+        const msgId = $(this).data('msg');
+        const $picker = $(`#${msgId}_translate`);
+        if (!$picker.prop('hidden')) { $picker.prop('hidden', true); return; }
+        $picker.html(translatePickerHtml(msgId)).prop('hidden', false);
+        $picker.find('input').first().trigger('focus');
+    });
+    $(document).on('change', '.translate-options input', function () {
+        updateTranslateButton($(this).closest('.translate-picker'));
+    });
+    $(document).on('click', '.translate-all', function () {
+        const $picker = $(this).closest('.translate-picker');
+        const $boxes = $picker.find('.translate-options input');
+        $boxes.prop('checked', $boxes.filter(':checked').length !== $boxes.length);
+        updateTranslateButton($picker);
+    });
+    $(document).on('click', '.translate-cancel', function () {
+        $(this).closest('.translate-picker').prop('hidden', true);
+    });
+    $(document).on('click', '.post-lang-tab', function () {
+        const msgId = $(this).data('msg');
+        const lang = $(this).data('lang');
+        const h = window.chatHistory[msgId];
+        let index = -1;  // the latest version in that language
+        h.responses.forEach((r, i) => { if (responseLanguage(r) === lang) index = i; });
+        if (index < 0 || index === h.currentIndex) return;
+        h.currentIndex = index;
+        if (refineBaseMsgId === msgId) adoptAsRefineBase(msgId);
+        renderAssistantResponse(msgId);
+    });
+    $(document).on('click', '.translate-go', function () {
+        const msgId = $(this).data('msg');
+        const $picker = $(this).closest('.translate-picker');
+        const languages = $picker.find('.translate-options input:checked').map(function () { return this.value; }).get();
+        const h = window.chatHistory[msgId];
+        const current = h.responses[h.currentIndex];
+        $picker.find('input, button').prop('disabled', true);
+        $picker.find('.translate-error').prop('hidden', true);
+        $(this).html(`<span class="spinner-border spinner-border-sm me-1" aria-hidden="true"></span>Writing ${languages.length} language${languages.length === 1 ? '' : 's'}...`);
+        $.ajax({
+            url: `/api/history/${current.runId}/translate`, type: 'POST', contentType: 'application/json',
+            data: JSON.stringify({ languages: languages, version_of_run_id: (h.responses[0] || {}).runId }),
+        }).done(function (r) {
+            const versions = r.versions || [];
+            versions.forEach(v => {
+                languageNames[v.language.code] = v.language.short;
+                h.responses.push({ content: v.content, runId: v.run_id, usage: v.usage,
+                    agentsExecuted: v.content._agents || null, qualitySummary: v.content._quality || null });
+            });
+            if (r.source) languageNames[r.source.code] = r.source.short;
+            h.currentIndex = h.responses.length - versions.length;  // the first new language
+            if (refineBaseMsgId === msgId) adoptAsRefineBase(msgId);
+            renderAssistantResponse(msgId);
+            showToast(`Made in ${versions.map(v => v.language.short).join(', ')}. Pick a language above the post to see each one.`, 'success');
+            (r.errors || []).forEach(e => showToast(e.error, 'error'));
+            renderHistory();
+            loadUserUsageMetrics();
+        }).fail(function (xhr) {
+            const message = (xhr.responseJSON && xhr.responseJSON.error) || 'Could not translate the post. Please try again.';
+            $picker.find('.translate-error').text(message).prop('hidden', false);
+            $picker.find('input, button').prop('disabled', false);
+            updateTranslateButton($picker);
+        });
+    });
+
     function renderAssistantResponse(msgId) {
         const historyObj = window.chatHistory[msgId];
         if (historyObj.preset || (historyObj.responses[historyObj.currentIndex]?.content || {})._preset) {
@@ -3289,6 +3433,7 @@ $(document).ready(function () {
                     </div>
                 </aside>
                 <div class="out-main">
+            ${languageBarHtml(msgId)}
             ${tabsHtml}
             ${panelsHtml}
             ${outMoreRowHtml(msgId, `

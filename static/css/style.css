@@ -4042,6 +4042,26 @@ body.settings-page .sc-primary { flex: none; }
   .st-pane-head { flex-direction: column; }
 }
 
+/* Studio Chat "Translate": a tab per language above the post, and the language picker */
+.post-lang-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+.post-lang-tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+.post-lang-tab { border: 1px solid var(--bp-border, #e5e7eb); background: #fff; color: var(--bp-text-sub, #4b5563); border-radius: 999px;
+  padding: 4px 12px; font-size: 0.8rem; font-weight: 600; }
+.post-lang-tab:hover { border-color: var(--brand, #ea580c); color: var(--brand-strong, #c2410c); }
+.post-lang-tab.active { background: #fff7ed; border-color: var(--brand, #ea580c); color: var(--brand-strong, #c2410c); }
+.post-lang-bar .btn-translate-post { margin-left: auto; }
+.translate-picker { border: 1px solid var(--bp-border, #e5e7eb); border-radius: 12px; background: #fff; padding: 14px 16px; margin-bottom: 12px; }
+.translate-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 0.9rem; }
+.translate-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px; }
+.translate-option { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--bp-border, #e5e7eb);
+  border-radius: 8px; font-size: 0.85rem; cursor: pointer; margin: 0; }
+.translate-option:has(input:checked) { border-color: var(--brand, #ea580c); background: #fff7ed; }
+.translate-option small { margin-left: auto; color: #15803d; font-weight: 600; }
+.translate-note { margin: 10px 0 0; font-size: 0.78rem; color: var(--bp-text-sub, #6b7280); }
+.translate-error { margin: 8px 0 0; font-size: 0.82rem; color: #b91c1c; }
+.translate-empty { margin: 0; font-size: 0.85rem; }
+.translate-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+
 /* ===== Slider-puzzle verification (static/js/captcha.js) ===== */
 body.captcha-open { overflow: hidden; }
 .captcha-overlay {

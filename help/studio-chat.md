@@ -55,6 +55,15 @@ When the post is ready, **Send for approval** emails it to your reviewer. **Sche
 
 > Tip: **Rewrite caption** only costs a new caption. **New image** uses one of today's images.
 
+### The same post in other languages
+
+Click **Translate** above the post, tick up to 5 languages and click **Create**. The list is English plus the languages of the Country on your [brand profile](/brand-profile).
+
+- Each language is written the way a native speaker would post it, not word for word. Brand and product names, numbers, prices and links stay as they are, and about half the hashtags stay in English.
+- Each one gets its own compliance check. The image stays the same.
+- A tab per language appears above the post. Pick one to see, edit, schedule or send that language for approval on its own.
+- Translations are versions of the same post: they use AI credit but don't count as new posts on your plan.
+
 ### Length limits
 
 The caption and its hashtags are posted together and counted together.
