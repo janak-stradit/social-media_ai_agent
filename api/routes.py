@@ -1300,6 +1300,49 @@ def image_presets_list():
     return jsonify({"success": True, "presets": list_presets()})
 
 
+@api_bp.route("/admin/ai-calls", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_ai_calls():
+    """Admin -> AI calls: every AI call, newest first (services/llm_trace.py).
+    Filters: ?user= (email contains), feature, status (ok/empty/error), group,
+    q (text in the prompts or answer), days, page."""
+    if not DB_AVAILABLE:
+        return jsonify({"success": True, "calls": [], "total": 0, "features": [], "totals": {}})
+    from datetime import datetime, timedelta, timezone
+
+    from db import list_llm_calls
+
+    args = request.args
+    try:
+        page = max(1, int(args.get("page", 1)))
+        days = int(args["days"]) if args.get("days") else None
+    except ValueError:
+        return jsonify({"success": False, "error": "page and days are numbers"}), 400
+    data = list_llm_calls(user_email=args.get("user") or None, feature=args.get("feature") or None,
+                          status=args.get("status") or None, group_id=args.get("group") or None,
+                          search=args.get("q") or None,
+                          since=datetime.now(timezone.utc) - timedelta(days=days) if days else None,
+                          limit=50, offset=(page - 1) * 50)
+    return jsonify({"success": True, "page": page, "page_size": 50, "tracing": Config.LLM_TRACING,
+                    "keep_days": Config.LLM_TRACE_DAYS, **data})
+
+
+@api_bp.route("/admin/ai-calls/<int:call_id>", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_ai_call(call_id):
+    """One AI call in full: the prompts sent and the answer."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import get_llm_call
+
+    call = get_llm_call(call_id)
+    if not call:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify({"success": True, "call": call})
+
+
 @api_bp.route("/admin/image-presets", methods=["GET"])
 @login_required_api
 @admin_required_api

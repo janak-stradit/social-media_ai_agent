@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI calls — AVIR AI Admin</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
+</head>
+<body class="ai-calls-page">
+
+<header class="app-header">
+    <div class="header-brand">
+        <div class="brand-logo">
+            <svg viewBox="0 0 24 24" width="19" height="19" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <path d="M12 2.5a9.5 9.5 0 1 0 9.5 9.5" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                <path d="M12 6.5a5.5 5.5 0 1 0 5.5 5.5" stroke="#fff" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+                <circle cx="12" cy="12" r="1.7" fill="#fff"/>
+            </svg>
+        </div>
+        <div class="brand-text">
+            <span class="brand-name">AVIR AI <span class="beta-badge">Beta</span></span>
+            <span class="brand-tagline">Admin · AI calls</span>
+        </div>
+    </div>
+    <nav class="header-nav">
+        <a href="/dashboard" class="header-nav-item"><i class="fas fa-comments me-2"></i>Studio Chat</a>
+        <a href="/admin" class="header-nav-item"><i class="fas fa-user-shield me-2"></i>Admin Control Center</a>
+        <a href="/admin/ai-calls" class="header-nav-item active" aria-current="page"><i class="fas fa-microchip me-2"></i>AI calls</a>
+    </nav>
+    <div class="header-actions">
+        {% include 'partials/user_menu.html' %}
+    </div>
+</header>
+
+<!-- Every AI call (static/js/admin_ai_calls.js; /api/admin/ai-calls, services/llm_trace.py) -->
+<main class="perf-main">
+    <div class="perf-head">
+        <div>
+            <h1>AI calls</h1>
+            <p id="aiIntro">Every call to the AI: the prompts sent, the answer, model, tokens, cost and time. Admins only.</p>
+        </div>
+    </div>
+
+    <section class="perf-kpis" id="aiTotals" aria-label="Totals" aria-live="polite"></section>
+
+    <form class="perf-card ai-filters" id="aiFilters" aria-label="Filters">
+        <div class="ai-filter">
+            <label for="aiUser">User</label>
+            <input type="search" id="aiUser" class="form-control form-control-sm" placeholder="email contains...">
+        </div>
+        <div class="ai-filter">
+            <label for="aiFeature">Part of the app</label>
+            <select id="aiFeature" class="form-select form-select-sm"><option value="">All</option></select>
+        </div>
+        <div class="ai-filter">
+            <label for="aiStatus">Result</label>
+            <select id="aiStatus" class="form-select form-select-sm">
+                <option value="">All</option>
+                <option value="ok">Answered</option>
+                <option value="empty">Empty answer</option>
+                <option value="error">Failed</option>
+            </select>
+        </div>
+        <div class="ai-filter">
+            <label for="aiDays">Period</label>
+            <select id="aiDays" class="form-select form-select-sm">
+                <option value="1">Last 24 hours</option>
+                <option value="7" selected>Last 7 days</option>
+                <option value="30">Last 30 days</option>
+                <option value="">Everything kept</option>
+            </select>
+        </div>
+        <div class="ai-filter ai-filter-grow">
+            <label for="aiSearch">Text in the prompt or answer</label>
+            <input type="search" id="aiSearch" class="form-control form-control-sm" placeholder="e.g. Diwali">
+        </div>
+        <div class="ai-filter ai-filter-buttons">
+            <button type="submit" class="perf-btn is-main">Apply</button>
+            <button type="button" class="perf-btn" id="aiClear">Clear</button>
+        </div>
+        <div class="ai-group-note d-none" id="aiGroupNote"></div>
+    </form>
+
+    <section class="perf-card" aria-labelledby="aiListTitle">
+        <div class="perf-card-head">
+            <h2 id="aiListTitle">Calls</h2>
+            <span class="perf-sub" id="aiCount"></span>
+        </div>
+        <div class="perf-table-wrap">
+            <table class="perf-table ai-table">
+                <thead>
+                    <tr>
+                        <th scope="col">When</th>
+                        <th scope="col">User</th>
+                        <th scope="col">Part of the app</th>
+                        <th scope="col">Model</th>
+                        <th scope="col">Result</th>
+                        <th scope="col" class="num">Tokens in / out</th>
+                        <th scope="col" class="num">Cost</th>
+                        <th scope="col" class="num">Time</th>
+                    </tr>
+                </thead>
+                <tbody id="aiRows"></tbody>
+            </table>
+        </div>
+        <p class="perf-empty d-none" id="aiEmpty">No AI calls match.</p>
+        <div class="ai-pager">
+            <button type="button" class="perf-btn" id="aiPrev">Newer</button>
+            <span class="perf-sub" id="aiPage"></span>
+            <button type="button" class="perf-btn" id="aiNext">Older</button>
+        </div>
+    </section>
+</main>
+
+<!-- One call in full -->
+<dialog class="ai-dialog" id="aiDialog" aria-labelledby="aiDialogTitle">
+    <div class="ai-dialog-head">
+        <h2 id="aiDialogTitle">AI call</h2>
+        <form method="dialog"><button class="ai-dialog-close" aria-label="Close"><i class="fas fa-xmark" aria-hidden="true"></i></button></form>
+    </div>
+    <div id="aiDialogBody"></div>
+</dialog>
+
+<script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
+<script src="{{ url_for('static', filename='js/admin_ai_calls.js') }}"></script>
+    {% include 'partials/cookie_consent.html' %}
+</body>
+</html>

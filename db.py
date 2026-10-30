@@ -25,6 +25,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    case,
     create_engine,
     or_,
     text,
@@ -717,6 +718,40 @@ class PostComment(Base):
     replied_privately: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)  # sent as a DM
     reply_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+
+
+class LlmCall(Base):
+    """One attempt at an AI call, for Admin -> AI calls (services/llm_trace.py):
+    the prompts sent, the answer, provider, model, tokens, cost, time taken,
+    and which part of the app asked, for which user. Kept LLM_TRACE_DAYS."""
+
+    __tablename__ = "llm_calls"
+    __table_args__ = {"schema": SCHEMA} if not IS_SQLITE else {}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, nullable=False, index=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    request_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    group_id: Mapped[str | None] = mapped_column(String(40), nullable=True, index=True)
+    run_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    feature: Mapped[str] = mapped_column(String(160), nullable=False)  # "agents/caption_agent.py:generate_caption"
+    kind: Mapped[str] = mapped_column(String(8), nullable=False)  # text / json
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    model: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    status: Mapped[str] = mapped_column(String(8), nullable=False)  # ok / empty / error
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    user_prompt: Mapped[str] = mapped_column(Text, nullable=False)
+    output: Mapped[str | None] = mapped_column(Text, nullable=True)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
+    latency_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    temperature: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reasoning_effort: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    streamed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    attempt: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
 
 
 class PostMetricSnapshot(Base):
@@ -3367,6 +3402,80 @@ def follower_growth(user_id: int, since: datetime, until: datetime | None = None
         days.setdefault(platform, []).append(followers)
     return {platform: {"followers": counts[-1], "change": counts[-1] - counts[0] if len(counts) > 1 else None}
             for platform, counts in days.items()}
+
+
+# ── AI calls, for Admin -> AI calls (services/llm_trace.py) ──────────────
+
+LLM_CALL_LIST_FIELDS = ("id", "user_id", "group_id", "run_id", "feature", "kind", "provider", "model", "status",
+                        "input_tokens", "output_tokens", "cost_usd", "latency_ms", "streamed", "attempt")
+
+
+def save_llm_call(fields: dict) -> None:
+    with Session(engine) as session:
+        session.add(LlmCall(**fields))
+        session.commit()
+
+
+def _llm_call_dict(row: "LlmCall", emails: dict, full: bool = False) -> dict:
+    out = {k: getattr(row, k) for k in LLM_CALL_LIST_FIELDS}
+    out["created_at"] = _as_utc(row.created_at).isoformat()
+    out["user_email"] = emails.get(row.user_id)
+    out["error"] = (row.error or "")[:200] or None
+    out["preview"] = " ".join((row.user_prompt or "").split())[:160]
+    if full:
+        out.update(error=row.error, request_id=row.request_id, system_prompt=row.system_prompt, user_prompt=row.user_prompt,
+                   output=row.output, temperature=row.temperature, max_tokens=row.max_tokens,
+                   reasoning_effort=row.reasoning_effort)
+    return out
+
+
+def list_llm_calls(*, user_email: str | None = None, feature: str | None = None, status: str | None = None,
+                   group_id: str | None = None, search: str | None = None, since: datetime | None = None,
+                   limit: int = 50, offset: int = 0) -> dict:
+    """Newest first, with filters; {calls, total, totals: {calls, cost_usd, input_tokens, output_tokens, errors},
+    features: the parts of the app seen (for the filter)}."""
+    with Session(engine) as session:
+        query = session.query(LlmCall)
+        if user_email:
+            ids = [u for (u,) in session.query(User.id).filter(User.email.ilike(f"%{user_email.strip()}%"))]
+            query = query.filter(LlmCall.user_id.in_(ids or [-1]))
+        if feature:
+            query = query.filter(LlmCall.feature == feature)
+        if status in ("ok", "empty", "error"):
+            query = query.filter(LlmCall.status == status)
+        if group_id:
+            query = query.filter(LlmCall.group_id == group_id)
+        if search:
+            like = f"%{search.strip()[:200]}%"
+            query = query.filter(LlmCall.user_prompt.ilike(like) | LlmCall.output.ilike(like) | LlmCall.system_prompt.ilike(like))
+        if since:
+            query = query.filter(LlmCall.created_at >= since.astimezone(timezone.utc).replace(tzinfo=None))
+        total, cost, tin, tout, errors = query.with_entities(
+            func.count(LlmCall.id), func.coalesce(func.sum(LlmCall.cost_usd), 0.0),
+            func.coalesce(func.sum(LlmCall.input_tokens), 0), func.coalesce(func.sum(LlmCall.output_tokens), 0),
+            func.coalesce(func.sum(case((LlmCall.status != "ok", 1), else_=0)), 0)).one()
+        rows = query.order_by(LlmCall.created_at.desc(), LlmCall.id.desc()).offset(max(0, offset)).limit(min(200, limit)).all()
+        emails = dict(session.query(User.id, User.email).filter(User.id.in_({r.user_id for r in rows if r.user_id}))) if rows else {}
+        features = sorted(f for (f,) in session.query(LlmCall.feature).distinct())
+        return {"calls": [_llm_call_dict(r, emails) for r in rows], "total": int(total or 0), "features": features,
+                "totals": {"calls": int(total or 0), "cost_usd": round(float(cost or 0.0), 6), "input_tokens": int(tin or 0),
+                           "output_tokens": int(tout or 0), "errors": int(errors or 0)}}
+
+
+def get_llm_call(call_id: int) -> dict | None:
+    with Session(engine) as session:
+        row = session.get(LlmCall, call_id)
+        if row is None:
+            return None
+        emails = dict(session.query(User.id, User.email).filter(User.id == row.user_id)) if row.user_id else {}
+        return _llm_call_dict(row, emails, full=True)
+
+
+def purge_llm_calls(before: datetime) -> int:
+    with Session(engine) as session:
+        n = session.query(LlmCall).filter(LlmCall.created_at < before.astimezone(timezone.utc).replace(tzinfo=None)).delete()
+        session.commit()
+        return int(n or 0)
 
 
 # ── Comments on published posts: the Inbox (services/comment_service.py) ──

@@ -449,6 +449,14 @@ def create_app(config_name="development"):
             return redirect(url_for("approval_review_page", request_id=int(approve_id)))
         return render_template("competitor_dashboard.html")
 
+    @app.route("/admin/ai-calls")
+    @login_required_page
+    @admin_required_page
+    def admin_ai_calls_page():
+        """Admin -> AI calls: every AI call's prompts, answer, model, tokens,
+        cost and time, like a LangSmith trace (static/js/admin_ai_calls.js)."""
+        return render_template("admin_ai_calls.html")
+
     @app.route("/admin")
     @login_required_page
     @admin_required_page
