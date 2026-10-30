@@ -78,6 +78,15 @@
                 <label>User (email contains)
                     <input type="text" id="lsUser" placeholder="e.g. jack">
                 </label>
+                <label>Feedback
+                    <select class="ls-select" id="lsFeedback">
+                        <option value="">Any</option>
+                        <option value="good">Good answer</option>
+                        <option value="bad">Bad answer</option>
+                        <option value="rated">Has feedback</option>
+                        <option value="unrated">No feedback yet</option>
+                    </select>
+                </label>
                 <button type="button" class="ls-btn is-main" id="lsFilterApply">Apply</button>
             </div>
         </div>
@@ -98,8 +107,8 @@
         <div class="ls-table-wrap">
             <table class="ls-table">
                 <colgroup>
-                    <col style="width: 23%"><col style="width: 20%"><col style="width: 20%"><col style="width: 9%">
-                    <col style="width: 11%"><col style="width: 7%"><col style="width: 6%"><col style="width: 7%"><col style="width: 9%">
+                    <col style="width: 22%"><col style="width: 19%"><col style="width: 19%"><col style="width: 8%">
+                    <col style="width: 11%"><col style="width: 7%"><col style="width: 6%"><col style="width: 7%"><col style="width: 4%"><col style="width: 9%">
                 </colgroup>
                 <thead>
                     <tr>
@@ -111,6 +120,7 @@
                         <th scope="col" class="num">Latency</th>
                         <th scope="col" class="num">Tokens</th>
                         <th scope="col" class="num">Cost</th>
+                        <th scope="col"><span class="visually-hidden">Feedback</span><i class="fas fa-thumbs-up" aria-hidden="true" title="Feedback"></i></th>
                         <th scope="col">User</th>
                     </tr>
                 </thead>

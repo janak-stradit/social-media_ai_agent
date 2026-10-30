@@ -752,6 +752,11 @@ class LlmCall(Base):
     reasoning_effort: Mapped[str | None] = mapped_column(String(16), nullable=True)
     streamed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     attempt: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    # An admin's verdict on the answer (Admin -> AI calls -> Feedback): 1 good, -1 bad, None not rated
+    rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    feedback_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    feedback_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    feedback_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class PostMetricSnapshot(Base):
@@ -1454,6 +1459,14 @@ def init_db():
                 sub_conn.execute(text(f"ALTER TABLE {pub_tbl} ADD COLUMN comments_at TIMESTAMP"))
         except Exception:  # noqa: BLE001 - already there
             pass
+        llm_tbl = f'"{SCHEMA}".llm_calls' if not IS_SQLITE else "llm_calls"
+        for col_name, col_type in [("rating", "INTEGER"), ("feedback_note", "TEXT"), ("feedback_by", "INTEGER"),
+                                   ("feedback_at", "TIMESTAMP")]:
+            try:
+                with engine.begin() as sub_conn:
+                    sub_conn.execute(text(f"ALTER TABLE {llm_tbl} ADD COLUMN {col_name} {col_type}"))
+            except Exception:  # noqa: BLE001 - already there
+                pass
         comment_tbl = f'"{SCHEMA}".post_comments' if not IS_SQLITE else "post_comments"
         try:
             with engine.begin() as sub_conn:
@@ -3407,7 +3420,7 @@ def follower_growth(user_id: int, since: datetime, until: datetime | None = None
 # ── AI calls, for Admin -> AI calls (services/llm_trace.py) ──────────────
 
 LLM_CALL_LIST_FIELDS = ("id", "user_id", "group_id", "run_id", "feature", "kind", "provider", "model", "status",
-                        "input_tokens", "output_tokens", "cost_usd", "latency_ms", "streamed", "attempt")
+                        "input_tokens", "output_tokens", "cost_usd", "latency_ms", "streamed", "attempt", "rating")
 
 
 def save_llm_call(fields: dict) -> None:
@@ -3423,16 +3436,29 @@ def _llm_call_dict(row: "LlmCall", emails: dict, full: bool = False) -> dict:
     out["error"] = (row.error or "")[:200] or None
     out["preview"] = " ".join((row.user_prompt or "").split())[:160]
     out["output_preview"] = " ".join((row.output or "").split())[:160]
+    out["feedback_note"] = row.feedback_note
     if full:
         out.update(error=row.error, request_id=row.request_id, system_prompt=row.system_prompt, user_prompt=row.user_prompt,
                    output=row.output, temperature=row.temperature, max_tokens=row.max_tokens,
-                   reasoning_effort=row.reasoning_effort)
+                   reasoning_effort=row.reasoning_effort,
+                   feedback_at=_as_utc(row.feedback_at).isoformat() if row.feedback_at else None,
+                   feedback_by_email=emails.get(row.feedback_by) if row.feedback_by else None)
     return out
 
 
-def _llm_call_query(session, *, user_email=None, feature=None, status=None, group_id=None, search=None, since=None):
-    """The AI calls matching Admin -> AI calls' filters (shared by its three views)."""
+def _llm_call_query(session, *, user_email=None, feature=None, status=None, group_id=None, search=None, since=None,
+                    feedback=None):
+    """The AI calls matching Admin -> AI calls' filters (shared by its three views).
+    feedback: good / bad / rated (either) / unrated."""
     query = session.query(LlmCall)
+    if feedback == "good":
+        query = query.filter(LlmCall.rating == 1)
+    elif feedback == "bad":
+        query = query.filter(LlmCall.rating == -1)
+    elif feedback == "rated":
+        query = query.filter(LlmCall.rating.isnot(None))
+    elif feedback == "unrated":
+        query = query.filter(LlmCall.rating.is_(None))
     if user_email:
         ids = [u for (u,) in session.query(User.id).filter(User.email.ilike(f"%{user_email.strip()}%"))]
         query = query.filter(LlmCall.user_id.in_(ids or [-1]))
@@ -3455,16 +3481,35 @@ def list_llm_calls(*, limit: int = 50, offset: int = 0, **filters) -> dict:
     input_tokens, output_tokens, errors}, features: the parts of the app seen (for the filter)}."""
     with Session(engine) as session:
         query = _llm_call_query(session, **filters)
-        total, cost, tin, tout, errors = query.with_entities(
+        total, cost, tin, tout, errors, good, bad = query.with_entities(
             func.count(LlmCall.id), func.coalesce(func.sum(LlmCall.cost_usd), 0.0),
             func.coalesce(func.sum(LlmCall.input_tokens), 0), func.coalesce(func.sum(LlmCall.output_tokens), 0),
-            func.coalesce(func.sum(case((LlmCall.status != "ok", 1), else_=0)), 0)).one()
+            func.coalesce(func.sum(case((LlmCall.status != "ok", 1), else_=0)), 0),
+            func.coalesce(func.sum(case((LlmCall.rating == 1, 1), else_=0)), 0),
+            func.coalesce(func.sum(case((LlmCall.rating == -1, 1), else_=0)), 0)).one()
         rows = query.order_by(LlmCall.created_at.desc(), LlmCall.id.desc()).offset(max(0, offset)).limit(min(200, limit)).all()
         emails = dict(session.query(User.id, User.email).filter(User.id.in_({r.user_id for r in rows if r.user_id}))) if rows else {}
         features = sorted(f for (f,) in session.query(LlmCall.feature).distinct())
         return {"calls": [_llm_call_dict(r, emails) for r in rows], "total": int(total or 0), "features": features,
                 "totals": {"calls": int(total or 0), "cost_usd": round(float(cost or 0.0), 6), "input_tokens": int(tin or 0),
-                           "output_tokens": int(tout or 0), "errors": int(errors or 0)}}
+                           "output_tokens": int(tout or 0), "errors": int(errors or 0), "good": int(good or 0),
+                           "bad": int(bad or 0)}}
+
+
+def set_llm_feedback(call_id: int, rating: int | None, note: str | None, by_user_id: int) -> dict | None:
+    """An admin's verdict on one AI call's answer: rating 1 (good), -1 (bad) or
+    None (cleared), and a note. The call in full, or None if it is gone."""
+    with Session(engine) as session:
+        row = session.get(LlmCall, call_id)
+        if row is None:
+            return None
+        row.rating = rating if rating in (1, -1) else None
+        row.feedback_note = (note or "").strip()[:2000] or None
+        cleared = row.rating is None and not row.feedback_note
+        row.feedback_by = None if cleared else by_user_id
+        row.feedback_at = None if cleared else _utcnow().replace(tzinfo=None)
+        session.commit()
+    return get_llm_call(call_id)
 
 
 def _span(rows) -> tuple[datetime, datetime]:
@@ -3587,7 +3632,8 @@ def get_llm_call(call_id: int) -> dict | None:
         row = session.get(LlmCall, call_id)
         if row is None:
             return None
-        emails = dict(session.query(User.id, User.email).filter(User.id == row.user_id)) if row.user_id else {}
+        ids = {i for i in (row.user_id, row.feedback_by) if i}
+        emails = dict(session.query(User.id, User.email).filter(User.id.in_(ids))) if ids else {}
         return _llm_call_dict(row, emails, full=True)
 
 

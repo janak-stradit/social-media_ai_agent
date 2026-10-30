@@ -201,3 +201,70 @@ def test_overview_per_day_and_per_part_of_the_app(app, monkeypatch):
         s["user_id"] = admin["id"]
     body = client.get(f"/api/admin/ai-calls/stats?user={user['email']}&days=7").get_json()
     assert body["success"] and len(body["features"]) == 2
+
+
+def _admin_client(app, monkeypatch):
+    monkeypatch.setattr(Config, "ADMIN_2FA_REQUIRED", False)
+    admin = db.create_user("Admin", f"{uuid.uuid4().hex[:10]}@example.com", "hash", is_admin=True)
+    client = app.test_client()
+    with client.session_transaction() as s:
+        s["user_id"] = admin["id"]
+    return client, admin
+
+
+def test_feedback_on_a_run_and_filtering_by_it(app, monkeypatch):
+    client, admin = _admin_client(app, monkeypatch)
+    marker = uuid.uuid4().hex[:10]
+    with llm_trace.bind():
+        _llm("a good one", "a bad one", "not rated").generate("s", f"q {marker} 1")
+        _llm("a bad one").generate("s", f"q {marker} 2")
+        _llm("not rated").generate("s", f"q {marker} 3")
+    ids = {c["preview"][-1]: c["id"] for c in client.get(f"/api/admin/ai-calls?q={marker}").get_json()["calls"]}
+    good = client.post(f"/api/admin/ai-calls/{ids['1']}/feedback", json={"rating": 1, "note": "On brand"}).get_json()["call"]
+    assert good["rating"] == 1 and good["feedback_note"] == "On brand" and good["feedback_by_email"] == admin["email"]
+    client.post(f"/api/admin/ai-calls/{ids['2']}/feedback", json={"rating": -1, "note": "Invented a price"})
+    listed = client.get(f"/api/admin/ai-calls?q={marker}").get_json()
+    assert listed["totals"]["good"] == 1 and listed["totals"]["bad"] == 1
+    assert [c["id"] for c in client.get(f"/api/admin/ai-calls?q={marker}&feedback=bad").get_json()["calls"]] == [ids["2"]]
+    assert client.get(f"/api/admin/ai-calls?q={marker}&feedback=rated").get_json()["total"] == 2
+    assert client.get(f"/api/admin/ai-calls?q={marker}&feedback=unrated").get_json()["total"] == 1
+    cleared = client.post(f"/api/admin/ai-calls/{ids['1']}/feedback", json={"rating": 0, "note": ""}).get_json()["call"]
+    assert cleared["rating"] is None and cleared["feedback_note"] is None and cleared["feedback_at"] is None
+    assert client.post(f"/api/admin/ai-calls/{ids['1']}/feedback", json={"rating": 5}).status_code == 400
+    assert client.post("/api/admin/ai-calls/999999999/feedback", json={"rating": 1}).status_code == 404
+    user = db.create_user("Priya", f"{uuid.uuid4().hex[:10]}@example.com", "hash")
+    with client.session_transaction() as s:
+        s["user_id"] = user["id"]
+    assert client.post(f"/api/admin/ai-calls/{ids['2']}/feedback", json={"rating": 1}).status_code == 403
+
+
+def test_the_playground_runs_edited_prompts_and_can_switch_models(app, monkeypatch):
+    client, admin = _admin_client(app, monkeypatch)
+    with llm_trace.bind():
+        _llm('{"caption": "Old"}').generate_json("Write JSON.", "Brief: old", temperature=0.4, max_tokens=300)
+    original = client.get("/api/admin/ai-calls?q=Brief: old").get_json()["calls"][0]
+
+    seen = {}
+
+    class FakeService:
+        def __init__(self):
+            self.providers = [{"name": "heyroute", "model": "gpt-4o-mini", "client": None}]
+
+        def generate_json(self, system_prompt, user_prompt, **kwargs):
+            seen.update(system=system_prompt, user=user_prompt, model=self.providers[0]["model"], **kwargs)
+            return {"caption": "New"}, {"input_tokens": 10, "output_tokens": 4, "cost_usd": 0.0001, "model": self.providers[0]["model"]}
+
+        def generate(self, system_prompt, user_prompt, **kwargs):
+            raise RuntimeError("model not found")
+
+    from services import llm_service
+
+    monkeypatch.setattr(llm_service, "LLMService", FakeService)
+    body = client.post(f"/api/admin/ai-calls/{original['id']}/playground",
+                       json={"user_prompt": "Brief: new", "model": "gpt-5.6-terra", "temperature": 0.9}).get_json()
+    assert body["success"] and '"caption": "New"' in body["output"] and body["usage"]["cost_usd"] == 0.0001
+    assert seen["system"] == "Write JSON." and seen["user"] == "Brief: new"  # untouched fields keep the original
+    assert seen["model"] == "gpt-5.6-terra" and seen["temperature"] == 0.9 and seen["max_tokens"] == 300
+    failed = client.post(f"/api/admin/ai-calls/{original['id']}/playground", json={"json": False})
+    assert failed.status_code == 502 and "model not found" in failed.get_json()["error"]
+    assert client.post(f"/api/admin/ai-calls/{original['id']}/playground", json={"temperature": 9}).status_code == 400

@@ -8,7 +8,9 @@
 // strip on top. Clicking a run or trace opens the trace drawer: its runs as a
 // tree (or a waterfall of when each ran) on the left, the selected run on the
 // right - input as SYSTEM / HUMAN messages, output as the AI message, plus
-// Metadata and Raw. j / k move through the list, Esc closes.
+// Feedback (good / bad and a note), Playground (run the prompts again, as
+// edited, maybe with another model, and compare the answers), Metadata and
+// Raw. j / k move through the list, Esc closes.
 // Data: /api/admin/ai-calls[/traces|/traces/<group>|/stats|/<id>] (services/llm_trace.py).
 // Vanilla JS like performance.js.
 (function () {
@@ -17,7 +19,7 @@
     const $ = (id) => document.getElementById(id);
     const state = {
         view: 'runs', runsPage: 1, tracesPage: 1, list: [],
-        filters: { q: '', status: '', feature: '', user: '', days: '7' },
+        filters: { q: '', status: '', feature: '', user: '', days: '7', feedback: '' },
         drawer: null,  // {group, trace, selected, mode, listIndex}
     };
     const detailCache = {};
@@ -63,6 +65,7 @@
         if (f.feature) q.set('feature', f.feature);
         if (f.user) q.set('user', f.user);
         if (f.days) q.set('days', f.days);
+        if (f.feedback) q.set('feedback', f.feedback);
         Object.entries(extra || {}).forEach(([k, v]) => q.set(k, v));
         return q.toString();
     }
@@ -77,7 +80,9 @@
         const box = $('lsChips');
         box.textContent = '';
         const f = state.filters;
-        [['status', 'Status', statusLabel(f.status)], ['feature', 'Name', runName(f.feature)], ['user', 'User', f.user], ['q', 'Search', f.q]]
+        const FEEDBACK = { good: 'Good answer', bad: 'Bad answer', rated: 'Has feedback', unrated: 'No feedback yet' };
+        [['status', 'Status', statusLabel(f.status)], ['feature', 'Name', runName(f.feature)], ['user', 'User', f.user],
+         ['feedback', 'Feedback', FEEDBACK[f.feedback]], ['q', 'Search', f.q]]
             .filter(([k]) => f[k]).forEach(function ([k, label, value]) {
                 const chip = el('span', 'ls-chip');
                 chip.append(document.createTextNode(label + ': ' + value));
@@ -104,6 +109,7 @@
             $('lsStatus').value = state.filters.status;
             $('lsFeature').value = state.filters.feature;
             $('lsUser').value = state.filters.user;
+            $('lsFeedback').value = state.filters.feedback;
             $('lsStatus').focus();
         }
     }
@@ -112,6 +118,7 @@
         state.filters.status = $('lsStatus').value;
         state.filters.feature = $('lsFeature').value;
         state.filters.user = $('lsUser').value.trim();
+        state.filters.feedback = $('lsFeedback').value;
         toggleFilterPop(false);
         refresh();
     });
@@ -181,6 +188,18 @@
         }).catch(function () { $('lsStats').textContent = ''; });
     }
 
+    function feedbackCell(c) {
+        const td = el('td', 'ls-fb-cell');
+        if (c.rating) {
+            td.appendChild(icon('fas ' + (c.rating > 0 ? 'fa-thumbs-up is-good' : 'fa-thumbs-down is-bad')));
+            td.title = (c.rating > 0 ? 'Good answer' : 'Bad answer') + (c.feedback_note ? ': ' + c.feedback_note : '');
+        } else if (c.feedback_note) {
+            td.appendChild(icon('fas fa-note-sticky'));
+            td.title = c.feedback_note;
+        }
+        return td;
+    }
+
     // ── Runs ──────────────────────────────────────────────────────────
     function loadRuns() {
         const body = $('lsRunRows');
@@ -216,7 +235,7 @@
                 tr.append(name, el('td', 'ls-mono', c.preview), el('td', 'ls-mono', c.output_preview || '–'),
                     el('td', 'ls-err', c.error || ''), el('td', '', when(c.created_at)), latency,
                     el('td', 'num', number(c.input_tokens + c.output_tokens)), el('td', 'num', money(c.cost_usd)),
-                    el('td', '', c.user_email || (c.user_id ? 'user ' + c.user_id : 'system')));
+                    feedbackCell(c), el('td', '', c.user_email || (c.user_id ? 'user ' + c.user_id : 'system')));
                 tr.lastChild.title = tr.lastChild.textContent;
                 rowKeys(tr, function () { openFromList(index); });
                 body.appendChild(tr);
@@ -423,12 +442,16 @@
         renderTree();
         const box = $('lsDetail');
         box.textContent = 'Loading...';
-        const render = function (c) {
+        // startTab: re-drawn after feedback, it stays on the tab that was open
+        const render = function (c, startTab) {
             if (!state.drawer || state.drawer.selected !== id) return;
+            let current = startTab || 'run';
+            const again = function (fresh) { render(fresh, current); };
             box.textContent = '';
             const head = el('div', 'ls-detail-head');
             head.append(el('h3', '', runName(c.feature)), pill(statusLabel(c.status), 'is-' + c.status), pill(seconds(c.latency_ms)),
                 pill(number(c.input_tokens) + ' → ' + number(c.output_tokens) + ' tokens'), pill(money(c.cost_usd)), pill(c.model || c.provider));
+            head.appendChild(thumbs(c, again));
             box.appendChild(head);
             const tabs = el('div', 'ls-subtabs');
             tabs.setAttribute('role', 'tablist');
@@ -444,6 +467,7 @@
                 },
                 metadata: function () {
                     panel.textContent = '';
+                    panel.removeAttribute('style');
                     const meta = el('dl', 'ls-meta');
                     [['Name', c.feature], ['Run id', c.id], ['Trace id', c.group_id || '–'], ['Request id', c.request_id || '–'],
                      ['User', c.user_email || (c.user_id ? 'user ' + c.user_id : 'system / scheduler')], ['Provider', c.provider],
@@ -455,27 +479,182 @@
                 },
                 raw: function () {
                     panel.textContent = '';
+                    panel.removeAttribute('style');
                     const raw = JSON.stringify(c, null, 2);
                     panel.appendChild(message('RAW', '', raw, true));
                 },
             };
-            ['run', 'metadata', 'raw'].forEach(function (key, i) {
-                const tab = el('button', 'ls-tab', { run: 'Run', metadata: 'Metadata', raw: 'Raw' }[key]);
+            show.feedback = function () { panel.textContent = ''; panel.removeAttribute('style'); feedbackPanel(panel, c, again); };
+            show.playground = function () { panel.textContent = ''; panel.removeAttribute('style'); playgroundPanel(panel, c); };
+            ['run', 'feedback', 'playground', 'metadata', 'raw'].forEach(function (key) {
+                const label = { run: 'Run', feedback: c.rating ? (c.rating > 0 ? 'Feedback \u2713' : 'Feedback \u2717') : 'Feedback',
+                                playground: 'Playground', metadata: 'Metadata', raw: 'Raw' }[key];
+                const tab = el('button', 'ls-tab', label);
                 tab.type = 'button';
                 tab.setAttribute('role', 'tab');
-                tab.setAttribute('aria-selected', String(i === 0));
+                tab.setAttribute('aria-selected', String(key === current));
                 tab.addEventListener('click', function () {
+                    current = key;
                     tabs.querySelectorAll('.ls-tab').forEach((x) => x.setAttribute('aria-selected', String(x === tab)));
                     show[key]();
                 });
                 tabs.appendChild(tab);
             });
             box.append(tabs, panel);
-            show.run();
+            show[current]();
         };
         if (detailCache[id]) { render(detailCache[id]); return; }
         getJSON('/api/admin/ai-calls/' + id).then(function (r) { detailCache[id] = r.call; render(r.call); })
             .catch(function () { box.textContent = 'This run is no longer kept.'; });
+    }
+
+    // ── Feedback: an admin's verdict on a run's answer ────────────────
+    function saveFeedback(c, rating, note, rerender) {
+        return fetch('/api/admin/ai-calls/' + c.id + '/feedback', {
+            method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rating: rating, note: note }),
+        }).then((r) => r.json()).then(function (r) {
+            if (!r.success) throw new Error(r.error || 'not saved');
+            detailCache[c.id] = r.call;
+            const row = state.list.findIndex((x) => x.id === c.id);  // the table's icon follows
+            if (row >= 0) {
+                const cell = $('lsRunRows').querySelector(`tr[data-index="${row}"] .ls-fb-cell`);
+                if (cell) cell.replaceWith(feedbackCell(r.call));
+            }
+            rerender(r.call);
+            return r.call;
+        });
+    }
+    function thumbs(c, rerender) {
+        const group = el('span', 'ls-thumbs');
+        group.setAttribute('role', 'group');
+        group.setAttribute('aria-label', 'Rate this answer');
+        [[1, 'fa-thumbs-up', 'Good answer'], [-1, 'fa-thumbs-down', 'Bad answer']].forEach(function ([value, cls, label]) {
+            const b = el('button', 'ls-icon-btn' + (c.rating === value ? (value > 0 ? ' is-good' : ' is-bad') : ''));
+            b.type = 'button';
+            b.title = label;
+            b.setAttribute('aria-label', label);
+            b.setAttribute('aria-pressed', String(c.rating === value));
+            b.appendChild(icon('fas ' + cls));
+            b.addEventListener('click', function () {
+                saveFeedback(c, c.rating === value ? 0 : value, c.feedback_note || '', rerender);  // the same again clears it
+            });
+            group.appendChild(b);
+        });
+        return group;
+    }
+    function feedbackPanel(panel, c, rerender) {
+        const wrap = el('div', 'ls-fb');
+        const rate = el('div', 'ls-fb-row');
+        rate.append(el('span', 'ls-section-label', 'Was this a good answer?'), thumbs(c, rerender));
+        const label = el('label', 'ls-section-label', 'Note');
+        label.htmlFor = 'lsFbNote';
+        const note = el('textarea', 'ls-textarea');
+        note.id = 'lsFbNote';
+        note.rows = 4;
+        note.value = c.feedback_note || '';
+        note.placeholder = 'What was wrong or right? e.g. "Invented a price", "Ignored the brand voice"';
+        const save = el('button', 'ls-btn is-main', 'Save note');
+        save.type = 'button';
+        const status = el('span', 'ls-sub');
+        if (c.feedback_at) status.textContent = 'Last saved ' + new Date(c.feedback_at).toLocaleString() + (c.feedback_by_email ? ' by ' + c.feedback_by_email : '');
+        save.addEventListener('click', function () {
+            save.disabled = true;
+            saveFeedback(c, c.rating || 0, note.value, function (fresh) { status.textContent = 'Saved.'; c.feedback_note = fresh.feedback_note; })
+                .catch(function (err) { status.textContent = 'Not saved: ' + err.message; })
+                .finally(function () { save.disabled = false; });
+        });
+        const actions = el('div', 'ls-fb-row');
+        actions.append(save, status);
+        wrap.append(rate, label, note, actions,
+            el('p', 'ls-sub', 'Use the Feedback filter to find answers marked good or bad. Feedback is deleted with the run after the keeping period.'));
+        panel.appendChild(wrap);
+    }
+
+    // ── Playground: run the prompts again, as edited, and compare ─────
+    function playgroundPanel(panel, c) {
+        const wrap = el('div', 'ls-pg');
+        const field = function (labelText, node, id) {
+            const box = el('div', 'ls-pg-field');
+            const label = el('label', 'ls-section-label', labelText);
+            label.htmlFor = id;
+            node.id = id;
+            box.append(label, node);
+            return box;
+        };
+        const system = el('textarea', 'ls-textarea ls-code-input');
+        system.rows = 8;
+        system.value = c.system_prompt || '';
+        const user = el('textarea', 'ls-textarea ls-code-input');
+        user.rows = 6;
+        user.value = c.user_prompt || '';
+        const model = el('input', 'ls-input');
+        model.placeholder = c.model || 'the usual model';
+        const temperature = el('input', 'ls-input');
+        temperature.type = 'number'; temperature.min = '0'; temperature.max = '2'; temperature.step = '0.1';
+        temperature.value = c.temperature ?? 0.7;
+        const maxTokens = el('input', 'ls-input');
+        maxTokens.type = 'number'; maxTokens.min = '1'; maxTokens.max = '16000';
+        maxTokens.value = c.max_tokens ?? 1200;
+        const json = el('input');
+        json.type = 'checkbox';
+        json.checked = c.kind === 'json';
+        const jsonLabel = el('label', 'ls-check');
+        jsonLabel.append(json, document.createTextNode(' Ask for a JSON answer'));
+        const params = el('div', 'ls-pg-params');
+        params.append(field('Model', model, 'lsPgModel'), field('Temperature', temperature, 'lsPgTemp'), field('Max tokens', maxTokens, 'lsPgMax'), jsonLabel);
+        const run = el('button', 'ls-btn is-main', 'Run');
+        run.type = 'button';
+        run.prepend(icon('fas fa-play'));
+        const reset = el('button', 'ls-btn', 'Reset to the original');
+        reset.type = 'button';
+        reset.addEventListener('click', function () {
+            system.value = c.system_prompt || ''; user.value = c.user_prompt || ''; model.value = '';
+            temperature.value = c.temperature ?? 0.7; maxTokens.value = c.max_tokens ?? 1200; json.checked = c.kind === 'json';
+        });
+        const bar = el('div', 'ls-fb-row');
+        bar.append(run, reset, el('span', 'ls-sub', 'Runs on your account and counts as an AI call. Nothing changes in the app.'));
+        const result = el('div', 'ls-pg-compare');
+        const original = el('div', 'ls-pg-col');
+        original.append(el('div', 'ls-section-label', 'Original answer'),
+            message('AI', 'is-ai', c.output === null ? '' : (c.kind === 'json' ? pretty(c.output) : c.output), c.kind === 'json'));
+        const fresh = el('div', 'ls-pg-col');
+        fresh.append(el('div', 'ls-section-label', 'New answer'), el('p', 'ls-sub', 'Press Run to see it here.'));
+        result.append(original, fresh);
+        run.addEventListener('click', function () {
+            run.disabled = true;
+            fresh.textContent = '';
+            fresh.append(el('div', 'ls-section-label', 'New answer'), el('p', 'ls-sub', 'Running...'));
+            fetch('/api/admin/ai-calls/' + c.id + '/playground', {
+                method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ system_prompt: system.value, user_prompt: user.value, model: model.value.trim(),
+                                       temperature: temperature.value, max_tokens: maxTokens.value, json: json.checked }),
+            }).then((r) => r.json()).then(function (r) {
+                fresh.textContent = '';
+                const head = el('div', 'ls-detail-head');
+                head.append(el('span', 'ls-section-label', 'New answer'));
+                if (r.success) {
+                    const u = r.usage || {};
+                    head.append(pill('Success', 'is-ok'), pill(seconds(r.latency_ms)),
+                        pill(number(u.input_tokens) + ' → ' + number(u.output_tokens) + ' tokens'), pill(money(u.cost_usd)), pill(u.model || model.value || c.model || ''));
+                    fresh.append(head, message('AI', 'is-ai', r.output, json.checked));
+                } else {
+                    head.append(pill('Error', 'is-error'), pill(seconds(r.latency_ms || 0)));
+                    fresh.append(head, el('pre', 'ls-error-box', r.error || 'The run failed.'));
+                }
+                if (r.group_id) {
+                    const open = el('button', 'ls-btn', 'Open this run\'s trace');
+                    open.type = 'button';
+                    open.addEventListener('click', function () { openDrawer(r.group_id, null, null); });
+                    fresh.appendChild(open);
+                }
+            }).catch(function () {
+                fresh.textContent = '';
+                fresh.append(el('div', 'ls-section-label', 'New answer'), el('pre', 'ls-error-box', 'The run could not be sent. Please try again.'));
+            }).finally(function () { run.disabled = false; });
+        });
+        wrap.append(field('System prompt', system, 'lsPgSystem'), field('User prompt', user, 'lsPgUser'), params, bar, result);
+        panel.appendChild(wrap);
     }
 
     // ── Views ─────────────────────────────────────────────────────────
