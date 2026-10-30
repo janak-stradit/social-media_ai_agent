@@ -157,8 +157,8 @@ class Config:
     LEGAL_GRIEVANCE_OFFICER = os.getenv("LEGAL_GRIEVANCE_OFFICER") or "the Grievance Officer"
     LEGAL_GRIEVANCE_EMAIL = os.getenv("LEGAL_GRIEVANCE_EMAIL", "")
     LEGAL_JURISDICTION = os.getenv("LEGAL_JURISDICTION") or "Gujarat, India"
-    LEGAL_UPDATED = os.getenv("LEGAL_UPDATED") or "26 October 2026"
-    LEGAL_VERSION = os.getenv("LEGAL_VERSION") or "2026-10-26"
+    LEGAL_UPDATED = os.getenv("LEGAL_UPDATED") or "30 October 2026"
+    LEGAL_VERSION = os.getenv("LEGAL_VERSION") or "2026-10-30"
     # GST added to INR prices (services/billing_service.py)
     GST_RATE = float(os.getenv("GST_RATE", "0.18"))
     # Stripe: the only payment gateway, for every country - INR for Indian
