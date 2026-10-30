@@ -1300,32 +1300,89 @@ def image_presets_list():
     return jsonify({"success": True, "presets": list_presets()})
 
 
+def _ai_call_filters() -> dict:
+    """Admin -> AI calls' filters from the query string (ValueError on a bad number):
+    ?user= (email contains), feature, status (ok/empty/error), group, q (text in the
+    prompts or answer), days, feedback (good/bad/rated/unrated)."""
+    from datetime import datetime, timedelta, timezone
+
+    args = request.args
+    days = int(args["days"]) if args.get("days") else None
+    return {"user_email": args.get("user") or None, "feature": args.get("feature") or None,
+            "status": args.get("status") or None, "group_id": args.get("group") or None,
+            "search": args.get("q") or None,
+            "since": datetime.now(timezone.utc) - timedelta(days=days) if days else None,
+            "feedback": args.get("feedback") if args.get("feedback") in ("good", "bad", "rated", "unrated") else None}
+
+
 @api_bp.route("/admin/ai-calls", methods=["GET"])
 @login_required_api
 @admin_required_api
 def admin_ai_calls():
-    """Admin -> AI calls: every AI call, newest first (services/llm_trace.py).
-    Filters: ?user= (email contains), feature, status (ok/empty/error), group,
-    q (text in the prompts or answer), days, page."""
+    """Admin -> AI calls: every AI call, newest first (services/llm_trace.py),
+    50 a page (?page=), with the filters of _ai_call_filters."""
     if not DB_AVAILABLE:
         return jsonify({"success": True, "calls": [], "total": 0, "features": [], "totals": {}})
-    from datetime import datetime, timedelta, timezone
-
     from db import list_llm_calls
 
-    args = request.args
     try:
-        page = max(1, int(args.get("page", 1)))
-        days = int(args["days"]) if args.get("days") else None
+        page = max(1, int(request.args.get("page", 1)))
+        filters = _ai_call_filters()
     except ValueError:
         return jsonify({"success": False, "error": "page and days are numbers"}), 400
-    data = list_llm_calls(user_email=args.get("user") or None, feature=args.get("feature") or None,
-                          status=args.get("status") or None, group_id=args.get("group") or None,
-                          search=args.get("q") or None,
-                          since=datetime.now(timezone.utc) - timedelta(days=days) if days else None,
-                          limit=50, offset=(page - 1) * 50)
+    data = list_llm_calls(limit=50, offset=(page - 1) * 50, **filters)
     return jsonify({"success": True, "page": page, "page_size": 50, "tracing": Config.LLM_TRACING,
                     "keep_days": Config.LLM_TRACE_DAYS, **data})
+
+
+@api_bp.route("/admin/ai-calls/traces", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_ai_traces():
+    """Admin -> AI calls -> Traces: one row per generation or request (the calls
+    sharing a group), newest first, 30 a page, with the same filters."""
+    if not DB_AVAILABLE:
+        return jsonify({"success": True, "traces": [], "total": 0})
+    from db import list_llm_traces
+
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+        filters = _ai_call_filters()
+    except ValueError:
+        return jsonify({"success": False, "error": "page and days are numbers"}), 400
+    return jsonify({"success": True, "page": page, "page_size": 30,
+                    **list_llm_traces(limit=30, offset=(page - 1) * 30, **filters)})
+
+
+@api_bp.route("/admin/ai-calls/traces/<group_id>", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_ai_trace(group_id):
+    """One generation's calls as a timeline (when each started, how long it took)."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import get_llm_trace
+
+    trace = get_llm_trace(group_id[:40])
+    if not trace:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify({"success": True, "trace": trace})
+
+
+@api_bp.route("/admin/ai-calls/stats", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_ai_stats():
+    """Admin -> AI calls -> Overview: calls, cost and failures per day, and per part of the app."""
+    if not DB_AVAILABLE:
+        return jsonify({"success": True, "days": [], "features": []})
+    from db import llm_call_stats
+
+    try:
+        filters = _ai_call_filters()
+    except ValueError:
+        return jsonify({"success": False, "error": "days is a number"}), 400
+    return jsonify({"success": True, **llm_call_stats(**filters)})
 
 
 @api_bp.route("/admin/ai-calls/<int:call_id>", methods=["GET"])
@@ -1341,6 +1398,81 @@ def admin_ai_call(call_id):
     if not call:
         return jsonify({"error": "Not found"}), 404
     return jsonify({"success": True, "call": call})
+
+
+@api_bp.route("/admin/ai-calls/<int:call_id>/feedback", methods=["POST"])
+@login_required_api
+@admin_required_api
+def admin_ai_call_feedback(call_id):
+    """An admin's verdict on a run's answer: {rating: 1 | -1 | 0 (clear), note}."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import set_llm_feedback
+
+    data = request.get_json(silent=True) or {}
+    rating = data.get("rating")
+    if rating not in (1, -1, 0, None):
+        return jsonify({"success": False, "error": "rating is 1, -1 or 0"}), 400
+    call = set_llm_feedback(call_id, rating or None, str(data.get("note") or ""), get_current_user_id())
+    if not call:
+        return jsonify({"error": "Not found"}), 404
+    log_event("ai_calls.feedback", call_id=call_id, rating=rating)
+    return jsonify({"success": True, "call": call})
+
+
+@api_bp.route("/admin/ai-calls/<int:call_id>/playground", methods=["POST"])
+@login_required_api
+@admin_required_api
+@limit_by_user("ai_user")
+def admin_ai_call_playground(call_id):
+    """Run a run's prompts again, as edited, to compare answers: {system_prompt,
+    user_prompt, model, temperature, max_tokens, json}. The new call is traced
+    like any other (its name is this endpoint), under the admin's account."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    import time
+    import uuid
+
+    from db import get_llm_call
+    from services import llm_trace
+    from services.llm_service import LLMService
+
+    original = get_llm_call(call_id)
+    if not original:
+        return jsonify({"error": "Not found"}), 404
+    data = request.get_json(silent=True) or {}
+    system_prompt = str(data.get("system_prompt") if data.get("system_prompt") is not None else original["system_prompt"])[:100_000]
+    user_prompt = str(data.get("user_prompt") if data.get("user_prompt") is not None else original["user_prompt"])[:100_000]
+    try:
+        temperature = float(data["temperature"]) if data.get("temperature") not in (None, "") else (original["temperature"] or 0.7)
+        max_tokens = int(data["max_tokens"]) if data.get("max_tokens") not in (None, "") else (original["max_tokens"] or 1200)
+    except (TypeError, ValueError):
+        return jsonify({"success": False, "error": "temperature and max tokens are numbers"}), 400
+    if not (0 <= temperature <= 2 and 1 <= max_tokens <= 16000):
+        return jsonify({"success": False, "error": "temperature is 0 to 2 and max tokens 1 to 16,000"}), 400
+    as_json = bool(data.get("json", original["kind"] == "json"))
+    model = str(data.get("model") or "").strip()[:120]
+
+    llm = LLMService()
+    if model:  # the same provider chain, asking for this model instead
+        llm.providers = [dict(p, model=model) for p in llm.providers if p["name"] != "mock"] or llm.providers
+    group = f"playground-{uuid.uuid4().hex[:12]}"
+    started = time.time()
+    try:
+        with llm_trace.bind(user_id=get_current_user_id(), group_id=group):
+            if as_json:
+                answer, usage = llm.generate_json(system_prompt, user_prompt, temperature=temperature, max_tokens=max_tokens,
+                                                  return_usage=True, max_retries_per_provider=1)
+                answer = json.dumps(answer, ensure_ascii=False, indent=2)
+            else:
+                answer, usage = llm.generate(system_prompt, user_prompt, temperature=temperature, max_tokens=max_tokens,
+                                             return_usage=True, max_retries_per_provider=1)
+    except Exception as err:  # noqa: BLE001 - shown to the admin as is
+        return jsonify({"success": False, "error": str(err)[:500], "group_id": group,
+                        "latency_ms": int((time.time() - started) * 1000)}), 502
+    log_event("ai_calls.playground", call_id=call_id, model=model or None)
+    return jsonify({"success": True, "output": answer, "usage": usage or {}, "group_id": group,
+                    "latency_ms": int((time.time() - started) * 1000)})
 
 
 @api_bp.route("/admin/image-presets", methods=["GET"])

@@ -137,3 +137,134 @@ def test_make_admin_script():
     assert db.get_user_by_email(email).is_admin
     assert make_admin.main(["make_admin.py", email, "--remove"]) == 0
     assert not db.get_user_by_email(email).is_admin and user["id"]
+
+
+def _call(group, feature, ended, latency_ms, status="ok", cost=0.001, user_id=None):
+    db.save_llm_call({"user_id": user_id, "group_id": group, "feature": feature, "kind": "json", "provider": "heyroute",
+                      "model": "gpt-4o-mini", "status": status, "system_prompt": "s", "user_prompt": "u", "output": "o",
+                      "input_tokens": 100, "output_tokens": 20, "cost_usd": cost, "latency_ms": latency_ms,
+                      "created_at": ended.replace(tzinfo=None)})
+
+
+def test_a_trace_is_a_timeline_of_one_generations_calls(app, monkeypatch):
+    monkeypatch.setattr(Config, "ADMIN_2FA_REQUIRED", False)
+    admin = db.create_user("Admin", f"{uuid.uuid4().hex[:10]}@example.com", "hash", is_admin=True)
+    user = db.create_user("Priya", f"{uuid.uuid4().hex[:10]}@example.com", "hash")
+    group, t0 = uuid.uuid4().hex[:16], datetime.now(timezone.utc) - timedelta(minutes=5)
+    # research 0-4 s; caption and hashtags in parallel 4-9 s and 4-6 s (hashtags failed once first); review 9-10 s
+    _call(group, "agents/story_agent.py:analyze", t0 + timedelta(seconds=4), 4000, user_id=user["id"])
+    _call(group, "agents/hashtag_agent.py:generate_hashtags_batch", t0 + timedelta(seconds=5), 1000, "error", 0.0, user["id"])
+    _call(group, "agents/hashtag_agent.py:generate_hashtags_batch", t0 + timedelta(seconds=6), 1000, user_id=user["id"])
+    _call(group, "agents/caption_agent.py:generate_caption", t0 + timedelta(seconds=9), 5000, user_id=user["id"])
+    _call(group, "agents/reviewer_agent.py:review", t0 + timedelta(seconds=10), 1000, user_id=user["id"])
+
+    trace = db.get_llm_trace(group)
+    assert trace["duration_ms"] == 10000 and trace["user_email"] == user["email"]
+    assert trace["totals"] == {"calls": 5, "errors": 1, "input_tokens": 500, "output_tokens": 100, "cost_usd": 0.004}
+    starts = {(c["feature"].split(":")[1], c["status"]): c["start_ms"] for c in trace["calls"]}
+    assert starts == {("analyze", "ok"): 0, ("generate_hashtags_batch", "error"): 4000, ("generate_hashtags_batch", "ok"): 5000,
+                      ("generate_caption", "ok"): 4000, ("review", "ok"): 9000}
+    assert [c["start_ms"] for c in trace["calls"]] == sorted(c["start_ms"] for c in trace["calls"])
+
+    client = app.test_client()
+    with client.session_transaction() as s:
+        s["user_id"] = admin["id"]
+    listed = client.get(f"/api/admin/ai-calls/traces?user={user['email']}").get_json()
+    row = listed["traces"][0]
+    assert listed["total"] == 1 and row["group_id"] == group and row["calls"] == 5 and row["errors"] == 1
+    assert row["duration_ms"] == 10000 and row["features"][0] == "agents/story_agent.py:analyze"
+    assert client.get(f"/api/admin/ai-calls/traces?user={user['email']}&status=error").get_json()["total"] == 1  # has a failed call
+    assert client.get(f"/api/admin/ai-calls/traces/{group}").get_json()["trace"]["duration_ms"] == 10000
+    assert client.get("/api/admin/ai-calls/traces/nope").status_code == 404
+    with client.session_transaction() as s:
+        s["user_id"] = user["id"]
+    assert client.get(f"/api/admin/ai-calls/traces/{group}").status_code == 403
+
+
+def test_overview_per_day_and_per_part_of_the_app(app, monkeypatch):
+    monkeypatch.setattr(Config, "ADMIN_2FA_REQUIRED", False)
+    admin = db.create_user("Admin", f"{uuid.uuid4().hex[:10]}@example.com", "hash", is_admin=True)
+    user = db.create_user("Priya", f"{uuid.uuid4().hex[:10]}@example.com", "hash")
+    now = datetime.now(timezone.utc)
+    for n, latency in enumerate((100, 200, 300, 400, 5000)):
+        _call(uuid.uuid4().hex[:16], "agents/caption_agent.py:generate_caption", now - timedelta(days=n % 2), latency,
+              "error" if n == 4 else "ok", 0.002, user["id"])
+    _call(uuid.uuid4().hex[:16], "services/hook_service.py:other_openings", now, 50, cost=0.0005, user_id=user["id"])
+    stats = db.llm_call_stats(user_email=user["email"])
+    caption = stats["features"][0]
+    assert caption["feature"] == "agents/caption_agent.py:generate_caption"  # costliest first
+    assert caption["calls"] == 5 and caption["errors"] == 1 and caption["cost_usd"] == 0.01
+    assert caption["avg_ms"] == 1200 and caption["p95_ms"] == 5000
+    assert sum(d["calls"] for d in stats["days"]) == 6 and len(stats["days"]) == 2
+    client = app.test_client()
+    with client.session_transaction() as s:
+        s["user_id"] = admin["id"]
+    body = client.get(f"/api/admin/ai-calls/stats?user={user['email']}&days=7").get_json()
+    assert body["success"] and len(body["features"]) == 2
+
+
+def _admin_client(app, monkeypatch):
+    monkeypatch.setattr(Config, "ADMIN_2FA_REQUIRED", False)
+    admin = db.create_user("Admin", f"{uuid.uuid4().hex[:10]}@example.com", "hash", is_admin=True)
+    client = app.test_client()
+    with client.session_transaction() as s:
+        s["user_id"] = admin["id"]
+    return client, admin
+
+
+def test_feedback_on_a_run_and_filtering_by_it(app, monkeypatch):
+    client, admin = _admin_client(app, monkeypatch)
+    marker = uuid.uuid4().hex[:10]
+    with llm_trace.bind():
+        _llm("a good one", "a bad one", "not rated").generate("s", f"q {marker} 1")
+        _llm("a bad one").generate("s", f"q {marker} 2")
+        _llm("not rated").generate("s", f"q {marker} 3")
+    ids = {c["preview"][-1]: c["id"] for c in client.get(f"/api/admin/ai-calls?q={marker}").get_json()["calls"]}
+    good = client.post(f"/api/admin/ai-calls/{ids['1']}/feedback", json={"rating": 1, "note": "On brand"}).get_json()["call"]
+    assert good["rating"] == 1 and good["feedback_note"] == "On brand" and good["feedback_by_email"] == admin["email"]
+    client.post(f"/api/admin/ai-calls/{ids['2']}/feedback", json={"rating": -1, "note": "Invented a price"})
+    listed = client.get(f"/api/admin/ai-calls?q={marker}").get_json()
+    assert listed["totals"]["good"] == 1 and listed["totals"]["bad"] == 1
+    assert [c["id"] for c in client.get(f"/api/admin/ai-calls?q={marker}&feedback=bad").get_json()["calls"]] == [ids["2"]]
+    assert client.get(f"/api/admin/ai-calls?q={marker}&feedback=rated").get_json()["total"] == 2
+    assert client.get(f"/api/admin/ai-calls?q={marker}&feedback=unrated").get_json()["total"] == 1
+    cleared = client.post(f"/api/admin/ai-calls/{ids['1']}/feedback", json={"rating": 0, "note": ""}).get_json()["call"]
+    assert cleared["rating"] is None and cleared["feedback_note"] is None and cleared["feedback_at"] is None
+    assert client.post(f"/api/admin/ai-calls/{ids['1']}/feedback", json={"rating": 5}).status_code == 400
+    assert client.post("/api/admin/ai-calls/999999999/feedback", json={"rating": 1}).status_code == 404
+    user = db.create_user("Priya", f"{uuid.uuid4().hex[:10]}@example.com", "hash")
+    with client.session_transaction() as s:
+        s["user_id"] = user["id"]
+    assert client.post(f"/api/admin/ai-calls/{ids['2']}/feedback", json={"rating": 1}).status_code == 403
+
+
+def test_the_playground_runs_edited_prompts_and_can_switch_models(app, monkeypatch):
+    client, admin = _admin_client(app, monkeypatch)
+    with llm_trace.bind():
+        _llm('{"caption": "Old"}').generate_json("Write JSON.", "Brief: old", temperature=0.4, max_tokens=300)
+    original = client.get("/api/admin/ai-calls?q=Brief: old").get_json()["calls"][0]
+
+    seen = {}
+
+    class FakeService:
+        def __init__(self):
+            self.providers = [{"name": "heyroute", "model": "gpt-4o-mini", "client": None}]
+
+        def generate_json(self, system_prompt, user_prompt, **kwargs):
+            seen.update(system=system_prompt, user=user_prompt, model=self.providers[0]["model"], **kwargs)
+            return {"caption": "New"}, {"input_tokens": 10, "output_tokens": 4, "cost_usd": 0.0001, "model": self.providers[0]["model"]}
+
+        def generate(self, system_prompt, user_prompt, **kwargs):
+            raise RuntimeError("model not found")
+
+    from services import llm_service
+
+    monkeypatch.setattr(llm_service, "LLMService", FakeService)
+    body = client.post(f"/api/admin/ai-calls/{original['id']}/playground",
+                       json={"user_prompt": "Brief: new", "model": "gpt-5.6-terra", "temperature": 0.9}).get_json()
+    assert body["success"] and '"caption": "New"' in body["output"] and body["usage"]["cost_usd"] == 0.0001
+    assert seen["system"] == "Write JSON." and seen["user"] == "Brief: new"  # untouched fields keep the original
+    assert seen["model"] == "gpt-5.6-terra" and seen["temperature"] == 0.9 and seen["max_tokens"] == 300
+    failed = client.post(f"/api/admin/ai-calls/{original['id']}/playground", json={"json": False})
+    assert failed.status_code == 502 and "model not found" in failed.get_json()["error"]
+    assert client.post(f"/api/admin/ai-calls/{original['id']}/playground", json={"temperature": 9}).status_code == 400
