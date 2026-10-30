@@ -9,7 +9,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link href="{{ url_for('static', filename='css/style.css') }}" rel="stylesheet">
 </head>
-<body class="ai-calls-page">
+<body class="ls-page">
 
 <header class="app-header">
     <div class="header-brand">
@@ -35,94 +35,188 @@
     </div>
 </header>
 
-<!-- Every AI call (static/js/admin_ai_calls.js; /api/admin/ai-calls, services/llm_trace.py) -->
-<main class="perf-main">
-    <div class="perf-head">
+<!-- Every AI call, laid out like an LLM tracing tool (static/js/admin_ai_calls.js;
+     /api/admin/ai-calls[/traces|/stats|/<id>], services/llm_trace.py) -->
+<main class="ls-main">
+    <div class="ls-head">
         <div>
-            <h1>AI calls</h1>
-            <p id="aiIntro">Every call to the AI: the prompts sent, the answer, model, tokens, cost and time. Admins only.</p>
+            <div class="ls-title">
+                <h1>AI calls</h1>
+                <span class="ls-chip" id="lsTracing">Recording</span>
+            </div>
+            <div class="ls-sub" id="lsIntro">Every call to the AI: the prompts sent, the answer, model, tokens, cost and time. Admins only.</div>
         </div>
+        <button type="button" class="ls-btn" id="lsRefresh"><i class="fas fa-rotate-right" aria-hidden="true"></i>Refresh</button>
     </div>
 
-    <section class="perf-kpis" id="aiTotals" aria-label="Totals" aria-live="polite"></section>
+    <div class="ls-tabs" role="tablist" aria-label="View">
+        <button type="button" role="tab" class="ls-tab" data-view="runs" aria-selected="true" aria-controls="lsRuns">Runs<span class="ls-count" id="lsRunsCount"></span></button>
+        <button type="button" role="tab" class="ls-tab" data-view="traces" aria-selected="false" aria-controls="lsTraces">Traces<span class="ls-count" id="lsTracesCount"></span></button>
+        <button type="button" role="tab" class="ls-tab" data-view="monitor" aria-selected="false" aria-controls="lsMonitor">Monitor</button>
+    </div>
 
-    <form class="perf-card ai-filters" id="aiFilters" aria-label="Filters">
-        <div class="ai-filter">
-            <label for="aiUser">User</label>
-            <input type="search" id="aiUser" class="form-control form-control-sm" placeholder="email contains...">
+    <div class="ls-toolbar">
+        <form class="ls-search" id="lsSearchForm" role="search">
+            <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+            <label class="visually-hidden" for="lsSearch">Search the prompts and answers</label>
+            <input type="search" id="lsSearch" placeholder="Search the prompts and answers">
+        </form>
+        <div class="ls-filter-menu">
+            <button type="button" class="ls-btn" id="lsFilterBtn" aria-expanded="false" aria-controls="lsFilterPop"><i class="fas fa-filter" aria-hidden="true"></i>Filter</button>
+            <div class="ls-filter-pop" id="lsFilterPop" hidden>
+                <label>Status
+                    <select class="ls-select" id="lsStatus">
+                        <option value="">Any</option>
+                        <option value="ok">Success</option>
+                        <option value="error">Error</option>
+                        <option value="empty">Empty answer</option>
+                    </select>
+                </label>
+                <label>Name (part of the app)
+                    <select class="ls-select" id="lsFeature"><option value="">Any</option></select>
+                </label>
+                <label>User (email contains)
+                    <input type="text" id="lsUser" placeholder="e.g. jack">
+                </label>
+                <button type="button" class="ls-btn is-main" id="lsFilterApply">Apply</button>
+            </div>
         </div>
-        <div class="ai-filter">
-            <label for="aiFeature">Part of the app</label>
-            <select id="aiFeature" class="form-select form-select-sm"><option value="">All</option></select>
-        </div>
-        <div class="ai-filter">
-            <label for="aiStatus">Result</label>
-            <select id="aiStatus" class="form-select form-select-sm">
-                <option value="">All</option>
-                <option value="ok">Answered</option>
-                <option value="empty">Empty answer</option>
-                <option value="error">Failed</option>
-            </select>
-        </div>
-        <div class="ai-filter">
-            <label for="aiDays">Period</label>
-            <select id="aiDays" class="form-select form-select-sm">
-                <option value="1">Last 24 hours</option>
-                <option value="7" selected>Last 7 days</option>
-                <option value="30">Last 30 days</option>
-                <option value="">Everything kept</option>
-            </select>
-        </div>
-        <div class="ai-filter ai-filter-grow">
-            <label for="aiSearch">Text in the prompt or answer</label>
-            <input type="search" id="aiSearch" class="form-control form-control-sm" placeholder="e.g. Diwali">
-        </div>
-        <div class="ai-filter ai-filter-buttons">
-            <button type="submit" class="perf-btn is-main">Apply</button>
-            <button type="button" class="perf-btn" id="aiClear">Clear</button>
-        </div>
-        <div class="ai-group-note d-none" id="aiGroupNote"></div>
-    </form>
+        <label class="visually-hidden" for="lsDays">Time range</label>
+        <select class="ls-select" id="lsDays">
+            <option value="1">Last 24 hours</option>
+            <option value="7" selected>Last 7 days</option>
+            <option value="30">Last 30 days</option>
+            <option value="">All kept</option>
+        </select>
+        <div class="ls-chips" id="lsChips" aria-live="polite"></div>
+    </div>
 
-    <section class="perf-card" aria-labelledby="aiListTitle">
-        <div class="perf-card-head">
-            <h2 id="aiListTitle">Calls</h2>
-            <span class="perf-sub" id="aiCount"></span>
-        </div>
-        <div class="perf-table-wrap">
-            <table class="perf-table ai-table">
+    <section class="ls-stats" id="lsStats" aria-label="Summary" aria-live="polite"></section>
+
+    <!-- Runs: every AI call -->
+    <section class="ls-table-card" id="lsRuns" role="tabpanel">
+        <div class="ls-table-wrap">
+            <table class="ls-table">
+                <colgroup>
+                    <col style="width: 23%"><col style="width: 20%"><col style="width: 20%"><col style="width: 9%">
+                    <col style="width: 11%"><col style="width: 7%"><col style="width: 6%"><col style="width: 7%"><col style="width: 9%">
+                </colgroup>
                 <thead>
                     <tr>
-                        <th scope="col">When</th>
-                        <th scope="col">User</th>
-                        <th scope="col">Part of the app</th>
-                        <th scope="col">Model</th>
-                        <th scope="col">Result</th>
-                        <th scope="col" class="num">Tokens in / out</th>
+                        <th scope="col">Name</th>
+                        <th scope="col">Input</th>
+                        <th scope="col">Output</th>
+                        <th scope="col">Error</th>
+                        <th scope="col">Start time</th>
+                        <th scope="col" class="num">Latency</th>
+                        <th scope="col" class="num">Tokens</th>
                         <th scope="col" class="num">Cost</th>
-                        <th scope="col" class="num">Time</th>
+                        <th scope="col">User</th>
                     </tr>
                 </thead>
-                <tbody id="aiRows"></tbody>
+                <tbody id="lsRunRows"></tbody>
             </table>
         </div>
-        <p class="perf-empty d-none" id="aiEmpty">No AI calls match.</p>
-        <div class="ai-pager">
-            <button type="button" class="perf-btn" id="aiPrev">Newer</button>
-            <span class="perf-sub" id="aiPage"></span>
-            <button type="button" class="perf-btn" id="aiNext">Older</button>
+        <div class="ls-empty d-none" id="lsRunsEmpty">No runs match.</div>
+        <div class="ls-foot">
+            <span id="lsRunsPage"></span>
+            <span>
+                <button type="button" class="ls-btn" id="lsRunsPrev">Newer</button>
+                <button type="button" class="ls-btn" id="lsRunsNext">Older</button>
+            </span>
+        </div>
+    </section>
+
+    <!-- Traces: one row per generation or request -->
+    <section class="ls-table-card d-none" id="lsTraces" role="tabpanel">
+        <div class="ls-table-wrap">
+            <table class="ls-table">
+                <colgroup>
+                    <col style="width: 36%"><col style="width: 9%"><col style="width: 13%"><col style="width: 8%">
+                    <col style="width: 7%"><col style="width: 9%"><col style="width: 8%"><col style="width: 10%">
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th scope="col">Trace</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Start time</th>
+                        <th scope="col" class="num">Latency</th>
+                        <th scope="col" class="num">Runs</th>
+                        <th scope="col" class="num">Tokens</th>
+                        <th scope="col" class="num">Cost</th>
+                        <th scope="col">User</th>
+                    </tr>
+                </thead>
+                <tbody id="lsTraceRows"></tbody>
+            </table>
+        </div>
+        <div class="ls-empty d-none" id="lsTracesEmpty">No traces match.</div>
+        <div class="ls-foot">
+            <span id="lsTracesPage"></span>
+            <span>
+                <button type="button" class="ls-btn" id="lsTracesPrev">Newer</button>
+                <button type="button" class="ls-btn" id="lsTracesNext">Older</button>
+            </span>
+        </div>
+    </section>
+
+    <!-- Monitor: charts over time, and per name -->
+    <section class="d-none" id="lsMonitor" role="tabpanel" aria-label="Monitor">
+        <div class="ls-charts">
+            <div class="ls-chart"><h3>Run count</h3><div class="ls-legend"><span><i style="background:var(--brand)"></i>Success</span><span><i style="background:#dc2626"></i>Error</span></div><div class="ls-bars" id="lsChartRuns"></div></div>
+            <div class="ls-chart"><h3>Latency</h3><div class="ls-legend"><span><i style="background:#fdba74"></i>P50</span><span><i style="background:var(--brand)"></i>P99</span></div><div class="ls-bars" id="lsChartLatency"></div></div>
+            <div class="ls-chart"><h3>Tokens</h3><div class="ls-bars" id="lsChartTokens"></div></div>
+            <div class="ls-chart"><h3>Cost</h3><div class="ls-bars" id="lsChartCost"></div></div>
+        </div>
+        <div class="ls-table-card" style="margin-top: 14px;">
+            <div class="ls-table-wrap">
+                <table class="ls-table">
+                    <colgroup>
+                        <col style="width: 34%"><col style="width: 9%"><col style="width: 11%"><col style="width: 11%">
+                        <col style="width: 11%"><col style="width: 12%"><col style="width: 12%">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th scope="col">Name</th>
+                            <th scope="col" class="num">Runs</th>
+                            <th scope="col" class="num">Error rate</th>
+                            <th scope="col" class="num">Tokens</th>
+                            <th scope="col" class="num">Cost</th>
+                            <th scope="col" class="num">Avg latency</th>
+                            <th scope="col" class="num">P95 latency</th>
+                        </tr>
+                    </thead>
+                    <tbody id="lsFeatureRows"></tbody>
+                </table>
+            </div>
         </div>
     </section>
 </main>
 
-<!-- One call in full -->
-<dialog class="ai-dialog" id="aiDialog" aria-labelledby="aiDialogTitle">
-    <div class="ai-dialog-head">
-        <h2 id="aiDialogTitle">AI call</h2>
-        <form method="dialog"><button class="ai-dialog-close" aria-label="Close"><i class="fas fa-xmark" aria-hidden="true"></i></button></form>
+<!-- The trace: a tree of its runs on the left, the selected run on the right -->
+<div class="ls-drawer-back" id="lsDrawerBack" hidden></div>
+<aside class="ls-drawer" id="lsDrawer" role="dialog" aria-modal="true" aria-labelledby="lsDrawerTitle" hidden>
+    <div class="ls-drawer-head">
+        <button type="button" class="ls-icon-btn" id="lsPrevRun" aria-label="Previous run in the list" title="Previous (k)"><i class="fas fa-chevron-up" aria-hidden="true"></i></button>
+        <button type="button" class="ls-icon-btn" id="lsNextRun" aria-label="Next run in the list" title="Next (j)"><i class="fas fa-chevron-down" aria-hidden="true"></i></button>
+        <h2 id="lsDrawerTitle">Trace</h2>
+        <span class="ls-sub" id="lsDrawerSub"></span>
+        <button type="button" class="ls-icon-btn" id="lsDrawerClose" aria-label="Close" title="Close (Esc)"><i class="fas fa-xmark" aria-hidden="true"></i></button>
     </div>
-    <div id="aiDialogBody"></div>
-</dialog>
+    <div class="ls-drawer-body">
+        <nav class="ls-tree" aria-label="Runs in this trace">
+            <div class="ls-tree-head">
+                <span class="ls-section-label">Trace</span>
+                <span class="ls-seg" role="group" aria-label="Tree or waterfall">
+                    <button type="button" data-tree="tree" aria-pressed="true">Tree</button>
+                    <button type="button" data-tree="waterfall" aria-pressed="false">Waterfall</button>
+                </span>
+            </div>
+            <div id="lsTree" role="tree"></div>
+        </nav>
+        <section class="ls-detail" id="lsDetail" aria-live="polite"></section>
+    </div>
+</aside>
 
 <script src="{{ url_for('static', filename='js/user_menu.js') }}"></script>
 <script src="{{ url_for('static', filename='js/admin_ai_calls.js') }}"></script>

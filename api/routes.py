@@ -1300,32 +1300,88 @@ def image_presets_list():
     return jsonify({"success": True, "presets": list_presets()})
 
 
+def _ai_call_filters() -> dict:
+    """Admin -> AI calls' filters from the query string (ValueError on a bad number):
+    ?user= (email contains), feature, status (ok/empty/error), group, q (text in the
+    prompts or answer), days."""
+    from datetime import datetime, timedelta, timezone
+
+    args = request.args
+    days = int(args["days"]) if args.get("days") else None
+    return {"user_email": args.get("user") or None, "feature": args.get("feature") or None,
+            "status": args.get("status") or None, "group_id": args.get("group") or None,
+            "search": args.get("q") or None,
+            "since": datetime.now(timezone.utc) - timedelta(days=days) if days else None}
+
+
 @api_bp.route("/admin/ai-calls", methods=["GET"])
 @login_required_api
 @admin_required_api
 def admin_ai_calls():
-    """Admin -> AI calls: every AI call, newest first (services/llm_trace.py).
-    Filters: ?user= (email contains), feature, status (ok/empty/error), group,
-    q (text in the prompts or answer), days, page."""
+    """Admin -> AI calls: every AI call, newest first (services/llm_trace.py),
+    50 a page (?page=), with the filters of _ai_call_filters."""
     if not DB_AVAILABLE:
         return jsonify({"success": True, "calls": [], "total": 0, "features": [], "totals": {}})
-    from datetime import datetime, timedelta, timezone
-
     from db import list_llm_calls
 
-    args = request.args
     try:
-        page = max(1, int(args.get("page", 1)))
-        days = int(args["days"]) if args.get("days") else None
+        page = max(1, int(request.args.get("page", 1)))
+        filters = _ai_call_filters()
     except ValueError:
         return jsonify({"success": False, "error": "page and days are numbers"}), 400
-    data = list_llm_calls(user_email=args.get("user") or None, feature=args.get("feature") or None,
-                          status=args.get("status") or None, group_id=args.get("group") or None,
-                          search=args.get("q") or None,
-                          since=datetime.now(timezone.utc) - timedelta(days=days) if days else None,
-                          limit=50, offset=(page - 1) * 50)
+    data = list_llm_calls(limit=50, offset=(page - 1) * 50, **filters)
     return jsonify({"success": True, "page": page, "page_size": 50, "tracing": Config.LLM_TRACING,
                     "keep_days": Config.LLM_TRACE_DAYS, **data})
+
+
+@api_bp.route("/admin/ai-calls/traces", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_ai_traces():
+    """Admin -> AI calls -> Traces: one row per generation or request (the calls
+    sharing a group), newest first, 30 a page, with the same filters."""
+    if not DB_AVAILABLE:
+        return jsonify({"success": True, "traces": [], "total": 0})
+    from db import list_llm_traces
+
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+        filters = _ai_call_filters()
+    except ValueError:
+        return jsonify({"success": False, "error": "page and days are numbers"}), 400
+    return jsonify({"success": True, "page": page, "page_size": 30,
+                    **list_llm_traces(limit=30, offset=(page - 1) * 30, **filters)})
+
+
+@api_bp.route("/admin/ai-calls/traces/<group_id>", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_ai_trace(group_id):
+    """One generation's calls as a timeline (when each started, how long it took)."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from db import get_llm_trace
+
+    trace = get_llm_trace(group_id[:40])
+    if not trace:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify({"success": True, "trace": trace})
+
+
+@api_bp.route("/admin/ai-calls/stats", methods=["GET"])
+@login_required_api
+@admin_required_api
+def admin_ai_stats():
+    """Admin -> AI calls -> Overview: calls, cost and failures per day, and per part of the app."""
+    if not DB_AVAILABLE:
+        return jsonify({"success": True, "days": [], "features": []})
+    from db import llm_call_stats
+
+    try:
+        filters = _ai_call_filters()
+    except ValueError:
+        return jsonify({"success": False, "error": "days is a number"}), 400
+    return jsonify({"success": True, **llm_call_stats(**filters)})
 
 
 @api_bp.route("/admin/ai-calls/<int:call_id>", methods=["GET"])

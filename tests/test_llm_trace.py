@@ -137,3 +137,67 @@ def test_make_admin_script():
     assert db.get_user_by_email(email).is_admin
     assert make_admin.main(["make_admin.py", email, "--remove"]) == 0
     assert not db.get_user_by_email(email).is_admin and user["id"]
+
+
+def _call(group, feature, ended, latency_ms, status="ok", cost=0.001, user_id=None):
+    db.save_llm_call({"user_id": user_id, "group_id": group, "feature": feature, "kind": "json", "provider": "heyroute",
+                      "model": "gpt-4o-mini", "status": status, "system_prompt": "s", "user_prompt": "u", "output": "o",
+                      "input_tokens": 100, "output_tokens": 20, "cost_usd": cost, "latency_ms": latency_ms,
+                      "created_at": ended.replace(tzinfo=None)})
+
+
+def test_a_trace_is_a_timeline_of_one_generations_calls(app, monkeypatch):
+    monkeypatch.setattr(Config, "ADMIN_2FA_REQUIRED", False)
+    admin = db.create_user("Admin", f"{uuid.uuid4().hex[:10]}@example.com", "hash", is_admin=True)
+    user = db.create_user("Priya", f"{uuid.uuid4().hex[:10]}@example.com", "hash")
+    group, t0 = uuid.uuid4().hex[:16], datetime.now(timezone.utc) - timedelta(minutes=5)
+    # research 0-4 s; caption and hashtags in parallel 4-9 s and 4-6 s (hashtags failed once first); review 9-10 s
+    _call(group, "agents/story_agent.py:analyze", t0 + timedelta(seconds=4), 4000, user_id=user["id"])
+    _call(group, "agents/hashtag_agent.py:generate_hashtags_batch", t0 + timedelta(seconds=5), 1000, "error", 0.0, user["id"])
+    _call(group, "agents/hashtag_agent.py:generate_hashtags_batch", t0 + timedelta(seconds=6), 1000, user_id=user["id"])
+    _call(group, "agents/caption_agent.py:generate_caption", t0 + timedelta(seconds=9), 5000, user_id=user["id"])
+    _call(group, "agents/reviewer_agent.py:review", t0 + timedelta(seconds=10), 1000, user_id=user["id"])
+
+    trace = db.get_llm_trace(group)
+    assert trace["duration_ms"] == 10000 and trace["user_email"] == user["email"]
+    assert trace["totals"] == {"calls": 5, "errors": 1, "input_tokens": 500, "output_tokens": 100, "cost_usd": 0.004}
+    starts = {(c["feature"].split(":")[1], c["status"]): c["start_ms"] for c in trace["calls"]}
+    assert starts == {("analyze", "ok"): 0, ("generate_hashtags_batch", "error"): 4000, ("generate_hashtags_batch", "ok"): 5000,
+                      ("generate_caption", "ok"): 4000, ("review", "ok"): 9000}
+    assert [c["start_ms"] for c in trace["calls"]] == sorted(c["start_ms"] for c in trace["calls"])
+
+    client = app.test_client()
+    with client.session_transaction() as s:
+        s["user_id"] = admin["id"]
+    listed = client.get(f"/api/admin/ai-calls/traces?user={user['email']}").get_json()
+    row = listed["traces"][0]
+    assert listed["total"] == 1 and row["group_id"] == group and row["calls"] == 5 and row["errors"] == 1
+    assert row["duration_ms"] == 10000 and row["features"][0] == "agents/story_agent.py:analyze"
+    assert client.get(f"/api/admin/ai-calls/traces?user={user['email']}&status=error").get_json()["total"] == 1  # has a failed call
+    assert client.get(f"/api/admin/ai-calls/traces/{group}").get_json()["trace"]["duration_ms"] == 10000
+    assert client.get("/api/admin/ai-calls/traces/nope").status_code == 404
+    with client.session_transaction() as s:
+        s["user_id"] = user["id"]
+    assert client.get(f"/api/admin/ai-calls/traces/{group}").status_code == 403
+
+
+def test_overview_per_day_and_per_part_of_the_app(app, monkeypatch):
+    monkeypatch.setattr(Config, "ADMIN_2FA_REQUIRED", False)
+    admin = db.create_user("Admin", f"{uuid.uuid4().hex[:10]}@example.com", "hash", is_admin=True)
+    user = db.create_user("Priya", f"{uuid.uuid4().hex[:10]}@example.com", "hash")
+    now = datetime.now(timezone.utc)
+    for n, latency in enumerate((100, 200, 300, 400, 5000)):
+        _call(uuid.uuid4().hex[:16], "agents/caption_agent.py:generate_caption", now - timedelta(days=n % 2), latency,
+              "error" if n == 4 else "ok", 0.002, user["id"])
+    _call(uuid.uuid4().hex[:16], "services/hook_service.py:other_openings", now, 50, cost=0.0005, user_id=user["id"])
+    stats = db.llm_call_stats(user_email=user["email"])
+    caption = stats["features"][0]
+    assert caption["feature"] == "agents/caption_agent.py:generate_caption"  # costliest first
+    assert caption["calls"] == 5 and caption["errors"] == 1 and caption["cost_usd"] == 0.01
+    assert caption["avg_ms"] == 1200 and caption["p95_ms"] == 5000
+    assert sum(d["calls"] for d in stats["days"]) == 6 and len(stats["days"]) == 2
+    client = app.test_client()
+    with client.session_transaction() as s:
+        s["user_id"] = admin["id"]
+    body = client.get(f"/api/admin/ai-calls/stats?user={user['email']}&days=7").get_json()
+    assert body["success"] and len(body["features"]) == 2

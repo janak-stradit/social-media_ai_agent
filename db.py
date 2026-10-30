@@ -3422,6 +3422,7 @@ def _llm_call_dict(row: "LlmCall", emails: dict, full: bool = False) -> dict:
     out["user_email"] = emails.get(row.user_id)
     out["error"] = (row.error or "")[:200] or None
     out["preview"] = " ".join((row.user_prompt or "").split())[:160]
+    out["output_preview"] = " ".join((row.output or "").split())[:160]
     if full:
         out.update(error=row.error, request_id=row.request_id, system_prompt=row.system_prompt, user_prompt=row.user_prompt,
                    output=row.output, temperature=row.temperature, max_tokens=row.max_tokens,
@@ -3429,27 +3430,31 @@ def _llm_call_dict(row: "LlmCall", emails: dict, full: bool = False) -> dict:
     return out
 
 
-def list_llm_calls(*, user_email: str | None = None, feature: str | None = None, status: str | None = None,
-                   group_id: str | None = None, search: str | None = None, since: datetime | None = None,
-                   limit: int = 50, offset: int = 0) -> dict:
-    """Newest first, with filters; {calls, total, totals: {calls, cost_usd, input_tokens, output_tokens, errors},
-    features: the parts of the app seen (for the filter)}."""
+def _llm_call_query(session, *, user_email=None, feature=None, status=None, group_id=None, search=None, since=None):
+    """The AI calls matching Admin -> AI calls' filters (shared by its three views)."""
+    query = session.query(LlmCall)
+    if user_email:
+        ids = [u for (u,) in session.query(User.id).filter(User.email.ilike(f"%{user_email.strip()}%"))]
+        query = query.filter(LlmCall.user_id.in_(ids or [-1]))
+    if feature:
+        query = query.filter(LlmCall.feature == feature)
+    if status in ("ok", "empty", "error"):
+        query = query.filter(LlmCall.status == status)
+    if group_id:
+        query = query.filter(LlmCall.group_id == group_id)
+    if search:
+        like = f"%{search.strip()[:200]}%"
+        query = query.filter(LlmCall.user_prompt.ilike(like) | LlmCall.output.ilike(like) | LlmCall.system_prompt.ilike(like))
+    if since:
+        query = query.filter(LlmCall.created_at >= since.astimezone(timezone.utc).replace(tzinfo=None))
+    return query
+
+
+def list_llm_calls(*, limit: int = 50, offset: int = 0, **filters) -> dict:
+    """Newest first, with filters (_llm_call_query); {calls, total, totals: {calls, cost_usd,
+    input_tokens, output_tokens, errors}, features: the parts of the app seen (for the filter)}."""
     with Session(engine) as session:
-        query = session.query(LlmCall)
-        if user_email:
-            ids = [u for (u,) in session.query(User.id).filter(User.email.ilike(f"%{user_email.strip()}%"))]
-            query = query.filter(LlmCall.user_id.in_(ids or [-1]))
-        if feature:
-            query = query.filter(LlmCall.feature == feature)
-        if status in ("ok", "empty", "error"):
-            query = query.filter(LlmCall.status == status)
-        if group_id:
-            query = query.filter(LlmCall.group_id == group_id)
-        if search:
-            like = f"%{search.strip()[:200]}%"
-            query = query.filter(LlmCall.user_prompt.ilike(like) | LlmCall.output.ilike(like) | LlmCall.system_prompt.ilike(like))
-        if since:
-            query = query.filter(LlmCall.created_at >= since.astimezone(timezone.utc).replace(tzinfo=None))
+        query = _llm_call_query(session, **filters)
         total, cost, tin, tout, errors = query.with_entities(
             func.count(LlmCall.id), func.coalesce(func.sum(LlmCall.cost_usd), 0.0),
             func.coalesce(func.sum(LlmCall.input_tokens), 0), func.coalesce(func.sum(LlmCall.output_tokens), 0),
@@ -3460,6 +3465,121 @@ def list_llm_calls(*, user_email: str | None = None, feature: str | None = None,
         return {"calls": [_llm_call_dict(r, emails) for r in rows], "total": int(total or 0), "features": features,
                 "totals": {"calls": int(total or 0), "cost_usd": round(float(cost or 0.0), 6), "input_tokens": int(tin or 0),
                            "output_tokens": int(tout or 0), "errors": int(errors or 0)}}
+
+
+def _span(rows) -> tuple[datetime, datetime]:
+    """(start, end) of calls: each is recorded when it ends, so it started latency_ms earlier."""
+    starts = [r.created_at - timedelta(milliseconds=r.latency_ms or 0) for r in rows]
+    return min(starts), max(r.created_at for r in rows)
+
+
+def list_llm_traces(*, limit: int = 30, offset: int = 0, **filters) -> dict:
+    """Generations (calls sharing a group_id) with a matching call, newest first:
+    {traces: [{group_id, user_id, user_email, started_at, duration_ms, calls, errors,
+    input_tokens, output_tokens, cost_usd, features}], total}."""
+    with Session(engine) as session:
+        matching = _llm_call_query(session, **filters).filter(LlmCall.group_id.isnot(None)) \
+            .with_entities(LlmCall.group_id).distinct().subquery()
+        ordered = (session.query(LlmCall.group_id, func.max(LlmCall.created_at).label("last"))
+                   .filter(LlmCall.group_id.in_(session.query(matching.c.group_id)))
+                   .group_by(LlmCall.group_id))
+        total = ordered.count()
+        page = ordered.order_by(func.max(LlmCall.created_at).desc()).offset(max(0, offset)).limit(min(100, limit)).all()
+        groups = [g for g, _ in page]
+        rows = session.query(LlmCall).filter(LlmCall.group_id.in_(groups)).all() if groups else []
+        by_group: dict[str, list] = {}
+        for row in rows:
+            by_group.setdefault(row.group_id, []).append(row)
+        emails = dict(session.query(User.id, User.email).filter(User.id.in_({r.user_id for r in rows if r.user_id}))) if rows else {}
+        traces = []
+        for group in groups:
+            calls = by_group.get(group) or []
+            if not calls:
+                continue
+            start, end = _span(calls)
+            user_id = next((c.user_id for c in calls if c.user_id), None)
+            features = []
+            for c in sorted(calls, key=lambda c: c.created_at):
+                if c.feature not in features:
+                    features.append(c.feature)
+            traces.append({
+                "group_id": group, "user_id": user_id, "user_email": emails.get(user_id),
+                "started_at": _as_utc(start).isoformat(), "duration_ms": int((end - start).total_seconds() * 1000),
+                "calls": len(calls), "errors": sum(1 for c in calls if c.status != "ok"),
+                "input_tokens": sum(c.input_tokens for c in calls), "output_tokens": sum(c.output_tokens for c in calls),
+                "cost_usd": round(sum(c.cost_usd for c in calls), 6), "features": features,
+            })
+        return {"traces": traces, "total": total}
+
+
+def get_llm_trace(group_id: str) -> dict | None:
+    """One generation's calls as a timeline: {group_id, user_email, started_at, duration_ms,
+    totals, calls: [{id, feature, model, status, attempt, kind, start_ms, latency_ms, tokens, cost}]}."""
+    with Session(engine) as session:
+        rows = session.query(LlmCall).filter(LlmCall.group_id == group_id).order_by(LlmCall.created_at, LlmCall.id).all()
+        if not rows:
+            return None
+        start, end = _span(rows)
+        user_id = next((r.user_id for r in rows if r.user_id), None)
+        email = session.query(User.email).filter(User.id == user_id).scalar() if user_id else None
+        calls = [{
+            "id": r.id, "feature": r.feature, "model": r.model, "provider": r.provider, "status": r.status,
+            "attempt": r.attempt, "kind": r.kind, "latency_ms": r.latency_ms, "streamed": r.streamed,
+            "start_ms": int(((r.created_at - timedelta(milliseconds=r.latency_ms or 0)) - start).total_seconds() * 1000),
+            "input_tokens": r.input_tokens, "output_tokens": r.output_tokens, "cost_usd": r.cost_usd,
+            "error": (r.error or "")[:200] or None,
+        } for r in rows]
+        calls.sort(key=lambda c: (c["start_ms"], c["id"]))
+        return {"group_id": group_id, "user_id": user_id, "user_email": email, "started_at": _as_utc(start).isoformat(),
+                "duration_ms": int((end - start).total_seconds() * 1000), "calls": calls,
+                "totals": {"calls": len(rows), "errors": sum(1 for r in rows if r.status != "ok"),
+                           "input_tokens": sum(r.input_tokens for r in rows), "output_tokens": sum(r.output_tokens for r in rows),
+                           "cost_usd": round(sum(r.cost_usd for r in rows), 6)}}
+
+
+def _percentile(sorted_values: list[int], share: float) -> int:
+    return sorted_values[min(len(sorted_values) - 1, int(share * len(sorted_values)))] if sorted_values else 0
+
+
+def llm_call_stats(**filters) -> dict:
+    """Admin -> AI calls -> Monitor: {summary: {calls, errors, error_rate, p50_ms, p99_ms,
+    tokens, cost_usd}, days: [{day, calls, errors, cost_usd, tokens, p50_ms, p99_ms}] oldest first,
+    features: [{feature, calls, errors, cost_usd, tokens, avg_ms, p95_ms}] costliest first}."""
+    with Session(engine) as session:
+        rows = _llm_call_query(session, **filters).with_entities(
+            LlmCall.created_at, LlmCall.feature, LlmCall.status, LlmCall.cost_usd, LlmCall.latency_ms,
+            LlmCall.input_tokens, LlmCall.output_tokens).all()
+    days: dict[str, dict] = {}
+    features: dict[str, dict] = {}
+    everything: list[int] = []
+    for created, feature, status, cost, latency, tin, tout in rows:
+        day = days.setdefault(created.strftime("%Y-%m-%d"), {"calls": 0, "errors": 0, "cost_usd": 0.0, "tokens": 0, "latencies": []})
+        f = features.setdefault(feature, {"calls": 0, "errors": 0, "cost_usd": 0.0, "tokens": 0, "latencies": []})
+        for bucket in (day, f):
+            bucket["calls"] += 1
+            bucket["errors"] += status != "ok"
+            bucket["cost_usd"] += float(cost or 0.0)
+            bucket["tokens"] += int(tin or 0) + int(tout or 0)
+            bucket["latencies"].append(int(latency or 0))
+        everything.append(int(latency or 0))
+    out_features = []
+    for name, f in features.items():
+        lat = sorted(f.pop("latencies"))
+        out_features.append({"feature": name, **f, "cost_usd": round(f["cost_usd"], 6),
+                             "avg_ms": int(sum(lat) / len(lat)), "p95_ms": _percentile(lat, 0.95)})
+    out_features.sort(key=lambda f: (-f["cost_usd"], -f["calls"]))
+    out_days = []
+    for name, d in sorted(days.items()):
+        lat = sorted(d.pop("latencies"))
+        out_days.append({"day": name, **d, "cost_usd": round(d["cost_usd"], 6),
+                         "p50_ms": _percentile(lat, 0.5), "p99_ms": _percentile(lat, 0.99)})
+    everything.sort()
+    calls, errors = len(rows), sum(d["errors"] for d in out_days)
+    return {"summary": {"calls": calls, "errors": errors, "error_rate": round(100 * errors / calls, 1) if calls else 0.0,
+                        "p50_ms": _percentile(everything, 0.5), "p99_ms": _percentile(everything, 0.99),
+                        "tokens": sum(d["tokens"] for d in out_days),
+                        "cost_usd": round(sum(d["cost_usd"] for d in out_days), 6)},
+            "days": out_days, "features": out_features}
 
 
 def get_llm_call(call_id: int) -> dict | None:
