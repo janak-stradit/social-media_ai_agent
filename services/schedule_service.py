@@ -59,6 +59,8 @@ def check_items(user_id: int, items: list[dict]) -> None:
         platform, name = item["platform"], NAMES.get(item["platform"], item["platform"])
         if platform not in PLATFORMS:
             raise ScheduleError(f"{name} posts can't be scheduled yet.")
+        if platform == "youtube" and not item.get("video"):
+            raise ScheduleError("YouTube posts need a video. Make one in Studio Chat (Video) and schedule it with that.")
         if not connected.get(platform):
             raise ScheduleError(f"Connect your {name} account in Settings before scheduling to it.")
         length, limit = len(post_text(item)), limit_for(platform)

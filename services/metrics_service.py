@@ -8,6 +8,7 @@ views, fetched from each platform for the posts the app published
              and views from media insights
   linkedin   socialActions: likes and comments (reach needs LinkedIn's
              organisation analytics, which most apps don't have)
+  youtube    Data API: views, likes and comments (services/youtube_service.py)
 
 A platform that refuses one of the extra numbers (missing permission, post
 type without insights) still gives what it can; nothing here ever raises.
@@ -109,7 +110,15 @@ def fetch_linkedin(post_urn: str, token: str) -> dict:
     }
 
 
-FETCHERS = {"facebook": fetch_facebook, "instagram": fetch_instagram, "linkedin": fetch_linkedin}
+def fetch_youtube(video_id: str, token: str) -> dict:
+    """Views, likes and comments (services/youtube_service.py; the scheduler keeps the token fresh)."""
+    from services.youtube_service import fetch_metrics
+
+    return fetch_metrics(video_id, token)
+
+
+FETCHERS = {"facebook": fetch_facebook, "instagram": fetch_instagram, "linkedin": fetch_linkedin,
+            "youtube": fetch_youtube}
 
 
 # ── Followers, once a day per connected account ───────────────────────
@@ -143,7 +152,14 @@ def followers_linkedin(author_urn: str, token: str) -> int:
     return int(resp.json().get("firstDegreeSize") or 0)
 
 
-FOLLOWER_FETCHERS = {"facebook": followers_facebook, "instagram": followers_instagram, "linkedin": followers_linkedin}
+def followers_youtube(channel_id: str, token: str) -> int:
+    from services.youtube_service import subscribers
+
+    return subscribers(channel_id, token)
+
+
+FOLLOWER_FETCHERS = {"facebook": followers_facebook, "instagram": followers_instagram, "linkedin": followers_linkedin,
+                     "youtube": followers_youtube}
 
 
 def refresh_followers(now: datetime | None = None) -> dict:

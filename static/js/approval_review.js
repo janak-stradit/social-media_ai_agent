@@ -236,7 +236,8 @@ $(document).ready(function () {
         const caption = [item.caption, (item.hashtags || []).join(' ')].filter(Boolean).join('\n\n');
         const square = item.platform === 'instagram';
         let mediaHtml = '';
-        if (item.media === 'carousel') mediaHtml = carouselMediaHtml(item, idx, square);
+        if (item.video) mediaHtml = previewMediaBlockHtml({ type: 'video', content: escapeHtml(item.video) }, false);  // YouTube
+        else if (item.media === 'carousel') mediaHtml = carouselMediaHtml(item, idx, square);
         else if ((item.images || []).length) mediaHtml = previewMediaBlockHtml({ type: 'image', content: item.images[0] }, square);
         const card = { type: 'image', content: item.images && item.images[0], caption: caption, mediaHtml: mediaHtml || ' ' };
         if (!mediaHtml) card.mediaHtml = ' ';
@@ -247,7 +248,7 @@ $(document).ready(function () {
         const fmt = item.media === 'carousel'
             ? `<span class="ap-tag ap-tag-primary"><i class="fas fa-images me-1"></i>Carousel · ${item.images.length} slides</span>`
               + (item.platform === 'linkedin' ? `<span class="ap-tag">${item.linkedin_format === 'document' ? 'Document (PDF)' : 'Multi-image post'}</span>` : '')
-            : `<span class="ap-tag">${(item.images || []).length ? 'Single image' : 'Text only'}</span>`;
+            : `<span class="ap-tag">${item.video ? 'Video' : (item.images || []).length ? 'Single image' : 'Text only'}</span>`;
         const pdf = item.pdf_url ? `<a class="btn-xs-outline-info text-decoration-none ms-auto" href="${escapeHtml(item.pdf_url)}" target="_blank" rel="noopener"><i class="fas fa-file-pdf me-1"></i>Open PDF</a>` : '';
         return `<div class="ap-row-meta mb-3 d-flex align-items-center flex-wrap gap-2">${fmt}${pdf}</div>${html}`;
     }
@@ -324,7 +325,7 @@ $(document).ready(function () {
         const slides = (item.images || []).length;
         const what = item.media === 'carousel'
             ? (item.platform === 'linkedin' && item.linkedin_format === 'document' ? `Document carousel (PDF) of ${slides} slides` : `Carousel of ${slides} slides`)
-            : slides ? 'One image' : 'Text post';
+            : item.video ? 'Video' : slides ? 'One image' : 'Text post';
         return `<div class="ap-publish-row">
                 <button type="button" class="ap-btn ap-btn-accept ap-publish" data-platform="${item.platform}">
                     <i class="${icon}"></i>Publish to ${escapeHtml(account)}</button>

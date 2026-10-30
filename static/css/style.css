@@ -3822,6 +3822,7 @@ body {
 .sa-pill input { margin: 0; accent-color: var(--brand-strong); }
 .sa-pill.on { border-color: var(--brand); background: var(--brand-bg); color: var(--brand-hover); }
 .sa-help { font-size: 0.75rem; color: #6b7280; margin-top: 0.3rem; }
+.sa-video { display: block; width: 100%; max-width: 280px; max-height: 360px; border-radius: 10px; background: #0f172a; margin-bottom: 4px; }
 .sa-slides { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.6rem; }
 .sa-slide { position: relative; width: 104px; height: 104px; border-radius: 10px; overflow: hidden; border: 1px solid #e5e7eb; background: #f3f4f6; }
 .sa-slide img { width: 100%; height: 100%; object-fit: cover; display: block; }

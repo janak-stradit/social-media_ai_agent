@@ -4227,6 +4227,8 @@ def youtube_auth_redirect():
 def youtube_auth_callback():
     """Google sends the user back here. The channel is saved for the signed-in
     user who started the sign-in; the outcome is shown in Settings."""
+    from datetime import datetime, timedelta, timezone
+
     from flask import redirect, session
 
     saved = session.pop("oauth_state", None)  # one use
@@ -4288,6 +4290,8 @@ def youtube_auth_callback():
             refresh_token=refresh_token,
             connection_type="direct",
             connected_via="oauth",
+            # an hour: renewed from the refresh token before then (services/youtube_service.py)
+            token_expires_at=(datetime.now(timezone.utc) + timedelta(seconds=int(tokens.get("expires_in") or 3600))).replace(tzinfo=None),
         )
         log_event("social.oauth", provider="youtube", status="connected")
         return _oauth_done("youtube", True, f"Connected YouTube ({channel_name}).")

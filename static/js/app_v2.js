@@ -3044,7 +3044,8 @@ $(document).ready(function () {
             const pData = content[p] || {};
             const url = pData.media?.image?.url;
             return { platform: p, caption: pData.caption?.primary_caption || '', hashtags: getTagList(pData.hashtags),
-                     images: url ? [url] : [], media: url ? 'single' : undefined };
+                     images: url ? [url] : [], media: url ? 'single' : undefined,
+                     video: pData.media?.video?.url || null };  // YouTube publishes the video
         });
     }
 

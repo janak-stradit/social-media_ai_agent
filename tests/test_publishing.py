@@ -289,7 +289,7 @@ def test_publish_item_explains_what_is_missing(linkedin, facebook, images):
     item = {"platform": "facebook", "caption": "Hi", "media": "none", "images": []}
     with pytest.raises(PublishError, match="Connect your Facebook account"):
         publish_service.publish_item(user["id"], item, Config.UPLOAD_FOLDER)
-    with pytest.raises(PublishError, match="YouTube isn't available"):
+    with pytest.raises(PublishError, match="YouTube posts need a video"):  # tests/test_youtube.py publishes one
         publish_service.publish_item(user["id"], {**item, "platform": "youtube"}, Config.UPLOAD_FOLDER)
     _connect(user, "facebook")
     with pytest.raises(PublishError, match="could not be found"):
@@ -335,10 +335,10 @@ def test_linkedin_through_an_mcp_server_is_text_only(monkeypatch, images):
 
 def test_connections_name_accounts_without_their_tokens():
     user = _user()
-    assert publish_service.connections(user["id"]) == {"linkedin": None, "instagram": None, "facebook": None}
+    assert publish_service.connections(user["id"]) == {"linkedin": None, "instagram": None, "facebook": None, "youtube": None}
     _connect(user, "linkedin", "instagram")
     found = publish_service.connections(user["id"])
-    assert found == {"linkedin": "Acme Logistics", "instagram": "@acme", "facebook": None} and "tok" not in json.dumps(found)
+    assert found == {"linkedin": "Acme Logistics", "instagram": "@acme", "facebook": None, "youtube": None} and "tok" not in json.dumps(found)
 
 
 # ── From an approved request ────────────────────────────────────────────────
@@ -378,7 +378,7 @@ def test_an_approved_carousel_is_published_to_linkedin_and_facebook(app, linkedi
     _login(app, reviewer).post(f"/api/approval-requests/{rid}/decide", json={"decision": "approved"})
 
     view = client.get(f"/api/approval-requests/{rid}").get_json()["request"]
-    assert view["publishing"]["accounts"] == {"linkedin": "Acme Logistics", "instagram": None, "facebook": "Acme Page"}
+    assert view["publishing"]["accounts"] == {"linkedin": "Acme Logistics", "instagram": None, "facebook": "Acme Page", "youtube": None}
 
     r = client.post(f"/api/approval-requests/{rid}/publish", json={"platform": "linkedin"})
     body = r.get_json()
@@ -454,7 +454,7 @@ def test_scheduling_checks_the_post_before_taking_it(images):
     for items, why in (
         ([], "at least one platform to schedule"),
         ([{"platform": "instagram", "caption": "No picture", "media": "none"}], "Instagram posts need an image"),
-        ([{"platform": "youtube", "caption": "A video", "media": "none"}], "YouTube posts can't be scheduled"),
+        ([{"platform": "youtube", "caption": "A video", "media": "none"}], "YouTube posts need a video"),
         ([{"platform": "linkedin", "caption": "x" * 2990, "hashtags": ["#LongTagHere"], "media": "none"}], "over the limit of 3,000"),
         ([{"platform": "facebook", "caption": "Hi", "media": "single", "images": ["/static/uploads/gone.jpg"]}], "could not be found"),
     ):
@@ -577,7 +577,7 @@ def test_schedule_endpoints(app, images):
     user, other = _user(), _user("Ravi")
     _connect(user, "linkedin", "facebook")
     client = _login(app, user)
-    assert client.get("/api/social/connections").get_json()["connections"] == {"linkedin": "Acme Logistics", "instagram": None, "facebook": "Acme Page"}
+    assert client.get("/api/social/connections").get_json()["connections"] == {"linkedin": "Acme Logistics", "instagram": None, "facebook": "Acme Page", "youtube": None}
 
     when = (datetime.now(timezone.utc) + timedelta(days=2)).replace(microsecond=0)
     r = client.post("/api/social/schedule", json={"scheduled_at": when.isoformat(), "items": _items(images(3)), "story": "Tips", "run_id": 5})

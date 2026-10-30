@@ -27,6 +27,7 @@ LABELS = {
     ("format", "carousel"): "Carousels",
     ("format", "image"): "Posts with one image",
     ("format", "text"): "Text-only posts",
+    ("format", "video"): "Videos",
     ("opening", "question"): "Posts that open with a question",
     ("opening", "number"): "Posts with a number in the first line",
     ("opening", "statement"): "Posts that open with a plain statement",
@@ -51,7 +52,9 @@ def traits(item: dict) -> dict[str, str]:
     caption = (item.get("caption") or "").strip()
     images = item.get("images") or []
     media = item.get("media")
-    if media == "carousel" or (media != "none" and media != "single" and len(images) > 1):
+    if media == "video" or item.get("video"):
+        fmt = "video"
+    elif media == "carousel" or (media != "none" and media != "single" and len(images) > 1):
         fmt = "carousel"
     elif media != "none" and images:
         fmt = "image"

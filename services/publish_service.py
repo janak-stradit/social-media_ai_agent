@@ -4,21 +4,21 @@ both go through publish_item, so a post is checked and sent the same way
 whichever road it took.
 
 An item (the shape approval_bundle_service.normalize_items produces):
-    {platform, caption, hashtags, media: none|single|carousel,
-     images: ["/static/uploads/..."], linkedin_format, pdf_url, slide_titles}
+    {platform, caption, hashtags, media: none|single|carousel|video,
+     images: ["/static/uploads/..."], video: "/static/uploads/....mp4",
+     linkedin_format, pdf_url, slide_titles}
 
   instagram  one image or a carousel               services/instagram_service.py
   facebook   text, one photo or several photos     services/facebook_service.py
   linkedin   text, one image, a multi-image post
              or a document (PDF) carousel          services/linkedin_service.py
+  youtube    the post's video                       services/youtube_service.py
 """
 
 import os
-from datetime import datetime, timezone
-
 import requests
 
-PLATFORMS = ("linkedin", "instagram", "facebook")
+PLATFORMS = ("linkedin", "instagram", "facebook", "youtube")
 NAMES = {"linkedin": "LinkedIn", "instagram": "Instagram", "facebook": "Facebook", "youtube": "YouTube"}
 
 
@@ -35,9 +35,8 @@ def accounts(user_id: int) -> dict[str, dict]:
     """The user's connected accounts by platform (with their tokens - never sent to a page)."""
     from sqlalchemy.orm import Session
 
-    from db import SocialAccount, engine
+    from db import SocialAccount, engine, social_account_expired
 
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
     with Session(engine) as session:
         rows = session.query(SocialAccount).filter(SocialAccount.user_id == user_id, SocialAccount.status == "connected").all()
         return {
@@ -46,7 +45,7 @@ def accounts(user_id: int) -> dict[str, dict]:
                 "connection_type": getattr(row, "connection_type", None) or "direct",
                 "mcp_endpoint": getattr(row, "mcp_endpoint", None), "mcp_token": getattr(row, "mcp_token", None),
                 "mcp_tool_name": getattr(row, "mcp_tool_name", None) or "linkedin_publish_post",
-                "expired": bool(getattr(row, "token_expires_at", None) and row.token_expires_at <= now),
+                "expired": social_account_expired(row),
             }
             for row in rows
         }
@@ -119,6 +118,16 @@ def publish_item(user_id: int, item: dict, upload_folder: str) -> dict:
     if item.get("media") == "single":
         images = images[:1]
     try:
+        if platform == "youtube":
+            from services import youtube_service
+
+            if not item.get("video"):
+                raise PublishError("YouTube posts need a video.")
+            try:
+                result = youtube_service.publish(user_id, item, _local(item["video"], upload_folder))
+            except youtube_service.YouTubeError as err:
+                raise PublishError(str(err)) from err
+            return {"platform": platform, "account": (accounts(user_id).get("youtube") or {}).get("name"), **result}
         if platform == "instagram":
             from services.instagram_service import publish_for_user
 

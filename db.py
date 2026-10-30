@@ -3615,7 +3615,7 @@ def post_detail(user_id: int, post_id: int) -> dict | None:
             "vs_usual": round(score["engagement"] / usual, 1) if score and score["final"] and usual else None,
             "snapshots": [{"age_hours": a, "engagement": int(e or 0)} for a, e in snaps],
             "score_age_hours": SCORE_AGE_HOURS,
-            "item": {k: (item or {}).get(k) for k in ("caption", "hashtags", "media", "images")} if item else None,
+            "item": {k: (item or {}).get(k) for k in ("caption", "hashtags", "media", "images", "video")} if item else None,
             "comments": comments,
         }
 
@@ -5596,6 +5596,18 @@ def get_global_cost_history(
 # ── SOCIAL ACCOUNTS & POST SCHEDULING HELPERS ─────────────────────────
 
 
+def social_account_expired(acc: "SocialAccount") -> bool:
+    """Whether the connection needs the user to sign in again. A YouTube token
+    lasts an hour but is renewed from its refresh token
+    (services/youtube_service.py), so only a refresh Google refused
+    (status "expired") counts there."""
+    if acc.status == "expired":
+        return True
+    if acc.platform == "youtube" and acc.refresh_token:
+        return False
+    return bool(acc.token_expires_at and acc.token_expires_at <= _utcnow().replace(tzinfo=None))
+
+
 def get_user_social_accounts(user_id: int) -> list[dict]:
     """Fetch all connected social media accounts for a user."""
     with Session(engine) as session:
@@ -5614,7 +5626,7 @@ def get_user_social_accounts(user_id: int) -> list[dict]:
                     "status": acc.status,
                     "connected_via": getattr(acc, "connected_via", None) or "manual",
                     "token_expires_at": _as_utc(acc.token_expires_at).isoformat() if getattr(acc, "token_expires_at", None) else None,
-                    "expired": bool(getattr(acc, "token_expires_at", None) and acc.token_expires_at <= _utcnow().replace(tzinfo=None)),
+                    "expired": social_account_expired(acc),
                     "updated_at": acc.updated_at.strftime("%Y-%m-%d %H:%M:%S"),
                 }
             )
