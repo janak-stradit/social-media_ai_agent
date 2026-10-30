@@ -25,7 +25,7 @@ import typing
 import uuid
 
 from config import Config
-from services import hashtag_service
+from services import hashtag_service, llm_trace
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +53,13 @@ def _conversation_for(user_id, data: dict, title: str) -> int | None:
 
 
 def generate_post(user_id, data: dict) -> dict:
-    """Runs the whole pipeline for one brief (see the module docstring)."""
+    """Runs the whole pipeline for one brief (see the module docstring). Its AI
+    calls are traced as one group for this user (services/llm_trace.py)."""
+    with llm_trace.bind(user_id=user_id):
+        return _generate_post(user_id, data)
+
+
+def _generate_post(user_id, data: dict) -> dict:
     from api import routes as r
 
     started = time.time()
@@ -193,7 +199,7 @@ def generate_post(user_id, data: dict) -> dict:
 
         early_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gen-tags")
         early_hashtags = early_pool.submit(
-            r.hashtag_agent.generate_hashtags_batch,
+            llm_trace.carry(r.hashtag_agent.generate_hashtags_batch),
             platforms,
             {"themes": [story[:300]], "emotions": []},
             None,
@@ -224,7 +230,7 @@ def generate_post(user_id, data: dict) -> dict:
 
         research_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gen-research")
         research_future = research_pool.submit(
-            r.story_agent.analyze,
+            llm_trace.carry(r.story_agent.analyze),
             story_prompt,
             memory_context=mem_prompt,
             return_usage=True,
@@ -314,8 +320,8 @@ def generate_post(user_id, data: dict) -> dict:
         _progress("caption", "active")
         _progress("hashtag", "active")
         with ThreadPoolExecutor(max_workers=min(8, len(platforms) + 1), thread_name_prefix="gen") as pool:
-            caption_futures = {p: pool.submit(_caption_for, p) for p in platforms}
-            hashtag_future = pool.submit(_all_hashtags)
+            caption_futures = {p: pool.submit(llm_trace.carry(_caption_for), p) for p in platforms}
+            hashtag_future = pool.submit(llm_trace.carry(_all_hashtags))
             r._mark_done_when_finished(list(caption_futures.values()), lambda: _progress("caption", "done"))
 
             # Show each caption on the page the moment it's written, while the
@@ -447,7 +453,7 @@ def generate_post(user_id, data: dict) -> dict:
                     return platform, None
 
             with ThreadPoolExecutor(max_workers=min(4, len(to_fix)), thread_name_prefix="fix") as pool:
-                for platform, outcome in pool.map(_rewrite, to_fix):
+                for platform, outcome in (f.result() for f in [pool.submit(llm_trace.carry(_rewrite), p) for p in to_fix]):
                     if not outcome:
                         continue
                     refined_cap, ref_usage = outcome

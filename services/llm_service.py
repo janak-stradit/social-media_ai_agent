@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import time
 
 import openai
 
@@ -351,6 +352,20 @@ class LLMService:
             "model": model_name,
         }
 
+    @staticmethod
+    def _trace(kind, provider, system_prompt, user_prompt, output, status, error, usage, started, attempt,
+               temperature, max_tokens, reasoning_effort, streamed=False):
+        """One attempt, for Admin -> AI calls (services/llm_trace.py). Never raises."""
+        try:
+            from services import llm_trace
+
+            llm_trace.record(kind=kind, provider=provider["name"], model=provider.get("model"),
+                             system_prompt=system_prompt, user_prompt=user_prompt, output=output, status=status,
+                             error=error, usage=usage, started=started, ended=time.time(), temperature=temperature,
+                             max_tokens=max_tokens, reasoning_effort=reasoning_effort, streamed=streamed, attempt=attempt)
+        except Exception:  # noqa: BLE001, S110 - tracing must never break an AI call
+            pass
+
     def generate(
         self,
         system_prompt,
@@ -373,6 +388,8 @@ class LLMService:
         last_error = None
         for provider in self.providers:
             for attempt in range(max_retries_per_provider):
+                started, text_out, usage_metrics = time.time(), None, None
+                trace = (system_prompt, user_prompt)
                 try:
                     if provider["name"] == "mock":
                         text_out = self._generate_mock_response(system_prompt, user_prompt)
@@ -420,17 +437,23 @@ class LLMService:
                     if not text_out or not text_out.strip() or self._looks_like_reasoning_leakage(text_out):
                         reason = "empty response" if not text_out or not text_out.strip() else "reasoning leakage"
                         last_error = Exception(f"{provider['name']} returned a {reason}")
+                        self._trace("text", provider, *trace, text_out, "empty", reason, usage_metrics, started,
+                                    attempt + 1, temperature, max_tokens, reasoning_effort)
                         logger.warning(
                             f"Provider {provider['name']} returned {reason} "
                             f"(attempt {attempt + 1}/{max_retries_per_provider}). Retrying..."
                         )
                         continue
 
+                    self._trace("text", provider, *trace, text_out, "ok", None, usage_metrics, started,
+                                attempt + 1, temperature, max_tokens, reasoning_effort)
                     if return_usage:
                         return text_out, usage_metrics
                     return text_out
                 except Exception as e:
                     last_error = e
+                    self._trace("text", provider, *trace, text_out, "error", str(e), usage_metrics, started,
+                                attempt + 1, temperature, max_tokens, reasoning_effort)
                     logger.warning(
                         f"Provider {provider['name']} failed "
                         f"(attempt {attempt + 1}/{max_retries_per_provider}): {e}."
@@ -545,6 +568,8 @@ class LLMService:
         last_error = None
         for provider in self.providers:
             for attempt in range(max_retries_per_provider):
+                started, content, usage_metrics = time.time(), None, None
+                trace = [system_prompt, user_prompt]
                 try:
                     if provider["name"] == "bedrock":
                         json_system_prompt = system_prompt
@@ -563,6 +588,7 @@ class LLMService:
                             system=[{"text": json_system_prompt}],
                             inferenceConfig=inference_config,
                         )
+                        trace[0] = json_system_prompt  # what was really sent
                         content = response["output"]["message"]["content"][0]["text"]
 
                         usage_raw = response.get("usage", {})
@@ -600,17 +626,23 @@ class LLMService:
 
                     if not parsed_json:
                         last_error = Exception(f"{provider['name']} returned an empty JSON object")
+                        self._trace("json", provider, *trace, content, "empty", "empty JSON object", usage_metrics, started,
+                                    attempt + 1, temperature, max_tokens, reasoning_effort, bool(on_partial))
                         logger.warning(
                             f"Provider {provider['name']} returned empty JSON "
                             f"(attempt {attempt + 1}/{max_retries_per_provider}). Retrying..."
                         )
                         continue
 
+                    self._trace("json", provider, *trace, content, "ok", None, usage_metrics, started,
+                                attempt + 1, temperature, max_tokens, reasoning_effort, bool(on_partial))
                     if return_usage:
                         return parsed_json, usage_metrics
                     return parsed_json
                 except Exception as e:
                     last_error = e
+                    self._trace("json", provider, *trace, content, "error", str(e), usage_metrics, started,
+                                attempt + 1, temperature, max_tokens, reasoning_effort, bool(on_partial))
                     logger.warning(
                         f"Provider {provider['name']} failed JSON generation "
                         f"(attempt {attempt + 1}/{max_retries_per_provider}): {e}."

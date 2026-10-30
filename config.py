@@ -120,6 +120,12 @@ class Config:
     # in the Meta app -> Webhooks. Empty: the webhook is off and comments are
     # only fetched on the schedule.
     META_WEBHOOK_VERIFY_TOKEN = os.getenv("META_WEBHOOK_VERIFY_TOKEN", "")
+    # Every AI call kept for admins (Admin -> AI calls, services/llm_trace.py):
+    # prompts, answers, model, tokens, cost and time. The prompts hold customers'
+    # brand profiles and posts, so they stay in this database and are deleted
+    # after LLM_TRACE_DAYS. LLM_TRACING=false stops keeping them.
+    LLM_TRACING = os.getenv("LLM_TRACING", "true").lower() == "true"
+    LLM_TRACE_DAYS = int(os.getenv("LLM_TRACE_DAYS", "30"))
     # Public HTTPS address Instagram downloads post images from (Meta fetches
     # them itself). Defaults to APP_BASE_URL; set it if images are served elsewhere.
     PUBLIC_MEDIA_BASE_URL = os.getenv("PUBLIC_MEDIA_BASE_URL", "")
@@ -151,8 +157,8 @@ class Config:
     LEGAL_GRIEVANCE_OFFICER = os.getenv("LEGAL_GRIEVANCE_OFFICER") or "the Grievance Officer"
     LEGAL_GRIEVANCE_EMAIL = os.getenv("LEGAL_GRIEVANCE_EMAIL", "")
     LEGAL_JURISDICTION = os.getenv("LEGAL_JURISDICTION") or "Gujarat, India"
-    LEGAL_UPDATED = os.getenv("LEGAL_UPDATED") or "26 October 2026"
-    LEGAL_VERSION = os.getenv("LEGAL_VERSION") or "2026-10-26"
+    LEGAL_UPDATED = os.getenv("LEGAL_UPDATED") or "30 October 2026"
+    LEGAL_VERSION = os.getenv("LEGAL_VERSION") or "2026-10-30"
     # GST added to INR prices (services/billing_service.py)
     GST_RATE = float(os.getenv("GST_RATE", "0.18"))
     # Stripe: the only payment gateway, for every country - INR for Indian

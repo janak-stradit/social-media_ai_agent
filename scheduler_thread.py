@@ -120,6 +120,13 @@ def run_scheduler(app_root_path):
         # industries whose trends are over a day old (services/trend_service.py)
         if current_time - last_trends_time >= 3600:
             last_trends_time = current_time
+            # AI calls kept for admins are deleted after LLM_TRACE_DAYS (services/llm_trace.py)
+            try:
+                from services.llm_trace import purge_old
+
+                purge_old()
+            except Exception as e:
+                logger.warning(f"Error deleting old AI calls: {e}")
             try:
                 from services.trend_service import refresh_stale_trends
 
