@@ -1148,6 +1148,10 @@ def refine_post():
             content_to_save: dict[str, typing.Any] = dict(content)
             content_to_save["_agents"] = agents_executed
             content_to_save["_meta"] = {"refined_from_run_id": data.get("base_run_id")}
+            if data.get("language") and data.get("language") != "en":  # a translated version stays in its language
+                from services.language_service import normalize as _normalize_language
+
+                content_to_save["_meta"]["language"] = _normalize_language(data.get("language"))
             preset_meta = data.get("preset") if isinstance(data.get("preset"), dict) else None
             if preset_meta and preset_meta.get("id"):
                 content_to_save["_preset"] = {k: preset_meta.get(k) for k in ("id", "label", "icon", "text", "keys", "occasion")}
@@ -1950,6 +1954,104 @@ def post_openings(run_id):
     add_run_cost(run_id, float(usage.get("cost_usd") or 0.0), user_id)
     log_event("post.openings", run_id=run_id, platform=platform, count=len(options))
     return jsonify({"success": True, "opening": hook_service.opening_of(caption), "options": options})
+
+
+@api_bp.route("/history/<int:run_id>/translate", methods=["POST"])
+@login_required_api
+@limit_by_user("ai_user")
+def translate_post(run_id):
+    """The same post in other languages (Studio Chat post card -> "Translate"):
+    one AI call per language, the compliance check again on every caption,
+    each language saved as another version of the post (services/translate_service.py).
+    Body: {languages: [code, ...], version_of_run_id?: the post's first version}."""
+    if not DB_AVAILABLE:
+        return jsonify({"error": "Database not available"}), 503
+    from services import translate_service as ts
+
+    user_id = get_current_user_id()
+    run = get_run_by_id(run_id, user_id=user_id)
+    if not run:
+        return jsonify({"error": "Post not found"}), 404
+    content = run["content"] or {}
+    if content.get("_preset"):
+        return jsonify({"success": False, "error": "Image posts can't be translated yet."}), 400
+    texts = ts.post_texts(content)
+    if not texts:
+        return jsonify({"success": False, "error": "This post has no caption to translate."}), 400
+    data = request.get_json(silent=True) or {}
+    source = (content.get("_quality") or {}).get("language") or (content.get("_meta") or {}).get("language") or "en"
+    try:
+        codes = ts.pick_languages(data.get("languages"), source)
+    except ts.TranslateError as err:
+        return jsonify({"success": False, "error": str(err)}), 400
+    try:
+        if _credit_blocked(get_user_usage_stats(user_id)):
+            return jsonify({"error": "Credit limit reached. Please request a credit extension.", "credit_limit_exceeded": True}), 402
+    except Exception as cred_err:  # noqa: BLE001
+        current_app.logger.warning(f"[Credits] Check error: {cred_err}")
+
+    # The versions hang off the post's first version, like a regenerate
+    owner = run_id
+    try:
+        asked = int(data.get("version_of_run_id") or 0)
+    except (TypeError, ValueError):
+        asked = 0
+    if asked and asked != run_id:
+        first = get_run_by_id(asked, user_id=user_id)
+        if first and first.get("conversation_id") == run.get("conversation_id"):
+            owner = asked
+    owner = ((get_run_by_id(owner, user_id=user_id) or {}).get("content") or {}).get("_meta", {}).get("version_of") or owner
+
+    rules = active_rules_for_user(user_id)
+    results = ts.translate_all(texts, codes, refine_llm)
+    versions, errors = [], []
+    for code in codes:
+        result = results[code]
+        if result.get("error"):
+            errors.append({"language": ts.language_meta(code), "error": result["error"]})
+            continue
+        short = ts.language_meta(code)["short"]
+        tokens = int(result["usage"].get("total_tokens") or 0)
+        cost = float(result["usage"].get("cost_usd") or 0.0)
+        new_content: dict[str, typing.Any] = {}
+        for platform, node in content.items():
+            if str(platform).startswith("_") or not isinstance(node, dict):
+                continue
+            entry = {k: v for k, v in node.items() if k not in ("caption", "hashtags", "compliance", "quality", "edited", "original")}
+            got = result["posts"].get(platform)
+            if got:
+                entry["caption"] = {"primary_caption": got["caption"], "refined_by_critic": False}
+                entry["hashtags"] = {"hashtags": got["hashtags"]}
+                if rules:  # the translated caption is checked again, so it can't slip past the rules
+                    try:
+                        checked, c_usage = check_caption(got["caption"], platform, rules, refine_llm)
+                        tokens += int(c_usage.get("total_tokens") or 0)
+                        cost += float(c_usage.get("cost_usd") or 0.0)
+                        if checked:
+                            entry["caption"]["primary_caption"] = checked.pop("caption")
+                            entry["compliance"] = checked
+                    except Exception as c_err:  # noqa: BLE001
+                        current_app.logger.warning(f"[Compliance] Translate check failed for {platform}: {c_err}")
+            else:
+                entry["caption"], entry["hashtags"] = node.get("caption"), node.get("hashtags")
+            new_content[platform] = entry
+        new_content["_quality"] = {**(content.get("_quality") or {}), "language": code}
+        new_content["_meta"] = {"version_of": owner, "language": code, "translated_from_run_id": run_id}
+        new_content["_agents"] = [{"name": "Translator", "agent": "TranslateAgent",
+                                   "role": f"Wrote the post in {short}"}]
+        if rules:
+            new_content["_agents"].append({"name": "Compliance Checker", "agent": "ComplianceAgent",
+                                           "role": f"Re-checked the translated captions against {len(rules)} advertising rules"})
+        new_run_id = save_run(story=f"Translate to {short}", tone=run.get("tone") or "Auto",
+                              platforms=run.get("platforms") or list(texts), content=new_content, user_id=user_id,
+                              tokens_used=tokens, cost_usd=round(cost, 6), conversation_id=run.get("conversation_id"))
+        versions.append({"language": ts.language_meta(code), "run_id": new_run_id, "content": new_content,
+                         "usage": {"total_tokens": tokens, "cost_usd": round(cost, 6)}})
+    log_event("post.translate", run_id=run_id, languages=codes, made=len(versions), failed=len(errors) or None)
+    if not versions:
+        return jsonify({"success": False, "error": errors[0]["error"] if errors else "Nothing was translated.",
+                        "errors": errors}), 502
+    return jsonify({"success": True, "source": ts.language_meta(source), "versions": versions, "errors": errors})
 
 
 @api_bp.route("/history/<int:run_id>", methods=["GET"])
